@@ -9,7 +9,8 @@ from features.auth.application.services.refresh_service import RefreshService
 from features.auth.application.services.logout_service import LogoutService
 
 from features.chat.application.services.chat_service import ChatService
-from features.chat.adapters.simple_responder import SimpleResponder
+from infrastructure.models.simple_responder import SimpleResponder
+
 
 # ORM session factory (közös)
 SessionLocal = make_session_factory(settings.mysql_dsn)
@@ -40,7 +41,7 @@ def get_logout_service(): return _logout_service
 
 
 # Chat service
-_chat_service = ChatService(chat_model=SimpleResponder())
+_chat_service = ChatService()
 
 def get_chat_service():
     return _chat_service

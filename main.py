@@ -1,3 +1,6 @@
+from dotenv import load_dotenv
+load_dotenv()
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -10,8 +13,11 @@ from apps.api.routers import chat, auth
 
 from apps.api.middleware.rate_limit import limiter
 
+from dotenv import load_dotenv
+load_dotenv()
+
 # --- 0️⃣ Alkalmazás létrehozása ---
-app = FastAPI(title="AIPLAZA")
+app = FastAPI(title="BrainBankCenter.com")
 
 # --- 1️⃣ CORS védelem ---
 app.add_middleware(

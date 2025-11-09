@@ -47,7 +47,7 @@ export default function ChatPage() {
     <div className="min-h-screen flex flex-col bg-slate-900 text-white">
       {/* 🔹 Rögzített fejléc */}
       <nav className="fixed top-0 left-0 w-full p-4 bg-blue-600 flex justify-between items-center shadow-md z-10">
-        <span className="font-semibold">💬 AIPLAZA.com – {user?.email}</span>
+        <span className="font-semibold">💬 BrainBankCenter.com – {user?.email}</span>
         <button
           onClick={() => logout()}
           className="text-sm underline hover:text-slate-200"
