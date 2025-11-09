@@ -1,7 +1,5 @@
 from config.settings import settings
 from infrastructure.persistence.db_session import make_session_factory
-from infrastructure.persistence.mysql.auth_models import AuthBase
-from sqlalchemy import create_engine
 
 from infrastructure.persistence.mysql.auth_repos import MySQLUserRepository, MySQLSessionRepository
 from infrastructure.security.tokens import TokenService
@@ -15,9 +13,6 @@ from features.chat.adapters.simple_responder import SimpleResponder
 
 # ORM session factory (közös)
 SessionLocal = make_session_factory(settings.mysql_dsn)
-
-# (opciós dev) táblák létrehozása:
-# engine = create_engine(settings.mysql_dsn, future=True); AuthBase.metadata.create_all(engine)
 
 # Repozitóriumok
 _user_repo = MySQLUserRepository(SessionLocal)
@@ -47,5 +42,5 @@ def get_logout_service(): return _logout_service
 # Chat service
 _chat_service = ChatService(chat_model=SimpleResponder())
 
-
-def get_chat_service() -> ChatService: return _chat_service
+def get_chat_service():
+    return _chat_service

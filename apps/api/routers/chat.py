@@ -6,8 +6,8 @@ from apps.api.di import get_chat_service
 from apps.api.middleware.rate_limit import limiter
 router = APIRouter()
 
-@router.post("/chat/ask", response_model=AskResponse)
+@router.post("/chat", response_model=AskResponse)
 @limiter.limit("30/minute")
 async def chat(request: Request, req: AskRequest, svc = Depends(get_chat_service)):
-    answer = await svc.chat(req.question)
+    answer = await svc.chat(req.question)  # ✅ most már await kell
     return AskResponse(answer=answer)
