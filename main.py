@@ -5,8 +5,10 @@ from slowapi.errors import RateLimitExceeded
 from fastapi.responses import JSONResponse
 
 from apps.api.middleware.auth import AuthMiddleware
-from infrastructure.security.tokens import TokenService
+from apps.api.di import _token_service
 from apps.api.routers import chat, auth
+
+from apps.api.middleware.rate_limit import limiter
 
 # --- 0️⃣ Alkalmazás létrehozása ---
 app = FastAPI(title="AIPLAZA")
@@ -16,8 +18,6 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://localhost:3000",
-        "https://fixyourdoc.com",
-        "https://www.fixyourdoc.com",
     ],
     allow_credentials=True,
     allow_methods=["GET", "POST", "OPTIONS"],
@@ -25,11 +25,9 @@ app.add_middleware(
 )
 
 # --- 2️⃣ Auth middleware (JWT / PASETO token ellenőrzés) ---
-token_service = TokenService(secret="supersecret", access_min=15, refresh_min=1440)
-app.add_middleware(AuthMiddleware, token_service=token_service)
+app.add_middleware(AuthMiddleware, token_service=_token_service)
 
 # --- 3️⃣ Rate limiting (DDoS, brute-force ellen) ---
-from apps.api.middleware.rate_limit import limiter
 app.state.limiter = limiter
 
 @app.exception_handler(RateLimitExceeded)
