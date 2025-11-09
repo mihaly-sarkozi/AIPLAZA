@@ -1,0 +1,10 @@
+fastapi
+uvicorn
+SQLAlchemy>=2
+pymysql
+pydantic>=2
+pydantic-settings
+passlib
+bcrypt==3.2.2
+pyjwt
+requests
