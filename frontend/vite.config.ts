@@ -1,4 +1,3 @@
-// vite.config.ts
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
@@ -7,6 +6,14 @@ export default defineConfig({
 
   server: {
     port: 5173,
-    host: true,   // opcionális
+    host: true,
+
+    proxy: {
+      "/api": {
+        target: "http://localhost:8010",  // <- FastAPI itt fut!!!
+        changeOrigin: true,
+        secure: false,
+      },
+    },
   },
 });
