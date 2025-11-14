@@ -22,12 +22,9 @@ class RefreshService:
             return None
 
         # 2️⃣ meglévő session ellenőrzése
+        # ⚠️ 3️⃣ reuse detection: ha valaki visszavont refresh tokent használna
         rec = self.sessions.get_by_jti(payload["jti"])
         if not rec or not rec.valid:
-            return None
-
-        # ⚠️ 3️⃣ reuse detection: ha valaki visszavont refresh tokent használna
-        if not rec.valid:
             # → azonnal minden session-t visszavonunk ennél a felhasználónál
             self.sessions.invalidate_all_for_user(rec.user_id)
             return None

@@ -20,6 +20,7 @@ class MySQLUserRepository(UserRepositoryPort):
                 email=row.email,
                 password_hash=row.password_hash,
                 is_active=row.is_active,
+                role=row.role,
                 created_at=row.created_at,
             )
 
@@ -33,6 +34,7 @@ class MySQLUserRepository(UserRepositoryPort):
                 email=row.email,
                 password_hash=row.password_hash,
                 is_active=row.is_active,
+                role = row.role,
                 created_at=row.created_at,
             )
 

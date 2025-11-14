@@ -8,7 +8,7 @@ from typing import Any, Dict
 class TokenService:
     def __init__(self, secret: str, issuer: str | None = None, access_exp_min: int = 15, refresh_exp_min: int = 60 * 24 * 30):
         self.secret = secret
-        self.issuer: issuer
+        self.issuer = issuer
         self.access_exp = access_exp_min
         self.refresh_exp = refresh_exp_min
         self.alg = "HS256"
@@ -23,6 +23,7 @@ class TokenService:
         payload = {
             "sub": str(user_id),
             "typ": "access",
+            "iss": self.issuer,
             "exp": self._now() + datetime.timedelta(minutes=self.access_exp),
             "iat": self._now()
         }
