@@ -1,5 +1,26 @@
+# Environment variables
 .env
-.env
-.env
-.env
-.env
+
+# Python cache files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# macOS
+.DS_Store
+**/.DS_Store
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Virtual environments
+venv/
+env/
+ENV/
+.venv
