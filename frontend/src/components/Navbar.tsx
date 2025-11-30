@@ -6,6 +6,7 @@ export default function Navbar() {
   const navigate = useNavigate();
 
   const isAdmin = user?.role === "admin";
+  const isSuperuser = user?.is_superuser === true;
 
   const handleLogout = () => {
     logout();
@@ -32,30 +33,31 @@ export default function Navbar() {
       {/* Jobb oldal – Menüpontok */}
       <div className="flex items-center gap-6">
 
-        {/* --- Chat menüpont (mindig elérhető) --- */}
-        <button
-          onClick={() => navigate("/chat")}
-          className="hover:underline"
-        >
-          Chat
-        </button>
-
-        {/* --- Admin menüpontok --- */}
         {isAdmin && (
+        
           <>
             <button
-              onClick={() => navigate("/admin/train")}
+              onClick={() => navigate("/chat")}
+              className="hover:underline"
+            >
+              Chat
+            </button>
+
+            <button
+              onClick={() => navigate("/kb")}
               className="hover:underline"
             >
               Tudástár
             </button>
 
-            <button
-              onClick={() => navigate("/admin/roles")}
-              className="hover:underline"
-            >
-              Jogosultság
-            </button>
+            {isSuperuser && (
+              <button
+                onClick={() => navigate("/admin/roles")}
+                className="hover:underline"
+              >
+                Jogosultság
+              </button>
+            )}
 
             <button
               onClick={() => navigate("/admin/settings")}
@@ -66,14 +68,12 @@ export default function Navbar() {
           </>
         )}
 
-        {/* --- Kilépés --- */}
         <button
           onClick={handleLogout}
           className="text-sm underline hover:text-slate-200"
         >
           Kilépés
         </button>
-
       </div>
     </nav>
   );

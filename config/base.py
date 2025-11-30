@@ -14,7 +14,7 @@ class BaseConfig(BaseSettings):
     ollama_model: str = "qwen2.5:7b-instruct"
 
     # Auth/JWT
-    jwt_secret: str = "change_me"
+    jwt_secret: str = "5g6e7c14987t89bb845d1b69a5385a7afa8ef05efc08436a2554e0af4ebd75d89"
     access_ttl_min: int = 15
     refresh_ttl_days: int = 14
 
