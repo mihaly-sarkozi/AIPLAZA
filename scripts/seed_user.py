@@ -4,7 +4,7 @@ from passlib.hash import bcrypt_sha256 as pwd_hasher
 
 
 from config.settings import settings
-from infrastructure.persistence.mysql.auth_models import AuthBase, UserORM
+from apps.auth.infrastructure.db.models import AuthBase, UserORM
 
 def main():
     engine = create_engine(settings.mysql_dsn, future=True)

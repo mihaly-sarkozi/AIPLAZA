@@ -21,6 +21,6 @@ label {
   @apply block text-sm font-medium text-slate-300 mb-1;
 }
 
-button {
+.btn {
   @apply bg-primary text-white px-4 py-2 rounded-md hover:bg-blue-600 transition;
 }
