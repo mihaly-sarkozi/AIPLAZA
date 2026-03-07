@@ -49,7 +49,7 @@ class MockLoginService:
 class MockRefreshService:
     """Refresh route: refresh(rt, ip, ua) → (access, new_refresh, access_jti) vagy None; tokens.verify(rt) → payload."""
     def __init__(self):
-        self.result = None  # (access, new_refresh, access_jti) vagy None
+        self.result = None  # (access, new_refresh, access_jti, user) vagy None
         self.verify_payload = {"sub": "1", "typ": "refresh"}
         self.tokens = MagicMock()
         self.tokens.verify.side_effect = lambda rt: self.verify_payload

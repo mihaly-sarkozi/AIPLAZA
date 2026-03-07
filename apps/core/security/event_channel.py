@@ -71,25 +71,49 @@ class AuditServiceProxy:
 
 class SecurityAuditEventChannel:
     """
-    Központi eseménycsatorna: security + audit események queue-ba kerülnek,
-    egy háttérszál feldolgozza (valódi SecurityLogger + AuditService).
+    Központi eseménycsatorna: security + audit + email (2FA) események queue-ba kerülnek,
+    egy háttérszál feldolgozza (valódi SecurityLogger + AuditService + EmailService).
+    Login step1 nem vár SMTP-re: 2FA kód email háttérben megy.
     """
 
     def __init__(
         self,
         security_logger: Any,
         audit_service: Any,
+        email_service: Any,
         *,
         queue_maxsize: int = DEFAULT_QUEUE_MAXSIZE,
     ) -> None:
         self._security_logger = security_logger
         self._audit_service = audit_service
+        self._email_service = email_service
         self._queue: queue.Queue = queue.Queue(maxsize=queue_maxsize)
         self._worker_thread: Optional[threading.Thread] = None
         self._stop = threading.Event()
 
         self.security_logger = SecurityLoggerProxy(self._queue)
         self.audit_service = AuditServiceProxy(self._queue)
+
+    def enqueue_email_2fa(
+        self,
+        to_email: str,
+        code: str,
+        pending_token: Optional[str] = None,
+        lang: Optional[str] = None,
+    ) -> None:
+        """2FA kód email háttérbe (login step1 ne várjon SMTP-re)."""
+        try:
+            self._queue.put_nowait(
+                {
+                    "type": "email_2fa",
+                    "to_email": to_email,
+                    "code": code,
+                    "pending_token": pending_token,
+                    "lang": lang,
+                }
+            )
+        except queue.Full:
+            _log.warning("event_channel queue full, dropping email_2fa event")
 
     def start_worker(self) -> None:
         if self._worker_thread is not None and self._worker_thread.is_alive():
@@ -113,12 +137,21 @@ class SecurityAuditEventChannel:
                     if method and hasattr(self._security_logger, method):
                         getattr(self._security_logger, method)(*args, **kwargs)
                 elif event.get("type") == "audit":
+                    from apps.audit.sanitization import sanitize_details
+                    details = sanitize_details(event.get("details"))
                     self._audit_service.log(
                         action=event["action"],
                         user_id=event.get("user_id"),
-                        details=event.get("details"),
+                        details=details,
                         ip=event.get("ip"),
                         user_agent=event.get("user_agent"),
+                    )
+                elif event.get("type") == "email_2fa":
+                    self._email_service.send_2fa_code(
+                        event.get("to_email", ""),
+                        event.get("code", ""),
+                        pending_token=event.get("pending_token"),
+                        lang=event.get("lang"),
                     )
             except Exception as e:
                 _log.exception("event_channel worker error processing event: %s", e)

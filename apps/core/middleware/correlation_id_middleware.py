@@ -6,6 +6,8 @@
 import uuid
 from starlette.types import ASGIApp, Receive, Scope, Send
 
+from apps.core.timing import init_request_timing
+
 
 def _get_header(scope: Scope, name: str) -> str | None:
     name_lower = name.encode().lower()
@@ -25,6 +27,7 @@ class CorrelationIdMiddleware:
         if scope["type"] != "http":
             await self.app(scope, receive, send)
             return
+        init_request_timing()  # hot-path span-ek gyűjtése ehhez a kéréshez
         state = scope.setdefault("state", {})
         correlation_id = _get_header(scope, "X-Request-ID") or str(uuid.uuid4())
         state["correlation_id"] = correlation_id

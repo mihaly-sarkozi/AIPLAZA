@@ -12,6 +12,10 @@ from passlib.hash import bcrypt_sha256 as pwd_hasher
 
 from config.settings import settings
 from apps.users.ports import UserRepositoryInterface, InviteTokenRepositoryInterface
+
+def _invite_ttl_hours() -> int:
+    """Invite/set-password token TTL (óra); 1–4 óra ajánlott, max 24."""
+    return max(1, min(24, getattr(settings, "invite_ttl_hours", 4)))
 from apps.users.domain.user import User
 from apps.audit.application.audit_service import AuditService
 
@@ -48,7 +52,7 @@ class UserService:
         role: str = "user",
         request_base_url: str | None = None,
     ) -> User:
-        """User létrehozása jelszó nélkül (is_active=False); emailben megy a 24h érvényes regisztrációs link. Owner csak az első regisztráló lehet."""
+        """User létrehozása jelszó nélkül (is_active=False); emailben megy a invite_ttl_hours érvényes regisztrációs link. Owner csak az első regisztráló lehet."""
         if self.user_repository.get_by_email(email):
             raise ValueError("Email already exists")
         if role not in ["user", "admin"]:
@@ -68,7 +72,7 @@ class UserService:
 
         token = secrets.token_urlsafe(32)
         token_hash = hashlib.sha256(token.encode()).hexdigest()
-        expires_at = datetime.now(timezone.utc) + timedelta(hours=24)
+        expires_at = datetime.now(timezone.utc) + timedelta(hours=_invite_ttl_hours())
         self.invite_token_repo.create(created.id, token_hash, expires_at)
 
         set_password_link = self._build_set_password_link(request_base_url, token)
@@ -232,7 +236,7 @@ class UserService:
         self.invite_token_repo.invalidate_all_for_user(user_id)
         token = secrets.token_urlsafe(32)
         token_hash = hashlib.sha256(token.encode()).hexdigest()
-        expires_at = datetime.now(timezone.utc) + timedelta(hours=24)
+        expires_at = datetime.now(timezone.utc) + timedelta(hours=_invite_ttl_hours())
         self.invite_token_repo.create(user_id, token_hash, expires_at)
         set_password_link = self._build_set_password_link(request_base_url, token)
         if set_password_link and self.email_service:
@@ -253,7 +257,7 @@ class UserService:
         self.invite_token_repo.invalidate_all_for_user(user.id)
         token = secrets.token_urlsafe(32)
         token_hash = hashlib.sha256(token.encode()).hexdigest()
-        expires_at = datetime.now(timezone.utc) + timedelta(hours=24)
+        expires_at = datetime.now(timezone.utc) + timedelta(hours=_invite_ttl_hours())
         self.invite_token_repo.create(user.id, token_hash, expires_at)
         set_password_link = self._build_set_password_link(request_base_url, token)
         if set_password_link and self.email_service:

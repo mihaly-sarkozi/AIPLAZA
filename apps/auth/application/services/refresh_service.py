@@ -5,11 +5,13 @@
 
 from __future__ import annotations
 
+import time
 from typing import Optional, TYPE_CHECKING
 import jwt
 from datetime import datetime, timezone
 from apps.auth.ports import SessionRepositoryInterface
 from apps.core.security.token_service import TokenService
+from apps.core.timing import record_span
 from apps.auth.domain.session import Session
 from apps.core.security.security_logger import SecurityLogger
 from apps.audit.application.audit_service import AuditService
@@ -65,9 +67,10 @@ class RefreshService:
         # -------------------------------
         # 1️⃣ Token dekódolása
         # -------------------------------
+        t0_verify = time.monotonic()
         try:
             payload = self.tokens.verify(refresh_token)
-
+            record_span("refresh_token_verify", (time.monotonic() - t0_verify) * 1000)
         except jwt.ExpiredSignatureError:
             self.logger.refresh_expired_token(ip, ua, **ctx)
             self.audit.log("refresh_failed", user_id=None, details={"reason": "expired_token"}, ip=ip, user_agent=ua)
@@ -92,14 +95,18 @@ class RefreshService:
         current_user_ver = token_user_ver
         user_for_ver = None
         if self.user_repository:
+            t0_user = time.monotonic()
             user_for_ver = self.user_repository.get_by_id(user_id)
+            record_span("refresh_user_ver_fetch", (time.monotonic() - t0_user) * 1000)
             current_user_ver = getattr(user_for_ver, "security_version", 0) if user_for_ver else 0
             if token_user_ver != current_user_ver or token_tenant_ver != tenant_security_version:
                 self.logger.refresh_session_expired(user_id, ip, ua, **ctx)
                 self.audit.log("refresh_failed", user_id=user_id, details={"reason": "security_version_mismatch"}, ip=ip, user_agent=ua)
                 return None
 
+        t0_sess = time.monotonic()
         rec = self.session_repository.get_by_jti(jti)
+        record_span("refresh_session_lookup", (time.monotonic() - t0_sess) * 1000)
 
         if rec is None:
             self.logger.refresh_unknown_jti(user_id, ip, ua, **ctx)
@@ -175,4 +182,5 @@ class RefreshService:
         self.logger.refresh_success(user_id, ip, ua, **ctx)
         self.audit.log("refresh", user_id=user_id, ip=ip, user_agent=ua)
 
-        return new_access, new_refresh, access_jti
+        # user_for_ver már megvan (version check); visszaadjuk, hogy a route ne hívjon get_by_id-t újra (hot path optimalizáció)
+        return new_access, new_refresh, access_jti, user_for_ver

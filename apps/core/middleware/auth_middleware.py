@@ -14,6 +14,7 @@ from apps.core.security.token_allowlist import is_allowed as allowlist_is_allowe
 from apps.auth.application.services.login_service import LoginService
 from apps.core.cache import get_cache, user_cache_key, USER_TTL_SEC
 from apps.core.db.tenant_context import current_tenant_schema
+from apps.core.timing import record_span
 from apps.users.domain.user import User
 
 _log = logging.getLogger(__name__)
@@ -85,9 +86,9 @@ def invalidate_user_cache(tenant_slug: str | None, user_id: int) -> None:
     get_cache().delete(user_cache_key(tenant_slug, user_id))
 
 
-# Path prefixek, ahol token + allowlist elég; DB user load és version check kihagyva (token-driven auth).
-# Role/revoke változás csak access token lejáratakor (pl. 15 perc) lép életbe.
-LIGHT_PATHS: tuple[str, ...] = ("/api/chat", "/api/knowledge")
+# Alapértelmezett light path prefixek (ha a middleware-t light_paths nélkül hívják). Egyébként main.py configból adja.
+# Policy: csak alacsony kockázatú route-ok; role/revoke csak access lejáratakor. docs/Auth_light_paths.md
+_DEFAULT_LIGHT_PATHS: tuple[str, ...] = ("/api/chat",)
 
 
 def _minimal_user_from_payload(payload: dict, user_id: int) -> User:
@@ -109,12 +110,20 @@ def _minimal_user_from_payload(payload: dict, user_id: int) -> User:
 
 
 class AuthMiddleware:
-    """ASGI: Bearer token → payload; access token + allowlist → user betöltés; scope.state.user, user_token_payload."""
-
-    def __init__(self, app: ASGIApp, token_service: TokenService, login_service: LoginService) -> None:
+    """ASGI: Bearer token → payload; access token + allowlist → user betöltés; scope.state.user, user_token_payload.
+    light_paths: path prefixek, ahol csak token+allowlist elég (nincs DB user load). Üres = mindig teljes path."""
+    def __init__(
+        self,
+        app: ASGIApp,
+        token_service: TokenService,
+        login_service: LoginService,
+        *,
+        light_paths: tuple[str, ...] | None = None,
+    ) -> None:
         self.app = app
         self.token_service = token_service
         self.login_service = login_service
+        self.light_paths = light_paths if light_paths is not None else _DEFAULT_LIGHT_PATHS
 
     def _get_user(self, tenant_slug: str | None, user_id: int) -> User | None:
         if not tenant_slug:
@@ -137,6 +146,32 @@ class AuthMiddleware:
             cache.set(key, _user_to_json(user), USER_TTL_SEC)
         return user
 
+    def _get_user_with_timing(self, tenant_slug: str | None, user_id: int) -> tuple[User | None, bool, float, float]:
+        """Ugyanaz mint _get_user, de visszaad (user, cache_hit, cache_ms, db_ms) a hot-path méréshez."""
+        t0 = time.monotonic()
+        if not tenant_slug:
+            user = self.login_service.user_repository.get_by_id(user_id)
+            if user and not getattr(user, "is_active", True):
+                return None, False, 0.0, (time.monotonic() - t0) * 1000
+            return user, False, 0.0, (time.monotonic() - t0) * 1000
+        cache = get_cache()
+        key = user_cache_key(tenant_slug, user_id)
+        raw = cache.get(key)
+        cache_ms = (time.monotonic() - t0) * 1000
+        if raw:
+            user = _user_from_json(raw)
+            if user and getattr(user, "is_active", True):
+                return user, True, cache_ms, 0.0
+            cache.delete(key)
+        t1 = time.monotonic()
+        user = self.login_service.user_repository.get_by_id(user_id)
+        db_ms = (time.monotonic() - t1) * 1000
+        if user and not getattr(user, "is_active", True):
+            return None, False, cache_ms, db_ms
+        if user:
+            cache.set(key, _user_to_json(user), USER_TTL_SEC)
+        return user, False, cache_ms, db_ms
+
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http":
             await self.app(scope, receive, send)
@@ -151,8 +186,10 @@ class AuthMiddleware:
 
         if token:
             try:
+                t0_tv = time.monotonic()
                 loop = asyncio.get_event_loop()
                 payload = await loop.run_in_executor(None, lambda: self.token_service.verify(token))
+                record_span("token_verify", (time.monotonic() - t0_tv) * 1000)
                 state["user_token_payload"] = payload
             except Exception:
                 state["user_token_payload"] = None
@@ -164,29 +201,39 @@ class AuthMiddleware:
             user_id = payload.get("sub")
             jti = payload.get("jti")
             tenant_slug = state.get("tenant_slug")
-            if user_id and jti and allowlist_is_allowed(tenant_slug, int(user_id), jti):
+            t0_al = time.monotonic()
+            allowlist_ok = user_id and jti and allowlist_is_allowed(tenant_slug, int(user_id), jti)
+            record_span("allowlist_check", (time.monotonic() - t0_al) * 1000)
+            if allowlist_ok:
                 uid = int(user_id)
                 path = scope.get("path") or ""
 
-                # Token-only ág: light path prefix → nincs DB user load, nincs version check
-                if any(path.startswith(prefix) for prefix in LIGHT_PATHS):
+                # Token-only ág: light path prefix → nincs DB user load, nincs version check (mérés: log)
+                if self.light_paths and any(path.startswith(prefix) for prefix in self.light_paths):
                     state["user"] = _minimal_user_from_payload(payload, uid)
                     state["auth_light"] = True
+                    _log.info(
+                        "auth_light_path",
+                        extra={"path": path, "user_id": uid, "correlation_id": state.get("correlation_id")},
+                    )
                 else:
                     tenant_slug_for_fetch = tenant_slug
 
-                    def _fetch_user() -> User | None:
+                    def _fetch_user() -> tuple[User | None, bool, float, float]:
                         if tenant_slug_for_fetch:
                             current_tenant_schema.set(tenant_slug_for_fetch)
                         try:
-                            return self._get_user(tenant_slug_for_fetch, uid)
+                            return self._get_user_with_timing(tenant_slug_for_fetch, uid)
                         finally:
                             current_tenant_schema.set(None)
 
                     t0 = time.monotonic()
                     loop = asyncio.get_event_loop()
-                    user = await loop.run_in_executor(None, _fetch_user)
+                    user, cache_hit, cache_ms, db_ms = await loop.run_in_executor(None, _fetch_user)
                     elapsed = time.monotonic() - t0
+                    record_span("user_cache_hit" if cache_hit else "user_cache_miss", cache_ms)
+                    if db_ms > 0:
+                        record_span("user_db_fetch", db_ms)
                     _timing(f"  -> auth user lookup user_id={uid} {elapsed:.3f}s")
                     if elapsed > 1.0:
                         _log.warning("auth user lookup slow: user_id=%s %.2fs", uid, elapsed)

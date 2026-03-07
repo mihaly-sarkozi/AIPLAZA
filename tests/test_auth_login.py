@@ -136,7 +136,7 @@ def test_login_step1_success_returns_two_factor_required(client: TestClient, moc
 def test_login_step2_success_returns_tokens_and_cookie(
     client: TestClient, mock_login_service, sample_user: User
 ):
-    """Érvényes 2. lépés: service LoginSuccess → 200, access_token, user, refresh cookie."""
+    """Érvényes 2. lépés: service LoginSuccess → 200, access_token, user; refresh csak cookie-ban (policy)."""
     mock_login_service.result = LoginSuccess(
         access_token="access-abc",
         refresh_token="refresh-xyz",
@@ -149,9 +149,10 @@ def test_login_step2_success_returns_tokens_and_cookie(
     assert r.status_code == 200
     data = r.json()
     assert data.get("access_token") == "access-abc"
-    assert data.get("refresh_token") == "refresh-xyz"
     assert "user" in data
     assert data["user"].get("email") == sample_user.email
+    # Policy: refresh token NEM szerepel a response body-ban, csak HttpOnly cookie-ban.
+    assert "refresh_token" not in data
     assert "refresh_token" in r.cookies
     assert r.cookies["refresh_token"] == "refresh-xyz"
 
@@ -196,8 +197,8 @@ def test_refresh_invalid_or_revoked_returns_401(client_with_refresh, mock_refres
 def test_refresh_success_returns_tokens_and_cookie(
     client_with_refresh, mock_refresh_service, sample_user: User
 ):
-    """Érvényes refresh cookie → 200, új access_token, refresh_token (body + cookie), user."""
-    mock_refresh_service.result = ("new-access-token", "new-refresh-token", "access-jti-123")
+    """Érvényes refresh cookie → 200, access_token + user; új refresh csak cookie-ban (policy)."""
+    mock_refresh_service.result = ("new-access-token", "new-refresh-token", "access-jti-123", sample_user)
     mock_refresh_service.verify_payload = {"sub": "1", "typ": "refresh"}
 
     client_with_refresh.cookies.set("refresh_token", "valid-refresh-cookie")
@@ -206,33 +207,26 @@ def test_refresh_success_returns_tokens_and_cookie(
     assert r.status_code == 200
     data = r.json()
     assert data.get("access_token") == "new-access-token"
-    assert data.get("refresh_token") == "new-refresh-token"
     assert "user" in data
     assert data["user"].get("email") == sample_user.email
     assert data["user"].get("id") == 1
+    # Policy: refresh token NEM szerepel a response body-ban, csak HttpOnly cookie-ban.
+    assert "refresh_token" not in data
     assert "refresh_token" in r.cookies
     assert r.cookies["refresh_token"] == "new-refresh-token"
 
 
-def test_refresh_with_x_refresh_token_header_success(
-    client_with_refresh, mock_refresh_service, sample_user: User
-):
-    """X-Refresh-Token headerrel (cookie nélkül) is működik a refresh."""
-    mock_refresh_service.result = ("access-from-header", "refresh-from-header", "access-jti-header")
-    mock_refresh_service.verify_payload = {"sub": "1", "typ": "refresh"}
+def test_refresh_only_header_no_cookie_returns_401(client_with_refresh):
+    """Policy: refresh token csak cookie-ban; csak X-Refresh-Token header (nincs cookie) → 401."""
     r = client_with_refresh.post(
         "/api/auth/refresh",
         headers={"X-Refresh-Token": "valid-refresh-jwt"},
     )
-    assert r.status_code == 200
-    data = r.json()
-    assert data.get("access_token") == "access-from-header"
-    assert data.get("refresh_token") == "refresh-from-header"
-    assert data["user"].get("email") == sample_user.email
+    assert r.status_code == 401
 
 
 def test_refresh_no_cookie_no_header_returns_401(client_with_refresh):
-    """Nincs cookie és nincs X-Refresh-Token header → 401."""
+    """Nincs refresh_token cookie → 401 (header nem fogadható policy miatt)."""
     r = client_with_refresh.post("/api/auth/refresh")
     assert r.status_code == 401
     detail = r.json().get("detail")
@@ -315,8 +309,9 @@ def test_refresh_same_fingerprint_not_re_2fa():
 
     assert result is not None
     assert result != (None, "re_2fa_required")
-    assert len(result) == 3
+    assert len(result) == 4  # (access, new_refresh, access_jti, user)
     assert result[0] == "new-access" and result[1] == "new-refresh"
+    assert result[3] is None  # nincs user_repository injektálva
 
 
 def test_refresh_re_2fa_required_returns_401_with_code(client_with_refresh, mock_refresh_service):

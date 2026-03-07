@@ -1,4 +1,5 @@
 # reset_passwords.py
+# Bulk jelszó reset – CSAK dev/staging. Productionben tiltva (prod_guard).
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from passlib.hash import bcrypt_sha256 as pwd_hasher
@@ -6,8 +7,11 @@ from passlib.hash import bcrypt_sha256 as pwd_hasher
 from config.settings import settings
 from apps.users.infrastructure.db.models import UserORM
 
+from config.prod_guard import reject_if_production
+
 
 def main():
+    reject_if_production("reset_passwords", "bulk jelszó reset")
     engine = create_engine(settings.database_url, future=True)
     SessionLocal = sessionmaker(bind=engine, expire_on_commit=False, autoflush=False)
 

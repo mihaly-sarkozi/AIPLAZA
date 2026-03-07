@@ -152,10 +152,9 @@ def login(
     tenant_slug = getattr(request.state, "tenant_slug", None)
     allowlist_add(tenant_slug, result.user.id, result.access_jti)
 
-    # Visszatérünk a tokenekkel (access + refresh a body-ban is) és a felhasználó adataival.
+    # Válasz: access_token + user. Refresh token csak cookie-ban (policy: ne legyen a body-ban).
     return TokenResp(
         access_token=result.access_token,
-        refresh_token=result.refresh_token,
         user=UserInfo(
             id=result.user.id,
             email=result.user.email,
@@ -214,9 +213,10 @@ def refresh_tokens(
     svc: RefreshService = Depends(get_refresh_service),
     login_svc: LoginService = Depends(get_login_service),
 ):
-    """Refresh token cookie-ból vagy X-Refresh-Token headerből; új access + refresh párt ad."""
+    """Refresh token csak cookie-ból; új access + refresh cookie-t ad (body-ban csak access_token + user)."""
     lang = _lang_from_request(request)
-    rt = request.cookies.get("refresh_token") or request.headers.get("X-Refresh-Token")
+    # Policy: refresh token csak HttpOnly cookie-ban él; header-t nem fogadunk.
+    rt = request.cookies.get("refresh_token")
     if not rt:
         raise HTTPException(status_code=401, detail=_detail(ErrorCode.NO_REFRESH_TOKEN, lang))
 
@@ -241,11 +241,14 @@ def refresh_tokens(
             raise HTTPException(status_code=401, detail=_detail(ErrorCode.RE_2FA_REQUIRED, lang))
         raise HTTPException(status_code=401, detail=_detail(ErrorCode.PERMISSIONS_CHANGED, lang))
 
-    access, new_refresh, access_jti = result
-
-    # Allowlist: új access token jti regisztrálása
+    # result: (access, new_refresh, access_jti, user) – user már a service-ből (hot path: nincs második get_by_id)
+    access, new_refresh, access_jti, user = result
     payload = svc.tokens.verify(new_refresh)
     user_id = int(payload["sub"])
+    if user is None:
+        user = login_svc.user_repository.get_by_id(user_id)
+
+    # Allowlist: új access token jti regisztrálása
     allowlist_add(tenant_slug, user_id, access_jti)
 
     # Új refresh cookie (ugyanaz a policy: auto_login → napok, különben session_hours)
@@ -261,12 +264,8 @@ def refresh_tokens(
         max_age=cookie_max_age,
     )
 
-    # user lekérése az új refresh payloadból (user_id már fent kiszámolva)
-    user = login_svc.user_repository.get_by_id(user_id)
-
     return TokenResp(
         access_token=access,
-        refresh_token=new_refresh,
         user=UserInfo(
             id=user.id,
             email=user.email,
@@ -293,8 +292,8 @@ def logout(
     audit_service: AuditService = Depends(get_audit_service),
     token_service: TokenService = Depends(get_token_service),
 ):
-    """Ha van user (érvényes Bearer), abból; ha nincs, refresh tokenból (lejárt is ok) vesszük a user_id-t. Mindig kiléptetünk."""
-    rt = request.cookies.get("refresh_token") or request.headers.get("X-Refresh-Token")
+    """Ha van user (érvényes Bearer), abból; ha nincs, refresh token cookie-ból (lejárt is ok) vesszük a user_id-t. Policy: refresh csak cookie."""
+    rt = request.cookies.get("refresh_token")
     ip = getattr(request.client, "host", None) if request.client else None
     ua = request.headers.get("user-agent")
 

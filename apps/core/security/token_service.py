@@ -117,9 +117,9 @@ class TokenService:
 
     def verify(self, token: str) -> Dict[str, Any]:
         """
-        JWT ellenőrzése: aláírás, lejárat (exp), iss, opcionális aud, nbf.
-        Más környezetből vagy más célra kiadott token (rossz iss/aud) nem fogadható el.
-        Hibás/lejárt/rossz iss/aud token esetén jwt.InvalidTokenError dobódik.
+        JWT ellenőrzése: aláírás, exp, iss, aud (ha megadva), nbf (ha a tokenben van).
+        Policy: mindig iss + aud (ha configban van) + nbf ellenőrzés – más környezet/cél token elutasítva.
+        Hibás/lejárt/rossz iss/aud/nbf → jwt.InvalidTokenError.
         """
         kwargs: Dict[str, Any] = {"algorithms": [self.alg]}
         if self.issuer is not None:

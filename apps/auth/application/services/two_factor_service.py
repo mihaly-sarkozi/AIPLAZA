@@ -3,8 +3,10 @@
 # 2026.02.28 - Sárközi Mihály
 
 import secrets
+import time
 from datetime import datetime, timedelta, timezone
 from apps.auth.ports import TwoFactorRepositoryInterface, TwoFactorAttemptRepositoryInterface
+from apps.core.timing import record_span
 from apps.auth.domain.two_factor_code import TwoFactorCode
 from apps.auth.application.exceptions import TwoFactorEmailError, TwoFactorTooManyAttemptsError
 from apps.core.i18n.messages import ErrorCode
@@ -25,13 +27,17 @@ class TwoFactorService:
         attempt_repo: TwoFactorAttemptRepositoryInterface | None = None,
         max_attempts: int = TWO_FA_MAX_ATTEMPTS,
         attempt_window_minutes: int = TWO_FA_ATTEMPT_WINDOW_MINUTES,
+        code_expiry_minutes: int = 10,
+        event_channel: object | None = None,
     ):
         self.two_factor_repo = two_factor_repo
         self.email_service = email_service
         self.attempt_repo = attempt_repo
         self.max_attempts = max_attempts
         self.attempt_window_minutes = attempt_window_minutes
-        self.code_expiry_minutes = 10
+        self.code_expiry_minutes = code_expiry_minutes
+        # Ha van event_channel (async audit), 2FA email háttérbe megy → login step1 nem vár SMTP-re
+        self.event_channel = event_channel
     
     def generate_code(self) -> str:
         # 6 jegyű kriptográfiailag biztonságos véletlen kód (secrets modul)
@@ -56,16 +62,21 @@ class TwoFactorService:
         # Kód mentése
         saved_code = self.two_factor_repo.create(two_factor_code)
 
-        # Email küldése: 2FA kód + pending_token (mindkettő emailben); hiba esetén kód a router i18n-hez
+        # Email: háttérbe (queue) vagy szinkron. Háttérrel login step1 nem vár SMTP-re.
+        if self.event_channel and hasattr(self.event_channel, "enqueue_email_2fa"):
+            self.event_channel.enqueue_email_2fa(email, code, pending_token=pending_token)
+            record_span("email_queued", 0.0)
+            return saved_code
         try:
+            t0_email = time.monotonic()
             ok = self.email_service.send_2fa_code(email, code, pending_token=pending_token)
+            record_span("email_send", (time.monotonic() - t0_email) * 1000)
             if not ok:
                 raise TwoFactorEmailError(error_code=ErrorCode.TWO_FACTOR_EMAIL_FAILED)
         except TwoFactorEmailError:
             raise
         except Exception as e:
             raise TwoFactorEmailError(str(e), error_code=ErrorCode.TWO_FACTOR_EMAIL_FAILED) from e
-
         return saved_code
     
     def verify_code(

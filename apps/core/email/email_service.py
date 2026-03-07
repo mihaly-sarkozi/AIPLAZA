@@ -1,7 +1,9 @@
 # apps/core/email/email_service.py
 # Email küldés szolgáltatás (SMTP, pl. Gmail 587 + STARTTLS).
+# Dev: szimulált küldésnél csak maszkolt body preview kerül logba (2FA kód, token, link token ne).
 # 2026.03.07 - Sárközi Mihály
 
+import re
 import smtplib
 import ssl
 from email.mime.text import MIMEText
@@ -9,6 +11,28 @@ from email.mime.multipart import MIMEMultipart
 from typing import Optional
 from config.settings import settings
 from apps.core.i18n.email_templates import get_email_template, get_2fa_token_block, DEFAULT_LANG
+
+# Maximális body hossz a dev log preview-ban (maszkolás után).
+_DEV_LOG_BODY_PREVIEW_LEN = 280
+
+
+def mask_email_body_for_log(body: str, max_len: int = _DEV_LOG_BODY_PREVIEW_LEN) -> str:
+    """
+    Érzékeny részek maszkolása, hogy a dev email log ne tartalmazzon 2FA kódot, pending tokent vagy link tokent.
+    Vissza: maszkolt szöveg, max_len hosszig; ha hosszabb, \"... (N chars)\" utótag.
+    """
+    if not body:
+        return ""
+    s = body
+    # 6 számjegyű 2FA kód (önálló sor vagy szóközzel körülvéve) → ******
+    s = re.sub(r"\b\d{6}\b", "******", s)
+    # Hosszú hex/alfanumerikus token (pl. pending_token 32 hex, vagy link token) → [REDACTED]
+    s = re.sub(r"\b[a-zA-Z0-9]{20,}\b", "[REDACTED]", s)
+    # URL token= érték maszkolása (set_password_link): token=xxx → token=[REDACTED]
+    s = re.sub(r"([?&]token=)([^&\s]+)", r"\1[REDACTED]", s, flags=re.IGNORECASE)
+    if len(s) > max_len:
+        s = s[:max_len].rstrip() + f" ... ({len(body)} chars)"
+    return s
 
 
 class EmailService:
@@ -38,11 +62,12 @@ class EmailService:
             True ha sikeres, False ha hiba történt
         """
         if not self.user or not self.password:
-            # Ha nincs beállítva SMTP, csak logoljuk (dev környezetben)
+            # Ha nincs beállítva SMTP, csak logoljuk (dev környezetben). Body NEM megy ki teljesen: maszkolt preview (2FA kód, token, link token ne).
+            preview = mask_email_body_for_log(body)
             print(f"[EMAIL SERVICE] Email küldés szimulálva:")
             print(f"  To: {to_email}")
             print(f"  Subject: {subject}")
-            print(f"  Body: {body}")
+            print(f"  Body (masked preview): {preview}")
             return True
         
         try:

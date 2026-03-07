@@ -36,6 +36,8 @@ class BaseConfig(BaseSettings):
 
     # Auth/JWT: élesben .env-ben JWT_SECRET kötelező (pl. openssl rand -hex 64)
     jwt_secret: str = "5g6e7c14987t89bb845d1b69a5385a7afa8ef05efc08436a2554e0af4ebd75d89"
+    # jwt_audience: opcionális "aud" claim; ha megadva, token verify ellenőrzi (policy: iss + aud + nbf)
+    jwt_audience: str = ""
     # Cookie: Secure = csak HTTPS (élesben True); SameSite = lax | strict (subdomain izoláció + CSRF)
     # Domain NINCS beállítva → host-only: demo.local cookie nem megy acme.local-ra (tenant → tenant nem szivárog).
     cookie_secure: bool = True
@@ -47,8 +49,21 @@ class BaseConfig(BaseSettings):
     # Security/audit: True = queue + háttér worker (kisebb request latency), False = szinkron log/audit (pl. tesztek)
     audit_events_async: bool = True
 
+    # Invite / set-password token TTL (óra); 1–4 óra ajánlott (rövid életű link).
+    invite_ttl_hours: int = 4
+
+    # 2FA policy: max próbálkozás / ablak, lock (központi réteg).
+    two_fa_max_attempts: int = 5
+    two_fa_attempt_window_minutes: int = 15
+    two_fa_code_expiry_minutes: int = 10
+
     # Rate limit: login IP alapú (5/perc élesben; tesztekben magasabb limit lehet env-ből)
     rate_limit_login_per_minute: int = 5
+
+    # Auth light path: path prefixek, ahol token+allowlist elég, DB user load és version check kihagyva.
+    # Csak alacsony kockázatú route-ok (pl. /api/chat). Üres string = kikapcsolva (mindig teljes user load).
+    # Vesszővel elválasztott lista, pl. "/api/chat" vagy "" (disable). Dokumentálva: docs/Auth_light_paths.md
+    auth_light_paths: str = "/api/chat"
 
     # Email (SMTP): jelszót .env-ben (smtp_password)
     smtp_host: str = "smtp.gmail.com"

@@ -159,10 +159,13 @@ DB-ből és request.state.user beállítása. A user_repository a current_tenant
 alapján használja a session search_path-ot – ezért a TenantMiddleware-nek előbb
 kell futnia, különben "relation users does not exist" (public sémában nincs users).
 """
+# Light path: configból; üres = kikapcsolva. docs/Auth_light_paths.md
+_light_paths = tuple(p.strip() for p in (getattr(settings, "auth_light_paths", "") or "").split(",") if p.strip())
 app.add_middleware(
     AuthMiddleware,
     token_service=get_token_service(),
     login_service=get_login_service(),
+    light_paths=_light_paths,
 )
 
 """
@@ -231,7 +234,23 @@ Security headers middleware (ASGI)
 Minden kimenő HTTP válaszhoz biztonsági fejléceket ad: X-Frame-Options, X-Content-Type-Options, stb.
 """
 
+# Teljes CSP: default-src, script-src, style-src, img-src, connect-src, frame-ancestors, object-src, base-uri.
+# API backend: a válaszokra kerül; ha a backend szolgál HTML-t (pl. /docs), ezek korlátozzák a betöltéseket.
+_CSP_DIRECTIVES = (
+    "default-src 'self'",
+    "script-src 'self'",
+    "style-src 'self' 'unsafe-inline'",  # Swagger/Redoc inline style miatt
+    "img-src 'self' data:",
+    "connect-src 'self'",
+    "frame-ancestors 'none'",
+    "object-src 'none'",
+    "base-uri 'self'",
+)
+_CSP_HEADER_VALUE = "; ".join(_CSP_DIRECTIVES)
+
+
 class SecurityHeadersMiddleware:
+    """CSP és security headerek; teljes policy (default-src, script-src, connect-src, img-src, style-src, frame-ancestors, stb.)."""
     def __init__(self, app):
         self.app = app
 
@@ -247,7 +266,7 @@ class SecurityHeadersMiddleware:
                 headers.append((b"x-content-type-options", b"nosniff"))
                 headers.append((b"x-xss-protection", b"1; mode=block"))
                 headers.append((b"referrer-policy", b"strict-origin-when-cross-origin"))
-                headers.append((b"content-security-policy", b"frame-ancestors 'none';"))
+                headers.append((b"content-security-policy", _CSP_HEADER_VALUE.encode("utf-8")))
                 message = {**message, "headers": headers}
             await send(message)
 

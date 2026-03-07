@@ -74,10 +74,12 @@ class AppContainer:
         # --- Email service ---
         self.email_service = EmailService()
 
-        # --- Token system ---
+        # --- Token system (policy: iss + aud ha megadva + nbf mindig) ---
+        _aud = (getattr(settings, "jwt_audience", "") or "").strip()
         self.token_service = TokenService(
             secret=settings.jwt_secret,
             issuer="AIPLAZA",
+            audience=_aud or None,
             access_exp_min=settings.access_ttl_min,
             refresh_exp_min=settings.refresh_ttl_days * 24 * 60
         )
@@ -85,18 +87,18 @@ class AppContainer:
         # --- Settings & 2FA services ---
         self.settings_service = SettingsService(self.settings_repo)
         self._audit_service = AuditService(self.audit_repo)
-        self.two_factor_service = TwoFactorService(
-            self.two_factor_repo,
-            self.email_service,
-            attempt_repo=self.two_factor_attempt_repo,
+        from apps.core.security.two_factor_policy import (
+            get_2fa_max_attempts,
+            get_2fa_attempt_window_minutes,
+            get_2fa_code_expiry_minutes,
         )
-
-        # --- Security/audit: async eseménycsatorna (queue + worker) vagy szinkron ---
+        # --- Security/audit/email: async eseménycsatorna (queue + worker) vagy szinkron ---
         self.event_channel = None
         if getattr(settings, "audit_events_async", True):
             self.event_channel = SecurityAuditEventChannel(
                 self._security_logger,
                 self._audit_service,
+                self.email_service,
             )
             self.event_channel.start_worker()
             self.security_logger = self.event_channel.security_logger
@@ -104,6 +106,17 @@ class AppContainer:
         else:
             self.security_logger = self._security_logger
             self.audit_service = self._audit_service
+
+        # --- 2FA service (email háttérbe küldhet event_channel-nel) ---
+        self.two_factor_service = TwoFactorService(
+            self.two_factor_repo,
+            self.email_service,
+            attempt_repo=self.two_factor_attempt_repo,
+            max_attempts=get_2fa_max_attempts(),
+            attempt_window_minutes=get_2fa_attempt_window_minutes(),
+            code_expiry_minutes=get_2fa_code_expiry_minutes(),
+            event_channel=self.event_channel,
+        )
 
         # --- Auth app services ---
         self.login_service = LoginService(

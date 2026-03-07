@@ -47,11 +47,11 @@ limiter = Limiter(**_limiter_kwargs)
 
 def refresh_token_key(request):
     """
-    Rate limit kulcs refresh végponthoz: tenant + session (cookie/header refresh token) vagy IP.
+    Rate limit kulcs refresh végponthoz: tenant + session (csak cookie; policy: refresh csak cookie).
     Limit: 20/5perc per session; központi store-ban tenant dimenzióval.
     """
     tenant = getattr(request.state, "tenant_slug", None) or ""
-    rt = request.cookies.get("refresh_token") or request.headers.get("X-Refresh-Token")
+    rt = request.cookies.get("refresh_token")
     if rt:
         return f"t:{tenant}:refresh:{rt}"
     return f"t:{tenant}:ip:{get_remote_address(request)}"
