@@ -213,6 +213,14 @@ class TenantMiddleware:
 
         host = (_get_header(scope, "host") or "").split(":")[0].strip().lower()
         if not host:
+            if scope.get("path", "").startswith("/api"):
+                _timing("MIDDLEWARE TenantMiddleware OUT  (400 no host)")
+                await _send_json_response(
+                    send, 400,
+                    {"detail": "Tenant hiányzik. Használd a céges aldomaint (pl. http://demo.local:8001)."}
+                )
+                current_tenant_schema.reset(token)
+                return
             try:
                 await self.app(scope, receive, send)
             finally:

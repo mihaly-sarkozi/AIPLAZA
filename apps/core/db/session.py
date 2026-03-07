@@ -1,5 +1,7 @@
 # apps/core/db/session.py
-# Session factory: ha current_tenant_schema be van állítva, SET search_path TO <schema>.
+# Session factory: current_tenant_schema alapján SET search_path.
+# - Ha schema be van állítva (pl. "demo") → tenant séma (users, sessions, stb.).
+# - Ha schema None (pl. middleware executor szál, vagy még nincs tenant) → public (tenants, tenant_domains – nem tenant-scoped user adat, nincs szivárgás).
 # 2026.02.14 - Sárközi Mihály
 
 from sqlalchemy import create_engine, text
@@ -9,7 +11,6 @@ from apps.core.db.tenant_context import current_tenant_schema
 
 
 def make_session_factory(dsn: str, *, pool_pre_ping: bool = True):
-    # pool_pre_ping: dev-ben False = gyorsabb (kevesebb round-trip), élesben True ajánlott
     engine = create_engine(dsn, future=True, pool_pre_ping=pool_pre_ping)
     inner = sessionmaker(bind=engine, expire_on_commit=False, autoflush=False)
 
@@ -25,6 +26,9 @@ def make_session_factory(dsn: str, *, pool_pre_ping: bool = True):
                 safe = "".join(c for c in self._schema if c.isalnum() or c == "_")
                 if safe == self._schema:
                     self._session.execute(text(f'SET search_path TO "{safe}"'))
+            else:
+                # Nincs tenant context (pl. middleware get_by_slug executor szál): public (tenant lista, nincs user adat).
+                self._session.execute(text("SET search_path TO public"))
             return self._session
 
         def __exit__(self, *args):

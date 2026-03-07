@@ -1,16 +1,25 @@
 import axios, { type InternalAxiosRequestConfig } from "axios";
 import { useAuthStore } from "../store/authStore";
+import { getSafeLoginRedirect } from "../utils/loginRedirect";
+import { getCsrfToken, setCsrfToken } from "../utils/csrf";
 import { useLocaleStore } from "../i18n";
 
+// Dev proxy: baseURL legyen relatív (/api), hogy a kérés ugyanarra az originra menjen → refresh_token cookie (SameSite=Lax) elküldésre kerül.
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL ?? "",
+  baseURL: import.meta.env.VITE_API_URL ?? "/api",
   withCredentials: true, // küldi a HttpOnly cookie-t (refresh tokenhez)
 });
 
-// 🔒 Token + Accept-Language minden kéréshez (backend hibák a kiválasztott nyelven)
+// 🔒 Request interceptor: Authorization from auth store; X-CSRF-Token for state-changing methods.
 api.interceptors.request.use((config) => {
   const locale = useLocaleStore.getState().locale;
   config.headers["Accept-Language"] = locale;
+
+  const method = (config.method ?? "get").toLowerCase();
+  if (["post", "patch", "put", "delete"].includes(method)) {
+    const csrf = getCsrfToken();
+    if (csrf) config.headers["X-CSRF-Token"] = csrf;
+  }
 
   const url = (config.url ?? "").toString();
   if (/^\/auth\/login(\/|$)/.test(url) || /^\/auth\/register(\/|$)/.test(url)) {
@@ -63,8 +72,8 @@ function redirectToLogin(err?: unknown): void {
   const pathname = window.location.pathname || "";
   // Már login/forgot/set-password oldalon vagyunk → ne töltődjön újra (különben refresh 401 → logout → reload → végtelen ciklus)
   if (pathname === "/login" || pathname.startsWith("/forgot") || pathname.startsWith("/set-password")) return;
-  const path = pathname && pathname !== "/login" ? pathname : "";
-  window.location.href = path ? `/login?redirect=${encodeURIComponent(path)}` : "/login";
+  const path = getSafeLoginRedirect(pathname && pathname !== "/login" ? pathname : null);
+  window.location.href = path !== "/chat" ? `/login?redirect=${encodeURIComponent(path)}` : "/login";
 }
 
 // 🔁 401 → előbb refresh token próba; ha az is 401 → kijelentkeztetés + login oldalra
@@ -105,5 +114,15 @@ api.interceptors.response.use(
     }
   }
 );
+
+/** Fetch CSRF token on app init; store in memory. Call once before any state-changing request. */
+export async function fetchCsrfToken(): Promise<void> {
+  try {
+    const res = await api.get<{ csrf_token: string }>("/auth/csrf-token", { withCredentials: true });
+    if (res.data?.csrf_token) setCsrfToken(res.data.csrf_token);
+  } catch {
+    setCsrfToken(null);
+  }
+}
 
 export default api;

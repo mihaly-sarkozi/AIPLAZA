@@ -2,8 +2,16 @@ import { create } from "zustand";
 import api from "../api/axiosClient";
 
 /**
- * Access token CSAK memóriában (NE localStorage/sessionStorage) – XSS esetén ne legyen lopható.
- * Refresh token csak HttpOnly cookie-ban (backend); subdomain izoláció: host-only cookie (tenant→tenant nem szivárog).
+ * Authentication state – access token in memory only.
+ *
+ * ACCESS TOKEN:
+ * - Stored ONLY in this in-memory store (Zustand state). Cleared on page reload.
+ * - MUST NOT be written to localStorage, sessionStorage, or IndexedDB (XSS would expose it).
+ * - Axios interceptor reads the token from this store only; never from browser storage.
+ *
+ * REFRESH TOKEN:
+ * - Stored in HttpOnly Secure SameSite cookie by the backend. Not readable by JS.
+ * - Sent automatically with credentials; used by POST /auth/refresh to get a new access token.
  */
 
 /** Egyetlen folyamatban lévő /me kérés – Strict Mode / többszörös mount ne indítson több hívást */
@@ -35,6 +43,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   user: null,
   loadingUser: true,
 
+  /** Access token: memory only. Never persist to localStorage/sessionStorage/IndexedDB. */
   setToken: (token) => {
     set({ token });
   },

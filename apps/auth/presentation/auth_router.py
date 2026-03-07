@@ -31,6 +31,7 @@ from apps.core.di import get_user_repository
 from apps.users.application.services.user_service import UserService
 from apps.core.security.token_allowlist import add as allowlist_add, remove_by_user as allowlist_remove_by_user
 from apps.core.security.cookie_policy import set_refresh_cookie, clear_refresh_cookie
+from apps.core.security.csrf import generate_csrf_token, set_csrf_cookie
 from apps.audit.application.audit_service import AuditService
 from apps.core.i18n.messages import get_message, ErrorCode
 
@@ -53,6 +54,23 @@ def _detail(code: ErrorCode, lang: str):
 # A main.py: include_router(auth_router.router, prefix="/api", tags=["auth"]).
 # set_tenant_context_from_request: a sync route thread-ben is meglegyen a tenant séma (context var).
 router = APIRouter(dependencies=[Depends(set_tenant_context_from_request)])
+
+# -------------------------------------------------
+# CSRF TOKEN (GET: cookie + body; frontend stores in memory, sends X-CSRF-Token on POST/PUT/PATCH/DELETE)
+# -------------------------------------------------
+
+@router.get("/auth/csrf-token")
+def get_csrf_token(response: Response):
+    """Return CSRF token for double-submit; also set in cookie. No auth required."""
+    token = generate_csrf_token()
+    set_csrf_cookie(
+        response,
+        token,
+        secure=settings.cookie_secure,
+        samesite=getattr(settings, "cookie_samesite", "lax"),
+    )
+    return {"csrf_token": token}
+
 
 # -------------------------------------------------
 # LOGIN
@@ -316,6 +334,7 @@ def logout(
                 details={"error": str(e)},
                 ip=ip,
                 user_agent=ua,
+                tenant_slug=tenant_slug,
             )
         except Exception:
             pass

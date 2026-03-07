@@ -3,22 +3,19 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import api from "../api/axiosClient";
 import { useTranslation } from "../i18n";
 import { useAuthStore } from "../store/authStore";
+import { getSafeLoginRedirect } from "../utils/loginRedirect";
 import { useLocaleStore } from "../i18n";
 import type { Locale } from "../i18n";
 import type { Theme } from "../i18n";
 
 const LOGIN_REMEMBER_EMAIL_KEY = "AIPLAZA_login_remember_email";
-
-function safeRedirectPath(redirect: string | null): string {
-  if (!redirect || !redirect.startsWith("/") || redirect.startsWith("//")) return "/chat";
-  return redirect;
-}
+const LOGIN_COOLDOWN_SECONDS = 30;
 
 export default function Login() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const returnTo = safeRedirectPath(searchParams.get("redirect"));
+  const returnTo = getSafeLoginRedirect(searchParams.get("redirect"));
   const { setToken, logout, loadUser } = useAuthStore();
   const setLocaleAndTheme = useLocaleStore((s) => s.setLocaleAndTheme);
 
@@ -33,7 +30,7 @@ export default function Login() {
   }, [setLocaleAndTheme]);
 
   const handleLoginSuccess = async (access_token: string) => {
-    setToken(access_token);
+    setToken(access_token); // memory only (auth store); never persist to localStorage/sessionStorage
     await loadUser();
     navigate(returnTo);
   };
@@ -58,10 +55,19 @@ export default function Login() {
   const [error, setError] = useState("");
   const [pendingToken, setPendingToken] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [cooldownSecondsRemaining, setCooldownSecondsRemaining] = useState(0);
+
+  useEffect(() => {
+    if (cooldownSecondsRemaining <= 0) return;
+    const id = setInterval(() => {
+      setCooldownSecondsRemaining((s) => (s <= 1 ? 0 : s - 1));
+    }, 1000);
+    return () => clearInterval(id);
+  }, [cooldownSecondsRemaining]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (submitting) return;
+    if (submitting || cooldownSecondsRemaining > 0) return;
     setError("");
     setSubmitting(true);
 
@@ -108,6 +114,7 @@ export default function Login() {
             }
           } else if (retry.response?.status === 429) {
             setError(t("login.errorTooMany"));
+            setCooldownSecondsRemaining(LOGIN_COOLDOWN_SECONDS);
           } else {
             setError(t("login.errorUnknown"));
           }
@@ -116,6 +123,7 @@ export default function Login() {
       }
       if (axErr.response?.status === 429) {
         setError(t("login.errorTooMany"));
+        setCooldownSecondsRemaining(LOGIN_COOLDOWN_SECONDS);
       } else if (axErr.response?.status === 401) {
         if (pendingToken) {
           setError(t("login.errorBad2FA"));
@@ -142,7 +150,13 @@ export default function Login() {
           </div>
         )}
 
-        <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+        {cooldownSecondsRemaining > 0 && (
+          <div className="bg-[var(--color-table-head)] border border-[var(--color-border)] text-[var(--color-foreground)] p-3 rounded-md text-sm mb-4 text-center font-medium" role="status" aria-live="polite">
+            {t("login.tryAgainInSeconds").replace("{{seconds}}", String(cooldownSecondsRemaining))}
+          </div>
+        )}
+
+        <form onSubmit={handleSubmit} className="flex flex-col gap-4" aria-disabled={cooldownSecondsRemaining > 0}>
           {!pendingToken && (
             <>
               <div>
@@ -151,11 +165,12 @@ export default function Login() {
                   type="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  className="w-full p-3 rounded-md bg-[var(--color-input-bg)] border border-[var(--color-border)] text-[var(--color-foreground)] focus:outline-none focus:ring-2 focus:ring-[var(--color-border)]"
+                  className="w-full p-3 rounded-md bg-[var(--color-input-bg)] border border-[var(--color-border)] text-[var(--color-foreground)] focus:outline-none focus:ring-2 focus:ring-[var(--color-border)] disabled:opacity-60 disabled:cursor-not-allowed"
                   placeholder={t("login.emailPlaceholder")}
                   autoComplete="username"
                   maxLength={100}
                   required
+                  disabled={cooldownSecondsRemaining > 0}
                 />
               </div>
 
@@ -166,10 +181,11 @@ export default function Login() {
                     type={showPassword ? "text" : "password"}
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    className="w-full p-3 pr-10 rounded-md bg-[var(--color-input-bg)] border border-[var(--color-border)] text-[var(--color-foreground)] focus:outline-none focus:ring-2 focus:ring-[var(--color-border)]"
+                    className="w-full p-3 pr-10 rounded-md bg-[var(--color-input-bg)] border border-[var(--color-border)] text-[var(--color-foreground)] focus:outline-none focus:ring-2 focus:ring-[var(--color-border)] disabled:opacity-60 disabled:cursor-not-allowed"
                     placeholder={t("login.passwordPlaceholder")}
                     autoComplete="current-password"
                     required
+                    disabled={cooldownSecondsRemaining > 0}
                   />
                   <button
                     type="button"
@@ -197,11 +213,12 @@ export default function Login() {
                 type="text"
                 value={twoFactorCode}
                 onChange={(e) => setTwoFactorCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
-                className="w-full p-3 rounded-md bg-[var(--color-input-bg)] border border-[var(--color-border)] text-[var(--color-foreground)] focus:outline-none focus:ring-2 focus:ring-[var(--color-border)]"
+                className="w-full p-3 rounded-md bg-[var(--color-input-bg)] border border-[var(--color-border)] text-[var(--color-foreground)] focus:outline-none focus:ring-2 focus:ring-[var(--color-border)] disabled:opacity-60 disabled:cursor-not-allowed"
                 placeholder={t("login.twoFactorPlaceholder")}
                 maxLength={6}
                 autoComplete="one-time-code"
                 required
+                disabled={cooldownSecondsRemaining > 0}
               />
               <p className="text-sm text-[var(--color-muted)] mt-1">
                 {t("login.twoFactorHint")}
@@ -215,6 +232,7 @@ export default function Login() {
                 <input
                   type="checkbox"
                   checked={autoLogin}
+                  disabled={cooldownSecondsRemaining > 0}
                   onChange={(e) => {
                     const checked = e.target.checked;
                     setAutoLogin(checked);
@@ -262,10 +280,14 @@ export default function Login() {
 
           <button
             type="submit"
-            disabled={submitting}
+            disabled={submitting || cooldownSecondsRemaining > 0}
             className="w-full bg-[var(--color-primary)] hover:opacity-90 text-[var(--color-on-primary)] disabled:opacity-60 disabled:cursor-not-allowed font-semibold py-3 rounded-md transition"
           >
-            {submitting ? t("login.submitting") : t("login.submit")}
+            {cooldownSecondsRemaining > 0
+              ? t("login.tryAgainInSeconds").replace("{{seconds}}", String(cooldownSecondsRemaining))
+              : submitting
+                ? t("login.submitting")
+                : t("login.submit")}
           </button>
         </form>
       </div>

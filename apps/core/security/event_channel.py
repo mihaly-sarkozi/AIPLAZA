@@ -12,6 +12,8 @@ import queue
 import threading
 from typing import Any, Optional
 
+from apps.core.db.tenant_context import current_tenant_schema
+
 _log = logging.getLogger(__name__)
 
 # Queue max méret: extrém terhelésnél ne nőjön a memória; put block=False vagy put timeout, full esetén drop/warn
@@ -53,6 +55,8 @@ class AuditServiceProxy:
         details: Optional[dict[str, Any]] = None,
         ip: Optional[str] = None,
         user_agent: Optional[str] = None,
+        *,
+        tenant_slug: Optional[str] = None,
     ) -> None:
         try:
             self._queue.put_nowait(
@@ -63,6 +67,7 @@ class AuditServiceProxy:
                     "details": details,
                     "ip": ip,
                     "user_agent": user_agent,
+                    "tenant_slug": tenant_slug,
                 }
             )
         except queue.Full:
@@ -137,14 +142,18 @@ class SecurityAuditEventChannel:
                     if method and hasattr(self._security_logger, method):
                         getattr(self._security_logger, method)(*args, **kwargs)
                 elif event.get("type") == "audit":
-                    # A valódi AuditService.log() maga sanitizál; itt csak továbbítjuk.
-                    self._audit_service.log(
-                        action=event["action"],
-                        user_id=event.get("user_id"),
-                        details=event.get("details"),
-                        ip=event.get("ip"),
-                        user_agent=event.get("user_agent"),
-                    )
+                    # Worker szálban nincs tenant context; az audit tábla tenant sémában van → beállítjuk.
+                    token = current_tenant_schema.set(event.get("tenant_slug"))
+                    try:
+                        self._audit_service.log(
+                            action=event["action"],
+                            user_id=event.get("user_id"),
+                            details=event.get("details"),
+                            ip=event.get("ip"),
+                            user_agent=event.get("user_agent"),
+                        )
+                    finally:
+                        current_tenant_schema.reset(token)
                 elif event.get("type") == "email_2fa":
                     self._email_service.send_2fa_code(
                         event.get("to_email", ""),

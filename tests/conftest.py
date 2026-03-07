@@ -4,6 +4,8 @@ import os
 
 # Login rate limit: tesztekben magasabb limit (ugyanaz az IP = testclient), különben 5/perc 429-et adna
 os.environ.setdefault("RATE_LIMIT_LOGIN_PER_MINUTE", "100")
+# CSRF: tesztekben a TestClient nem küldi a tokent; a middleware kihagyja a validációt
+os.environ.setdefault("DISABLE_CSRF", "1")
 
 from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch

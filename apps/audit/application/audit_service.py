@@ -34,6 +34,8 @@ class AuditService:
         details: Optional[dict[str, Any]] = None,
         ip: Optional[str] = None,
         user_agent: Optional[str] = None,
+        *,
+        tenant_slug: Optional[str] = None,  # proxy használja; worker már beállította current_tenant_schema-t
     ) -> None:
         """Egy esemény rögzítése (szinkron DB írás). details sanitizálás után JSON stringként tároljuk."""
         safe_details = sanitize_details(details)

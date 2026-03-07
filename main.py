@@ -33,6 +33,7 @@ from apps.core.i18n.messages import get_message, lang_from_request
 from config.settings import settings
 from apps.core.middleware.tenant_middleware import TenantMiddleware
 from apps.core.middleware.auth_middleware import AuthMiddleware
+from apps.core.middleware.csrf_middleware import CSRFMiddleware
 from apps.core.middleware.correlation_id_middleware import CorrelationIdMiddleware
 from apps.core.middleware.request_timing_middleware import RequestTimingMiddleware
 from apps.core.di import get_token_service, get_login_service, get_tenant_repository
@@ -44,6 +45,7 @@ from apps.settings.presentation import settings_router
 from apps.knowledge.presentation import knowledge_router
 
 import logging
+import os
 import sys
 # Lassú kérés / tenant / auth logok a konzolon (uvicorn stderr); force=True hogy uvicorn után is látszódjon
 logging.basicConfig(level=logging.WARNING, format="[%(levelname)s] %(name)s: %(message)s", stream=sys.stderr, force=True)
@@ -149,7 +151,7 @@ app.add_middleware(
     allow_origin_regex=_cors_origin_regex,
     allow_credentials=True,
     allow_methods=["*"],
-    allow_headers=["Authorization", "Content-Type"],
+    allow_headers=["Authorization", "Content-Type", "X-CSRF-Token"],
 )
 
 """
@@ -273,6 +275,9 @@ class SecurityHeadersMiddleware:
 
         await self.app(scope, receive, send_with_headers)
 
+# CSRF: tesztekben DISABLE_CSRF=1 (conftest), így a TestClient nem kell token-t küldjön
+if os.environ.get("DISABLE_CSRF") != "1":
+    app.add_middleware(CSRFMiddleware)
 app.add_middleware(SecurityHeadersMiddleware)
 
 

@@ -3,6 +3,8 @@ import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-route
 
 import MainLayout from "./layouts/MainLayout";
 import { useAuthStore } from "./store/authStore";
+import { fetchCsrfToken } from "./api/axiosClient";
+import { getSafeLoginRedirect } from "./utils/loginRedirect";
 import { useLocaleStore } from "./i18n";
 import type { Locale } from "./i18n";
 import type { Theme } from "./i18n";
@@ -37,8 +39,9 @@ function AuthGuard({ children }: { children: JSX.Element }) {
     const location = useLocation();
     if (loadingUser) return <GuardFallback />;
     if (!user) {
-        const redirect = encodeURIComponent(location.pathname || "/chat");
-        return <Navigate to={`/login?redirect=${redirect}`} replace />;
+        const safePath = getSafeLoginRedirect(location.pathname || "/chat");
+        const redirect = safePath !== "/chat" ? `?redirect=${encodeURIComponent(safePath)}` : "";
+        return <Navigate to={`/login${redirect}`} replace />;
     }
     return children;
 }
@@ -57,12 +60,15 @@ export default function App() {
 
     useEffect(() => {
         const path = window.location.pathname || "";
-        if (path === "/login" || path.startsWith("/forgot") || path.startsWith("/set-password")) {
-            useAuthStore.getState().setToken(null);
-            useAuthStore.setState({ user: null, loadingUser: false });
-            return;
-        }
-        loadUser();
+        (async () => {
+            await fetchCsrfToken();
+            if (path === "/login" || path.startsWith("/forgot") || path.startsWith("/set-password")) {
+                useAuthStore.getState().setToken(null);
+                useAuthStore.setState({ user: null, loadingUser: false });
+                return;
+            }
+            loadUser();
+        })();
     }, [loadUser]);
 
     useEffect(() => {

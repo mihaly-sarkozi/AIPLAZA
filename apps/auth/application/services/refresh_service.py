@@ -73,17 +73,17 @@ class RefreshService:
             record_span("refresh_token_verify", (time.monotonic() - t0_verify) * 1000)
         except jwt.ExpiredSignatureError:
             self.logger.refresh_expired_token(ip, ua, **ctx)
-            self.audit.log("refresh_failed", user_id=None, details={"reason": "expired_token"}, ip=ip, user_agent=ua)
+            self.audit.log("refresh_failed", user_id=None, details={"reason": "expired_token"}, ip=ip, user_agent=ua, tenant_slug=tenant_slug)
             return None
 
         except (jwt.InvalidSignatureError, jwt.DecodeError):
             self.logger.refresh_invalid_token(ip, ua, **ctx)
-            self.audit.log("refresh_failed", user_id=None, details={"reason": "invalid_token"}, ip=ip, user_agent=ua)
+            self.audit.log("refresh_failed", user_id=None, details={"reason": "invalid_token"}, ip=ip, user_agent=ua, tenant_slug=tenant_slug)
             return None
 
         if payload.get("typ") != "refresh":
             self.logger.refresh_wrong_type(ip, ua, **ctx)
-            self.audit.log("refresh_failed", user_id=None, details={"reason": "wrong_type"}, ip=ip, user_agent=ua)
+            self.audit.log("refresh_failed", user_id=None, details={"reason": "wrong_type"}, ip=ip, user_agent=ua, tenant_slug=tenant_slug)
             return None
 
         user_id = int(payload["sub"])
@@ -101,7 +101,7 @@ class RefreshService:
             current_user_ver = getattr(user_for_ver, "security_version", 0) if user_for_ver else 0
             if token_user_ver != current_user_ver or token_tenant_ver != tenant_security_version:
                 self.logger.refresh_session_expired(user_id, ip, ua, **ctx)
-                self.audit.log("refresh_failed", user_id=user_id, details={"reason": "security_version_mismatch"}, ip=ip, user_agent=ua)
+                self.audit.log("refresh_failed", user_id=user_id, details={"reason": "security_version_mismatch"}, ip=ip, user_agent=ua, tenant_slug=tenant_slug)
                 return None
 
         t0_sess = time.monotonic()
@@ -110,22 +110,22 @@ class RefreshService:
 
         if rec is None:
             self.logger.refresh_unknown_jti(user_id, ip, ua, **ctx)
-            self.audit.log("refresh_failed", user_id=user_id, details={"reason": "unknown_jti"}, ip=ip, user_agent=ua)
+            self.audit.log("refresh_failed", user_id=user_id, details={"reason": "unknown_jti"}, ip=ip, user_agent=ua, tenant_slug=tenant_slug)
             return None
 
         if not rec.valid:
             if permissions_changed_get(tenant_slug, rec.user_id):
-                self.audit.log("refresh_failed", user_id=user_id, details={"reason": "permissions_changed"}, ip=ip, user_agent=ua)
+                self.audit.log("refresh_failed", user_id=user_id, details={"reason": "permissions_changed"}, ip=ip, user_agent=ua, tenant_slug=tenant_slug)
                 return (None, "permissions_changed")
             self.logger.refresh_reuse_detected(user_id, ip, ua, **ctx)
-            self.audit.log("refresh_failed", user_id=user_id, details={"reason": "reuse_detected"}, ip=ip, user_agent=ua)
+            self.audit.log("refresh_failed", user_id=user_id, details={"reason": "reuse_detected"}, ip=ip, user_agent=ua, tenant_slug=tenant_slug)
             self.session_repository.invalidate_all_for_user(rec.user_id)
             return None
 
         if rec.is_expired():
             self.session_repository.update(rec.invalidate())
             self.logger.refresh_session_expired(user_id, ip, ua, **ctx)
-            self.audit.log("refresh_failed", user_id=user_id, details={"reason": "session_expired"}, ip=ip, user_agent=ua)
+            self.audit.log("refresh_failed", user_id=user_id, details={"reason": "session_expired"}, ip=ip, user_agent=ua, tenant_slug=tenant_slug)
             return None
 
         # -------------------------------
@@ -144,6 +144,7 @@ class RefreshService:
                 },
                 ip=ip,
                 user_agent=ua,
+                tenant_slug=tenant_slug,
             )
             return (None, "re_2fa_required")
 
@@ -180,7 +181,7 @@ class RefreshService:
         new_access, access_jti = self.tokens.make_access(user_id, user_ver=user_ver, tenant_ver=tenant_ver, role=getattr(user_for_ver, "role", "user"))
 
         self.logger.refresh_success(user_id, ip, ua, **ctx)
-        self.audit.log("refresh", user_id=user_id, ip=ip, user_agent=ua)
+        self.audit.log("refresh", user_id=user_id, ip=ip, user_agent=ua, tenant_slug=tenant_slug)
 
         # user_for_ver már megvan (version check); visszaadjuk, hogy a route ne hívjon get_by_id-t újra (hot path optimalizáció)
         return new_access, new_refresh, access_jti, user_for_ver

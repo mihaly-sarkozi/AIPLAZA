@@ -77,19 +77,19 @@ class LoginService:
         # Ha nincs felhasználó akkor hibát dobunk
         if user is None:
             self.logger.login_invalid_user_attempt(email, ip, ua, **ctx)
-            self.audit.log("login_failed", user_id=None, details={"reason": "invalid_user", "email": email}, ip=ip, user_agent=ua)
+            self.audit.log("login_failed", user_id=None, details={"reason": "invalid_user", "email": email}, ip=ip, user_agent=ua, tenant_slug=tenant_slug)
             return None
 
         # Ha a felhasználó nem aktív akkor hibát dobunk
         if not user.is_active:
             self.logger.login_inactive_user_attempt(user.id, ip, ua, **ctx)
-            self.audit.log("login_failed", user_id=user.id, details={"reason": "inactive_user"}, ip=ip, user_agent=ua)
+            self.audit.log("login_failed", user_id=user.id, details={"reason": "inactive_user"}, ip=ip, user_agent=ua, tenant_slug=tenant_slug)
             return None
 
         # Ha a jelszó nem megfelelő: növeljük a sikertelen próbálkozást, 5 után kilitjuk (is_active=False)
         if not pwd_hasher.verify(password, user.password_hash):
             self.logger.login_bad_password_attempt(user.id, ip, ua, **ctx)
-            self.audit.log("login_failed", user_id=user.id, details={"reason": "bad_password"}, ip=ip, user_agent=ua)
+            self.audit.log("login_failed", user_id=user.id, details={"reason": "bad_password"}, ip=ip, user_agent=ua, tenant_slug=tenant_slug)
             self.user_repository.record_failed_login(user.id)
             return None
 
@@ -99,7 +99,7 @@ class LoginService:
         # Ha 2FA ki van kapcsolva: azonnal beléptetés, email megerősítés nélkül
         if self.settings_service and not self.settings_service.is_two_factor_enabled():
             self.logger.login_successful_login(user.id, ip, ua, **ctx)
-            self.audit.log("login_success", user_id=user.id, details={"email": user.email, "2fa": False}, ip=ip, user_agent=ua)
+            self.audit.log("login_success", user_id=user.id, details={"email": user.email, "2fa": False}, ip=ip, user_agent=ua, tenant_slug=tenant_slug)
             access, refresh, access_jti = self._issue_tokens(user.id, ip, ua, auto_login, getattr(user, "security_version", 0), tenant_security_version, user.role)
             return LoginSuccess(access_token=access, refresh_token=refresh, user=user, access_jti=access_jti)
 
@@ -107,7 +107,7 @@ class LoginService:
         if not self.two_factor_service:
             return None
 
-        self.audit.log("login_2fa_required", user_id=user.id, details={"email": user.email}, ip=ip, user_agent=ua)
+        self.audit.log("login_2fa_required", user_id=user.id, details={"email": user.email}, ip=ip, user_agent=ua, tenant_slug=tenant_slug)
         pending = uuid.uuid4().hex
         expires_at = datetime.now(timezone.utc) + timedelta(minutes=PENDING_2FA_EXPIRE_MINUTES)
         self.pending_2fa_repository.create(pending, user.id, expires_at)
@@ -140,10 +140,10 @@ class LoginService:
                 user_id, two_factor_code, pending_token=pending_token, ip=ip
             ):
                 self.logger.login_bad_password_attempt(user_id, ip, ua, **ctx)
-                self.audit.log("login_2fa_failed", user_id=user_id, details={"reason": "invalid_code"}, ip=ip, user_agent=ua)
+                self.audit.log("login_2fa_failed", user_id=user_id, details={"reason": "invalid_code"}, ip=ip, user_agent=ua, tenant_slug=tenant_slug)
                 return None
         except TwoFactorTooManyAttemptsError:
-            self.audit.log("login_2fa_rate_limited", user_id=user_id, details={"reason": "too_many_attempts"}, ip=ip, user_agent=ua)
+            self.audit.log("login_2fa_rate_limited", user_id=user_id, details={"reason": "too_many_attempts"}, ip=ip, user_agent=ua, tenant_slug=tenant_slug)
             raise
 
         # Sikeres 2FA: pending token consume (egy használat)
@@ -157,7 +157,7 @@ class LoginService:
             return None
 
         self.logger.login_successful_login(user.id, ip, ua, **ctx)
-        self.audit.log("login_success", user_id=user.id, details={"email": user.email}, ip=ip, user_agent=ua)
+        self.audit.log("login_success", user_id=user.id, details={"email": user.email}, ip=ip, user_agent=ua, tenant_slug=tenant_slug)
         access, refresh, access_jti = self._issue_tokens(user.id, ip, ua, auto_login, getattr(user, "security_version", 0), tenant_security_version, user.role)
         return LoginSuccess(access_token=access, refresh_token=refresh, user=user, access_jti=access_jti)
 

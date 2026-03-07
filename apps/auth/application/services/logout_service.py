@@ -50,12 +50,12 @@ class LogoutService:
             return self._logout_with_expired_token(refresh_token, ip, ua, **ctx)
         except (jwt.InvalidSignatureError, jwt.DecodeError):
             self.logger.logout_invalid_token(ip, ua, **ctx)
-            self.audit.log("logout_failed", user_id=None, details={"reason": "invalid_token"}, ip=ip, user_agent=ua)
+            self.audit.log("logout_failed", user_id=None, details={"reason": "invalid_token"}, ip=ip, user_agent=ua, tenant_slug=tenant_slug)
             return True
 
         if payload.get("typ") != "refresh":
             self.logger.logout_wrong_type(ip, ua, **ctx)
-            self.audit.log("logout_failed", user_id=None, details={"reason": "wrong_type"}, ip=ip, user_agent=ua)
+            self.audit.log("logout_failed", user_id=None, details={"reason": "wrong_type"}, ip=ip, user_agent=ua, tenant_slug=tenant_slug)
             return True
 
         jti = payload.get("jti")
@@ -63,19 +63,19 @@ class LogoutService:
         session = self.session_repository.get_by_jti(jti)
         if not session:
             self.logger.logout_unknown_jti(user_id, ip, ua, **ctx)
-            self.audit.log("logout_failed", user_id=user_id, details={"reason": "unknown_jti"}, ip=ip, user_agent=ua)
+            self.audit.log("logout_failed", user_id=user_id, details={"reason": "unknown_jti"}, ip=ip, user_agent=ua, tenant_slug=tenant_slug)
             return True
 
         hashed = self.tokens.hash_token(refresh_token)
         if session.token_hash != hashed:
             self.logger.logout_replay_detected(user_id, ip, ua, **ctx)
-            self.audit.log("logout_failed", user_id=user_id, details={"reason": "replay_detected"}, ip=ip, user_agent=ua)
+            self.audit.log("logout_failed", user_id=user_id, details={"reason": "replay_detected"}, ip=ip, user_agent=ua, tenant_slug=tenant_slug)
             return True
 
         updated = session.invalidate()
         self.session_repository.update(updated)
         self.logger.logout_success(user_id, ip, ua, **ctx)
-        self.audit.log("logout", user_id=user_id, ip=ip, user_agent=ua)
+        self.audit.log("logout", user_id=user_id, ip=ip, user_agent=ua, tenant_slug=tenant_slug)
         return True
 
     def _logout_with_expired_token(
@@ -112,5 +112,6 @@ class LogoutService:
             details={"reason": "expired_token"},
             ip=ip,
             user_agent=ua,
+            tenant_slug=tenant_slug,
         )
         return True

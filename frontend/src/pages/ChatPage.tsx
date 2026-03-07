@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import api from "../api/axiosClient";
 import { useAuthStore } from "../store/authStore";
+import { sanitizeMessage } from "../utils/sanitize";
 
 export default function ChatPage() {
   const [question, setQuestion] = useState("");
@@ -19,8 +20,8 @@ export default function ChatPage() {
     if (!question.trim() || loading) return;
     const currentQuestion = question.trim();
 
-    // 🔹 Kérdés megjelenítése
-    setMessages((prev) => [...prev, { role: "user", text: currentQuestion }]);
+    // 🔹 Kérdés megjelenítése (szanitálva: beillesztett HTML/script nem kerül tárolásra)
+    setMessages((prev) => [...prev, { role: "user", text: sanitizeMessage(currentQuestion) }]);
     setQuestion("");
     setLoading(true);
 
@@ -28,8 +29,8 @@ export default function ChatPage() {
       const res = await api.post("/chat", { question: currentQuestion });
       const answer = res.data.answer;
 
-      // 🔹 AI válasz megjelenítése
-      setMessages((prev) => [...prev, { role: "assistant", text: answer }]);
+      // 🔹 AI válasz megjelenítése (DOMPurify: nincs HTML/script végrehajtás)
+      setMessages((prev) => [...prev, { role: "assistant", text: sanitizeMessage(answer) }]);
     } catch (err) {
       console.error("Chat error:", err);
       setMessages((prev) => [
@@ -60,7 +61,7 @@ export default function ChatPage() {
                   : "bg-gray-100 text-black border border-gray-200 rounded-bl-none"
               } shadow-sm whitespace-pre-wrap`}
             >
-              {msg.text}
+              {sanitizeMessage(msg.text)}
             </div>
           </div>
         ))}
