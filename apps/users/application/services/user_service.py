@@ -159,7 +159,7 @@ class UserService:
                 updates["is_active"] = is_active
             if email is not None:
                 email = email.strip()
-                if not email or "@" not in email:
+                if not is_valid_email(email):
                     raise ValueError("Érvénytelen email cím.")
                 existing = self.user_repository.get_by_email(email)
                 if existing and existing.id != user_id:
