@@ -41,7 +41,8 @@ class BaseConfig(BaseSettings):
     cookie_secure: bool = True
     cookie_samesite: str = "lax"  # lax | strict
     access_ttl_min: int = 15
-    refresh_ttl_days: int = 30
+    refresh_ttl_days: int = 30  # auto_login esetén a refresh cookie max_age (nap)
+    refresh_ttl_session_hours: int = 24  # nincs auto_login: refresh cookie max_age (óra); session cookie helyett, ne dobjon ki ~5 perc inaktivitás után
 
     # Rate limit: login IP alapú (5/perc élesben; tesztekben magasabb limit lehet env-ből)
     rate_limit_login_per_minute: int = 5

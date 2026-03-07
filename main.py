@@ -86,9 +86,9 @@ async def lifespan(app: FastAPI):
     except Exception:
         pass  # pl. DB még nincs, seed_user/init_db kell
     yield
-    # shutdown: Redis allowlist kapcsolat bezárása
+    # shutdown: központi Redis kapcsolat bezárása (allowlist, rate limit store)
     try:
-        from apps.core.security.token_allowlist import close_redis
+        from apps.core.redis_client import close_redis
         close_redis()
     except Exception:
         pass

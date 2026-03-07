@@ -100,7 +100,7 @@ class LoginService:
         if self.settings_service and not self.settings_service.is_two_factor_enabled():
             self.logger.login_successful_login(user.id, ip, ua, **ctx)
             self.audit.log("login_success", user_id=user.id, details={"email": user.email, "2fa": False}, ip=ip, user_agent=ua)
-            access, refresh, access_jti = self._issue_tokens(user.id, ip, ua, auto_login, getattr(user, "security_version", 0), tenant_security_version)
+            access, refresh, access_jti = self._issue_tokens(user.id, ip, ua, auto_login, getattr(user, "security_version", 0), tenant_security_version, user.role)
             return LoginSuccess(access_token=access, refresh_token=refresh, user=user, access_jti=access_jti)
 
         # 2FA be van kapcsolva: kódot küldünk, pending_token-t adunk vissza
@@ -158,7 +158,7 @@ class LoginService:
 
         self.logger.login_successful_login(user.id, ip, ua, **ctx)
         self.audit.log("login_success", user_id=user.id, details={"email": user.email}, ip=ip, user_agent=ua)
-        access, refresh, access_jti = self._issue_tokens(user.id, ip, ua, auto_login, getattr(user, "security_version", 0), tenant_security_version)
+        access, refresh, access_jti = self._issue_tokens(user.id, ip, ua, auto_login, getattr(user, "security_version", 0), tenant_security_version, user.role)
         return LoginSuccess(access_token=access, refresh_token=refresh, user=user, access_jti=access_jti)
 
     def _issue_tokens(
@@ -169,6 +169,7 @@ class LoginService:
         auto_login: bool = False,
         user_ver: int = 0,
         tenant_ver: int = 0,
+        role: str = "user",
     ) -> tuple[str, str, str]:
         # Érvénytelenítjük a már létező session-eket
         self.session_repository.invalidate_all_for_user(user_id)
@@ -195,6 +196,6 @@ class LoginService:
         # Elmentjük a session-t a DB-ben
         self.session_repository.create(s)
         
-        # Generáljuk az access token-t (jti a token_allowlisthez; user_ver/tenant_ver = force revoke)
-        access, access_jti = self.tokens.make_access(user_id, user_ver=user_ver, tenant_ver=tenant_ver)
+        # Generáljuk az access token-t (jti a token_allowlisthez; user_ver/tenant_ver/role = force revoke + token-driven auth)
+        access, access_jti = self.tokens.make_access(user_id, user_ver=user_ver, tenant_ver=tenant_ver, role=role)
         return access, refresh, access_jti

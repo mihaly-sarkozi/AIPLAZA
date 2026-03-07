@@ -90,6 +90,7 @@ class RefreshService:
 
         # Security version: ha a token user_ver/tenant_ver nem egyezik a jelenlegivel, token bukik (force revoke)
         current_user_ver = token_user_ver
+        user_for_ver = None
         if self.user_repository:
             user_for_ver = self.user_repository.get_by_id(user_id)
             current_user_ver = getattr(user_for_ver, "security_version", 0) if user_for_ver else 0
@@ -169,7 +170,7 @@ class RefreshService:
         # -------------------------------
         # 5️⃣ Új access token (jti a token_allowlisthez; user_ver/tenant_ver = force revoke)
         # -------------------------------
-        new_access, access_jti = self.tokens.make_access(user_id, user_ver=user_ver, tenant_ver=tenant_ver)
+        new_access, access_jti = self.tokens.make_access(user_id, user_ver=user_ver, tenant_ver=tenant_ver, role=getattr(user_for_ver, "role", "user"))
 
         self.logger.refresh_success(user_id, ip, ua, **ctx)
         self.audit.log("refresh", user_id=user_id, ip=ip, user_agent=ua)

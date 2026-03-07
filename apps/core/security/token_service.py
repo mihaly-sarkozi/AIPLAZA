@@ -57,10 +57,12 @@ class TokenService:
         user_id: int,
         user_ver: int = 0,
         tenant_ver: int = 0,
+        role: str = "user",
     ) -> tuple[str, str]:
         """
-        Access JWT előállítása. Payload: sub, typ="access", jti, user_ver, tenant_ver, iss, aud?, nbf, exp, iat.
+        Access JWT előállítása. Payload: sub, typ="access", jti, user_ver, tenant_ver, role, iss, aud?, nbf, exp, iat.
         user_ver/tenant_ver: security version – ha a middleware-ben nem egyezik a jelenlegivel, a token bukik (force revoke).
+        role: token-driven auth-hoz (light path: DB user load nélkül elég a token claim).
         """
         now = self._now()
         jti = str(uuid.uuid4())
@@ -70,6 +72,7 @@ class TokenService:
             "jti": jti,
             "user_ver": user_ver,
             "tenant_ver": tenant_ver,
+            "role": role,
             "exp": now + datetime.timedelta(minutes=self.access_exp),
             "iat": now,
             "nbf": now,

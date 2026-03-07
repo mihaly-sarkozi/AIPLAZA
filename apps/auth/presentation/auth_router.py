@@ -82,12 +82,13 @@ def login(
     if getattr(request.state, "user", None) is not None:
         raise HTTPException(status_code=409, detail=_detail(ErrorCode.ALREADY_LOGGED_IN, lang))
 
-    # Célzott rate limit: step2 = pending_token + 2FA kód → 5/perc/token; step1 = email → 10/óra/email
+    # Célzott rate limit: step2 = pending_token + 2FA kód → 5/perc/token; step1 = email → 10/óra/email (tenant dimenzióval)
+    tenant_slug = getattr(request.state, "tenant_slug", None)
     if getattr(req, "pending_token", None) and getattr(req, "two_factor_code", None):
-        if not check_login_step2_pending_token(req.pending_token):
+        if not check_login_step2_pending_token(req.pending_token, tenant_slug):
             raise HTTPException(status_code=429, detail=_detail(ErrorCode.AUTH_RATE_LIMIT, lang))
     elif getattr(req, "email", None):
-        if not check_login_step1_email(req.email):
+        if not check_login_step1_email(req.email, tenant_slug):
             raise HTTPException(status_code=429, detail=_detail(ErrorCode.AUTH_RATE_LIMIT, lang))
     
     # Adapter req → application DTO; service csak LoginInput-ot kap.
@@ -133,8 +134,12 @@ def login(
 
     # Ha vagy nincs 2FA vagy az is megtörtént akkor=>   
 
-    # Sikeres belépés: refresh cookie (HttpOnly, Secure, SameSite; domain nincs = host-only, tenant nem szivárog).
-    cookie_max_age = int(settings.refresh_ttl_days * 24 * 3600) if getattr(req, "auto_login", False) else None
+    # Sikeres belépés: refresh cookie (HttpOnly, Secure, SameSite; domain nincs = host-only).
+    # auto_login → 30 nap; nincs auto_login → refresh_ttl_session_hours (pl. 24 óra), ne session cookie (az inaktivitás után eldobható).
+    if getattr(req, "auto_login", False):
+        cookie_max_age = int(settings.refresh_ttl_days * 24 * 3600)
+    else:
+        cookie_max_age = int(getattr(settings, "refresh_ttl_session_hours", 24) * 3600)
     set_refresh_cookie(
         response,
         result.refresh_token,
@@ -243,8 +248,11 @@ def refresh_tokens(
     user_id = int(payload["sub"])
     allowlist_add(tenant_slug, user_id, access_jti)
 
-    # Új refresh cookie (ugyanaz a policy: HttpOnly, Secure, SameSite; domain nincs)
-    cookie_max_age = int(settings.refresh_ttl_days * 24 * 3600) if payload.get("al") else None
+    # Új refresh cookie (ugyanaz a policy: auto_login → napok, különben session_hours)
+    if payload.get("al"):
+        cookie_max_age = int(settings.refresh_ttl_days * 24 * 3600)
+    else:
+        cookie_max_age = int(getattr(settings, "refresh_ttl_session_hours", 24) * 3600)
     set_refresh_cookie(
         response,
         new_refresh,

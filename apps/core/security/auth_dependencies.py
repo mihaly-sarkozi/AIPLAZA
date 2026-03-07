@@ -7,10 +7,16 @@ from apps.users.domain.user import User
 from apps.core.i18n.messages import get_message, lang_from_request, ErrorCode
 
 
+def get_auth_light(request: Request) -> bool:
+    """True, ha a middleware token-only (light) ágon autentikált; ilyenkor request.state.user minimál (id, role, is_active)."""
+    return getattr(request.state, "auth_light", False)
+
+
 def get_current_user(request: Request) -> User:
     """
     Bejelentkezett, aktív user a middleware-ből (request.state.user).
     Ha nincs user vagy inaktív (kitiltott) → 401. Minden védett végpontnál (chat, profil, jogosultságok, stb.) így ellenőrzünk.
+    Light path-okon (pl. /api/chat, /api/knowledge) a user minimál (id, role, is_active); email/stb. üres.
     """
     user = getattr(request.state, "user", None)
     if not user:

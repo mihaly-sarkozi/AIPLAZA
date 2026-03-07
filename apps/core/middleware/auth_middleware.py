@@ -85,6 +85,29 @@ def invalidate_user_cache(tenant_slug: str | None, user_id: int) -> None:
     get_cache().delete(user_cache_key(tenant_slug, user_id))
 
 
+# Path prefixek, ahol token + allowlist elég; DB user load és version check kihagyva (token-driven auth).
+# Role/revoke változás csak access token lejáratakor (pl. 15 perc) lép életbe.
+LIGHT_PATHS: tuple[str, ...] = ("/api/chat", "/api/knowledge")
+
+
+def _minimal_user_from_payload(payload: dict, user_id: int) -> User:
+    """Token payload-ból minimál User (id, role, is_active=True); DB/cache load nélkül."""
+    return User(
+        id=user_id,
+        email="",
+        password_hash="",
+        is_active=True,
+        role=payload.get("role", "user"),
+        created_at=datetime.now(timezone.utc),
+        name=None,
+        registration_completed_at=None,
+        failed_login_attempts=0,
+        preferred_locale=None,
+        preferred_theme=None,
+        security_version=payload.get("user_ver", 0),
+    )
+
+
 class AuthMiddleware:
     """ASGI: Bearer token → payload; access token + allowlist → user betöltés; scope.state.user, user_token_payload."""
 
@@ -143,32 +166,40 @@ class AuthMiddleware:
             tenant_slug = state.get("tenant_slug")
             if user_id and jti and allowlist_is_allowed(tenant_slug, int(user_id), jti):
                 uid = int(user_id)
-                tenant_slug_for_fetch = tenant_slug
+                path = scope.get("path") or ""
 
-                def _fetch_user() -> User | None:
-                    if tenant_slug_for_fetch:
-                        current_tenant_schema.set(tenant_slug_for_fetch)
-                    try:
-                        return self._get_user(tenant_slug_for_fetch, uid)
-                    finally:
-                        current_tenant_schema.set(None)
-
-                t0 = time.monotonic()
-                loop = asyncio.get_event_loop()
-                user = await loop.run_in_executor(None, _fetch_user)
-                elapsed = time.monotonic() - t0
-                _timing(f"  -> auth user lookup user_id={uid} {elapsed:.3f}s")
-                if elapsed > 1.0:
-                    _log.warning("auth user lookup slow: user_id=%s %.2fs", uid, elapsed)
-                token_user_ver = payload.get("user_ver", 0)
-                token_tenant_ver = payload.get("tenant_ver", 0)
-                current_user_ver = getattr(user, "security_version", 0) if user else 0
-                current_tenant_ver = state.get("tenant_security_version", 0)
-                if user and token_user_ver == current_user_ver and token_tenant_ver == current_tenant_ver:
-                    state["user"] = user
+                # Token-only ág: light path prefix → nincs DB user load, nincs version check
+                if any(path.startswith(prefix) for prefix in LIGHT_PATHS):
+                    state["user"] = _minimal_user_from_payload(payload, uid)
+                    state["auth_light"] = True
                 else:
-                    state["user_token_payload"] = None
-                    state["user"] = None
+                    tenant_slug_for_fetch = tenant_slug
+
+                    def _fetch_user() -> User | None:
+                        if tenant_slug_for_fetch:
+                            current_tenant_schema.set(tenant_slug_for_fetch)
+                        try:
+                            return self._get_user(tenant_slug_for_fetch, uid)
+                        finally:
+                            current_tenant_schema.set(None)
+
+                    t0 = time.monotonic()
+                    loop = asyncio.get_event_loop()
+                    user = await loop.run_in_executor(None, _fetch_user)
+                    elapsed = time.monotonic() - t0
+                    _timing(f"  -> auth user lookup user_id={uid} {elapsed:.3f}s")
+                    if elapsed > 1.0:
+                        _log.warning("auth user lookup slow: user_id=%s %.2fs", uid, elapsed)
+                    token_user_ver = payload.get("user_ver", 0)
+                    token_tenant_ver = payload.get("tenant_ver", 0)
+                    current_user_ver = getattr(user, "security_version", 0) if user else 0
+                    current_tenant_ver = state.get("tenant_security_version", 0)
+                    if user and token_user_ver == current_user_ver and token_tenant_ver == current_tenant_ver:
+                        state["user"] = user
+                        state["auth_light"] = False
+                    else:
+                        state["user_token_payload"] = None
+                        state["user"] = None
             else:
                 state["user_token_payload"] = None
                 state["user"] = None
