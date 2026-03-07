@@ -36,11 +36,15 @@ class BaseConfig(BaseSettings):
 
     # Auth/JWT: élesben .env-ben JWT_SECRET kötelező (pl. openssl rand -hex 64)
     jwt_secret: str = "5g6e7c14987t89bb845d1b69a5385a7afa8ef05efc08436a2554e0af4ebd75d89"
-    # Cookie Secure: false = HTTP-n is küldi (Postman/localhost), true = csak HTTPS (éles)
+    # Cookie: Secure = csak HTTPS (élesben True); SameSite = lax | strict (subdomain izoláció + CSRF)
+    # Domain NINCS beállítva → host-only: demo.local cookie nem megy acme.local-ra (tenant → tenant nem szivárog).
     cookie_secure: bool = True
+    cookie_samesite: str = "lax"  # lax | strict
     access_ttl_min: int = 15
     refresh_ttl_days: int = 30
 
+    # Rate limit: login IP alapú (5/perc élesben; tesztekben magasabb limit lehet env-ből)
+    rate_limit_login_per_minute: int = 5
 
     # Email (SMTP): jelszót .env-ben (smtp_password)
     smtp_host: str = "smtp.gmail.com"

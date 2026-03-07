@@ -75,3 +75,9 @@ def get_session_repository():
     """Session repository (auth) – pl. user törlésnél session invalidate."""
     return container.session_repo
 
+
+def get_cache():
+    """Központi cache (tenant, user, permissions_changed). Redis ha redis_url, különben memory."""
+    from apps.core.cache import get_cache as _get_cache
+    return _get_cache()
+

@@ -193,6 +193,10 @@ class UserService:
                 self.audit.log("user_updated", user_id=result.id, details={**other, "changed_by": current_user_id})
         return result
 
+    def increment_security_version(self, user_id: int) -> None:
+        """User-oldali force revoke: role/jogosultság változás után minden régi token (user_ver) bukik."""
+        self.user_repository.increment_security_version(user_id)
+
     def delete(self, user_id: int, current_user_id: int) -> None:
         """User törlése. Az owner nem törölhető."""
         if user_id == current_user_id:

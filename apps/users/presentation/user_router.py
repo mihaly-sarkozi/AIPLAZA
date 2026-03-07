@@ -133,7 +133,7 @@ def create_user(
         raise HTTPException(status_code=400, detail={"code": "validation_error", "message": msg})
 
 
-# Regisztrációs link érvényesség ellenőrzése (csak admin/owner)
+# Regisztrációs/set-password link érvényesség ellenőrzése – auth NINCS (a link token a hitelesítés)
 @router.get("/users/set-password/validate")
 @limiter.limit("30/minute")
 def validate_set_password_token(
@@ -141,7 +141,6 @@ def validate_set_password_token(
     token: str = "",
     _tenant_id: int = Depends(get_tenant_id),
     svc: UserService = Depends(get_user_service),
-    current_user: User = Depends(get_current_admin_or_owner),
 ):
     status = svc.validate_invite_token(token or "")
     if status == "valid":
@@ -165,7 +164,7 @@ def validate_set_password_token(
     )
 
 
-# Jelszó beállítás a meghívott usernek (token + jelszó); csak admin/owner
+# Jelszó beállítás a meghívott usernek (token + jelszó) – auth NINCS (a link token a hitelesítés)
 @router.post("/users/set-password")
 @limiter.limit("10/minute")
 def set_password(
@@ -173,7 +172,6 @@ def set_password(
     data: SetPasswordReq,
     _tenant_id: int = Depends(get_tenant_id),
     svc: UserService = Depends(get_user_service),
-    current_user: User = Depends(get_current_admin_or_owner),
 ):
     try:
         svc.set_password(token=data.token, password=data.password)
@@ -221,13 +219,14 @@ def update_user(
         )
         if user.created_at is None:
             raise HTTPException(status_code=500, detail="User data is incomplete")
-        # Role vagy is_active változott → token, session és auth cache érvénytelenítés, a user újra be kell lépjen
+        # Role vagy is_active változott → token, session, security_version és auth cache érvénytelenítés; user újra be kell lépjen
         if data.role is not None or data.is_active is not None:
             tenant_slug = getattr(request.state, "tenant_slug", None)
             allowlist_remove_by_user(tenant_slug, user_id)
             session_repo.invalidate_all_for_user(user_id)
             permissions_changed_set(tenant_slug, user_id)
             invalidate_user_cache(tenant_slug, user_id)
+            svc.increment_security_version(user_id)
         user_dict = asdict(user)
         user_dict.pop('password_hash', None)
         user_dict.pop("registration_completed_at", None)

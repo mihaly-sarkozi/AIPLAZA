@@ -26,82 +26,120 @@ class TokenService:
         self,
         secret: str,
         issuer: str | None = None,
+        audience: str | None = None,
         access_exp_min: int = 15,
         refresh_exp_min: int = 60 * 24 * 30,
     ):
         """
         secret: JWT aláíráshoz használt titok (élesben erős, .env-ből).
-        issuer: Opcionális "iss" claim (pl. "AIPLAZA").
+        issuer: "iss" claim (élesben kötelező – más környezetből kiadott token ne legyen elfogadható).
+        audience: Opcionális "aud" claim (pl. API azonosító).
         access_exp_min: Access token érvényessége percekben.
         refresh_exp_min: Refresh token érvényessége percekben (pl. 30 nap).
         """
         self.secret = secret
         self.issuer = issuer
+        self.audience = audience
         self.access_exp = access_exp_min
         self.refresh_exp = refresh_exp_min
         self.alg = "HS256"
 
     def _now(self) -> datetime.datetime:
-        """UTC aktuális idő – exp/iat claim-ekhez."""
-        return datetime.datetime.utcnow()
+        """UTC aktuális idő – exp/iat claim-ekhez (timezone-aware)."""
+        return datetime.datetime.now(datetime.timezone.utc)
 
     def hash_token(self, token: str) -> str:
         """SHA256 hash a nyers tokenből (pl. session táblában tároláshoz)."""
         return hashlib.sha256(token.encode()).hexdigest()
 
-    def make_access(self, user_id: int) -> tuple[str, str]:
+    def make_access(
+        self,
+        user_id: int,
+        user_ver: int = 0,
+        tenant_ver: int = 0,
+    ) -> tuple[str, str]:
         """
-        Access JWT előállítása. Payload: sub=user_id, typ="access", jti, iss, exp, iat.
-        Vissza: (token_str, jti) – a jti a token_allowlist regisztrálásához kell (törlés/logout után 401).
+        Access JWT előállítása. Payload: sub, typ="access", jti, user_ver, tenant_ver, iss, aud?, nbf, exp, iat.
+        user_ver/tenant_ver: security version – ha a middleware-ben nem egyezik a jelenlegivel, a token bukik (force revoke).
         """
+        now = self._now()
         jti = str(uuid.uuid4())
         payload = {
             "sub": str(user_id),
             "typ": "access",
             "jti": jti,
-            "iss": self.issuer,
-            "exp": self._now() + datetime.timedelta(minutes=self.access_exp),
-            "iat": self._now(),
+            "user_ver": user_ver,
+            "tenant_ver": tenant_ver,
+            "exp": now + datetime.timedelta(minutes=self.access_exp),
+            "iat": now,
+            "nbf": now,
         }
+        if self.issuer is not None:
+            payload["iss"] = self.issuer
+        if self.audience is not None:
+            payload["aud"] = self.audience
         token = jwt.encode(payload, self.secret, algorithm=self.alg)
         return token, jti
 
-    def make_refresh_pair(self, user_id: int, auto_login: bool = False) -> tuple[str, Dict[str, Any]]:
+    def make_refresh_pair(
+        self,
+        user_id: int,
+        auto_login: bool = False,
+        user_ver: int = 0,
+        tenant_ver: int = 0,
+    ) -> tuple[str, Dict[str, Any]]:
         """
-        Refresh JWT + payload. Payload: sub, typ="refresh", jti, exp, iat, al (auto_login).
-        al=True: cookie max_age 30 nap (aktivitásnál kitolódik), al=False: session cookie.
+        Refresh JWT + payload. Payload: sub, typ="refresh", jti, user_ver, tenant_ver, iss, aud?, nbf, exp, iat, al.
+        user_ver/tenant_ver: security version – refresh ellenőrzéskor hasonlítjuk; nem egyezik → token bukik.
         """
+        now = self._now()
         jti = str(uuid.uuid4())
         payload = {
             "sub": str(user_id),
             "typ": "refresh",
             "jti": jti,
-            "exp": self._now() + datetime.timedelta(minutes=self.refresh_exp),
-            "iat": self._now(),
+            "user_ver": user_ver,
+            "tenant_ver": tenant_ver,
+            "exp": now + datetime.timedelta(minutes=self.refresh_exp),
+            "iat": now,
+            "nbf": now,
             "al": auto_login,
         }
+        if self.issuer is not None:
+            payload["iss"] = self.issuer
+        if self.audience is not None:
+            payload["aud"] = self.audience
         token = jwt.encode(payload, self.secret, algorithm=self.alg)
         return token, payload
 
     def verify(self, token: str) -> Dict[str, Any]:
         """
-        JWT ellenőrzése (aláírás + lejárat). Hibás/lejárt token esetén
-        jwt.InvalidTokenError (vagy alosztály) dobódik.
+        JWT ellenőrzése: aláírás, lejárat (exp), iss, opcionális aud, nbf.
+        Más környezetből vagy más célra kiadott token (rossz iss/aud) nem fogadható el.
+        Hibás/lejárt/rossz iss/aud token esetén jwt.InvalidTokenError dobódik.
         """
-        return jwt.decode(token, self.secret, algorithms=[self.alg])
+        kwargs: Dict[str, Any] = {"algorithms": [self.alg]}
+        if self.issuer is not None:
+            kwargs["issuer"] = self.issuer
+        if self.audience is not None:
+            kwargs["audience"] = self.audience
+        return jwt.decode(token, self.secret, **kwargs)
 
     def decode_ignore_exp(self, token: str) -> Dict[str, Any] | None:
         """
-        JWT payload lekérése aláírás ellenőrzéssel, de lejárat figyelmen kívül hagyásával.
+        JWT payload lekérése aláírással, iss/aud ellenőrzéssel, de lejárat figyelmen kívül.
         Logout-nál: lejárt refresh tokenből is kiolvasható a user_id (sub).
-        Hibás token esetén None.
+        Rossz iss/aud token nem fogadható el. Hibás token esetén None.
         """
         try:
-            return jwt.decode(
-                token,
-                self.secret,
-                algorithms=[self.alg],
-                options={"verify_exp": False},
-            )
-        except (jwt.InvalidSignatureError, jwt.DecodeError):
+            kwargs: Dict[str, Any] = {
+                "algorithms": [self.alg],
+                "options": {"verify_exp": False},
+            }
+            if self.issuer is not None:
+                kwargs["issuer"] = self.issuer
+            if self.audience is not None:
+                kwargs["audience"] = self.audience
+            return jwt.decode(token, self.secret, **kwargs)
+        except (jwt.InvalidSignatureError, jwt.DecodeError, jwt.InvalidIssuerError, jwt.InvalidAudienceError):
             return None

@@ -1,5 +1,10 @@
 # tests/conftest.py
 """Közös pytest fixture-ek: app, client, mock login/refresh/logout/user service (dependency override)."""
+import os
+
+# Login rate limit: tesztekben magasabb limit (ugyanaz az IP = testclient), különben 5/perc 429-et adna
+os.environ.setdefault("RATE_LIMIT_LOGIN_PER_MINUTE", "100")
+
 from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 
@@ -32,8 +37,12 @@ class MockLoginService:
     def __init__(self):
         self.result = None
         self.user_repository = None  # refresh route használja: get_by_id(1) → user
+        self.raise_2fa_too_many = False  # True → step2-nál TwoFactorTooManyAttemptsError (429 teszt)
 
     def login(self, inp):
+        if self.raise_2fa_too_many and getattr(inp, "pending_token", None) and getattr(inp, "two_factor_code", None):
+            from apps.auth.application.exceptions import TwoFactorTooManyAttemptsError
+            raise TwoFactorTooManyAttemptsError()
         return self.result
 
 
@@ -45,7 +54,7 @@ class MockRefreshService:
         self.tokens = MagicMock()
         self.tokens.verify.side_effect = lambda rt: self.verify_payload
 
-    def refresh(self, refresh_token: str, ip=None, ua=None, tenant_slug=None):
+    def refresh(self, refresh_token: str, ip=None, ua=None, tenant_slug=None, *, correlation_id=None, **kwargs):
         return self.result
 
 
@@ -54,7 +63,7 @@ class MockLogoutService:
     def __init__(self):
         self.result = True
 
-    def logout(self, refresh_token: str):
+    def logout(self, refresh_token: str, ip=None, ua=None, *, tenant_slug=None, correlation_id=None, **kwargs):
         return self.result
 
 

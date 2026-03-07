@@ -25,7 +25,6 @@ from sqlalchemy import text
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from slowapi.errors import RateLimitExceeded
 
@@ -34,6 +33,8 @@ from apps.core.i18n.messages import get_message, lang_from_request
 from config.settings import settings
 from apps.core.middleware.tenant_middleware import TenantMiddleware
 from apps.core.middleware.auth_middleware import AuthMiddleware
+from apps.core.middleware.correlation_id_middleware import CorrelationIdMiddleware
+from apps.core.middleware.request_timing_middleware import RequestTimingMiddleware
 from apps.core.di import get_token_service, get_login_service, get_tenant_repository
 from apps.core.middleware.rate_limit_middleware import limiter
 from apps.chat.presentation import chat_router
@@ -170,34 +171,15 @@ app.add_middleware(
 )
 
 """
-Részletes időmérés: kérés érkezés, middleware-k, válasz küldés – minden a terminálra.
+Időmérés + X-Response-Time-Ms (ASGI middleware, alacsony overhead).
 """
-import logging
-import time
-from datetime import datetime, timezone
-_request_log = logging.getLogger(__name__)
-
-def _ts():
-    return datetime.now(timezone.utc).strftime("%H:%M:%S.%f")[:-3]
-
-def _api_timing(msg: str):
-    print(f"[TIME] {_ts()} {msg}", file=sys.stderr, flush=True)
-
-class RequestTimingMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request: Request, call_next):
-        path = getattr(request.url, "path", "") or ""
-        if not path.startswith("/api"):
-            return await call_next(request)
-        t0 = time.monotonic()
-        _api_timing(f"REQUEST IN   {request.method} {path}")
-        response = await call_next(request)
-        elapsed = time.monotonic() - t0
-        _api_timing(f"REQUEST OUT  {request.method} {path}  total={elapsed:.3f}s")
-        # Postmanben látható: a backend ezt az idő alatt válaszolt (a ~4s DNS/kapcsolat előtte van)
-        response.headers["X-Response-Time-Ms"] = str(int(elapsed * 1000))
-        return response
-
 app.add_middleware(RequestTimingMiddleware)
+
+"""
+Correlation/request ID (security log, audit, SIEM)
+X-Request-ID header vagy generált UUID → request.state.correlation_id; válaszban X-Request-ID.
+"""
+app.add_middleware(CorrelationIdMiddleware)
 
 """
 Rate limiting (slowapi)
@@ -238,26 +220,31 @@ async def http_exception_handler(request: Request, exc: HTTPException):
     return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
 
 """
-Security headers middleware
-Mit csinál: Minden kimenő HTTP válaszhoz hozzáad biztonsági fejléceket:
-  X-Frame-Options: DENY              – oldal ne kerülhessen iframe-be (clickjacking ellen)
-  X-Content-Type-Options: nosniff    – böngésző ne találja ki a MIME típust
-  X-XSS-Protection                    – régi XSS szűrő (támogatott böngészőkben)
-  Referrer-Policy                     – referrer csak biztonságos átmenetekre
-  Content-Security-Policy             – senki ne ágyazhassa iframe-be
-Miért: Ezek a fejlécek csökkentik a clickjacking, MIME-sniffing és egyéb
-alapvető webtámadások kockázatát; ajánlott minden éles szolgáltatásnál.
+Security headers middleware (ASGI)
+Minden kimenő HTTP válaszhoz biztonsági fejléceket ad: X-Frame-Options, X-Content-Type-Options, stb.
 """
 
-class SecurityHeadersMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request, call_next):
-        response = await call_next(request)
-        response.headers["X-Frame-Options"] = "DENY"
-        response.headers["X-Content-Type-Options"] = "nosniff"
-        response.headers["X-XSS-Protection"] = "1; mode=block"
-        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-        response.headers["Content-Security-Policy"] = "frame-ancestors 'none';"
-        return response
+class SecurityHeadersMiddleware:
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        async def send_with_headers(message):
+            if message["type"] == "http.response.start":
+                headers = list(message.get("headers", []))
+                headers.append((b"x-frame-options", b"DENY"))
+                headers.append((b"x-content-type-options", b"nosniff"))
+                headers.append((b"x-xss-protection", b"1; mode=block"))
+                headers.append((b"referrer-policy", b"strict-origin-when-cross-origin"))
+                headers.append((b"content-security-policy", b"frame-ancestors 'none';"))
+                message = {**message, "headers": headers}
+            await send(message)
+
+        await self.app(scope, receive, send_with_headers)
 
 app.add_middleware(SecurityHeadersMiddleware)
 

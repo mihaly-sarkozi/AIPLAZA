@@ -11,3 +11,8 @@ class TwoFactorEmailError(Exception):
     def __init__(self, message: str | None = None, error_code: ErrorCode | None = None):
         super().__init__(message or "Email send failed")
         self.error_code = error_code or ErrorCode.TWO_FACTOR_EMAIL_FAILED
+
+
+class TwoFactorTooManyAttemptsError(Exception):
+    """Túl sok sikertelen 2FA próbálkozás (pending token / user / IP). Új login step1 kell."""
+    pass

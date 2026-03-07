@@ -9,17 +9,18 @@ CREATE TABLE IF NOT EXISTS settings (
     INDEX idx_key (`key`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Two factor codes tábla létrehozása
+-- Two factor codes tábla (code_hash = SHA-256 hex, nyers OTP nincs tárolva)
 CREATE TABLE IF NOT EXISTS two_factor_codes (
     id INT AUTO_INCREMENT PRIMARY KEY,
     user_id INT NOT NULL,
-    code VARCHAR(6) NOT NULL,
+    code_hash VARCHAR(64) NOT NULL,
     email VARCHAR(255) NOT NULL,
     expires_at DATETIME NOT NULL,
     used BOOLEAN DEFAULT FALSE,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES users(id),
-    INDEX idx_user_expires (user_id, expires_at)
+    INDEX idx_user_expires (user_id, expires_at),
+    INDEX ix_2fa_user_code_hash (user_id, code_hash)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 

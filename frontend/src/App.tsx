@@ -56,6 +56,12 @@ export default function App() {
     const setLocaleAndTheme = useLocaleStore((s) => s.setLocaleAndTheme);
 
     useEffect(() => {
+        const path = window.location.pathname || "";
+        if (path === "/login" || path.startsWith("/forgot") || path.startsWith("/set-password")) {
+            useAuthStore.getState().setToken(null);
+            useAuthStore.setState({ user: null, loadingUser: false });
+            return;
+        }
         loadUser();
     }, [loadUser]);
 

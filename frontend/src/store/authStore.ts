@@ -1,6 +1,11 @@
 import { create } from "zustand";
 import api from "../api/axiosClient";
 
+/**
+ * Access token CSAK memóriában (NE localStorage/sessionStorage) – XSS esetén ne legyen lopható.
+ * Refresh token csak HttpOnly cookie-ban (backend); subdomain izoláció: host-only cookie (tenant→tenant nem szivárog).
+ */
+
 /** Egyetlen folyamatban lévő /me kérés – Strict Mode / többszörös mount ne indítson több hívást */
 let loadUserPromise: Promise<void> | null = null;
 
@@ -26,34 +31,38 @@ interface AuthState {
 }
 
 export const useAuthStore = create<AuthState>((set, get) => ({
-  token: localStorage.getItem("access_token"),
+  token: null,
   user: null,
   loadingUser: true,
 
   setToken: (token) => {
-    if (token) localStorage.setItem("access_token", token);
-    else localStorage.removeItem("access_token");
     set({ token });
   },
 
   setUser: (user) => set({ user }),
 
   loadUser: async () => {
-    const token = get().token;
-    if (!token) {
-      set({ loadingUser: false });
-      return;
-    }
     if (loadUserPromise) return loadUserPromise;
 
     loadUserPromise = (async () => {
       set({ loadingUser: true });
       try {
+        let token = get().token;
+        if (!token) {
+          try {
+            const refreshRes = await api.post<{ access_token: string }>("/auth/refresh", {}, { withCredentials: true });
+            token = refreshRes.data.access_token;
+            set({ token });
+          } catch {
+            set({ user: null, token: null, loadingUser: false });
+            loadUserPromise = null;
+            return;
+          }
+        }
         const res = await api.get("/auth/me");
         set({ user: res.data });
       } catch {
         set({ user: null, token: null });
-        localStorage.removeItem("access_token");
       } finally {
         set({ loadingUser: false });
         loadUserPromise = null;
@@ -66,6 +75,5 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     loadUserPromise = null;
     api.post("/auth/logout").catch(() => {});
     set({ user: null, token: null });
-    localStorage.removeItem("access_token");
   },
 }));

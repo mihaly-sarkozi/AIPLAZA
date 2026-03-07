@@ -13,3 +13,4 @@ class Tenant:
     slug: str
     name: str
     created_at: datetime
+    security_version: int = 0  # növeléskor minden régi token (tenant_ver) érvénytelen

@@ -59,8 +59,11 @@ function redirectToLogin(err?: unknown): void {
     alert(msg);
   }
   useAuthStore.getState().logout();
-  const returnPath = typeof window !== "undefined" ? window.location.pathname : "/chat";
-  const path = returnPath && returnPath !== "/login" ? returnPath : "";
+  if (typeof window === "undefined") return;
+  const pathname = window.location.pathname || "";
+  // Már login/forgot/set-password oldalon vagyunk → ne töltődjön újra (különben refresh 401 → logout → reload → végtelen ciklus)
+  if (pathname === "/login" || pathname.startsWith("/forgot") || pathname.startsWith("/set-password")) return;
+  const path = pathname && pathname !== "/login" ? pathname : "";
   window.location.href = path ? `/login?redirect=${encodeURIComponent(path)}` : "/login";
 }
 

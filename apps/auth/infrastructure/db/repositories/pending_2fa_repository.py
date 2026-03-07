@@ -30,6 +30,25 @@ class Pending2FARepository(Pending2FARepositoryInterface):
                 db.rollback()
                 raise
 
+    def get_user_id(self, token: str) -> int | None:
+        with self._sf() as db:
+            row = db.query(Pending2FAORM).filter(
+                Pending2FAORM.token == token,
+                Pending2FAORM.expires_at > datetime.now(timezone.utc),
+            ).first()
+            return row.user_id if row else None
+
+    def consume(self, token: str) -> None:
+        with self._sf() as db:
+            try:
+                db.query(Pending2FAORM).filter(Pending2FAORM.token == token).delete(
+                    synchronize_session=False
+                )
+                db.commit()
+            except SQLAlchemyError:
+                db.rollback()
+                raise
+
     def get_user_id_and_consume(self, token: str) -> int | None:
         with self._sf() as db:
             try:

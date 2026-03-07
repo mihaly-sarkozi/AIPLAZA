@@ -5,11 +5,16 @@
 
 from __future__ import annotations
 
+from typing import Optional
 import jwt
 from apps.auth.ports import SessionRepositoryInterface
 from apps.core.security.token_service import TokenService
 from apps.core.security.security_logger import SecurityLogger
 from apps.audit.application.audit_service import AuditService
+
+
+def _ctx(tenant_slug: Optional[str], correlation_id: Optional[str]) -> dict:
+    return {"tenant_slug": tenant_slug, "correlation_id": correlation_id}
 
 
 class LogoutService:
@@ -25,24 +30,31 @@ class LogoutService:
         self.logger = logger
         self.audit = audit_service
 
-    def logout(self, refresh_token: str, ip: str | None = None, ua: str | None = None) -> bool:
+    def logout(
+        self,
+        refresh_token: str,
+        ip: str | None = None,
+        ua: str | None = None,
+        *,
+        tenant_slug: Optional[str] = None,
+        correlation_id: Optional[str] = None,
+    ) -> bool:
         """Mindig sikeres kiléptetés a kliens szempontjából. Hibát (lejárt/érvénytelen token) csak log/auditba írjuk."""
-
+        ctx = _ctx(tenant_slug, correlation_id)
         # -------------------------------
         # 1. Érvényes token → session érvénytelenítés, success log
         # -------------------------------
         try:
             payload = self.tokens.verify(refresh_token)
         except jwt.ExpiredSignatureError:
-            # Lejárt token: először kiléptetünk (decode_ignore_exp → session invalidate), utána bejegyezzük a hibát
-            return self._logout_with_expired_token(refresh_token, ip, ua)
+            return self._logout_with_expired_token(refresh_token, ip, ua, **ctx)
         except (jwt.InvalidSignatureError, jwt.DecodeError):
-            self.logger.logout_invalid_token(ip, ua)
+            self.logger.logout_invalid_token(ip, ua, **ctx)
             self.audit.log("logout_failed", user_id=None, details={"reason": "invalid_token"}, ip=ip, user_agent=ua)
             return True
 
         if payload.get("typ") != "refresh":
-            self.logger.logout_wrong_type(ip, ua)
+            self.logger.logout_wrong_type(ip, ua, **ctx)
             self.audit.log("logout_failed", user_id=None, details={"reason": "wrong_type"}, ip=ip, user_agent=ua)
             return True
 
@@ -50,24 +62,33 @@ class LogoutService:
         user_id = int(payload["sub"])
         session = self.session_repository.get_by_jti(jti)
         if not session:
-            self.logger.logout_unknown_jti(user_id, ip, ua)
+            self.logger.logout_unknown_jti(user_id, ip, ua, **ctx)
             self.audit.log("logout_failed", user_id=user_id, details={"reason": "unknown_jti"}, ip=ip, user_agent=ua)
             return True
 
         hashed = self.tokens.hash_token(refresh_token)
         if session.token_hash != hashed:
-            self.logger.logout_replay_detected(user_id, ip, ua)
+            self.logger.logout_replay_detected(user_id, ip, ua, **ctx)
             self.audit.log("logout_failed", user_id=user_id, details={"reason": "replay_detected"}, ip=ip, user_agent=ua)
             return True
 
         updated = session.invalidate()
         self.session_repository.update(updated)
-        self.logger.logout_success(user_id, ip, ua)
+        self.logger.logout_success(user_id, ip, ua, **ctx)
         self.audit.log("logout", user_id=user_id, ip=ip, user_agent=ua)
         return True
 
-    def _logout_with_expired_token(self, refresh_token: str, ip: str | None, ua: str | None) -> bool:
+    def _logout_with_expired_token(
+        self,
+        refresh_token: str,
+        ip: str | None,
+        ua: str | None,
+        *,
+        tenant_slug: Optional[str] = None,
+        correlation_id: Optional[str] = None,
+    ) -> bool:
         """Lejárt refresh token: először session érvénytelenítés (ha megvan jti), utána a hiba bejegyzése."""
+        ctx = _ctx(tenant_slug, correlation_id)
         payload = self.tokens.decode_ignore_exp(refresh_token)
         if payload and payload.get("typ") == "refresh" and payload.get("jti") and payload.get("sub"):
             jti = payload["jti"]
@@ -84,7 +105,7 @@ class LogoutService:
                 user_id_audit = int(payload["sub"])
             except (TypeError, ValueError):
                 pass
-        self.logger.logout_expired_token(ip, ua)
+        self.logger.logout_expired_token(ip, ua, **ctx)
         self.audit.log(
             "logout_failed",
             user_id=user_id_audit,

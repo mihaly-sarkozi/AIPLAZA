@@ -63,3 +63,8 @@ class UserRepositoryInterface(ABC):
     @abstractmethod
     def reset_failed_login(self, user_id: int) -> None:
         """Sikeres bejelentkezés vagy jelszó beállítás: failed_login_attempts = 0."""
+
+    @abstractmethod
+    def increment_security_version(self, user_id: int) -> None:
+        """User-oldali force revoke: role/jogosultság változás után növeljük; minden régi token (user_ver) bukik."""
+        ...

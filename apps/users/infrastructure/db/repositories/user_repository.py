@@ -41,6 +41,7 @@ class UserRepository(UserRepositoryInterface):
                 failed_login_attempts=getattr(row, "failed_login_attempts", 0),
                 preferred_locale=getattr(row, "preferred_locale", None),
                 preferred_theme=getattr(row, "preferred_theme", None),
+                security_version=getattr(row, "security_version", 0),
             )
 
     def exists_owner(self) -> bool:
@@ -66,6 +67,7 @@ class UserRepository(UserRepositoryInterface):
                 failed_login_attempts=getattr(row, "failed_login_attempts", 0),
                 preferred_locale=getattr(row, "preferred_locale", None),
                 preferred_theme=getattr(row, "preferred_theme", None),
+                security_version=getattr(row, "security_version", 0),
             )
 
     def get_by_email(self, email: str) -> User | None:
@@ -86,6 +88,7 @@ class UserRepository(UserRepositoryInterface):
                 failed_login_attempts=getattr(row, "failed_login_attempts", 0),
                 preferred_locale=getattr(row, "preferred_locale", None),
                 preferred_theme=getattr(row, "preferred_theme", None),
+                security_version=getattr(row, "security_version", 0),
             )
 
     def list_all(self) -> list[User]:
@@ -108,6 +111,7 @@ class UserRepository(UserRepositoryInterface):
                     failed_login_attempts=getattr(row, "failed_login_attempts", 0),
                     preferred_locale=getattr(row, "preferred_locale", None),
                     preferred_theme=getattr(row, "preferred_theme", None),
+                    security_version=getattr(row, "security_version", 0),
                 )
                 for row in rows
             ]
@@ -168,10 +172,19 @@ class UserRepository(UserRepositoryInterface):
                     failed_login_attempts=getattr(row, "failed_login_attempts", 0),
                     preferred_locale=getattr(row, "preferred_locale", None),
                     preferred_theme=getattr(row, "preferred_theme", None),
+                    security_version=getattr(row, "security_version", 0),
                 )
             except SQLAlchemyError:
                 db.rollback()
                 raise
+
+    def increment_security_version(self, user_id: int) -> None:
+        """User-oldali force revoke: role/jogosultság változás után növeljük; minden régi token (user_ver) bukik."""
+        with self._sf() as db:
+            row = db.get(UserORM, user_id)
+            if row:
+                row.security_version = getattr(row, "security_version", 0) + 1
+                db.commit()
 
     def record_failed_login(self, user_id: int) -> None:
         """Sikertelen bejelentkezés: növeli a számlálót; ha >= 5 és nem superuser, is_active=False."""

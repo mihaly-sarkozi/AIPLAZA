@@ -21,4 +21,5 @@ class UserORM(TenantSchemaBase):
     failed_login_attempts = Column(Integer, default=0, nullable=False)  # 5 sikertelen → is_active=False (admin újraküldi a linket)
     preferred_locale = Column(String(10), nullable=True)   # hu | en | es
     preferred_theme = Column(String(10), nullable=True)    # light | dark
+    security_version = Column(Integer, default=0, nullable=False)  # növeléskor minden régi token (user_ver) bukik
     __table_args__ = (Index("ix_users_created_at", "created_at"),)  # list_all order_by

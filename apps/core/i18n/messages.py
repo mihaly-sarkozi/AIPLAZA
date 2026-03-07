@@ -26,9 +26,12 @@ class ErrorCode(str, Enum):
     TWO_FACTOR_EMAIL_FAILED = "two_factor_email_failed"
     LOGIN_ERROR = "login_error"
     INVALID_CREDENTIALS = "invalid_credentials"
+    TWO_FACTOR_TOO_MANY_ATTEMPTS = "two_factor_too_many_attempts"
     NO_REFRESH_TOKEN = "no_refresh_token"
     INVALID_OR_REVOKED_REFRESH = "invalid_or_revoked_refresh"
     PERMISSIONS_CHANGED = "permissions_changed"
+    RE_2FA_REQUIRED = "re_2fa_required"
+    AUTH_RATE_LIMIT = "auth_rate_limit"
     # Users
     EMAIL_ALREADY_EXISTS = "email_already_exists"
     CURRENT_PASSWORD_WRONG = "current_password_wrong"
@@ -42,9 +45,12 @@ _MESSAGES: dict[str, dict[str, str]] = {
         ErrorCode.TWO_FACTOR_EMAIL_FAILED.value: "A kétfaktoros kód emailt jelenleg nem tudtuk elküldeni. Ellenőrizd az SMTP beállításokat, vagy próbáld később.",
         ErrorCode.LOGIN_ERROR.value: "Belépési hiba. Próbáld később.",
         ErrorCode.INVALID_CREDENTIALS.value: "Hibás belépési adatok.",
+        ErrorCode.TWO_FACTOR_TOO_MANY_ATTEMPTS.value: "Túl sok sikertelen 2FA kód. Jelentkezz be újra (1. lépés: email és jelszó).",
         ErrorCode.NO_REFRESH_TOKEN.value: "Nincs refresh token (küldd cookie-ban refresh_token vagy X-Refresh-Token headerben).",
         ErrorCode.INVALID_OR_REVOKED_REFRESH.value: "Érvénytelen vagy visszavont refresh token.",
         ErrorCode.PERMISSIONS_CHANGED.value: "Változás történt a jogosultságokban. Jelentkezz be újra.",
+        ErrorCode.RE_2FA_REQUIRED.value: "Más eszközről vagy böngészőből történt a kérés. Jelentkezz be újra (email, jelszó és 2FA).",
+        ErrorCode.AUTH_RATE_LIMIT.value: "Túl sok próbálkozás. Próbáld később újra.",
         ErrorCode.EMAIL_ALREADY_EXISTS.value: "Ez az email cím már használatban van.",
         ErrorCode.CURRENT_PASSWORD_WRONG.value: "A jelenlegi jelszó hibás. Nem sikerült módosítani.",
     },
@@ -54,9 +60,12 @@ _MESSAGES: dict[str, dict[str, str]] = {
         ErrorCode.TWO_FACTOR_EMAIL_FAILED.value: "We could not send the two-factor code email. Check SMTP settings or try again later.",
         ErrorCode.LOGIN_ERROR.value: "Login error. Please try again later.",
         ErrorCode.INVALID_CREDENTIALS.value: "Invalid credentials.",
+        ErrorCode.TWO_FACTOR_TOO_MANY_ATTEMPTS.value: "Too many failed 2FA attempts. Please log in again from step 1 (email and password).",
         ErrorCode.NO_REFRESH_TOKEN.value: "No refresh token (send refresh_token cookie or X-Refresh-Token header).",
         ErrorCode.INVALID_OR_REVOKED_REFRESH.value: "Invalid or revoked refresh token.",
         ErrorCode.PERMISSIONS_CHANGED.value: "Your permissions have changed. Please log in again.",
+        ErrorCode.RE_2FA_REQUIRED.value: "Request from a different device or browser. Please log in again (email, password and 2FA).",
+        ErrorCode.AUTH_RATE_LIMIT.value: "Too many attempts. Please try again later.",
         ErrorCode.EMAIL_ALREADY_EXISTS.value: "This email address is already in use.",
         ErrorCode.CURRENT_PASSWORD_WRONG.value: "Current password is incorrect. Change was not applied.",
     },

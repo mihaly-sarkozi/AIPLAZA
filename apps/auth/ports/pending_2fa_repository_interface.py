@@ -16,6 +16,16 @@ class Pending2FARepositoryInterface(ABC):
         ...
 
     @abstractmethod
+    def get_user_id(self, token: str) -> Optional[int]:
+        """Token alapján user_id visszaadása, ha érvényes és nem járt le (nem törli a pendiget)."""
+        ...
+
+    @abstractmethod
+    def consume(self, token: str) -> None:
+        """Token törlése (sikeres 2FA után)."""
+        ...
+
+    @abstractmethod
     def get_user_id_and_consume(self, token: str) -> Optional[int]:
         """Token alapján user_id visszaadása, ha érvényes és nem járt le; utána törli a pendiget."""
         ...

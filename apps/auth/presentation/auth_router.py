@@ -3,11 +3,13 @@
 # A végpont indulásnál ellenőrzi a paramétereket és meghívja a megfelelő service-t.
 # 2026.02.14 - Sárközi Mihály
 
+import os
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, Body
 from pydantic import BaseModel, Field, field_validator
 from passlib.hash import bcrypt_sha256 as pwd_hasher
 from config.settings import settings
-from apps.core.middleware.rate_limit_middleware import limiter
+from apps.core.middleware.rate_limit_middleware import limiter, refresh_token_key
+from apps.core.rate_limit.auth_limits import check_login_step1_email, check_login_step2_pending_token
 
 from apps.core.di import get_login_service, get_refresh_service, get_logout_service, get_audit_service, get_token_service, set_tenant_context_from_request, get_user_service
 from apps.core.db.tenant_context import current_tenant_schema
@@ -19,7 +21,7 @@ from apps.auth.application.services.refresh_service import RefreshService
 
 from apps.auth.adapter.http.request import LoginReq
 from apps.auth.application.dto import LoginInput
-from apps.auth.application.exceptions import TwoFactorEmailError
+from apps.auth.application.exceptions import TwoFactorEmailError, TwoFactorTooManyAttemptsError
 from apps.auth.adapter.http.response import TokenResp, UserInfo, TwoFactorRequiredResp
 
 from apps.users.domain.user import User
@@ -28,6 +30,7 @@ from apps.core.security.token_service import TokenService
 from apps.core.di import get_user_repository
 from apps.users.application.services.user_service import UserService
 from apps.core.security.token_allowlist import add as allowlist_add, remove_by_user as allowlist_remove_by_user
+from apps.core.security.cookie_policy import set_refresh_cookie, clear_refresh_cookie
 from apps.audit.application.audit_service import AuditService
 from apps.core.i18n.messages import get_message, ErrorCode
 
@@ -58,7 +61,7 @@ router = APIRouter(dependencies=[Depends(set_tenant_context_from_request)])
 # -------------------------------------------------
 
 @router.post("/auth/login")
-@limiter.limit("20/minute")  # 409-retry + pár próbálkozás ne üssön 429-be
+@limiter.limit(lambda: f"{settings.rate_limit_login_per_minute}/minute")  # IP alapú; plusz célzott: email 10/óra, pending_token 5/perc (auth_limits)
 def login(
     req: LoginReq,
     request: Request,
@@ -78,6 +81,14 @@ def login(
     # Ha már van bejelentkezett user (Authorization Bearer), előbb ki kell lépni
     if getattr(request.state, "user", None) is not None:
         raise HTTPException(status_code=409, detail=_detail(ErrorCode.ALREADY_LOGGED_IN, lang))
+
+    # Célzott rate limit: step2 = pending_token + 2FA kód → 5/perc/token; step1 = email → 10/óra/email
+    if getattr(req, "pending_token", None) and getattr(req, "two_factor_code", None):
+        if not check_login_step2_pending_token(req.pending_token):
+            raise HTTPException(status_code=429, detail=_detail(ErrorCode.AUTH_RATE_LIMIT, lang))
+    elif getattr(req, "email", None):
+        if not check_login_step1_email(req.email):
+            raise HTTPException(status_code=429, detail=_detail(ErrorCode.AUTH_RATE_LIMIT, lang))
     
     # Adapter req → application DTO; service csak LoginInput-ot kap.
     client_host = getattr(request.client, "host", None) if request.client else None
@@ -89,15 +100,27 @@ def login(
         ip=client_host,
         ua=request.headers.get("user-agent"),
         auto_login=getattr(req, "auto_login", False),
+        tenant_slug=tenant_slug,
+        correlation_id=getattr(request.state, "correlation_id", None),
+        tenant_security_version=getattr(request.state, "tenant_security_version", 0) or 0,
     )
     try:
         result = svc.login(inp)
     except TwoFactorEmailError as e:
         raise HTTPException(status_code=503, detail=_detail(e.error_code, lang))
+    except TwoFactorTooManyAttemptsError:
+        raise HTTPException(
+            status_code=429,
+            detail=_detail(ErrorCode.TWO_FACTOR_TOO_MANY_ATTEMPTS, lang),
+        )
     except Exception as e:
         import traceback
         traceback.print_exc()
-        raise HTTPException(status_code=500, detail=_detail(ErrorCode.LOGIN_ERROR, lang))
+        detail = _detail(ErrorCode.LOGIN_ERROR, lang)
+        # Dev: a válaszban is látszik a kivétel (pl. hiányzó oszlop → futtasd init_db.py)
+        if os.environ.get("APP_ENV", "dev").lower() != "prod":
+            detail = {**detail, "debug_message": str(e)}
+        raise HTTPException(status_code=500, detail=detail)
 
     if result is None:
         raise HTTPException(status_code=401, detail=_detail(ErrorCode.INVALID_CREDENTIALS, lang))
@@ -110,15 +133,13 @@ def login(
 
     # Ha vagy nincs 2FA vagy az is megtörtént akkor=>   
 
-    # Sikeres belépés: auto_login → 30 napos cookie (aktivitásnál kitolódik), különben session cookie.
+    # Sikeres belépés: refresh cookie (HttpOnly, Secure, SameSite; domain nincs = host-only, tenant nem szivárog).
     cookie_max_age = int(settings.refresh_ttl_days * 24 * 3600) if getattr(req, "auto_login", False) else None
-    response.set_cookie(
-        "refresh_token",
+    set_refresh_cookie(
+        response,
         result.refresh_token,
-        httponly=True,
         secure=settings.cookie_secure,
-        samesite="lax",
-        path="/api",
+        samesite=getattr(settings, "cookie_samesite", "lax"),
         max_age=cookie_max_age,
     )
     
@@ -181,7 +202,7 @@ def forgot_password(
 # -------------------------------------------------
 
 @router.post("/auth/refresh", response_model=TokenResp)
-@limiter.limit("5/minute")
+@limiter.limit("20/5minute", key_func=refresh_token_key)  # 20 kérés / 5 perc / session (refresh token)
 def refresh_tokens(
     request: Request,
     response: Response,
@@ -197,10 +218,22 @@ def refresh_tokens(
     tenant_slug = getattr(request.state, "tenant_slug", None)
     if tenant_slug:
         current_tenant_schema.set(tenant_slug)
-    result = svc.refresh(rt, getattr(request.client, "host", None), request.headers.get("user-agent"), tenant_slug=tenant_slug)
+    correlation_id = getattr(request.state, "correlation_id", None)
+    tenant_security_version = getattr(request.state, "tenant_security_version", 0) or 0
+    result = svc.refresh(
+        rt,
+        getattr(request.client, "host", None),
+        request.headers.get("user-agent"),
+        tenant_slug=tenant_slug,
+        correlation_id=correlation_id,
+        tenant_security_version=tenant_security_version,
+    )
     if not result:
         raise HTTPException(status_code=401, detail=_detail(ErrorCode.INVALID_OR_REVOKED_REFRESH, lang))
     if isinstance(result, tuple) and len(result) == 2 and result[0] is None:
+        code = result[1]
+        if code == "re_2fa_required":
+            raise HTTPException(status_code=401, detail=_detail(ErrorCode.RE_2FA_REQUIRED, lang))
         raise HTTPException(status_code=401, detail=_detail(ErrorCode.PERMISSIONS_CHANGED, lang))
 
     access, new_refresh, access_jti = result
@@ -210,15 +243,13 @@ def refresh_tokens(
     user_id = int(payload["sub"])
     allowlist_add(tenant_slug, user_id, access_jti)
 
-    # Új refresh cookie (auto_login: 30 nap, aktivitásnál kitolódik; különben session)
+    # Új refresh cookie (ugyanaz a policy: HttpOnly, Secure, SameSite; domain nincs)
     cookie_max_age = int(settings.refresh_ttl_days * 24 * 3600) if payload.get("al") else None
-    response.set_cookie(
-        "refresh_token",
+    set_refresh_cookie(
+        response,
         new_refresh,
-        httponly=True,
         secure=settings.cookie_secure,
-        samesite="lax",
-        path="/api",
+        samesite=getattr(settings, "cookie_samesite", "lax"),
         max_age=cookie_max_age,
     )
 
@@ -245,7 +276,7 @@ def refresh_tokens(
 # -------------------------------------------------
 
 @router.post("/auth/logout")
-@limiter.limit("10/minute")
+@limiter.limit("30/minute")  # lazább, de monitorozott (audit)
 def logout(
     request: Request,
     response: Response,
@@ -265,9 +296,11 @@ def logout(
         if payload and payload.get("typ") == "refresh" and payload.get("sub"):
             user_id = int(payload["sub"])
 
+    tenant_slug = getattr(request.state, "tenant_slug", None)
+    correlation_id = getattr(request.state, "correlation_id", None)
     try:
         if rt:
-            svc.logout(rt, ip=ip, ua=ua)
+            svc.logout(rt, ip=ip, ua=ua, tenant_slug=tenant_slug, correlation_id=correlation_id)
     except Exception as e:
         try:
             audit_service.log(
@@ -280,10 +313,9 @@ def logout(
         except Exception:
             pass
     finally:
-        tenant_slug = getattr(request.state, "tenant_slug", None)
         if user_id is not None:
             allowlist_remove_by_user(tenant_slug, user_id)
-        response.delete_cookie("refresh_token", path="/api")
+        clear_refresh_cookie(response, secure=settings.cookie_secure, samesite=getattr(settings, "cookie_samesite", "lax"))
 
     return {"ok": True}
 

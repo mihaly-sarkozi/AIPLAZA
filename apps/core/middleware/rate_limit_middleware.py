@@ -24,3 +24,14 @@ def user_or_ip_key(request):
 
 
 limiter = Limiter(key_func=user_or_ip_key)
+
+
+def refresh_token_key(request):
+    """
+    Rate limit kulcs refresh végponthoz: session (cookie/header refresh token) vagy IP.
+    Így a limit 20/5perc per session lesz, nem globális IP.
+    """
+    rt = request.cookies.get("refresh_token") or request.headers.get("X-Refresh-Token")
+    if rt:
+        return f"refresh:{rt}"
+    return f"ip:{get_remote_address(request)}"

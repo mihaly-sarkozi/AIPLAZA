@@ -3,12 +3,18 @@
 # 2026.03.07 - Sárközi Mihály
 
 from __future__ import annotations
+import hashlib
 from datetime import datetime, timezone
 from sqlalchemy.exc import SQLAlchemyError
 
 from apps.auth.infrastructure.db.models import TwoFactorCodeORM
 from apps.auth.ports.two_factor_repository_interface import TwoFactorRepositoryInterface
 from apps.auth.domain.two_factor_code import TwoFactorCode
+
+
+def _hash_code(code: str) -> str:
+    """OTP kód SHA-256 hash (hex); a DB-ben csak ez tárolódik."""
+    return hashlib.sha256(code.encode("utf-8")).hexdigest()
 
 
 class TwoFactorRepository(TwoFactorRepositoryInterface):
@@ -26,7 +32,7 @@ class TwoFactorRepository(TwoFactorRepositoryInterface):
             try:
                 row = TwoFactorCodeORM(
                     user_id=code.user_id,
-                    code=code.code,
+                    code_hash=_hash_code(code.code),
                     email=code.email,
                     expires_at=code.expires_at,
                     used=code.used
@@ -43,10 +49,11 @@ class TwoFactorRepository(TwoFactorRepositoryInterface):
                 raise
 
     def get_valid_code(self, user_id: int, code: str) -> TwoFactorCode | None:
+        code_hash = _hash_code(code)
         with self._sf() as db:
             row = db.query(TwoFactorCodeORM).filter(
                 TwoFactorCodeORM.user_id == user_id,
-                TwoFactorCodeORM.code == code,
+                TwoFactorCodeORM.code_hash == code_hash,
                 TwoFactorCodeORM.used == False,
                 TwoFactorCodeORM.expires_at > datetime.now(timezone.utc)
             ).first()
@@ -55,7 +62,7 @@ class TwoFactorRepository(TwoFactorRepositoryInterface):
             return TwoFactorCode(
                 id=row.id,
                 user_id=row.user_id,
-                code=row.code,
+                code="",  # nyers kód nincs tárolva
                 email=row.email,
                 expires_at=self._normalize_dt(row.expires_at),
                 used=row.used,

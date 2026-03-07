@@ -29,6 +29,7 @@ from apps.auth.infrastructure.db.repositories import (
     TenantRepository,
     SessionRepository,
     TwoFactorRepository,
+    TwoFactorAttemptRepository,
     Pending2FARepository,
 )
 from apps.users.application.services.user_service import UserService
@@ -66,6 +67,7 @@ class AppContainer:
         self.settings_repo = SettingsRepository(self.db_session_factory)
         self.audit_repo = AuditRepository(self.db_session_factory)
         self.two_factor_repo = TwoFactorRepository(self.db_session_factory)
+        self.two_factor_attempt_repo = TwoFactorAttemptRepository(self.db_session_factory)
         self.pending_2fa_repo = Pending2FARepository(self.db_session_factory)
 
         # --- Email service ---
@@ -82,7 +84,11 @@ class AppContainer:
         # --- Settings & 2FA services ---
         self.settings_service = SettingsService(self.settings_repo)
         self.audit_service = AuditService(self.audit_repo)
-        self.two_factor_service = TwoFactorService(self.two_factor_repo, self.email_service)
+        self.two_factor_service = TwoFactorService(
+            self.two_factor_repo,
+            self.email_service,
+            attempt_repo=self.two_factor_attempt_repo,
+        )
 
         # --- Auth app services ---
         self.login_service = LoginService(
@@ -96,7 +102,11 @@ class AppContainer:
             settings_service=self.settings_service,
         )
         self.refresh_service = RefreshService(
-            self.session_repo, self.token_service, self.security_logger, self.audit_service
+            self.session_repo,
+            self.token_service,
+            self.security_logger,
+            self.audit_service,
+            user_repository=self.user_repo,
         )
         self.logout_service = LogoutService(
             self.session_repo, self.token_service, self.security_logger, self.audit_service

@@ -20,6 +20,7 @@ class User:
     failed_login_attempts: int = 0
     preferred_locale: Optional[str] = None  # hu | en | es, alapértelmezés: owneré
     preferred_theme: Optional[str] = None   # light | dark, alapértelmezés: owneré → light
+    security_version: int = 0  # növeléskor minden régi token (user_ver) érvénytelen
 
     @classmethod
     def new(
