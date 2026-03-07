@@ -137,12 +137,11 @@ class SecurityAuditEventChannel:
                     if method and hasattr(self._security_logger, method):
                         getattr(self._security_logger, method)(*args, **kwargs)
                 elif event.get("type") == "audit":
-                    from apps.audit.sanitization import sanitize_details
-                    details = sanitize_details(event.get("details"))
+                    # A valódi AuditService.log() maga sanitizál; itt csak továbbítjuk.
                     self._audit_service.log(
                         action=event["action"],
                         user_id=event.get("user_id"),
-                        details=details,
+                        details=event.get("details"),
                         ip=event.get("ip"),
                         user_agent=event.get("user_agent"),
                     )

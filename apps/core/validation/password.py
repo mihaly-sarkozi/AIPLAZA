@@ -1,5 +1,5 @@
 # apps/core/validation/password.py
-# Jelszó erősség: min hossz, max hossz, opcionális komplexitás (nagybetű, szám, speciális).
+# Jelszó erősség: min hossz, max hossz, nagybetű, kisbetű, szám, speciális karakter.
 # Központi réteg: route/Pydantic és service is használhatja.
 
 from typing import Tuple
@@ -8,9 +8,15 @@ PASSWORD_MIN_LEN = 8
 PASSWORD_MAX_LEN = 128
 
 
+def _has_special_char(s: str) -> bool:
+    """Legalább egy nem betű és nem szám karakter (pl. !@#$%^&*)."""
+    return any(not c.isalnum() for c in s)
+
+
 def validate_password_strength(password: str | None) -> Tuple[bool, str]:
     """
     Ellenőrzi a jelszó erősségét.
+    Követelmények: min/max hossz, nagybetű, kisbetű, szám, speciális karakter.
     Vissza: (True, "") ha ok, (False, "hibaüzenet") ha gyenge.
     """
     if not password or not isinstance(password, str):
@@ -26,4 +32,6 @@ def validate_password_strength(password: str | None) -> Tuple[bool, str]:
         return False, "A jelszónak tartalmaznia kell legalább egy kisbetűt."
     if not any(c.isdigit() for c in p):
         return False, "A jelszónak tartalmaznia kell legalább egy számot."
+    if not _has_special_char(p):
+        return False, "A jelszónak tartalmaznia kell legalább egy speciális karaktert (pl. !@#$%)."
     return True, ""

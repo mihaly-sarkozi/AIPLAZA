@@ -11,6 +11,7 @@ from typing import Optional
 from passlib.hash import bcrypt_sha256 as pwd_hasher
 
 from config.settings import settings
+from apps.core.validation import is_valid_email
 from apps.users.ports import UserRepositoryInterface, InviteTokenRepositoryInterface
 
 def _invite_ttl_hours() -> int:
@@ -53,6 +54,9 @@ class UserService:
         request_base_url: str | None = None,
     ) -> User:
         """User létrehozása jelszó nélkül (is_active=False); emailben megy a invite_ttl_hours érvényes regisztrációs link. Owner csak az első regisztráló lehet."""
+        if not is_valid_email(email):
+            raise ValueError("Érvénytelen email cím.")
+        email = (email or "").strip()
         if self.user_repository.get_by_email(email):
             raise ValueError("Email already exists")
         if role not in ["user", "admin"]:
@@ -249,9 +253,9 @@ class UserService:
         Elfelejtett jelszó: ha az email szerepel az adatbázisban, érvénytelenítjük a régi tokeneket,
         új set-password linket küldünk. Ha nincs ilyen user, nem dobunk hibát (ne lehessen kideríteni).
         """
-        if not email or "@" not in email:
+        if not is_valid_email(email):
             return
-        user = self.user_repository.get_by_email(email.strip())
+        user = self.user_repository.get_by_email((email or "").strip())
         if not user or not self.invite_token_repo:
             return
         self.invite_token_repo.invalidate_all_for_user(user.id)
