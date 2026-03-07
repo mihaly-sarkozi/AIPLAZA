@@ -44,6 +44,9 @@ class BaseConfig(BaseSettings):
     refresh_ttl_days: int = 30  # auto_login esetén a refresh cookie max_age (nap)
     refresh_ttl_session_hours: int = 24  # nincs auto_login: refresh cookie max_age (óra); session cookie helyett, ne dobjon ki ~5 perc inaktivitás után
 
+    # Security/audit: True = queue + háttér worker (kisebb request latency), False = szinkron log/audit (pl. tesztek)
+    audit_events_async: bool = True
+
     # Rate limit: login IP alapú (5/perc élesben; tesztekben magasabb limit lehet env-ből)
     rate_limit_login_per_minute: int = 5
 

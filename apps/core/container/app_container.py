@@ -15,6 +15,7 @@ from apps.core.db.session import make_session_factory
 # --- Security ---
 from apps.core.security.token_service import TokenService
 from apps.core.security.security_logger import SecurityLogger
+from apps.core.security.event_channel import SecurityAuditEventChannel
 
 # --- Qdrant + Embedding ---
 from apps.core.qdrant.qdrant_wrapper import QdrantClientWrapper
@@ -57,8 +58,8 @@ class AppContainer:
             pool_pre_ping=getattr(settings, "database_pool_pre_ping", True),
         )
 
-        # --- Security logger ---
-        self.security_logger = SecurityLogger()
+        # --- Security logger (valódi; async módban a channel proxyit kapják a service-ek) ---
+        self._security_logger = SecurityLogger()
 
         # --- Auth repos (implementálják a ports *Interface osztályokat) ---
         self.tenant_repo = TenantRepository(self.db_session_factory)
@@ -83,12 +84,26 @@ class AppContainer:
 
         # --- Settings & 2FA services ---
         self.settings_service = SettingsService(self.settings_repo)
-        self.audit_service = AuditService(self.audit_repo)
+        self._audit_service = AuditService(self.audit_repo)
         self.two_factor_service = TwoFactorService(
             self.two_factor_repo,
             self.email_service,
             attempt_repo=self.two_factor_attempt_repo,
         )
+
+        # --- Security/audit: async eseménycsatorna (queue + worker) vagy szinkron ---
+        self.event_channel = None
+        if getattr(settings, "audit_events_async", True):
+            self.event_channel = SecurityAuditEventChannel(
+                self._security_logger,
+                self._audit_service,
+            )
+            self.event_channel.start_worker()
+            self.security_logger = self.event_channel.security_logger
+            self.audit_service = self.event_channel.audit_service
+        else:
+            self.security_logger = self._security_logger
+            self.audit_service = self._audit_service
 
         # --- Auth app services ---
         self.login_service = LoginService(
