@@ -86,8 +86,10 @@ def invalidate_user_cache(tenant_slug: str | None, user_id: int) -> None:
     get_cache().delete(user_cache_key(tenant_slug, user_id))
 
 
-# Alapértelmezett light path prefixek (ha a middleware-t light_paths nélkül hívják). Egyébként main.py configból adja.
-# Policy: csak alacsony kockázatú route-ok; role/revoke csak access lejáratakor. docs/Auth_light_paths.md
+# Full vs light path (tudatos finomhangolás):
+# - Full auth: DB/cache user fetch + security version check. Csak olyan végpontoknál, ahol TÉNYLEG kell: write, admin, settings, permission.
+# - Light path: csak token claim + allowlist + role (payload); NINCS DB fetch. Gyorsabb, de role/revoke csak token lejáratakor érvényesül.
+# Új prefixet csak akkor adj a light_paths-hoz, ha a route nem ír, nem admin/settings/permission érzékeny. docs/Auth_light_paths.md
 _DEFAULT_LIGHT_PATHS: tuple[str, ...] = ("/api/chat",)
 
 
@@ -110,8 +112,8 @@ def _minimal_user_from_payload(payload: dict, user_id: int) -> User:
 
 
 class AuthMiddleware:
-    """ASGI: Bearer token → payload; access token + allowlist → user betöltés; scope.state.user, user_token_payload.
-    light_paths: path prefixek, ahol csak token+allowlist elég (nincs DB user load). Üres = mindig teljes path."""
+    """ASGI: Bearer token → payload; allowlist; majd full user (DB/cache + version check) VAGY light path (csak payload → minimál user).
+    light_paths: prefixek, ahol NINCS DB fetch (token+allowlist+role elég). Minden más route = full auth (write/admin/settings/permission)."""
     def __init__(
         self,
         app: ASGIApp,
@@ -208,7 +210,7 @@ class AuthMiddleware:
                 uid = int(user_id)
                 path = scope.get("path") or ""
 
-                # Token-only ág: light path prefix → nincs DB user load, nincs version check (mérés: log)
+                # Light path: token+allowlist+role elég, nincs DB fetch. Full auth: write/admin/settings/permission route-okra.
                 if self.light_paths and any(path.startswith(prefix) for prefix in self.light_paths):
                     state["user"] = _minimal_user_from_payload(payload, uid)
                     state["auth_light"] = True

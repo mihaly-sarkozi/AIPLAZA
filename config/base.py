@@ -60,9 +60,9 @@ class BaseConfig(BaseSettings):
     # Rate limit: login IP alapú (5/perc élesben; tesztekben magasabb limit lehet env-ből)
     rate_limit_login_per_minute: int = 5
 
-    # Auth light path: path prefixek, ahol token+allowlist elég, DB user load és version check kihagyva.
-    # Csak alacsony kockázatú route-ok (pl. /api/chat). Üres string = kikapcsolva (mindig teljes user load).
-    # Vesszővel elválasztott lista, pl. "/api/chat" vagy "" (disable). Dokumentálva: docs/Auth_light_paths.md
+    # Auth light path: path prefixek, ahol NINCS DB user fetch (token+allowlist+role elég).
+    # Teljes user csak write/admin/settings/permission végpontokra. Tudatosan szűk: docs/Auth_light_paths.md
+    # Vesszővel elválasztott; üres = minden route full auth. Alap: csak /api/chat.
     auth_light_paths: str = "/api/chat"
 
     # Email (SMTP): jelszót .env-ben (smtp_password)

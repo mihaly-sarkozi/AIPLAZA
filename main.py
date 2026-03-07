@@ -159,7 +159,8 @@ DB-ből és request.state.user beállítása. A user_repository a current_tenant
 alapján használja a session search_path-ot – ezért a TenantMiddleware-nek előbb
 kell futnia, különben "relation users does not exist" (public sémában nincs users).
 """
-# Light path: configból; üres = kikapcsolva. docs/Auth_light_paths.md
+# Light path: csak ott nincs DB user fetch, ahol tényleg elég a token+allowlist+role (pl. /api/chat).
+# Write/admin/settings/permission végpontok mindig full auth. docs/Auth_light_paths.md
 _light_paths = tuple(p.strip() for p in (getattr(settings, "auth_light_paths", "") or "").split(",") if p.strip())
 app.add_middleware(
     AuthMiddleware,
