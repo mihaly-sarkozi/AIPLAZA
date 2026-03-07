@@ -1,11 +1,18 @@
 import { create } from "zustand";
 import api from "../api/axiosClient";
 
+/** Egyetlen folyamatban lévő /me kérés – Strict Mode / többszörös mount ne indítson több hívást */
+let loadUserPromise: Promise<void> | null = null;
+
 interface User {
   id: number;
   email: string;
-  role: "user" | "admin";
-  is_superuser?: boolean;
+  role: "user" | "admin" | "owner";
+  name?: string | null;
+  preferred_locale?: string | null;
+  preferred_theme?: string | null;
+  locale?: string;
+  theme?: string;
 }
 
 interface AuthState {
@@ -37,19 +44,26 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       set({ loadingUser: false });
       return;
     }
+    if (loadUserPromise) return loadUserPromise;
 
-    try {
-      const res = await api.get("/auth/me");
-      set({ user: res.data });
-    } catch {
-      set({ user: null, token: null });
-      localStorage.removeItem("access_token");
-    } finally {
-      set({ loadingUser: false });
-    }
+    loadUserPromise = (async () => {
+      set({ loadingUser: true });
+      try {
+        const res = await api.get("/auth/me");
+        set({ user: res.data });
+      } catch {
+        set({ user: null, token: null });
+        localStorage.removeItem("access_token");
+      } finally {
+        set({ loadingUser: false });
+        loadUserPromise = null;
+      }
+    })();
+    return loadUserPromise;
   },
 
   logout: () => {
+    loadUserPromise = null;
     api.post("/auth/logout").catch(() => {});
     set({ user: null, token: null });
     localStorage.removeItem("access_token");

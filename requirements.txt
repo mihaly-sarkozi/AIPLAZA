@@ -1,7 +1,7 @@
 fastapi~=0.115.12
 uvicorn~=0.34.3
 SQLAlchemy>=2
-pymysql~=1.1.2
+psycopg2-binary~=2.9.9
 pydantic>=2
 pydantic-settings~=2.11.0
 passlib~=1.7.4
@@ -15,7 +15,7 @@ python-dotenv~=1.1.0
 qdrant-client~=1.14.2
 starlette~=0.46.2
 slowapi~=0.1.9
-pdfminer-six~=20251107
+pdfminer-six==20251107
 hpack~=4.1.0
 hyperframe~=6.1.0
 h11~=0.16.0
@@ -54,3 +54,5 @@ pypdfium2~=5.0.0
 python-multipart~=0.0.20
 wrapt~=2.0.1
 portalocker~=2.10.1
+pytest~=8.3.0
+redis>=4.5.0,<6

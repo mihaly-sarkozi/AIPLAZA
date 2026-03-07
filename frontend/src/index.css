@@ -1,26 +1,63 @@
 @import "tailwindcss";
 
 @theme {
-  --color-background: #0f172a;
-  --color-primary: #2563eb;
-  --color-secondary: #1e293b;
-  --color-accent: #3b82f6;
+  --color-background: #ffffff;
+  --color-foreground: #000000;
+  --color-muted: #6b7280;
+  --color-label: #374151;
+  --color-border: #e5e7eb;
+  --color-input-bg: #ffffff;
+  --color-card: #ffffff;
+  --color-primary: #171717;
+  --color-primary-hover: #404040;
+  --color-on-primary: #ffffff;
+  --color-table-head: #f3f4f6;
+  --color-inactive: #4b5563;
+}
+
+/* Dark theme: fekete alapon fehér (html.dark a documentElement-en) */
+.dark {
+  --color-background: #000000;
+  --color-foreground: #ffffff;
+  --color-muted: #9ca3af;
+  --color-label: #e5e7eb;
+  --color-border: #374151;
+  --color-input-bg: #000000;
+  --color-card: #000000;
+  --color-primary: #4b5563;
+  --color-primary-hover: #6b7280;
+  --color-on-primary: #ffffff;
+  --color-table-head: #1f2937;
+  --color-inactive: #6b7280;
+}
+
+html {
+  background-color: var(--color-background);
 }
 
 body {
   background-color: var(--color-background);
-  color: white;
+  color: var(--color-foreground);
   font-family: system-ui, sans-serif;
 }
 
+#root {
+  min-height: 100vh;
+  background-color: var(--color-background);
+}
+
 input, textarea, select {
-  @apply bg-slate-800 text-white border border-slate-600 rounded-md px-3 py-2 w-full focus:outline-none focus:ring-2 focus:ring-primary;
+  background-color: var(--color-input-bg);
+  color: var(--color-foreground);
+  border: 1px solid var(--color-border);
+  @apply rounded-md px-3 py-2 w-full focus:outline-none focus:ring-2 focus:ring-gray-400 focus:border-gray-400;
 }
 
 label {
-  @apply block text-sm font-medium text-slate-300 mb-1;
+  color: var(--color-label);
+  @apply block text-sm font-medium mb-1;
 }
 
 .btn {
-  @apply bg-primary text-white px-4 py-2 rounded-md hover:bg-blue-600 transition;
+  @apply bg-black text-white px-4 py-2 rounded-md hover:bg-gray-800 transition;
 }

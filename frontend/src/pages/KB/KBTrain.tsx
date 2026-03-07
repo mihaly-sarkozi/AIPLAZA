@@ -33,45 +33,42 @@ export default function KBTrain() {
   };
 
   return (
-    <div className="p-10 text-white max-w-3xl mx-auto">
+    <div className="p-10 text-black max-w-3xl mx-auto">
 
       <h1 className="text-3xl font-bold mb-6">Tudástár tanítása</h1>
 
-      {/* ----- SZÖVEGES TANÍTÁS ----- */}
-      <div className="bg-slate-800 p-6 rounded-lg mb-10">
+      <div className="bg-white border border-gray-200 p-6 rounded-lg mb-10">
         <h2 className="text-xl font-bold mb-4">Szöveges tanítás</h2>
 
-        <label>Cím</label>
+        <label className="block mb-1 text-gray-700">Cím</label>
         <input
           value={title}
           onChange={(e) => setTitle(e.target.value)}
-          className="mb-4"
+          className="mb-4 w-full p-3 rounded bg-white border border-gray-300"
         />
 
-        <label>Tartalom</label>
+        <label className="block mb-1 text-gray-700">Tartalom</label>
         <textarea
           rows={6}
           value={content}
           onChange={(e) => setContent(e.target.value)}
-          className="mb-4"
+          className="mb-4 w-full p-3 rounded bg-white border border-gray-300"
         ></textarea>
 
         <button
-          className="bg-blue-600 px-4 py-2 rounded hover:bg-blue-500"
+          className="bg-black text-white px-4 py-2 rounded hover:bg-gray-800"
           onClick={trainText}
         >
           Tanítás szöveggel
         </button>
       </div>
 
-      {/* ----- FÁJLFELTÖLTÉS / DRAG&DROP ----- */}
-      <div className="bg-slate-800 p-6 rounded-lg">
+      <div className="bg-white border border-gray-200 p-6 rounded-lg">
         <h2 className="text-xl font-bold mb-4">Fájl feltöltés</h2>
 
-        {/* Drag & Drop area */}
         <div
           className={`border-2 border-dashed rounded-lg p-10 text-center transition ${
-            dragOver ? "border-blue-400 bg-slate-700" : "border-slate-600"
+            dragOver ? "border-gray-500 bg-gray-50" : "border-gray-300"
           }`}
           onDragOver={(e) => {
             e.preventDefault();
@@ -81,7 +78,7 @@ export default function KBTrain() {
           onDrop={handleDrop}
         >
           {file ? (
-            <div>📄 Kiválasztott fájl: <strong>{file.name}</strong></div>
+            <div>Kiválasztott fájl: <strong>{file.name}</strong></div>
           ) : (
             <div>Húzd ide a fájlt vagy kattints lentebb!</div>
           )}
@@ -96,7 +93,7 @@ export default function KBTrain() {
         </div>
 
         <button
-          className="bg-red-600 px-4 py-2 rounded mt-5 hover:bg-red-500"
+          className="bg-gray-800 text-white px-4 py-2 rounded mt-5 hover:bg-gray-700"
           onClick={trainFile}
         >
           Tanítás fájllal

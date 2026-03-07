@@ -1,52 +1,54 @@
 # core/security/auth_dependencies.py
+# A usert a AuthMiddleware már betölti (request.state.user); itt ellenőrzünk (aktív-e) és visszaadjuk.
+# 2026.03.07 - Sárközi Mihály
+
 from fastapi import Depends, HTTPException, Request
-from apps.core.di import get_login_service
-from apps.auth.domain.user import User
+from apps.users.domain.user import User
+from apps.core.i18n.messages import get_message, lang_from_request, ErrorCode
+
+
+def get_current_user(request: Request) -> User:
+    """
+    Bejelentkezett, aktív user a middleware-ből (request.state.user).
+    Ha nincs user vagy inaktív (kitiltott) → 401. Minden védett végpontnál (chat, profil, jogosultságok, stb.) így ellenőrzünk.
+    """
+    user = getattr(request.state, "user", None)
+    if not user:
+        raise HTTPException(status_code=401, detail="Missing or invalid token")
+    if not getattr(user, "is_active", True):
+        lang = lang_from_request(request)
+        raise HTTPException(
+            status_code=401,
+            detail={"code": ErrorCode.PERMISSIONS_CHANGED.value, "message": get_message(ErrorCode.PERMISSIONS_CHANGED, lang)},
+        )
+    return user
+
+
+def get_current_user_optional(request: Request) -> User | None:
+    """
+    User a middleware-ből, ha van érvényes token; különben None. Nem dob 401-et.
+    Logout-nál: ha nincs érvényes Bearer, a refresh tokenból vesszük a user_id-t.
+    """
+    user = getattr(request.state, "user", None)
+    if not user or not getattr(user, "is_active", True):
+        return None
+    return user
 
 
 def get_current_user_id(request: Request) -> int:
     """
-    A JWT payload már a middleware-ben beolvasásra került.
-    Itt csak döntést hozunk:
-    - van-e payload?
-    - jó-e a token típusa?
-    - kiolvassuk-e a user ID-t?
+    Bejelentkezett user id – request.state.user-t a middleware tölti, itt csak .id.
     """
-    payload = getattr(request.state, "user_token_payload", None)
-
-    if not payload:
-        raise HTTPException(status_code=401, detail="Missing or invalid token")
-
-    if payload.get("typ") != "access":
-        raise HTTPException(status_code=401, detail="Wrong token type")
-
-    # A JWT 'sub' mezőben van a user ID
-    return int(payload["sub"])
-
-
-def get_current_user(
-    user_id: int = Depends(get_current_user_id),
-    login_service = Depends(get_login_service)
-) -> User:
-    """
-    Az authentikáció után betöltjük az aktuális user-t
-    az application réteg LoginService-jével.
-    """
-    user = login_service.users.get_by_id(user_id)
-
-    if not user:
-        raise HTTPException(status_code=401, detail="User not found")
-
-    return user
+    return get_current_user(request).id
 
 
 def get_current_user_admin(
     user: User = Depends(get_current_user)
 ):
     """
-    Csak admin szerepkör engedélyezett.
+    Admin vagy owner szerepkör kell (beállítások, train, stb.).
     """
-    if user.role != "admin":
+    if user.role not in ("admin", "owner"):
         raise HTTPException(status_code=403, detail="Admin privileges required")
 
     return user

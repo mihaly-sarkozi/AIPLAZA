@@ -7,12 +7,19 @@ export default defineConfig({
   server: {
     port: 5173,
     host: true,
+    origin: "http://demo.local:5173",
 
     proxy: {
       "/api": {
-        target: "http://localhost:8010",  // <- FastAPI itt fut!!!
+        // IP használata: demo.local DNS (mDNS) másodpercekig tarthat, 127.0.0.1 azonnali
+        target: "http://127.0.0.1:8001",
         changeOrigin: true,
         secure: false,
+        configure: (proxy) => {
+          proxy.on("proxyReq", (proxyReq) => {
+            proxyReq.setHeader("Host", "demo.local:8001");
+          });
+        },
       },
     },
   },

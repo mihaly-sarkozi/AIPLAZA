@@ -4,7 +4,7 @@
 
 1. **Python 3.9+** telepítve
 2. **Node.js 18+** és **pnpm** (vagy npm) telepítve
-3. **MySQL** adatbázis fut
+3. **PostgreSQL** adatbázis fut
 4. **Qdrant** vektoradatbázis elérhető (cloud vagy local)
 5. **OpenAI API kulcs**
 
@@ -20,14 +20,15 @@ OPENAI_API_KEY=sk-your-openai-api-key
 
 # Opcionális (ha másképp szeretnéd)
 APP_ENV=dev
-mysql_dsn=mysql+pymysql://root:password@localhost:3306/aiplaza
+database_url=postgresql+psycopg2://postgres:password@localhost:5432/aiplaza
 ```
 
 ## 2️⃣ Adatbázis beállítása
 
-### MySQL adatbázis létrehozása:
-```sql
-CREATE DATABASE aiplaza CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+### PostgreSQL adatbázis létrehozása:
+```bash
+psql -U postgres -c "CREATE DATABASE aiplaza;"
+# vagy: createdb -U postgres aiplaza
 ```
 
 ### Táblák inicializálása:
@@ -100,7 +101,7 @@ A frontend elérhető lesz: **http://localhost:5173**
 
 ### Backend nem indul el:
 - Ellenőrizd, hogy a `.env` fájl létezik és helyes
-- Ellenőrizd a MySQL kapcsolatot
+- Ellenőrizd a PostgreSQL kapcsolatot
 - Ellenőrizd, hogy a Qdrant és OpenAI API kulcsok érvényesek
 
 ### Frontend nem csatlakozik a backendhez:
@@ -109,8 +110,8 @@ A frontend elérhető lesz: **http://localhost:5173**
 - Ellenőrizd a CORS beállításokat a `main.py`-ban
 
 ### Adatbázis hiba:
-- Ellenőrizd, hogy a MySQL fut
-- Ellenőrizd a `mysql_dsn` értékét a `.env`-ben vagy `config/base.py`-ban
+- Ellenőrizd, hogy a PostgreSQL fut
+- Ellenőrizd a `database_url` értékét a `.env`-ben vagy `config/base.py`-ban
 - Futtasd újra az `init_db.py` scriptet
 
 ## 📝 Hasznos parancsok

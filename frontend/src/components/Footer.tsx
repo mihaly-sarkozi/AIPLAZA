@@ -1,7 +1,18 @@
+import { useTranslation } from "../i18n";
+
 export default function Footer() {
+  const { t } = useTranslation();
   return (
-    <footer className="w-full bg-slate-800 text-slate-400 text-center p-4 text-sm border-t border-slate-700">
-      © {new Date().getFullYear()} BrainBankCenter.com – Minden jog fenntartva.
+    <footer
+      className="mt-auto w-full bg-[var(--color-background)] text-[var(--color-muted)] p-3 text-xs border-t border-[var(--color-border)] flex flex-wrap items-center justify-between gap-2 shrink-0"
+      style={{ contentVisibility: "auto" }}
+    >
+      <span className="text-center sm:text-left lowercase">
+        © {new Date().getFullYear()} – {t("footer.rights")}
+      </span>
+      <span className="font-medium">
+        {t("app.name")}
+      </span>
     </footer>
   );
 }

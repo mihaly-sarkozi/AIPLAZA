@@ -1,26 +1,21 @@
 # scripts/add_superuser_column.py
 """
 Migration script: is_superuser oszlop hozzáadása a users táblához.
+A beállítások a config.settings-ből jönnek (a loader betölti a .env-t).
 """
 import sys
-import os
 from pathlib import Path
-from dotenv import load_dotenv
 
-# Projekt gyökér hozzáadása a Python path-hoz
+# Projekt gyökér a path-on, hogy a config importálható legyen
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-# .env fájl betöltése
-load_dotenv(project_root / ".env")
-
+from config.settings import settings
 from sqlalchemy import create_engine, text
 
-# MySQL DSN közvetlenül a környezeti változókból vagy default értékből
-mysql_dsn = os.getenv("mysql_dsn") or "mysql+pymysql://root:Misi2010@localhost:3306/aiplaza"
 
 def main():
-    engine = create_engine(mysql_dsn, future=True)
+    engine = create_engine(settings.database_url, future=True)
     
     with engine.connect() as conn:
         # Ellenőrizzük, hogy létezik-e már az oszlop

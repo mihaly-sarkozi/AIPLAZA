@@ -1,5 +1,7 @@
-from .base import BaseConfig
+# A dev környezet beállításai amik felülírják a base config-ot vagy .env file-t
+# 2026.02.14 - Sárközi Mihály
 
+from .base import BaseConfig
 
 class DevConfig(BaseConfig):
     QDRANT_URL: str
@@ -7,4 +9,4 @@ class DevConfig(BaseConfig):
     OPENAI_API_KEY: str
 
     api_port: int = 8010
-    # dev-specifikus override-ok
+    database_pool_pre_ping: bool = False  # dev: gyorsabb első kérés (nincs extra ping round-trip)

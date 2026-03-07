@@ -1,5 +1,4 @@
-import os
-from dotenv import load_dotenv
+from config.settings import settings
 
 from qdrant_wrapper import QdrantClient
 from qdrant_wrapper.models import (
@@ -10,29 +9,23 @@ from qdrant_wrapper.models import (
 
 from openai import AsyncOpenAI
 
-load_dotenv()
-
-QDRANT_URL = os.getenv("QDRANT_URL")
-QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-
-if not QDRANT_URL:
+if not settings.QDRANT_URL:
     raise Exception("QDRANT_URL is not set in the environment")
-if not QDRANT_API_KEY:
+if not settings.QDRANT_API_KEY:
     raise Exception("QDRANT_API_KEY is not set in the environment")
-if not OPENAI_API_KEY:
+if not settings.OPENAI_API_KEY:
     raise Exception("OPENAI_API_KEY is not set in the environment")
 
 
 # ---------------------------------------------------------
-#  Qdrant + OpenAI kliensek
+#  Qdrant + OpenAI kliensek (beállítások: config.settings)
 # ---------------------------------------------------------
 qdrant_client = QdrantClient(
-    url=QDRANT_URL,
-    api_key=QDRANT_API_KEY,
+    url=settings.QDRANT_URL,
+    api_key=settings.QDRANT_API_KEY,
 )
 
-openai_client = AsyncOpenAI(api_key=OPENAI_API_KEY)
+openai_client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
 
 
 # ---------------------------------------------------------

@@ -1,10 +1,10 @@
-from sqlalchemy.orm import declarative_base
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Index
+from sqlalchemy import Column, Integer, String, DateTime
 from datetime import datetime
 
-AuthBase = declarative_base()
+from apps.auth.infrastructure.db.models.base import TenantSchemaBase
 
-class KBORM(AuthBase):
+
+class KBORM(TenantSchemaBase):
     __tablename__ = "knowledge_bases"
 
     id = Column(Integer, primary_key=True)

@@ -6,7 +6,7 @@ export default function ChatPage() {
   const [question, setQuestion] = useState("");
   const [messages, setMessages] = useState<{ role: string; text: string }[]>([]);
   const [loading, setLoading] = useState(false);
-  const { logout, user } = useAuthStore();
+  useAuthStore(); // keep store subscription if needed for auth checks
   const chatEndRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null); // 🔹 input mező ref
 
@@ -44,20 +44,8 @@ export default function ChatPage() {
   };
 
   return (
-    <div className="min-h-screen flex flex-col bg-slate-900 text-white">
-      {/* 🔹 Rögzített fejléc */}
-      <nav className="fixed top-0 left-0 w-full p-4 bg-blue-600 flex justify-between items-center shadow-md z-10">
-        <span className="font-semibold">💬 BrainBankCenter.com – {user?.email}</span>
-        <button
-          onClick={() => logout()}
-          className="text-sm underline hover:text-slate-200"
-        >
-          Kilépés
-        </button>
-      </nav>
-
-      {/* 🔹 Chat üzenetek */}
-      <div className="flex-1 overflow-y-auto p-6 space-y-4 pt-20 pb-28">
+    <div className="flex-1 flex flex-col min-h-0 bg-[var(--color-background)] text-[var(--color-foreground)]">
+      <div className="flex-1 overflow-y-auto p-6 space-y-4 pt-4 pb-4">
         {messages.map((msg, i) => (
           <div
             key={i}
@@ -68,9 +56,9 @@ export default function ChatPage() {
             <div
               className={`px-4 py-2 rounded-2xl max-w-lg ${
                 msg.role === "user"
-                  ? "bg-blue-600 text-white rounded-br-none"
-                  : "bg-slate-700 text-slate-100 rounded-bl-none"
-              } shadow-md whitespace-pre-wrap`}
+                  ? "bg-black text-white rounded-br-none"
+                  : "bg-gray-100 text-black border border-gray-200 rounded-bl-none"
+              } shadow-sm whitespace-pre-wrap`}
             >
               {msg.text}
             </div>
@@ -79,7 +67,7 @@ export default function ChatPage() {
 
         {loading && (
           <div className="flex justify-start">
-            <div className="bg-slate-700 text-slate-300 px-4 py-2 rounded-2xl rounded-bl-none animate-pulse">
+            <div className="bg-gray-100 text-gray-600 px-4 py-2 rounded-2xl rounded-bl-none animate-pulse border border-gray-200">
               ...
             </div>
           </div>
@@ -88,10 +76,9 @@ export default function ChatPage() {
         <div ref={chatEndRef} />
       </div>
 
-      {/* 🔹 Rögzített beviteli mező */}
-      <div className="fixed bottom-0 left-0 w-full bg-slate-800 border-t border-slate-700 p-4 flex items-center gap-2">
+      <div className="shrink-0 w-full bg-[var(--color-background)] border-t border-[var(--color-border)] p-4 flex items-center gap-2">
         <textarea
-          ref={inputRef} // 👈 fontos: ref hozzárendelve
+          ref={inputRef}
           value={question}
           onChange={(e) => setQuestion(e.target.value)}
           onKeyDown={(e) => {
@@ -100,7 +87,7 @@ export default function ChatPage() {
               send();
             }
           }}
-          className="flex-1 bg-slate-700 text-white p-3 rounded-lg resize-none h-16 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          className="flex-1 bg-[var(--color-background)] text-[var(--color-foreground)] border border-[var(--color-border)] p-3 rounded-lg resize-none h-16 focus:outline-none focus:ring-2 focus:ring-[var(--color-border)]"
           placeholder="Írd be a kérdésed és nyomj Entert..."
           disabled={loading}
         />
@@ -109,8 +96,8 @@ export default function ChatPage() {
           disabled={loading}
           className={`px-6 py-3 rounded-lg font-semibold transition-all ${
             loading
-              ? "bg-gray-500 cursor-not-allowed"
-              : "bg-blue-600 hover:bg-blue-500 text-white"
+              ? "bg-[var(--color-border)] text-[var(--color-muted)] cursor-not-allowed"
+              : "bg-[var(--color-primary)] hover:opacity-90 text-[var(--color-on-primary)]"
           }`}
         >
           {loading ? "..." : "Küldés"}

@@ -1,14 +1,15 @@
 from fastapi import APIRouter, Depends, HTTPException, Request, File, UploadFile
 from apps.core.middleware.rate_limit_middleware import limiter
+from apps.core.qdrant.qdrant_wrapper import QdrantUnavailableError
 
 from apps.knowledge.adapter.http.request import KBCreate, KBUpdate, KBDelete, KBTrainRequest
 from apps.knowledge.adapter.http.response import KBOut
 
 from apps.core.security.auth_dependencies import get_current_user_admin
-from apps.core.di import get_kb_service
+from apps.core.di import get_kb_service, set_tenant_context_from_request
 from apps.knowledge.application.knowledge_service import KnowledgeBaseService
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(set_tenant_context_from_request)])
 
 
 @router.get("/kb", response_model=list[KBOut])
@@ -30,6 +31,8 @@ def create_kb(
 ):
     try:
         return svc.create(data.name, data.description)
+    except QdrantUnavailableError as e:
+        raise HTTPException(status_code=503, detail=str(e))
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 

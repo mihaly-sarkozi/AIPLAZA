@@ -1,8 +1,7 @@
 # apps/auth/domain/session.py
-"""
-A bejelentkezési session reprezentálja és
-kezeli a token logikát
-"""
+# A bejelentkezési session reprezentálja és kezeli a token logikát
+# 2026.03.07 - Sárközi Mihály
+
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from typing import Optional

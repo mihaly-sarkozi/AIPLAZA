@@ -1,0 +1,49 @@
+1. Inicializálás
+    - A main.py indítja a programot. Ez egy API amit használhat mobil alkalmazás egy internetes frontend felület is.
+    - Először betölti az alkalmazáshoz szükséges beállításokat
+    - Beállítja a program védelmét
+        - Egyébként ha kap egy tokent a program akkor itt definiálja a felhasználót is!
+    - Definiálja az API modulokat
+
+
+2. Hexagonális architektúrában van a program megírva. 
+        Miden modulnál a presentation réteg ahova bejön a kérés. Ez egy router. 
+        A kérést az adapter request osztályokon keresztül értjük meg és DTO-ra alakítjuk majd az adapter response osztályon keresztül válaszolunk amit szintén DTO-ból töltünk ki.
+        Az Application rétegbe helyezzük azokat az üzleti logákat ami működteti a modult de csak a DTO-t használ. 
+        Domain  rétegben vannak a domain osztályok ami a modul tartalmát reprezentálják.
+        Infrastructure rétegben vannak a repository osztályok ami a modul adatbázis kapcsolatát reprezentálják.
+        Ports rétegben vannak azon osztályok amik a modul interfészét reprezentálják. Ezeken keresztül hívható az infrában elhelyezkedő műveletek.
+        Példaként a kérés bejön a routerbe, ahol request paraméterrel egy service osztályt meghívunk ami egy response paramétert ad vissza. 
+        A service valósítja meg a feladatot de csak a DTO-t használ vagy interfaceken keresztül más modulokat.
+        Ha adatbázis műveletre van szüksége vagy más modult is meghívhat, de csak az interface-ken keresztül.
+
+3. Dependency Injection-t használunk a modellben. Ez azt jelenti hogy a service-ket összeszedjük egy containerbe és onnan töljük be szükség esetén ezzel gyorsítva az elérést.
+
+4. Auth modul
+    Itt van a login (bejelentkezés), logout(kijelentkezés), me(felhasználó adatok lekérése), refresh(biztonsági token frissítése) függvények
+    Ebbe a modulba került a felhasználókezelés, ahol a felhasználók létrehozása, frissítése, törlése, lekérése is megtörténik.
+    És szintén ide került a beállítások kezelése, ahol a beállítások lekérése, frissítése is megtörténik.
+
+5. Tesztek arra jók hogy ellenőrizni lehet a programot.
+        Futtatás: .venv/bin/python -m pytest tests/ -v
+
+6. Alaprendszer
+        Függőségek ellenőrzése:             .venv/bin/pip install -r requirements.txt
+        DB táblák létrehozása:              .venv/bin/python scripts/init_db.py
+        Első user (owner) létrehozása:      .venv/bin/python scripts/seed_user.py
+        (Létező DB, régi is_superuser oszlop esetén: .venv/bin/python scripts/migrate_owner_drop_superuser.py)
+
+    Első user (owner) rögzítése
+        - Tenantenként egy owner lehet: az első regisztrált. Owner: jogosultságkezelés, később fizetési modul, nem törölhető, csak név (és később email kóddal) módosítható.
+        - Új tenant induláskor: a seed_user.py létrehozza a tenant sémát és az első usert role=owner-rel (email + jelszó .env-ből: ADMIN_EMAIL, ADMIN_PASSWORD). Ez az első rögzítés.
+        - Ha később meghívásos regisztrációval adnak hozzá usereket (admin/owner POST /users, link emailben), akkor az elsőként a set-password linkkel jelszót beállító user automatikusan owner lesz, ha a tenantben még nincs owner (UserService.set_password → exists_owner() → ha nincs, role=owner).
+        - Összefoglalva: az első rögzítés vagy a seed_user (üres tenant), vagy a meghívásos regisztráció első sikeres befejezése.
+
+7. Frontend indítása
+    cd frontend
+    npm run dev
+
+
+FONTOS:
+- kell egy tenant telepítő és ki kell tiltani a kulcs neveket pl www, api, admin, app, static, stb.
+- reuse_detected és egyéb nyalákságokra kell egy monitor!!!!

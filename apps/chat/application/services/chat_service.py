@@ -1,17 +1,19 @@
-from openai import AsyncOpenAI
-from openai import APIError, APIConnectionError, APITimeoutError, RateLimitError
-import os
 import logging
 from typing import Optional
 
+from openai import AsyncOpenAI
+from openai import APIError, APIConnectionError, APITimeoutError, RateLimitError
+
+from config.settings import settings
+
 logger = logging.getLogger(__name__)
+
 
 class ChatService:
     def __init__(self, chat_model: Optional[AsyncOpenAI] = None):
-        api_key = os.getenv("OPENAI_API_KEY")
-        if not api_key:
-            raise ValueError("❌ OPENAI_API_KEY nem található .env fájlban.")
-        self.client = chat_model or AsyncOpenAI(api_key=api_key)
+        if not settings.OPENAI_API_KEY:
+            raise ValueError("❌ OPENAI_API_KEY nincs beállítva (config / .env).")
+        self.client = chat_model or AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
 
     async def chat(self, question: str) -> str:
         """Chat üzenet küldése OpenAI API-nak."""
