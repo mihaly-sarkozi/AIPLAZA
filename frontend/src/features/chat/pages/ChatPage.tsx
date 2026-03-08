@@ -1,14 +1,12 @@
 import { useState, useEffect, useRef, useCallback, useLayoutEffect } from "react";
 import { VariableSizeList as List } from "react-window";
-import { useAuthStore } from "../store/authStore";
-import { sanitizeMessage } from "../utils/sanitize";
-import { getChatWsUrl } from "../utils/chatWs";
+import { useAuthStore } from "../../../store/authStore";
+import { sanitizeMessage } from "../../../utils/sanitize";
+import { getChatWsUrl } from "../api/chatWs";
 import ChatMessage from "../components/ChatMessage";
 
 const MAX_CHAT_MESSAGES = 100;
 const ESTIMATED_ROW_HEIGHT = 72;
-/** Virtualized list: only visible rows are rendered (react-window). Reduces DOM size for long chats. */
-const LIST_OVERSCAN_COUNT = 5;
 
 export type ChatMessageType = { role: string; text: string };
 
@@ -57,11 +55,6 @@ function MessageRow({ index, style, data }: MessageRowProps) {
   );
 }
 
-/**
- * Chat page: WebSocket streaming (no HTTP POST) + virtualized message list.
- * - Stream: connect to /api/chat/ws?token=…, send { question }, receive { chunk } then { done }.
- * - Virtualized: react-window VariableSizeList renders only visible rows for scalability.
- */
 export default function ChatPage() {
   const token = useAuthStore((s) => s.token);
   const [messages, setMessages] = useState<ChatMessageType[]>([]);
@@ -237,7 +230,7 @@ export default function ChatPage() {
             itemCount={messages.length}
             itemSize={getItemSize}
             itemData={listData}
-            overscanCount={LIST_OVERSCAN_COUNT}
+            overscanCount={5}
             className="scrollbar-thin"
           >
             {MessageRow}
@@ -258,7 +251,6 @@ export default function ChatPage() {
       </div>
 
       <div className="shrink-0 w-full bg-[var(--color-background)] border-t border-[var(--color-border)] p-4 flex items-center gap-2">
-        {/* Uncontrolled textarea: no state on keystroke, value read from ref on send */}
         <textarea
           ref={inputRef}
           defaultValue=""

@@ -1,12 +1,11 @@
 import { useState, useEffect } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { useTranslation } from "../i18n";
-import { useAuthStore } from "../store/authStore";
-import { getSafeLoginRedirect } from "../utils/loginRedirect";
-import { useLocaleStore } from "../i18n";
-import { useDefaultSettings, useLoginMutation } from "../hooks/useApi";
-import { fetchCsrfToken } from "../api/axiosClient";
-import type { Locale } from "../i18n";
+import { useTranslation } from "../../../i18n";
+import { useAuthStore } from "../state/authStore";
+import { getSafeLoginRedirect } from "../../../utils/loginRedirect";
+import { useLocaleStore } from "../../../i18n";
+import { useDefaultSettings, useLoginMutation } from "../hooks/useAuth";
+import type { Locale } from "../../../i18n";
 
 const LOGIN_REMEMBER_EMAIL_KEY = "AIPLAZA_login_remember_email";
 const LOGIN_COOLDOWN_SECONDS = 30;
@@ -29,7 +28,7 @@ export default function Login() {
   }, [defaultSettings, setLocaleAndTheme]);
 
   const handleLoginSuccess = async (access_token: string) => {
-    setToken(access_token); // memory only (auth store); never persist to localStorage/sessionStorage
+    setToken(access_token);
     await loadUser();
     navigate(returnTo);
   };
@@ -75,7 +74,6 @@ export default function Login() {
       : { email, password, auto_login: autoLogin };
 
     const doLogin = async () => {
-      await fetchCsrfToken();
       const data = await loginMutation.mutateAsync(payload);
       if (data.pending_token) {
         setPendingToken(data.pending_token);
@@ -122,8 +120,6 @@ export default function Login() {
         setCooldownSecondsRemaining(LOGIN_COOLDOWN_SECONDS);
       } else if (axErr.response?.status === 401) {
         setError(pendingToken ? t("login.errorBad2FA") : t("login.errorBadCredentials"));
-      } else if (axErr.response?.status === 403) {
-        setError(t("login.errorCsrf"));
       } else {
         setError(t("login.errorUnknown"));
       }

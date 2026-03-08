@@ -10,3 +10,4 @@ class DevConfig(BaseConfig):
 
     api_port: int = 8010
     database_pool_pre_ping: bool = False  # dev: gyorsabb első kérés (nincs extra ping round-trip)
+    cookie_secure: bool = False  # HTTP (demo.local:5173) mellett a cookie csak Secure=False-ként tárolódik

@@ -1,3 +1,7 @@
+/**
+ * Axios instance for API calls. Global retry strategy is applied in React Query (queryClient):
+ * queries retry with exponential backoff; direct axios calls (auth, CSRF) are not retried.
+ */
 import axios, { type InternalAxiosRequestConfig } from "axios";
 import { useAuthStore } from "../store/authStore";
 import { getSafeLoginRedirect } from "../utils/loginRedirect";

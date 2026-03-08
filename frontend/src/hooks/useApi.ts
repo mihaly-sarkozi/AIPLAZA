@@ -2,6 +2,7 @@ import {
   useQuery,
   useMutation,
   useQueryClient,
+  useSuspenseQuery,
   type UseQueryOptions,
   type UseMutationOptions,
 } from "@tanstack/react-query";
@@ -10,17 +11,26 @@ import { useAuthStore } from "../store/authStore";
 
 // ----- Auth / settings (unauthenticated or public) -----
 
+const defaultSettingsQueryOptions = {
+  queryKey: ["auth", "default-settings"] as const,
+  queryFn: async () => {
+    const res = await api.get("/auth/default-settings");
+    return res.data as { locale?: string; theme?: string };
+  },
+};
+
 export function useDefaultSettings(
   options?: Omit<UseQueryOptions<{ locale?: string; theme?: string }>, "queryKey" | "queryFn">
 ) {
   return useQuery({
-    queryKey: ["auth", "default-settings"],
-    queryFn: async () => {
-      const res = await api.get("/auth/default-settings");
-      return res.data as { locale?: string; theme?: string };
-    },
+    ...defaultSettingsQueryOptions,
     ...options,
   });
+}
+
+/** Suspense-based: suspend until default settings are loaded. Wrap in <Suspense>. */
+export function useDefaultSettingsSuspense() {
+  return useSuspenseQuery(defaultSettingsQueryOptions);
 }
 
 export function useLoginMutation(
@@ -65,17 +75,26 @@ export function useSetPasswordMutation(
 
 // ----- Settings (owner) -----
 
+const settingsQueryOptions = {
+  queryKey: ["settings"] as const,
+  queryFn: async () => {
+    const res = await api.get("/settings");
+    return res.data as { two_factor_enabled?: boolean };
+  },
+};
+
 export function useSettings(options?: Omit<UseQueryOptions<{ two_factor_enabled?: boolean }>, "queryKey" | "queryFn">) {
   const user = useAuthStore((s) => s.user);
   return useQuery({
-    queryKey: ["settings"],
-    queryFn: async () => {
-      const res = await api.get("/settings");
-      return res.data as { two_factor_enabled?: boolean };
-    },
+    ...settingsQueryOptions,
     enabled: user?.role === "owner",
     ...options,
   });
+}
+
+/** Suspense-based: suspend until settings are loaded. Only mount when user is owner. Wrap in <Suspense>. */
+export function useSettingsSuspense() {
+  return useSuspenseQuery(settingsQueryOptions);
 }
 
 export function usePatchSettingsMutation(
