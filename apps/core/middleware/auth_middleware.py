@@ -37,44 +37,33 @@ def _get_header(scope: Scope, name: str) -> str | None:
 
 
 def _user_to_json(user: User) -> str:
-    def _dt(d):
-        return d.isoformat() if d else None
+    """Cache: csak authhoz kell (password_hash soha ne kerüljön cache-be)."""
     return json.dumps({
         "id": user.id,
-        "email": user.email,
-        "password_hash": user.password_hash,
-        "is_active": user.is_active,
         "role": user.role,
-        "created_at": _dt(user.created_at),
-        "name": user.name,
-        "registration_completed_at": _dt(getattr(user, "registration_completed_at", None)),
-        "failed_login_attempts": getattr(user, "failed_login_attempts", 0),
+        "is_active": user.is_active,
+        "security_version": getattr(user, "security_version", 0),
         "preferred_locale": getattr(user, "preferred_locale", None),
         "preferred_theme": getattr(user, "preferred_theme", None),
-        "security_version": getattr(user, "security_version", 0),
     })
 
 
 def _user_from_json(s: str) -> User | None:
+    """Cache-ből User összerakása: csak cache-ben tárolt mezők; email/password_hash üres (nem tároljuk)."""
     try:
         d = json.loads(s)
     except (json.JSONDecodeError, TypeError):
         return None
-    def _parse_dt(v):
-        if not v:
-            return None
-        return datetime.fromisoformat(v.replace("Z", "+00:00"))
-    created = _parse_dt(d.get("created_at")) or datetime.now(timezone.utc)
     return User(
         id=d.get("id"),
-        email=d.get("email", ""),
-        password_hash=d.get("password_hash", ""),
+        email="",
+        password_hash="",
         is_active=bool(d.get("is_active", True)),
         role=d.get("role", "user"),
-        created_at=created,
-        name=d.get("name"),
-        registration_completed_at=_parse_dt(d.get("registration_completed_at")),
-        failed_login_attempts=d.get("failed_login_attempts", 0),
+        created_at=datetime.now(timezone.utc),
+        name=None,
+        registration_completed_at=None,
+        failed_login_attempts=0,
         preferred_locale=d.get("preferred_locale"),
         preferred_theme=d.get("preferred_theme"),
         security_version=d.get("security_version", 0),

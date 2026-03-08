@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback, useLayoutEffect } from "react
 import { VariableSizeList as List } from "react-window";
 import { useAuthStore } from "../../../store/authStore";
 import { sanitizeMessage } from "../../../utils/sanitize";
-import { getChatWsUrl } from "../api/chatWs";
+import { ensureChatWsToken, getChatWsUrl } from "../api/chatWs";
 import ChatMessage from "../components/ChatMessage";
 
 const MAX_CHAT_MESSAGES = 100;
@@ -115,11 +115,15 @@ export default function ChatPage() {
     });
   }, []);
 
-  const ensureConnection = useCallback((): WebSocket | null => {
+  const ensureConnection = useCallback(async (): Promise<WebSocket | null> => {
     if (!token) return null;
     if (wsRef.current?.readyState === WebSocket.OPEN) return wsRef.current;
-    const url = getChatWsUrl(token);
-    if (!url) return null;
+    try {
+      await ensureChatWsToken();
+    } catch {
+      return null;
+    }
+    const url = getChatWsUrl();
     const ws = new WebSocket(url);
     wsRef.current = ws;
     return ws;
@@ -134,7 +138,7 @@ export default function ChatPage() {
     };
   }, []);
 
-  const send = useCallback(() => {
+  const send = useCallback(async () => {
     const el = inputRef.current;
     const raw = el?.value?.trim() ?? "";
     if (!raw || loading) return;
@@ -146,7 +150,7 @@ export default function ChatPage() {
     setLoading(true);
     appendMessage({ role: "assistant", text: "" });
 
-    const ws = ensureConnection();
+    const ws = await ensureConnection();
     if (!ws) {
       setMessages((prev) => {
         const next = [...prev];

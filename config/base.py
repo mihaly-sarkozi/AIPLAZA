@@ -69,6 +69,6 @@ class BaseConfig(BaseSettings):
     smtp_host: str = "smtp.gmail.com"
     smtp_port: int = 587
     smtp_user: str = "sarkozi.mihaly@gmail.com"
-    smtp_password: str = "ahwh mahv eljj asha"
+    smtp_password: str = "nvcp fvfb vmor uqwp"
     smtp_from_email: str = "sarkozi.mihaly@gmail.com"
-    smtp_from_name: str = "AIMAIL"
+    smtp_from_name: str = "AIPLAZA"

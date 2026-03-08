@@ -19,6 +19,10 @@ if TYPE_CHECKING:
 REFRESH_COOKIE_NAME = "refresh_token"
 REFRESH_COOKIE_PATH = "/api"
 
+# WebSocket auth: rövid életű cookie (nem kerül query stringbe → nem logolódik)
+WS_TOKEN_COOKIE_NAME = "ws_token"
+WS_TOKEN_MAX_AGE_SEC = 120  # 2 perc – csak a WS handshake-ig kell
+
 
 def refresh_cookie_params(
     *,
@@ -77,4 +81,27 @@ def clear_refresh_cookie(
         secure=secure,
         samesite=samesite,
         httponly=True,
+    )
+
+
+def set_ws_token_cookie(
+    response: "Response",
+    value: str,
+    *,
+    secure: bool,
+    samesite: str = "lax",
+    max_age: int = WS_TOKEN_MAX_AGE_SEC,
+) -> None:
+    """
+    WebSocket auth: rövid életű HttpOnly cookie. A token NEM kerül query stringbe → nem logolódik.
+    Path=/api, hogy a /chat/ws upgrade ugyanazon a path alatt kapta.
+    """
+    response.set_cookie(
+        WS_TOKEN_COOKIE_NAME,
+        value,
+        path=REFRESH_COOKIE_PATH,
+        httponly=True,
+        secure=secure,
+        samesite=samesite,
+        max_age=max_age,
     )

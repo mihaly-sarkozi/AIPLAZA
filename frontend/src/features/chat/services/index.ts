@@ -1,1 +1,1 @@
-export { getChatWsUrl } from "../api/chatWs";
+export { ensureChatWsToken, getChatWsUrl } from "../api/chatWs";

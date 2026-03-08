@@ -1,8 +1,12 @@
 # apps/chat/presentation/chat_router.py
 import json
-from fastapi import APIRouter, Depends, Request, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi.responses import Response
+
+from config.settings import settings
 from apps.core.middleware.rate_limit_middleware import limiter
 from apps.core.security.auth_dependencies import get_current_user, validate_ws_token
+from apps.core.security.cookie_policy import set_ws_token_cookie
 from apps.users.domain.user import User
 
 from apps.chat.adapter.http.request import AskRequest
@@ -11,6 +15,28 @@ from apps.chat.adapter.http.response import AskResponse
 from apps.core.di import get_chat_service, set_tenant_context_from_request
 
 router = APIRouter()
+
+@router.get("/chat/ws-token", dependencies=[Depends(set_tenant_context_from_request)])
+async def chat_ws_token(request: Request, current_user: User = Depends(get_current_user)):
+    """
+    WebSocket auth: Bearer token → ws_token HttpOnly cookie (rövid életű).
+    A frontend ezt hívja credentials-szel; utána a /chat/ws kapcsolat a cookie-t küldi (token nem kerül URL-be/logokba).
+    """
+    auth = request.headers.get("Authorization") or ""
+    if not auth.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Missing or invalid Authorization")
+    token = auth[7:].strip()
+    if not token:
+        raise HTTPException(status_code=401, detail="Missing token")
+    response = Response(status_code=204)
+    set_ws_token_cookie(
+        response,
+        token,
+        secure=settings.cookie_secure,
+        samesite=getattr(settings, "cookie_samesite", "lax"),
+    )
+    return response
+
 
 @router.post("/chat", response_model=AskResponse, dependencies=[Depends(set_tenant_context_from_request)])
 @limiter.limit("30/minute")
@@ -27,10 +53,10 @@ async def chat(
 @router.websocket("/chat/ws")
 async def chat_ws(websocket: WebSocket):
     """
-    WebSocket chat: token a query param (token=xxx), opcionálisan tenant=yyy.
-    Üzenet formátum: {"question": "..."}. A szerver streameli a választ: {"chunk": "..."}, majd {"done": true}.
+    WebSocket chat: token HttpOnly cookie (ws_token). Query param NINCS (biztonság: ne kerüljön logokba).
+    Opcionálisan tenant=yyy query. Üzenet: {"question": "..."}; válasz: {"chunk": "..."}, majd {"done": true}.
     """
-    token = websocket.query_params.get("token")
+    token = websocket.cookies.get("ws_token")
     tenant_slug = websocket.query_params.get("tenant") or None
     user = await validate_ws_token(token, tenant_slug)
     if not user or not getattr(user, "is_active", True):
