@@ -13,7 +13,8 @@ from apps.knowledge.infrastructure.db.models import KBORM  # noqa: F401 – know
 
 def create_tenant_schema(engine: Engine, slug: str) -> None:
     """Létrehozza a tenant sémát és benne az összes táblát (users, sessions, settings, two_factor_codes, pending_2fa_logins)."""
-    safe_slug = "".join(c for c in slug if c.isalnum() or c == "_")
+    # Slug: betű, szám, aláhúzás, kötőjel (pl. ferike-hu). PostgreSQL idézett azonosítóban megengedett.
+    safe_slug = "".join(c for c in slug if c.isalnum() or c in "_-")
     if safe_slug != slug:
         raise ValueError(f"Érvénytelen tenant slug: {slug!r}")
 

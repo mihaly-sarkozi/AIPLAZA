@@ -61,7 +61,7 @@ def main():
     # Tenant séma + táblák (users, sessions, ...) – script kontextusban nincs contextvar
     create_tenant_schema(engine, tenant_slug)
 
-    safe_slug = "".join(c for c in tenant_slug if c.isalnum() or c == "_")
+    safe_slug = "".join(c for c in tenant_slug if c.isalnum() or c in "_-")
     if safe_slug != tenant_slug:
         print("Érvénytelen TENANT_SLUG:", tenant_slug)
         return

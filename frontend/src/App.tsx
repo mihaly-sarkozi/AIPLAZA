@@ -6,9 +6,12 @@ import ProtectedRoute from "./features/auth/components/ProtectedRoute";
 import { useAuthStore } from "./store/authStore";
 import { fetchCsrfToken } from "./api/axiosClient";
 import { useLocaleStore } from "./i18n";
+import { isTenantSubdomain } from "./utils/domain";
 import type { Locale } from "./i18n";
 import type { Theme } from "./i18n";
 
+const LandingPage = lazy(() => import("./features/landing/pages/LandingPage"));
+const DemoPage = lazy(() => import("./features/demo/pages/DemoPage"));
 const LoginPage = lazy(() => import("./features/auth/pages/LoginPage"));
 const ForgotPasswordPage = lazy(() => import("./features/auth/pages/ForgotPasswordPage"));
 const SetPasswordPage = lazy(() => import("./features/auth/pages/SetPasswordPage"));
@@ -34,6 +37,17 @@ const GuardFallback = () => (
     </div>
 );
 
+/** "/" útvonal: fődomain → landing; tenant aldomain → bejelentkezés alapján /chat vagy /login */
+function RootRoute() {
+    const { user, loadingUser } = useAuthStore();
+    if (isTenantSubdomain()) {
+        if (loadingUser) return <GuardFallback />;
+        if (user) return <Navigate to="/chat" replace />;
+        return <Navigate to="/login?redirect=%2Fchat" replace />;
+    }
+    return <LandingPage />;
+}
+
 export default function App() {
     const loadUser = useAuthStore((s) => s.loadUser);
     const user = useAuthStore((s) => s.user);
@@ -43,6 +57,8 @@ export default function App() {
         const path = window.location.pathname || "";
         (async () => {
             await fetchCsrfToken();
+            if (path === "/demo") return;
+            if (path === "/" && !isTenantSubdomain()) return;
             if (path === "/login" || path.startsWith("/forgot") || path.startsWith("/set-password")) {
                 useAuthStore.getState().setToken(null);
                 useAuthStore.setState({ user: null, loadingUser: false });
@@ -69,7 +85,9 @@ export default function App() {
         <BrowserRouter>
             <Suspense fallback={<PageFallback />}>
                 <Routes>
-                    {/* LOGIN / REGISZTRÁCIÓ (auth nélkül) */}
+                    {/* NYILVÁNOS: landing (fődomain), demo; tenant aldomain "/" → /chat vagy /login */}
+                    <Route path="/" element={<RootRoute />} />
+                    <Route path="/demo" element={<DemoPage />} />
                     <Route path="/login" element={<LoginPage />} />
                     <Route path="/forgot" element={<ForgotPasswordPage />} />
                     <Route path="/set-password" element={<SetPasswordPage />} />

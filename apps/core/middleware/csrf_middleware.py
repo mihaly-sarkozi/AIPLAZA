@@ -52,7 +52,8 @@ class CSRFMiddleware:
         if method not in ("POST", "PUT", "PATCH", "DELETE") or not path.startswith("/api"):
             await self.app(scope, receive, send)
             return
-        if path == self.skip_path:
+        if path == self.skip_path or path.startswith("/api/public/"):
+            # Nyilvános végpontok (check-slug, demo-signup): nincs bejelentkezett session, CSRF kivétel
             await self.app(scope, receive, send)
             return
 

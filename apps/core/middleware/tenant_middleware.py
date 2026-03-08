@@ -213,7 +213,7 @@ class TenantMiddleware:
 
         host = (_get_header(scope, "host") or "").split(":")[0].strip().lower()
         if not host:
-            if scope.get("path", "").startswith("/api"):
+            if scope.get("path", "").startswith("/api") and not scope.get("path", "").startswith("/api/public/"):
                 _timing("MIDDLEWARE TenantMiddleware OUT  (400 no host)")
                 await _send_json_response(
                     send, 400,
@@ -261,7 +261,8 @@ class TenantMiddleware:
             state["tenant_status"] = status
             state["tenant_config"] = config
             current_tenant_schema.set(tenant.slug)
-        elif scope.get("path", "").startswith("/api"):
+        elif scope.get("path", "").startswith("/api") and not scope.get("path", "").startswith("/api/public/"):
+            # /api/public/* (check-slug, demo-signup) tenant nélkül is elérhető
             _timing(f"MIDDLEWARE TenantMiddleware OUT  (400)")
             await _send_json_response(
                 send, 400,

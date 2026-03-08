@@ -1,2 +1,10 @@
-/** KB API calls are in hooks/useKb via shared axiosClient. */
-export { default as api } from "../../../api/axiosClient";
+export {
+  getKbList,
+  createKb,
+  updateKb,
+  deleteKb,
+  type KbItem,
+  type CreateKbPayload,
+  type UpdateKbPayload,
+  type DeleteKbPayload,
+} from "../../../api/services/kbService";

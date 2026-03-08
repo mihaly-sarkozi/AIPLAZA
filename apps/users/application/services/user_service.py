@@ -53,14 +53,17 @@ class UserService:
         role: str = "user",
         request_base_url: str | None = None,
     ) -> User:
-        """User létrehozása jelszó nélkül (is_active=False); emailben megy a invite_ttl_hours érvényes regisztrációs link. Owner csak az első regisztráló lehet."""
+        """User létrehozása jelszó nélkül (is_active=False); emailben megy a invite_ttl_hours érvényes regisztrációs link. Owner: csak az első (telepítésnél vagy set_password-nál)."""
         if not is_valid_email(email):
             raise ValueError("Érvénytelen email cím.")
         email = (email or "").strip()
         if self.user_repository.get_by_email(email):
             raise ValueError("Email already exists")
-        if role not in ["user", "admin"]:
-            raise ValueError("Invalid role. Must be 'user' or 'admin'")
+        if role == "owner":
+            if self.user_repository.exists_owner():
+                raise ValueError("Invalid role. Owner already exists")
+        elif role not in ["user", "admin"]:
+            raise ValueError("Invalid role. Must be 'user', 'admin' or 'owner' (owner only if none yet)")
         placeholder_password = secrets.token_urlsafe(32)
         password_hash = pwd_hasher.hash(placeholder_password)
         user = User.new(

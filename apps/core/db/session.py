@@ -23,7 +23,8 @@ def make_session_factory(dsn: str, *, pool_pre_ping: bool = True):
 
         def __enter__(self):
             if self._schema:
-                safe = "".join(c for c in self._schema if c.isalnum() or c == "_")
+                # Sémanév: betű, szám, aláhúzás, kötőjel (pl. ferike-hu) – PostgreSQL idézett azonosító
+                safe = "".join(c for c in self._schema if c.isalnum() or c in "_-")
                 if safe == self._schema:
                     self._session.execute(text(f'SET search_path TO "{safe}"'))
             else:

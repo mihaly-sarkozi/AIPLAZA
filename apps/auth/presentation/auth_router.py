@@ -362,15 +362,18 @@ def me(
     user: User = Depends(get_current_user),
     user_repo=Depends(get_user_repository),
 ):
+    # Mindig teljes user DB-ből (auth cache-ből jövő user.email/name üres)
+    full = user_repo.get_by_id(user.id)
+    u = full if full else user
     owner = user_repo.get_owner()
-    locale, theme = _effective_locale_theme(user, owner)
+    locale, theme = _effective_locale_theme(u, owner)
     return {
-        "id": user.id,
-        "email": user.email,
-        "role": user.role,
-        "name": getattr(user, "name", None),
-        "preferred_locale": getattr(user, "preferred_locale", None),
-        "preferred_theme": getattr(user, "preferred_theme", None),
+        "id": u.id,
+        "email": getattr(u, "email", "") or "",
+        "role": u.role,
+        "name": getattr(u, "name", None),
+        "preferred_locale": getattr(u, "preferred_locale", None),
+        "preferred_theme": getattr(u, "preferred_theme", None),
         "locale": locale,
         "theme": theme,
     }

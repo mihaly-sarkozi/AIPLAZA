@@ -58,6 +58,8 @@ class AuditServiceProxy:
         *,
         tenant_slug: Optional[str] = None,
     ) -> None:
+        # Ha a hívó nem adta meg, a workernek kell a tenant séma (audit_log tenant-scoped)
+        slug = tenant_slug if tenant_slug is not None else current_tenant_schema.get(None)
         try:
             self._queue.put_nowait(
                 {
@@ -67,7 +69,7 @@ class AuditServiceProxy:
                     "details": details,
                     "ip": ip,
                     "user_agent": user_agent,
-                    "tenant_slug": tenant_slug,
+                    "tenant_slug": slug,
                 }
             )
         except queue.Full:

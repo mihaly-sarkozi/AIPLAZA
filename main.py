@@ -40,7 +40,7 @@ from apps.core.middleware.request_timing_middleware import RequestTimingMiddlewa
 from apps.core.di import get_token_service, get_login_service, get_tenant_repository
 from apps.core.middleware.rate_limit_middleware import limiter
 from apps.chat.presentation import chat_router
-from apps.auth.presentation import auth_router
+from apps.auth.presentation import auth_router, public_router
 from apps.users.presentation import user_router
 from apps.settings.presentation import settings_router
 from apps.knowledge.presentation import knowledge_router
@@ -148,8 +148,8 @@ else:
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=_cors_origins,
-    allow_origin_regex=_cors_origin_regex,
+    allow_origins=settings.cors_origins.split(","),
+    allow_origin_regex=settings.cors_origin_regex,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["Authorization", "Content-Type", "X-CSRF-Token"],
@@ -298,6 +298,7 @@ erre az alap URL-re épít. A tag-ek segítenek a dokumentáció olvashatóság�
 """
 
 app.include_router(auth_router.router, prefix="/api", tags=["auth"])
+app.include_router(public_router.router, prefix="/api", tags=["public"])
 app.include_router(chat_router.router, prefix="/api", tags=["chat"])
 app.include_router(user_router.router, prefix="/api", tags=["users"])
 app.include_router(settings_router.router, prefix="/api", tags=["settings"])

@@ -9,18 +9,20 @@ class BaseConfig(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="", case_sensitive=False)
 
     # API (api_host = bind cím, pl. 0.0.0.0; port pl. 8001)
-    api_host: str = "demo.local"
+    api_host: str = "0.0.0.0"
     api_port: int = 8001
 
     # CORS: frontend origin(s), vesszővel elválasztva. acme.local esetén pl. :5173 (Vite)
-    cors_origins: str = "http://demo.local:5173,http://127.0.0.1:8001,http://localhost:5173"
+    cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
+    cors_origin_regex: str = r"https?://[^.]+\.app\.test(:\d+)?"
+    
     # Jelszó beállító link (emailben): path + opcionális frontend port (ha a kérés a backend portjára jön, pl. proxy).
     # Pl. path=/set-password, port=5173 → link: http://demo.local:5173/set-password?token=...
     frontend_set_password_path: str = "/set-password"
     frontend_set_password_port: int | None = 5173  # A link ezt a portot használja (frontend). Élesben írd felül .env-ben (pl. 443) vagy töröld.
 
     # Multi-tenant: base domain a Host-ból (acme.local → base=local → slug=acme)
-    tenant_base_domain: str = "local"
+    tenant_base_domain: str = "app.test"
 
     # DB: élesben .env-ben (database_url – jelszó ne legyen kódban). PostgreSQL.
     database_url: str = "postgresql+psycopg2://sarkozimihaly:erosjelszo123@localhost:5432/aiplaza"
@@ -35,7 +37,7 @@ class BaseConfig(BaseSettings):
     redis_url: str = ""
 
     # Auth/JWT: élesben .env-ben JWT_SECRET kötelező (pl. openssl rand -hex 64)
-    jwt_secret: str = "5g6e7c14987t89bb845d1b69a5385a7afa8ef05efc08436a2554e0af4ebd75d89"
+    jwt_secret: str = "1f40fac3f70be5f48cf91de59abe1a4ce3b7ec31c5b109a25b79ae46bf08b34a97f9f174ad1d5c099cf6143b7d686239c87591c0ea5fab93a1371b8f369ea810"
     # jwt_audience: opcionális "aud" claim; ha megadva, token verify ellenőrzi (policy: iss + aud + nbf)
     jwt_audience: str = ""
     # Cookie: Secure = csak HTTPS (élesben True); SameSite = lax | strict (subdomain izoláció + CSRF)
