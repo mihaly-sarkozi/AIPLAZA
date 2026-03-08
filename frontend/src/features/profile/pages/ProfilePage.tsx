@@ -1,19 +1,18 @@
 import { useState, useEffect, useRef } from "react";
-import { useTranslation } from "../i18n";
-import type { Locale } from "../i18n";
-import type { Theme } from "../i18n";
-import { useAuthStore } from "../store/authStore";
-import { usePatchMeMutation } from "../hooks/useApi";
-import { getApiErrorMessage } from "../utils/getApiErrorMessage";
-import { validateRequired } from "../utils/formValidation";
+import { toast } from "sonner";
+import { useTranslation } from "../../../i18n";
+import type { Locale } from "../../../i18n";
+import type { Theme } from "../../../i18n";
+import { useAuthStore } from "../../../store/authStore";
+import { usePatchMeMutation } from "../hooks";
+import { getApiErrorMessage } from "../../../utils/getApiErrorMessage";
+import { validateRequired } from "../../../utils/formValidation";
 
 const LOCALE_OPTIONS: { value: Locale; label: string }[] = [
   { value: "hu", label: "Magyar" },
   { value: "en", label: "English" },
   { value: "es", label: "Español" },
 ];
-
-const SAVED_MESSAGE_MS = 2000;
 
 export default function ProfilePage() {
   const { t, locale, setLocale, theme, setTheme } = useTranslation();
@@ -22,11 +21,9 @@ export default function ProfilePage() {
   const originalNameRef = useRef("");
   const [preferredLocale, setPreferredLocale] = useState<Locale>(locale);
   const [preferredTheme, setPreferredTheme] = useState<Theme>(theme);
-  const [savedMessage, setSavedMessage] = useState(false);
   const [nameError, setNameError] = useState<string | null>(null);
   const patchMe = usePatchMeMutation();
   const saving = patchMe.isPending;
-  const savedTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (user) {
@@ -38,25 +35,10 @@ export default function ProfilePage() {
     }
   }, [user, locale, theme]);
 
-  useEffect(() => {
-    return () => {
-      if (savedTimeoutRef.current) clearTimeout(savedTimeoutRef.current);
-    };
-  }, []);
-
-  const showSavedBriefly = () => {
-    setSavedMessage(true);
-    if (savedTimeoutRef.current) clearTimeout(savedTimeoutRef.current);
-    savedTimeoutRef.current = setTimeout(() => {
-      setSavedMessage(false);
-      savedTimeoutRef.current = null;
-    }, SAVED_MESSAGE_MS);
-  };
-
   const save = (payload: { name?: string | null; preferred_locale?: Locale; preferred_theme?: Theme }) => {
     if (!user) return;
     const body = {
-      name: payload.name !== undefined ? payload.name : name.trim() || null,
+      name: payload.name !== undefined ? (payload.name ?? undefined) : (name.trim() || undefined),
       preferred_locale: payload.preferred_locale ?? preferredLocale,
       preferred_theme: payload.preferred_theme ?? preferredTheme,
     };
@@ -71,11 +53,10 @@ export default function ProfilePage() {
           originalNameRef.current = newName;
           setNameError(null);
         }
-        showSavedBriefly();
+        toast.success(t("profile.saved"));
       },
       onError: (err: unknown) => {
-        setSavedMessage(false);
-        alert(getApiErrorMessage(err) ?? t("common.errorGeneric"));
+        toast.error(getApiErrorMessage(err) ?? t("common.errorGeneric"));
       },
     });
   };
@@ -109,11 +90,6 @@ export default function ProfilePage() {
       <h1 className="text-3xl font-bold mb-6 text-[var(--color-foreground)]">{t("profile.title")}</h1>
 
       <div className="w-full space-y-6 rounded-lg p-6 border border-[var(--color-border)]" style={{ backgroundColor: 'var(--color-card)' }}>
-        {savedMessage && (
-          <div className="p-3 rounded bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 text-green-700 dark:text-green-300 text-sm">
-            {t("profile.saved")}
-          </div>
-        )}
         <div>
           <label className="block mb-1 text-[var(--color-label)]">{t("profile.nameLabel")}</label>
           {nameError && (

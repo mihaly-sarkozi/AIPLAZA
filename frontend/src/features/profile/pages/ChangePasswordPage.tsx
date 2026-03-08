@@ -1,105 +1,66 @@
 import { useState } from "react";
+import { toast } from "sonner";
 import { useTranslation } from "../../../i18n";
-import { useChangePasswordMutation } from "../hooks/useUsers";
+import { useChangePasswordMutation } from "../hooks";
 import { validateRequired, validatePassword } from "../../../utils/formValidation";
+import { getApiErrorMessage } from "../../../utils/getApiErrorMessage";
 
-interface ChangePasswordModalProps {
-  isOpen: boolean;
-  onClose: () => void;
-}
-
-export default function ChangePasswordModal({ isOpen, onClose }: ChangePasswordModalProps) {
+export default function ChangePasswordPage() {
   const { t } = useTranslation();
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
-  const [error, setError] = useState("");
-  const [success, setSuccess] = useState(false);
   const changePasswordMutation = useChangePasswordMutation();
   const saving = changePasswordMutation.isPending;
 
-  const getErrorMsg = (err: unknown) => {
-    const res = err as { response?: { data?: { detail?: string | { message?: string } } } };
-    const detail = res.response?.data?.detail;
-    return typeof detail === "string"
-      ? detail
-      : (detail && typeof detail === "object" && "message" in detail ? String((detail as { message?: string }).message) : null) || t("common.errorGeneric");
-  };
-
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    setError("");
     const cur = currentPassword.trim();
     const newP = newPassword.trim();
     const conf = confirmPassword.trim();
     const requiredCur = validateRequired(cur);
     if (requiredCur) {
-      setError(t(requiredCur));
+      toast.error(t(requiredCur));
       return;
     }
     const requiredNew = validateRequired(newP);
     if (requiredNew) {
-      setError(t(requiredNew));
+      toast.error(t(requiredNew));
       return;
     }
     const requiredConf = validateRequired(conf);
     if (requiredConf) {
-      setError(t(requiredConf));
+      toast.error(t(requiredConf));
       return;
     }
     if (newP !== conf) {
-      setError(t("profile.passwordMismatch"));
+      toast.error(t("profile.passwordMismatch"));
       return;
     }
     const passwordError = validatePassword(newP);
     if (passwordError) {
-      setError(t(passwordError));
+      toast.error(t(passwordError));
       return;
     }
     changePasswordMutation.mutate(
       { current_password: cur, new_password: newP },
       {
         onSuccess: () => {
-          setSuccess(true);
+          toast.success(t("profile.passwordChanged"));
           setCurrentPassword("");
           setNewPassword("");
           setConfirmPassword("");
-          setTimeout(() => {
-            onClose();
-            setSuccess(false);
-          }, 1500);
         },
-        onError: (err) => setError(getErrorMsg(err)),
+        onError: (err: unknown) => toast.error(getApiErrorMessage(err) ?? t("common.errorGeneric")),
       }
     );
   };
 
-  const handleCancel = () => {
-    if (!saving) {
-      setError("");
-      setCurrentPassword("");
-      setNewPassword("");
-      setConfirmPassword("");
-      onClose();
-    }
-  };
-
-  if (!isOpen) return null;
-
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-      <div className="bg-[var(--color-card)] border border-[var(--color-border)] p-6 rounded-lg w-full max-w-md shadow-lg">
-        <h2 className="text-2xl font-bold mb-4 text-[var(--color-foreground)]">{t("profile.changePassword")}</h2>
-        {success && (
-          <div className="mb-4 p-3 rounded bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 text-green-700 dark:text-green-300 text-sm">
-            {t("profile.passwordChanged")}
-          </div>
-        )}
-        {error && (
-          <div className="mb-4 p-3 rounded bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-300 text-sm">
-            {error}
-          </div>
-        )}
+    <div className="p-6 w-full min-h-full bg-[var(--color-background)] flex flex-col items-center justify-center">
+      <h1 className="text-3xl font-bold mb-6 text-[var(--color-foreground)]">{t("profile.changePassword")}</h1>
+
+      <div className="w-full max-w-md bg-[var(--color-card)] border border-[var(--color-border)] rounded-lg p-6">
         <form onSubmit={handleSubmit} className="space-y-4" noValidate>
           <div>
             <label className="block mb-1 text-[var(--color-label)]">{t("profile.currentPassword")}{t("common.required")}</label>
@@ -109,7 +70,7 @@ export default function ChangePasswordModal({ isOpen, onClose }: ChangePasswordM
               onChange={(e) => setCurrentPassword(e.target.value)}
               className="w-full p-2 rounded bg-[var(--color-input-bg)] border border-[var(--color-border)] text-[var(--color-foreground)]"
               autoComplete="current-password"
-              disabled={saving || success}
+              disabled={saving}
               required
             />
           </div>
@@ -121,7 +82,7 @@ export default function ChangePasswordModal({ isOpen, onClose }: ChangePasswordM
               onChange={(e) => setNewPassword(e.target.value)}
               className="w-full p-2 rounded bg-[var(--color-input-bg)] border border-[var(--color-border)] text-[var(--color-foreground)]"
               autoComplete="new-password"
-              disabled={saving || success}
+              disabled={saving}
               required
             />
             <p className="text-sm text-[var(--color-muted)] mt-1">{t("profile.passwordRules")}</p>
@@ -134,27 +95,18 @@ export default function ChangePasswordModal({ isOpen, onClose }: ChangePasswordM
               onChange={(e) => setConfirmPassword(e.target.value)}
               className="w-full p-2 rounded bg-[var(--color-input-bg)] border border-[var(--color-border)] text-[var(--color-foreground)]"
               autoComplete="new-password"
-              disabled={saving || success}
+              disabled={saving}
               required
             />
           </div>
-          <div className="flex gap-2 pt-2 justify-end">
-            <button
-              type="button"
-              onClick={handleCancel}
-              disabled={saving || success}
-              className="bg-[var(--color-card)] hover:opacity-80 text-[var(--color-foreground)] border border-[var(--color-border)] px-4 py-2 rounded disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {t("common.cancel")}
-            </button>
-            <button
-              type="submit"
-              disabled={saving || success}
-              className="bg-[var(--color-primary)] hover:opacity-90 text-[var(--color-on-primary)] px-4 py-2 rounded disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {saving ? t("common.loading") : t("common.save")}
-            </button>
-          </div>
+
+          <button
+            type="submit"
+            disabled={saving}
+            className="w-full py-2 rounded bg-[var(--color-primary)] text-[var(--color-on-primary)] hover:opacity-90 disabled:opacity-60 font-semibold"
+          >
+            {saving ? t("common.loading") : t("common.save")}
+          </button>
         </form>
       </div>
     </div>

@@ -1,7 +1,8 @@
 import { useMemo, useState } from "react";
-import { useTranslation } from "../../i18n";
-import { useLocaleStore } from "../../i18n";
-import { useAuthStore } from "../../store/authStore";
+import { toast } from "sonner";
+import { useTranslation } from "../../../i18n";
+import { useLocaleStore } from "../../../i18n";
+import { useAuthStore } from "../../../store/authStore";
 import {
   useUsers,
   useCreateUserMutation,
@@ -9,8 +10,8 @@ import {
   useDeleteUserMutation,
   useResendInviteMutation,
   type UserListItem,
-} from "../../hooks/useApi";
-import { getApiErrorMessage } from "../../utils/getApiErrorMessage";
+} from "../hooks/useUsers";
+import { getApiErrorMessage } from "../../../utils/getApiErrorMessage";
 
 type User = UserListItem & { pending_registration?: boolean };
 
@@ -75,6 +76,7 @@ export default function RolesPage() {
       { email: emailTrim, name: nameTrim, role: formData.role },
       {
         onSuccess: () => {
+          toast.success(t("profile.saved"));
           setShowCreateModal(false);
           resetForm();
           setCreateFormError(null);
@@ -86,7 +88,7 @@ export default function RolesPage() {
           if (axErr.response?.status === 400 && code === "email_already_exists") {
             setCreateFormError(t("roles.createErrorEmailExists"));
           } else {
-            alert(getApiErrorMessage(err) ?? t("roles.errorCreate"));
+            toast.error(getApiErrorMessage(err) ?? t("roles.errorCreate"));
           }
         },
       }
@@ -127,6 +129,7 @@ export default function RolesPage() {
     }
     updateUserMutation.mutate(payload, {
       onSuccess: () => {
+        toast.success(t("profile.saved"));
         setEditingUser(null);
         resetForm();
         setEditFormError(null);
@@ -138,7 +141,7 @@ export default function RolesPage() {
         if (axErr.response?.status === 400 && code === "email_already_exists") {
           setEditFormError(t("roles.createErrorEmailExists"));
         } else {
-          alert(getApiErrorMessage(err) ?? t("roles.errorUpdate"));
+          toast.error(getApiErrorMessage(err) ?? t("roles.errorUpdate"));
         }
       },
     });
@@ -146,22 +149,21 @@ export default function RolesPage() {
 
   const handleDelete = (userId: number): void => {
     deleteUserMutation.mutate(userId, {
-      onSuccess: () => setDeleteConfirmUser(null),
-      onError: (err: unknown) => {
-        alert(getApiErrorMessage(err) ?? t("roles.errorDelete"));
+      onSuccess: () => {
+        toast.success(t("common.delete") + " – OK");
+        setDeleteConfirmUser(null);
       },
+      onError: (err: unknown) => toast.error(getApiErrorMessage(err) ?? t("roles.errorDelete")),
     });
   };
 
   const handleResendInvite = (userId: number) => {
     resendInviteMutation.mutate(userId, {
       onSuccess: () => {
+        toast.success(t("roles.resendSuccess"));
         setResendConfirmUser(null);
-        alert(t("roles.resendSuccess"));
       },
-      onError: (err: unknown) => {
-        alert(getApiErrorMessage(err) ?? t("roles.resendError"));
-      },
+      onError: (err: unknown) => toast.error(getApiErrorMessage(err) ?? t("roles.resendError")),
     });
   };
 
@@ -325,7 +327,7 @@ export default function RolesPage() {
             </table>
           </div>
 
-          {/* Keskeny: kártyák – felső sor: státusz + szerepkör, jobbra kisebb dátum; név, alatta email; majd ikonok */}
+          {/* Keskeny: kártyák */}
           <div className="md:hidden space-y-3">
             {sortedUsers.map((user) => (
               <div key={user.id} className="bg-[var(--color-card)] border border-[var(--color-border)] rounded-lg p-4 space-y-2">
@@ -368,18 +370,18 @@ export default function RolesPage() {
                     {user.role === "owner" && currentUser?.role !== "owner" && (
                       <span className="text-[var(--color-muted)] text-xs">{t("roles.ownerOnlyEdit")}</span>
                     )}
-{user.id !== currentUser?.id && user.role !== "owner" && (
-                    <button
-                      type="button"
-                      onClick={() => setDeleteConfirmUser(user)}
-                      disabled={actionLoading}
-                      className="p-1.5 rounded hover:bg-red-100 dark:hover:bg-red-900/30 text-red-600 dark:text-red-400 disabled:opacity-50 disabled:cursor-not-allowed"
-                    title={t("common.delete")}
-                    aria-label={t("common.delete")}
-                    >
-                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
-                    </button>
-                  )}
+                    {user.id !== currentUser?.id && user.role !== "owner" && (
+                      <button
+                        type="button"
+                        onClick={() => setDeleteConfirmUser(user)}
+                        disabled={actionLoading}
+                        className="p-1.5 rounded hover:bg-red-100 dark:hover:bg-red-900/30 text-red-600 dark:text-red-400 disabled:opacity-50 disabled:cursor-not-allowed"
+                        title={t("common.delete")}
+                        aria-label={t("common.delete")}
+                      >
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                      </button>
+                    )}
                     {user.pending_registration && user.role !== "owner" && (
                       <button
                         type="button"
@@ -483,7 +485,7 @@ export default function RolesPage() {
         </div>
       )}
 
-      {/* Edit Modal – csak név és Aktív szerkeszthető; email/szerepkör nem */}
+      {/* Edit Modal */}
       {editingUser && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-[var(--color-card)] border border-[var(--color-border)] p-6 rounded-lg w-96 shadow-lg">
@@ -494,7 +496,6 @@ export default function RolesPage() {
               </div>
             )}
             <div className="space-y-4">
-              {/* Aktív kapcsoló – szabványos toggle (track + thumb) */}
               <div className="flex items-center justify-between gap-3">
                 <label htmlFor="edit-active-toggle" className="text-[var(--color-label)] font-medium cursor-pointer">
                   {t("roles.labelActive")}
@@ -616,7 +617,7 @@ export default function RolesPage() {
         </div>
       )}
 
-      {/* Törlés megerősítő ablak */}
+      {/* Delete confirm */}
       {deleteConfirmUser && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-[var(--color-card)] border border-[var(--color-border)] p-6 rounded-lg w-96 shadow-lg">
@@ -643,7 +644,7 @@ export default function RolesPage() {
         </div>
       )}
 
-      {/* Link újraküldés megerősítő ablak */}
+      {/* Resend invite confirm */}
       {resendConfirmUser && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-[var(--color-card)] border border-[var(--color-border)] p-6 rounded-lg w-96 shadow-lg">

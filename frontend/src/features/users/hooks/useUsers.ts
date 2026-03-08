@@ -5,26 +5,25 @@ import {
   type UseQueryOptions,
   type UseMutationOptions,
 } from "@tanstack/react-query";
-import api from "../../../api/axiosClient";
+import {
+  getUsers,
+  createUser,
+  updateUser,
+  deleteUser,
+  resendInvite,
+  patchMe,
+  changePassword,
+  type UserListItem,
+  type UpdateUserPayload,
+} from "../../../api/services/userService";
 import { queryKeys } from "../../../queryKeys";
 
-export type UserListItem = {
-  id: number;
-  email: string;
-  name?: string | null;
-  role: string;
-  is_active: boolean;
-  created_at?: string;
-  [key: string]: unknown;
-};
+export type { UserListItem, UpdateUserPayload };
 
 export function useUsers(options?: Omit<UseQueryOptions<UserListItem[]>, "queryKey" | "queryFn">) {
   return useQuery({
     queryKey: queryKeys.users,
-    queryFn: async () => {
-      const res = await api.get("/users");
-      return res.data as UserListItem[];
-    },
+    queryFn: getUsers,
     ...options,
   });
 }
@@ -34,32 +33,18 @@ export function useCreateUserMutation(
 ) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (body: { email: string; name?: string; role: string }) => {
-      const res = await api.post("/users", body);
-      return res.data as UserListItem;
-    },
+    mutationFn: createUser,
     onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.users }),
     ...options,
   });
 }
-
-export type UpdateUserPayload = {
-  id: number;
-  name?: string;
-  is_active?: boolean;
-  email?: string;
-  role?: string;
-};
 
 export function useUpdateUserMutation(
   options?: UseMutationOptions<UserListItem, Error, UpdateUserPayload>
 ) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async ({ id, ...body }: UpdateUserPayload) => {
-      const res = await api.put(`/users/${id}`, body);
-      return res.data as UserListItem;
-    },
+    mutationFn: updateUser,
     onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.users }),
     ...options,
   });
@@ -68,10 +53,7 @@ export function useUpdateUserMutation(
 export function useDeleteUserMutation(options?: UseMutationOptions<unknown, Error, number>) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (userId: number) => {
-      const res = await api.delete(`/users/${userId}`);
-      return res.data;
-    },
+    mutationFn: deleteUser,
     onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.users }),
     ...options,
   });
@@ -80,10 +62,7 @@ export function useDeleteUserMutation(options?: UseMutationOptions<unknown, Erro
 export function useResendInviteMutation(options?: UseMutationOptions<unknown, Error, number>) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (userId: number) => {
-      const res = await api.post(`/users/${userId}/resend-invite`);
-      return res.data;
-    },
+    mutationFn: resendInvite,
     onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.users }),
     ...options,
   });
@@ -98,10 +77,7 @@ export function usePatchMeMutation(
 ) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (body: { name?: string; preferred_locale?: string; preferred_theme?: string }) => {
-      const res = await api.patch("/auth/me", body);
-      return res.data;
-    },
+    mutationFn: patchMe,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.authMe });
     },
@@ -113,10 +89,7 @@ export function useChangePasswordMutation(
   options?: UseMutationOptions<unknown, Error, { current_password: string; new_password: string }>
 ) {
   return useMutation({
-    mutationFn: async (body: { current_password: string; new_password: string }) => {
-      const res = await api.post("/auth/me/change-password", body);
-      return res.data;
-    },
+    mutationFn: changePassword,
     ...options,
   });
 }

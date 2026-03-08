@@ -8,6 +8,7 @@ import { getSafeLoginRedirect } from "../utils/loginRedirect";
 import { getCsrfToken, setCsrfToken } from "../utils/csrf";
 import { useLocaleStore } from "../i18n";
 import { getApiErrorMessage } from "../utils/getApiErrorMessage";
+import { toast } from "sonner";
 
 // Dev proxy: baseURL legyen relatív (/api), hogy a kérés ugyanarra az originra menjen → refresh_token cookie (SameSite=Lax) elküldésre kerül.
 const api = axios.create({
@@ -63,7 +64,7 @@ function isPermissionsChanged(err: unknown): boolean {
 function redirectToLogin(err?: unknown): void {
   if (typeof window !== "undefined" && isPermissionsChanged(err)) {
     const msg = getApiErrorMessage(err) ?? "Változás történt a jogosultságokban. Jelentkezz be újra.";
-    alert(msg);
+    toast.error(msg);
   }
   useAuthStore.getState().logout();
   if (typeof window === "undefined") return;

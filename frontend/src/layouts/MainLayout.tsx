@@ -1,10 +1,10 @@
 import { useState, useEffect, lazy, Suspense } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import Navbar from "../components/Navbar";
-import ProfileModal from "../components/ProfileModal";
+import ProfileModal from "../features/profile/components/ProfileModal";
+import ChangePasswordModal from "../features/profile/components/ChangePasswordModal";
 
 const Footer = lazy(() => import("../components/Footer"));
-import ChangePasswordModal from "../components/ChangePasswordModal";
 import { Outlet } from "react-router-dom";
 
 export default function MainLayout() {

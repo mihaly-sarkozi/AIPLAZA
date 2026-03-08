@@ -1,5 +1,5 @@
 import { useTranslation } from "../../../i18n";
-import { useAuthStore } from "../../auth/state/authStore";
+import { useAuthStore } from "../../../store/authStore";
 import { useSettings, usePatchSettingsMutation } from "../hooks/useSettings";
 
 export default function SettingsPage() {

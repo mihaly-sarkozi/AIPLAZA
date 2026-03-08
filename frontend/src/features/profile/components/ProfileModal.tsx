@@ -2,8 +2,10 @@ import { useState, useEffect } from "react";
 import { useTranslation } from "../../../i18n";
 import type { Locale } from "../../../i18n";
 import type { Theme } from "../../../i18n";
-import { useAuthStore } from "../../auth/state/authStore";
-import { usePatchMeMutation } from "../hooks/useUsers";
+import { useAuthStore } from "../../../store/authStore";
+import { usePatchMeMutation } from "../hooks";
+import { toast } from "sonner";
+import { getApiErrorMessage } from "../../../utils/getApiErrorMessage";
 import { validateRequired } from "../../../utils/formValidation";
 
 const LOCALE_OPTIONS: { value: Locale; label: string }[] = [
@@ -23,7 +25,6 @@ export default function ProfileModal({ isOpen, onClose }: ProfileModalProps) {
   const [name, setName] = useState("");
   const [preferredLocale, setPreferredLocale] = useState<Locale>("hu");
   const [preferredTheme, setPreferredTheme] = useState<Theme>("light");
-  const [error, setError] = useState<string | null>(null);
   const patchMe = usePatchMeMutation();
   const saving = patchMe.isPending;
 
@@ -32,33 +33,29 @@ export default function ProfileModal({ isOpen, onClose }: ProfileModalProps) {
       setName((user.name as string)?.trim() ?? "");
       setPreferredLocale((user.locale as Locale) || "hu");
       setPreferredTheme((user.theme as Theme) || "light");
-      setError(null);
     }
   }, [isOpen, user]);
 
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
     if (!user) return;
-    setError(null);
     const nameError = validateRequired(name);
     if (nameError) {
-      setError(t(nameError));
+      toast.error(t(nameError));
       return;
     }
     patchMe.mutate(
-      { name: name.trim() || null, preferred_locale: preferredLocale, preferred_theme: preferredTheme },
+      { name: name.trim() || undefined, preferred_locale: preferredLocale, preferred_theme: preferredTheme },
       {
-        onSuccess: (data) => {
-          const d = data as { locale?: string; theme?: string };
-          setUser({ ...user, ...data });
+        onSuccess: (data: { name?: string; preferred_locale?: string; preferred_theme?: string; locale?: string; theme?: string }) => {
+          const d = data;
+          setUser({ ...user, name: data.name ?? undefined, preferred_locale: data.preferred_locale, preferred_theme: data.preferred_theme, locale: d.locale, theme: d.theme });
           if (d.locale) setLocale(d.locale as Locale);
           if (d.theme) setTheme(d.theme as Theme);
+          toast.success(t("profile.saved"));
           onClose();
         },
-        onError: (err: unknown) => {
-          const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
-          setError(typeof detail === "string" ? detail : t("common.errorGeneric"));
-        },
+        onError: (err: unknown) => toast.error(getApiErrorMessage(err) ?? t("common.errorGeneric")),
       }
     );
   };
@@ -73,11 +70,6 @@ export default function ProfileModal({ isOpen, onClose }: ProfileModalProps) {
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
       <div className="bg-[var(--color-card)] border border-[var(--color-border)] p-6 rounded-lg w-full max-w-md shadow-lg max-h-[90vh] overflow-y-auto">
         <h2 className="text-2xl font-bold mb-4 text-[var(--color-foreground)]">{t("profile.title")}</h2>
-        {error && (
-          <div className="mb-4 p-3 rounded bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-300 text-sm">
-            {error}
-          </div>
-        )}
         <form onSubmit={handleSave} className="space-y-4">
           <div>
             <label className="block mb-1 text-[var(--color-label)]">{t("profile.nameLabel")}</label>
