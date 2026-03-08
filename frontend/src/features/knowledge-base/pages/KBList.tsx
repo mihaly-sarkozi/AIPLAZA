@@ -1,7 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo, useRef } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { toast } from "sonner";
-import { GearIcon, TrashIcon, BackpackIcon } from "@radix-ui/react-icons";
+import { GearIcon, TrashIcon, BackpackIcon, PersonIcon } from "@radix-ui/react-icons";
 import { useTranslation } from "../../../i18n";
 import { getApiErrorMessage } from "../../../utils/getApiErrorMessage";
 import {
@@ -9,28 +9,91 @@ import {
   useCreateKbMutation,
   useUpdateKbMutation,
   useDeleteKbMutation,
+  useKbPermissions,
+  useSetKbPermissionsMutation,
   type KbItem,
 } from "../hooks/useKb";
+import { useUsers } from "../../users/hooks/useUsers";
+import { useAuthStore } from "../../../store/authStore";
+
+const PERM_NONE = "none";
+const PERM_USE = "use";
+const PERM_TRAIN = "train";
 
 export default function KBList() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const location = useLocation();
+  const currentUserId = useAuthStore((s) => s.user?.id);
+  const canManage = useAuthStore((s) => s.user?.role === "admin" || s.user?.role === "owner");
+  const isOwner = useAuthStore((s) => s.user?.role === "owner");
   const { data: items = [], isLoading: loading, error: listError } = useKbList();
+  const { data: users = [] } = useUsers({ enabled: canManage });
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [createFormError, setCreateFormError] = useState<string | null>(null);
   const [editFormError, setEditFormError] = useState<string | null>(null);
   const [editingKb, setEditingKb] = useState<KbItem | null>(null);
+  const [settingsKb, setSettingsKb] = useState<KbItem | null>(null);
   const [deleteConfirmKb, setDeleteConfirmKb] = useState<KbItem | null>(null);
   const [deleteTypeName, setDeleteTypeName] = useState("");
 
   const createKbMutation = useCreateKbMutation();
   const updateKbMutation = useUpdateKbMutation();
   const deleteKbMutation = useDeleteKbMutation();
+  const setPermissionsMutation = useSetKbPermissionsMutation();
   const actionLoading =
-    createKbMutation.isPending || updateKbMutation.isPending || deleteKbMutation.isPending;
+    createKbMutation.isPending ||
+    updateKbMutation.isPending ||
+    deleteKbMutation.isPending ||
+    setPermissionsMutation.isPending;
 
   const [formData, setFormData] = useState({ name: "", description: "" });
+  /** Create modal: user_id -> permission (none/use/train) */
+  const [createPermissions, setCreatePermissions] = useState<Record<number, string>>({});
+  /** Beállítás modál: user_id -> permission; API-ból szinkronizálva */
+  const [settingsPermissions, setSettingsPermissions] = useState<Record<number, string>>({});
+
+  const { data: settingsPermsList = [], isLoading: settingsPermsLoading } = useKbPermissions(
+    settingsKb?.uuid ?? undefined,
+    { enabled: !!settingsKb }
+  );
+  const settingsPermsSyncedUuid = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!settingsKb || settingsPermsList.length === 0) return;
+    if (settingsPermsSyncedUuid.current === settingsKb.uuid) return;
+    settingsPermsSyncedUuid.current = settingsKb.uuid;
+    const next: Record<number, string> = {};
+    for (const p of settingsPermsList) {
+      next[p.user_id] = p.permission;
+    }
+    setSettingsPermissions(next);
+  }, [settingsKb?.uuid, settingsPermsList]);
+
+  useEffect(() => {
+    if (!settingsKb) settingsPermsSyncedUuid.current = null;
+  }, [settingsKb]);
+
+  const usersWithPermsCreate = useMemo(() => {
+    return (users as Array<{ id: number; email: string; name?: string | null }>)
+      .filter((u) => u.id != null)
+      .map((u) => ({
+        id: u.id!,
+        email: u.email,
+        name: u.name ?? null,
+        permission: createPermissions[u.id!] ?? PERM_NONE,
+      }));
+  }, [users, createPermissions]);
+
+  const usersWithPermsSettings = useMemo(() => {
+    return settingsPermsList.map((p) => ({
+      id: p.user_id,
+      email: p.email,
+      name: p.name ?? null,
+      permission: settingsPermissions[p.user_id] ?? p.permission,
+      role: p.role ?? "user",
+    }));
+  }, [settingsPermsList, settingsPermissions]);
 
   const error = listError ? (getApiErrorMessage(listError) ?? t("kb.errorLoad")) : null;
 
@@ -44,6 +107,7 @@ export default function KBList() {
 
   const resetForm = () => {
     setFormData({ name: "", description: "" });
+    setCreatePermissions({});
     setCreateFormError(null);
     setEditFormError(null);
   };
@@ -59,6 +123,11 @@ export default function KBList() {
     setFormData({ name: kb.name, description: kb.description ?? "" });
   };
 
+  const openSettingsModal = (kb: KbItem) => {
+    setSettingsKb(kb);
+    setSettingsPermissions({});
+  };
+
   const handleCreate = (e: React.FormEvent) => {
     e.preventDefault();
     const nameTrim = formData.name?.trim() ?? "";
@@ -67,8 +136,15 @@ export default function KBList() {
       setCreateFormError(t("common.fieldRequired"));
       return;
     }
+    const permissions = usersWithPermsCreate
+      .filter((u) => u.permission && u.permission !== PERM_NONE)
+      .map((u) => ({ user_id: u.id, permission: u.permission }));
     createKbMutation.mutate(
-      { name: nameTrim, description: formData.description?.trim() || undefined },
+      {
+        name: nameTrim,
+        description: formData.description?.trim() || undefined,
+        permissions: permissions.length ? permissions : undefined,
+      },
       {
         onSuccess: () => {
           toast.success(t("profile.saved"));
@@ -101,6 +177,18 @@ export default function KBList() {
         onError: (err: unknown) => {
           toast.error(getApiErrorMessage(err) ?? t("kb.errorUpdate"));
         },
+      }
+    );
+  };
+
+  const handleSaveSettingsPermissions = () => {
+    if (!settingsKb) return;
+    const permissions = usersWithPermsSettings.map((u) => ({ user_id: u.id, permission: u.permission }));
+    setPermissionsMutation.mutate(
+      { uuid: settingsKb.uuid, permissions },
+      {
+        onSuccess: () => setSettingsKb(null),
+        onError: (err: unknown) => toast.error(getApiErrorMessage(err) ?? t("kb.errorPermissions")),
       }
     );
   };
@@ -140,14 +228,16 @@ export default function KBList() {
         <h1 className="min-w-0 flex-1 text-xl sm:text-2xl md:text-3xl font-bold truncate text-[var(--color-foreground)]" title={t("kb.title")}>
           {t("kb.title")}
         </h1>
-        <button
-          type="button"
-          onClick={openCreateModal}
-          disabled={actionLoading}
-          className="ml-auto shrink-0 bg-[var(--color-primary)] hover:opacity-90 text-[var(--color-on-primary)] px-3 py-2 rounded text-xs sm:text-sm whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          {t("kb.newKb")}
-        </button>
+        {isOwner && (
+          <button
+            type="button"
+            onClick={openCreateModal}
+            disabled={actionLoading}
+            className="ml-auto shrink-0 bg-[var(--color-primary)] hover:opacity-90 text-[var(--color-on-primary)] px-3 py-2 rounded text-xs sm:text-sm whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {t("kb.newKb")}
+          </button>
+        )}
       </div>
 
       {error && (
@@ -161,9 +251,9 @@ export default function KBList() {
         <table className="w-full">
           <thead className="bg-[var(--color-table-head)]">
             <tr>
-              <th className="p-3 text-left text-[var(--color-foreground)]">{t("kb.tableName")}</th>
-              <th className="p-3 text-left text-[var(--color-foreground)]">{t("kb.tableDescription")}</th>
-              <th className="p-3 text-right text-[var(--color-foreground)] w-0 whitespace-nowrap">{t("kb.tableActions")}</th>
+              <th className="p-3 text-left text-xs font-normal text-[var(--color-foreground)]">{t("kb.tableName")}</th>
+              <th className="p-3 text-left text-xs font-normal text-[var(--color-foreground)]">{t("kb.tableDescription")}</th>
+              <th className="p-3 text-right text-xs font-normal text-[var(--color-foreground)] w-0 whitespace-nowrap">{t("kb.tableActions")}</th>
             </tr>
           </thead>
           <tbody>
@@ -173,39 +263,57 @@ export default function KBList() {
                 <td className="p-3 text-[var(--color-muted)]">{kb.description ?? "—"}</td>
                 <td className="p-3 text-right w-0 whitespace-nowrap">
                   <div className="flex gap-2 justify-end items-center">
-                    <button
-                      type="button"
-                      title={t("kb.actionEdit")}
-                      className="p-2 rounded text-[var(--color-foreground)] bg-[var(--color-card)] border border-[var(--color-border)] hover:opacity-80"
-                      onClick={() => openEditModal(kb)}
-                      disabled={actionLoading}
-                      aria-label={t("kb.actionEdit")}
-                    >
-                      <GearIcon className="w-4 h-4" />
-                    </button>
-                    <button
-                      type="button"
-                      title={t("kb.actionDelete")}
-                      className="p-2 rounded text-white bg-red-500 hover:bg-red-600"
-                      onClick={() => {
-                        setDeleteConfirmKb(kb);
-                        setDeleteTypeName("");
-                      }}
-                      disabled={actionLoading}
-                      aria-label={t("kb.actionDelete")}
-                    >
-                      <TrashIcon className="w-4 h-4" />
-                    </button>
-                    <button
-                      type="button"
-                      title={t("kb.actionTrain")}
-                      className="p-2 rounded text-[var(--color-foreground)] bg-[var(--color-card)] border border-[var(--color-border)] hover:opacity-80"
-                      onClick={() => navigate(`/kb/train/${kb.uuid}`)}
-                      disabled={actionLoading}
-                      aria-label={t("kb.actionTrain")}
-                    >
-                      <BackpackIcon className="w-4 h-4" />
-                    </button>
+                    {canManage && kb.can_train && (
+                      <button
+                        type="button"
+                        title={t("kb.actionEdit")}
+                        className="p-2 rounded text-[var(--color-foreground)] bg-[var(--color-card)] border border-[var(--color-border)] hover:opacity-80"
+                        onClick={() => openEditModal(kb)}
+                        disabled={actionLoading}
+                        aria-label={t("kb.actionEdit")}
+                      >
+                        <GearIcon className="w-4 h-4" />
+                      </button>
+                    )}
+                    {canManage && kb.can_train && (
+                      <button
+                        type="button"
+                        title={t("kb.actionSettings")}
+                        className="p-2 rounded text-[var(--color-foreground)] bg-[var(--color-card)] border border-[var(--color-border)] hover:opacity-80"
+                        onClick={() => openSettingsModal(kb)}
+                        disabled={actionLoading}
+                        aria-label={t("kb.actionSettings")}
+                      >
+                        <PersonIcon className="w-4 h-4" />
+                      </button>
+                    )}
+                    {isOwner && (
+                      <button
+                        type="button"
+                        title={t("kb.actionDelete")}
+                        className="p-2 rounded text-white bg-red-500 hover:bg-red-600"
+                        onClick={() => {
+                          setDeleteConfirmKb(kb);
+                          setDeleteTypeName("");
+                        }}
+                        disabled={actionLoading}
+                        aria-label={t("kb.actionDelete")}
+                      >
+                        <TrashIcon className="w-4 h-4" />
+                      </button>
+                    )}
+                    {kb.can_train && (
+                      <button
+                        type="button"
+                        title={t("kb.actionTrain")}
+                        className="p-2 rounded text-[var(--color-foreground)] bg-[var(--color-card)] border border-[var(--color-border)] hover:opacity-80"
+                        onClick={() => navigate(`/kb/train/${kb.uuid}`)}
+                        disabled={actionLoading}
+                        aria-label={t("kb.actionTrain")}
+                      >
+                        <BackpackIcon className="w-4 h-4" />
+                      </button>
+                    )}
                   </div>
                 </td>
               </tr>
@@ -221,39 +329,57 @@ export default function KBList() {
             <div className="font-medium text-[var(--color-foreground)]">{kb.name}</div>
             <div className="text-sm text-[var(--color-muted)]">{kb.description ?? "—"}</div>
             <div className="flex gap-2 justify-end pt-2">
-              <button
-                type="button"
-                title={t("kb.actionEdit")}
-                className="p-2 rounded hover:bg-[var(--color-border)] disabled:opacity-50"
-                onClick={() => openEditModal(kb)}
-                disabled={actionLoading}
-                aria-label={t("kb.actionEdit")}
-              >
-                <GearIcon className="w-4 h-4" />
-              </button>
-              <button
-                type="button"
-                title={t("kb.actionDelete")}
-                className="p-2 rounded text-red-600 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-900/30"
-                onClick={() => {
-                  setDeleteConfirmKb(kb);
-                  setDeleteTypeName("");
-                }}
-                disabled={actionLoading}
-                aria-label={t("kb.actionDelete")}
-              >
-                <TrashIcon className="w-4 h-4" />
-              </button>
-              <button
-                type="button"
-                title={t("kb.actionTrain")}
-                className="p-2 rounded hover:bg-[var(--color-border)] disabled:opacity-50"
-                onClick={() => navigate(`/kb/train/${kb.uuid}`)}
-                disabled={actionLoading}
-                aria-label={t("kb.actionTrain")}
-              >
-                <BackpackIcon className="w-4 h-4" />
-              </button>
+              {canManage && kb.can_train && (
+                <button
+                  type="button"
+                  title={t("kb.actionEdit")}
+                  className="p-2 rounded hover:bg-[var(--color-border)] disabled:opacity-50"
+                  onClick={() => openEditModal(kb)}
+                  disabled={actionLoading}
+                  aria-label={t("kb.actionEdit")}
+                >
+                  <GearIcon className="w-4 h-4" />
+                </button>
+              )}
+              {canManage && kb.can_train && (
+                <button
+                  type="button"
+                  title={t("kb.actionSettings")}
+                  className="p-2 rounded hover:bg-[var(--color-border)] disabled:opacity-50"
+                  onClick={() => openSettingsModal(kb)}
+                  disabled={actionLoading}
+                  aria-label={t("kb.actionSettings")}
+                >
+                  <PersonIcon className="w-4 h-4" />
+                </button>
+              )}
+              {isOwner && (
+                <button
+                  type="button"
+                  title={t("kb.actionDelete")}
+                  className="p-2 rounded text-red-600 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-900/30"
+                  onClick={() => {
+                    setDeleteConfirmKb(kb);
+                    setDeleteTypeName("");
+                  }}
+                  disabled={actionLoading}
+                  aria-label={t("kb.actionDelete")}
+                >
+                  <TrashIcon className="w-4 h-4" />
+                </button>
+              )}
+              {kb.can_train && (
+                <button
+                  type="button"
+                  title={t("kb.actionTrain")}
+                  className="p-2 rounded hover:bg-[var(--color-border)] disabled:opacity-50"
+                  onClick={() => navigate(`/kb/train/${kb.uuid}`)}
+                  disabled={actionLoading}
+                  aria-label={t("kb.actionTrain")}
+                >
+                  <BackpackIcon className="w-4 h-4" />
+                </button>
+              )}
             </div>
           </div>
         ))}
@@ -261,8 +387,8 @@ export default function KBList() {
 
       {/* Create Modal */}
       {showCreateModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-[var(--color-card)] border border-[var(--color-border)] p-6 rounded-lg w-96 shadow-lg">
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-[var(--color-card)] border border-[var(--color-border)] p-6 rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto shadow-lg">
             <h2 className="text-2xl font-bold mb-4 text-[var(--color-foreground)]">{t("kb.modalNewTitle")}</h2>
             <p className="text-sm text-[var(--color-muted)] mb-4">{t("kb.modalNewHint")}</p>
             {createFormError && (
@@ -295,6 +421,46 @@ export default function KBList() {
                   placeholder={t("kb.placeholderDescription")}
                 />
               </div>
+              {canManage && usersWithPermsCreate.length > 0 && (
+                <div>
+                  <h3 className="text-sm font-semibold text-[var(--color-foreground)] mb-1">{t("kb.permissionsTitle")}</h3>
+                  <p className="text-xs text-[var(--color-muted)] mb-2">{t("kb.permissionsHint")}</p>
+                  <div className="border border-[var(--color-border)] rounded overflow-hidden max-h-48 overflow-y-auto">
+                    <table className="w-full text-sm">
+                      <thead className="bg-[var(--color-table-head)]">
+                        <tr>
+                          <th className="p-2 text-left text-xs font-normal text-[var(--color-foreground)]">{t("roles.tableName")}</th>
+                          <th className="p-2 text-left text-xs font-normal text-[var(--color-foreground)]">{t("roles.tableEmail")}</th>
+                          <th className="p-2 text-left text-xs font-normal text-[var(--color-foreground)]">{t("kb.tableActions")}</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {usersWithPermsCreate.map((u) => (
+                          <tr key={u.id} className="border-t border-[var(--color-border)]">
+                            <td className="p-2 text-[var(--color-foreground)]">{u.name ?? "—"}</td>
+                            <td className="p-2 text-[var(--color-muted)]">{u.email}</td>
+                            <td className="p-2">
+                              <select
+                                value={u.permission === PERM_NONE && u.id === currentUserId ? PERM_TRAIN : u.permission}
+                                onChange={(e) =>
+                                  setCreatePermissions((prev) => ({ ...prev, [u.id]: e.target.value }))
+                                }
+                                className="w-full bg-[var(--color-input-bg)] border border-[var(--color-border)] text-[var(--color-foreground)] p-1.5 rounded text-sm"
+                              >
+                                {u.id !== currentUserId && (
+                                  <option value={PERM_NONE}>{t("kb.permissionNone")}</option>
+                                )}
+                                <option value={PERM_USE}>{t("kb.permissionUse")}</option>
+                                <option value={PERM_TRAIN}>{t("kb.permissionTrain")}</option>
+                              </select>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
               <div className="flex gap-2 mt-6 justify-end">
                 <button
                   type="button"
@@ -320,9 +486,9 @@ export default function KBList() {
         </div>
       )}
 
-      {/* Edit Modal */}
+      {/* Edit Modal – csak név és leírás */}
       {editingKb && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-[var(--color-card)] border border-[var(--color-border)] p-6 rounded-lg w-96 shadow-lg">
             <h2 className="text-2xl font-bold mb-4 text-[var(--color-foreground)]">{t("kb.modalEditTitle")}</h2>
             {editFormError && (
@@ -377,6 +543,163 @@ export default function KBList() {
                 {actionLoading ? t("common.loading") : t("common.save")}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Beállítás modál – jogosultságok (csak train joggal nyitható) */}
+      {settingsKb && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-[var(--color-card)] border border-[var(--color-border)] p-6 rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto shadow-lg">
+            <h2 className="text-2xl font-bold mb-1 text-[var(--color-foreground)]">{t("kb.actionSettings")} – {settingsKb.name}</h2>
+            <p className="text-sm text-[var(--color-muted)] mb-4">{t("kb.permissionsHint")}</p>
+            {settingsPermsLoading ? (
+              <p className="text-[var(--color-muted)]">{t("common.loading")}</p>
+            ) : (
+              <>
+                <div className="border border-[var(--color-border)] rounded overflow-hidden max-h-64 overflow-y-auto">
+                  <table className="w-full text-sm">
+                    <tbody>
+                      <tr className="border-b border-[var(--color-border)] bg-[var(--color-table-head)]">
+                        <td className="p-2 w-[20px] align-middle">
+                          <input
+                            type="checkbox"
+                            checked={
+                              usersWithPermsSettings
+                                .filter((u) => u.id !== currentUserId)
+                                .every((u) => u.permission === PERM_USE || u.permission === PERM_TRAIN)
+                            }
+                            onChange={(e) => {
+                              const on = e.target.checked;
+                              setSettingsPermissions((prev) => {
+                                const next = { ...prev };
+                                usersWithPermsSettings.forEach((u) => {
+                                  if (u.id !== currentUserId) {
+                                    next[u.id] = on
+                                      ? (u.role === "user" ? PERM_USE : PERM_TRAIN)
+                                      : PERM_NONE;
+                                  }
+                                });
+                                return next;
+                              });
+                            }}
+                            className="kb-perm-checkbox focus:ring-0 focus:outline-none focus:shadow-none [&:focus]:outline-none [&:focus]:ring-0 [&:focus]:shadow-none"
+                            aria-label={t("kb.everyone")}
+                          />
+                        </td>
+                        <td className="p-2 text-xs text-[var(--color-foreground)] font-normal w-[30%]">{t("roles.tableName")}</td>
+                        <td className="p-2 text-xs text-[var(--color-foreground)] font-normal w-[30%]">{t("roles.tableRole")}</td>
+                        <td className="p-2 text-xs text-[var(--color-foreground)] font-normal text-center">{t("kb.columnTrainer")}</td>
+                      </tr>
+                      {usersWithPermsSettings.map((u) => {
+                        const isSelf = u.id === currentUserId;
+                        const perm = u.permission;
+                        const hasPermission = perm === PERM_USE || perm === PERM_TRAIN;
+                        const canTrain = perm === PERM_TRAIN;
+
+                        const roleLabel =
+                          u.role === "owner"
+                            ? t("roles.roleOwner")
+                            : u.role === "admin"
+                              ? t("roles.roleAdmin")
+                              : t("roles.roleUser");
+                        const isOwnerRow = u.role === "owner";
+                        const nameRoleColor =
+                          isOwnerRow
+                            ? "text-[var(--color-muted)]"
+                            : hasPermission
+                              ? "text-[var(--color-foreground)]"
+                              : "text-[var(--color-muted)] opacity-70";
+
+                        return (
+                          <tr key={u.id} className="border-t border-[var(--color-border)]">
+                            <td className="p-2 w-[20px] align-middle">
+                              {(isSelf || isOwnerRow) ? (
+                                <input
+                                  type="checkbox"
+                                  checked
+                                  readOnly
+                                  tabIndex={-1}
+                                  className="w-4 h-4 border-[var(--color-border)] bg-[var(--color-border)] cursor-default"
+                                />
+                              ) : (
+                                <input
+                                  type="checkbox"
+                                  checked={hasPermission}
+                                  onChange={(e) =>
+                                    setSettingsPermissions((prev) => ({
+                                      ...prev,
+                                      [u.id]: e.target.checked ? (u.role === "user" ? PERM_USE : PERM_TRAIN) : PERM_NONE,
+                                    }))
+                                  }
+                                  className="kb-perm-checkbox focus:ring-0 focus:outline-none focus:shadow-none [&:focus]:outline-none [&:focus]:ring-0 [&:focus]:shadow-none"
+                                />
+                              )}
+                            </td>
+                            <td className="p-3 align-top w-[30%]">
+                              <div className={`font-medium ${nameRoleColor}`}>{u.name ?? "—"}</div>
+                            </td>
+                            <td className="p-3 align-top w-[30%]">
+                              <div className={`font-medium ${nameRoleColor}`}>{roleLabel}</div>
+                            </td>
+                            <td className="p-3 align-middle text-center">
+                              {isOwnerRow || (u.role === "admin" && (isSelf || canTrain)) ? (
+                                <input
+                                  type="checkbox"
+                                  checked
+                                  readOnly
+                                  tabIndex={-1}
+                                  className="w-4 h-4 border-[var(--color-border)] bg-[var(--color-border)] cursor-default"
+                                />
+                              ) : (
+                                <>
+                                  {isSelf && u.role === "user" ? (
+                                    <span className="text-[var(--color-muted)]">
+                                      {canTrain ? t("kb.permissionTrain") : perm === PERM_USE ? t("kb.permissionUse") : "—"}
+                                    </span>
+                                  ) : (
+                                    <input
+                                      type="checkbox"
+                                      checked={canTrain}
+                                      disabled={!hasPermission}
+                                      onChange={(e) =>
+                                        setSettingsPermissions((prev) => ({
+                                          ...prev,
+                                          [u.id]: e.target.checked ? PERM_TRAIN : PERM_USE,
+                                        }))
+                                      }
+                                      className="kb-perm-checkbox focus:ring-0 focus:outline-none focus:shadow-none [&:focus]:outline-none [&:focus]:ring-0 [&:focus]:shadow-none"
+                                    />
+                                  )}
+                                </>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="flex justify-end gap-2 mt-4">
+                  <button
+                    type="button"
+                    onClick={() => setSettingsKb(null)}
+                    disabled={actionLoading}
+                    className="px-4 py-2 rounded text-[var(--color-foreground)] hover:opacity-80 bg-[var(--color-card)] border border-[var(--color-border)] disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {t("common.cancel")}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleSaveSettingsPermissions}
+                    disabled={actionLoading}
+                    className="px-4 py-2 rounded bg-[var(--color-primary)] hover:opacity-90 text-[var(--color-on-primary)] disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {setPermissionsMutation.isPending ? t("common.loading") : t("kb.savePermissions")}
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}

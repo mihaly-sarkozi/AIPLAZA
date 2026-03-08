@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { GearIcon } from "@radix-ui/react-icons";
 import { useTranslation } from "../i18n";
 import { useAuthStore } from "../store/authStore";
 
@@ -56,14 +57,15 @@ export default function Navbar({ onOpenProfile, onOpenChangePassword }: NavbarPr
   return (
     <nav className="w-full bg-[var(--color-background)] text-[var(--color-foreground)] border-b border-[var(--color-border)] fixed top-0 left-0 z-50">
       <div className="p-4 flex justify-between items-center">
-        {/* Bal oldal: csak hamburger menü */}
-        <button
-          type="button"
-          onClick={() => setMenuOpen((o) => !o)}
-          className="p-2 rounded hover:bg-gray-200 dark:hover:bg-gray-700"
-          aria-expanded={menuOpen}
-          aria-label={menuOpen ? "Menü bezárása" : "Menü"}
-        >
+        {/* Bal oldal: hamburger + AIPLAZA */}
+        <div className="flex items-center gap-2 min-w-0">
+          <button
+            type="button"
+            onClick={() => setMenuOpen((o) => !o)}
+            className="p-2 rounded hover:bg-gray-200 dark:hover:bg-gray-700 shrink-0"
+            aria-expanded={menuOpen}
+            aria-label={menuOpen ? "Menü bezárása" : "Menü"}
+          >
           {menuOpen ? (
             <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -73,9 +75,11 @@ export default function Navbar({ onOpenProfile, onOpenChangePassword }: NavbarPr
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
             </svg>
           )}
-        </button>
+          </button>
+          <span className="font-semibold text-[var(--color-foreground)] truncate">AIPLAZA</span>
+        </div>
 
-        {/* Jobb oldal: név kattintható, profil felugró */}
+        {/* Jobb oldal: név, role + profil beállítás ikon (fogaskerék) */}
         <div className="flex items-center gap-2 sm:gap-3 min-w-0">
           {user && (
             <>
@@ -85,14 +89,27 @@ export default function Navbar({ onOpenProfile, onOpenChangePassword }: NavbarPr
                   setMenuOpen(false);
                   onOpenProfile?.();
                 }}
-                className="text-sm text-[var(--color-foreground)] truncate max-w-[120px] sm:max-w-[200px] text-left hover:underline"
+                className="flex flex-col items-end text-right min-w-0"
                 aria-label={t("profile.title")}
               >
-                {user.name?.trim() || user.email}
+                <span className="text-sm text-[var(--color-foreground)] truncate max-w-[120px] sm:max-w-[200px] hover:underline">
+                  {user.name?.trim() || user.email}
+                </span>
+                <span className="text-xs text-[var(--color-muted)]">
+                  {user.role === "owner" ? t("roles.roleOwner") : user.role === "admin" ? t("roles.roleAdmin") : t("roles.roleUser")}
+                </span>
               </button>
-              <span className="text-xs text-[var(--color-muted)] shrink-0">
-                ({user.role === "owner" ? t("roles.roleOwner") : user.role === "admin" ? t("roles.roleAdmin") : t("roles.roleUser")})
-              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  setMenuOpen(false);
+                  onOpenProfile?.();
+                }}
+                className="p-2 rounded hover:bg-gray-200 dark:hover:bg-gray-700 shrink-0"
+                aria-label={t("nav.settings")}
+              >
+                <GearIcon className="w-5 h-5 text-[var(--color-foreground)]" />
+              </button>
             </>
           )}
         </div>

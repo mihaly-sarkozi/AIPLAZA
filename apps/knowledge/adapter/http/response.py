@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Optional
+from typing import Optional, List
 
 from pydantic import BaseModel, ConfigDict
 
@@ -13,3 +13,12 @@ class KBOut(BaseModel):
     qdrant_collection_name: str
     created_at: datetime
     updated_at: datetime
+    can_train: Optional[bool] = None  # aktuális user taníthatja-e (listánál kitöltve)
+
+
+class KBPermissionOut(BaseModel):
+    user_id: int
+    email: str
+    name: Optional[str]
+    permission: str  # "use" | "train" | "none"
+    role: str  # "user" | "admin" | "owner"

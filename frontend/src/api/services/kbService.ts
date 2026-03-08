@@ -7,10 +7,24 @@ export type KbItem = {
   uuid: string;
   name: string;
   description?: string;
+  /** Aktuális user taníthatja-e (backend listánál kitölti) */
+  can_train?: boolean;
   [key: string]: unknown;
 };
 
-export type CreateKbPayload = { name: string; description?: string };
+export type KbPermissionItem = {
+  user_id: number;
+  email: string;
+  name?: string | null;
+  permission: string;
+  role: "user" | "admin" | "owner";
+};
+
+export type CreateKbPayload = {
+  name: string;
+  description?: string;
+  permissions?: Array<{ user_id: number; permission: string }>;
+};
 
 export type UpdateKbPayload = { uuid: string; name: string; description?: string };
 
@@ -24,6 +38,19 @@ export async function getKbList(): Promise<KbItem[]> {
 export async function createKb(body: CreateKbPayload): Promise<KbItem> {
   const res = await api.post("/kb", body);
   return res.data as KbItem;
+}
+
+export async function getKbPermissions(kbUuid: string): Promise<KbPermissionItem[]> {
+  const res = await api.get(`/kb/${kbUuid}/permissions`);
+  return res.data as KbPermissionItem[];
+}
+
+export async function setKbPermissions(
+  kbUuid: string,
+  permissions: Array<{ user_id: number; permission: string }>
+): Promise<unknown> {
+  const res = await api.put(`/kb/${kbUuid}/permissions`, { permissions });
+  return res.data;
 }
 
 export async function updateKb({ uuid, name, description }: UpdateKbPayload): Promise<KbItem> {

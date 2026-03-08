@@ -1,7 +1,7 @@
-from sqlalchemy import select
+from sqlalchemy import select, delete
 from apps.knowledge.domain.kb import KnowledgeBase
-from apps.knowledge.infrastructure.db.models import KBORM
-from apps.knowledge.ports.repositories import KnowledgeBaseRepositoryPort
+from apps.knowledge.infrastructure.db.models import KBORM, KbUserPermissionORM
+from apps.knowledge.ports.repositories import KnowledgeBaseRepositoryPort, KbPermissionItem
 
 
 class MySQLKnowledgeBaseRepository(KnowledgeBaseRepositoryPort):
@@ -29,6 +29,12 @@ class MySQLKnowledgeBaseRepository(KnowledgeBaseRepositoryPort):
     def get_by_uuid(self, uuid: str):
         with self.session_factory() as session:
             stmt = select(KBORM).where(KBORM.uuid == uuid)
+            orm = session.execute(stmt).scalar_one_or_none()
+            return self._to_domain(orm) if orm else None
+
+    def get_by_id(self, kb_id: int):
+        with self.session_factory() as session:
+            stmt = select(KBORM).where(KBORM.id == kb_id)
             orm = session.execute(stmt).scalar_one_or_none()
             return self._to_domain(orm) if orm else None
 
@@ -72,3 +78,43 @@ class MySQLKnowledgeBaseRepository(KnowledgeBaseRepositoryPort):
             if orm:
                 session.delete(orm)
                 session.commit()
+
+    def list_permissions(self, kb_uuid: str) -> list[KbPermissionItem]:
+        with self.session_factory() as session:
+            kb = session.execute(select(KBORM).where(KBORM.uuid == kb_uuid)).scalar_one_or_none()
+            if not kb:
+                return []
+            stmt = select(KbUserPermissionORM.user_id, KbUserPermissionORM.permission).where(
+                KbUserPermissionORM.kb_id == kb.id
+            )
+            rows = session.execute(stmt).all()
+            return [(r[0], r[1]) for r in rows]
+
+    def set_permissions(self, kb_uuid: str, permissions: list[KbPermissionItem]) -> None:
+        with self.session_factory() as session:
+            kb = session.execute(select(KBORM).where(KBORM.uuid == kb_uuid)).scalar_one_or_none()
+            if not kb:
+                raise ValueError("KB not found")
+            session.execute(delete(KbUserPermissionORM).where(KbUserPermissionORM.kb_id == kb.id))
+            for user_id, perm in permissions:
+                if perm and perm != "none":
+                    session.add(
+                        KbUserPermissionORM(kb_id=kb.id, user_id=user_id, permission=perm)
+                    )
+            session.commit()
+
+    def get_kb_ids_with_permission(self, user_id: int, permission: str) -> list[int]:
+        """KB id-k ahol a user rendelkezik ezzel a jogosultsággal (train = use + train)."""
+        with self.session_factory() as session:
+            if permission == "use":
+                stmt = select(KbUserPermissionORM.kb_id).where(
+                    KbUserPermissionORM.user_id == user_id,
+                    KbUserPermissionORM.permission.in_(["use", "train"]),
+                )
+            else:
+                stmt = select(KbUserPermissionORM.kb_id).where(
+                    KbUserPermissionORM.user_id == user_id,
+                    KbUserPermissionORM.permission == permission,
+                )
+            rows = session.execute(stmt).scalars().all()
+            return list(rows)

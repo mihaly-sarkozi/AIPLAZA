@@ -65,6 +65,18 @@ def get_current_user_admin(
     return user
 
 
+def get_current_user_owner(
+    user: User = Depends(get_current_user)
+):
+    """
+    Csak owner. Pl. tudástár létrehozás/törlés (fizetős).
+    """
+    if user.role != "owner":
+        raise HTTPException(status_code=403, detail="Only owner can perform this action")
+
+    return user
+
+
 def _minimal_user_from_payload(payload: dict, user_id: int) -> User:
     """Token payload-ból minimál User (WebSocket / light path)."""
     return User(

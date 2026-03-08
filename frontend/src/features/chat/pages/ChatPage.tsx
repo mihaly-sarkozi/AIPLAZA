@@ -1,9 +1,13 @@
 import { useState, useEffect, useRef, useCallback, useLayoutEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import { VariableSizeList as List } from "react-window";
 import { useAuthStore } from "../../../store/authStore";
 import { sanitizeMessage } from "../../../utils/sanitize";
 import { ensureChatWsToken, getChatWsUrl } from "../api/chatWs";
 import ChatMessage from "../components/ChatMessage";
+import { toast } from "sonner";
+import { useKbList } from "../../knowledge-base/hooks/useKb";
+import { useTranslation } from "../../../i18n";
 
 const MAX_CHAT_MESSAGES = 100;
 const ESTIMATED_ROW_HEIGHT = 72;
@@ -43,7 +47,7 @@ function MessageRow({ index, style, data }: MessageRowProps) {
   if (!msg) return null;
 
   return (
-    <div style={style} className="flex items-start px-2 pb-1">
+    <div style={style} className="flex items-start px-2 mb-[1px]">
       <div ref={rowRef} className="w-full min-h-[2rem]">
         <div
           className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
@@ -55,7 +59,11 @@ function MessageRow({ index, style, data }: MessageRowProps) {
   );
 }
 
+/** Üres tömb = Mind (minden tudástár); nem üres = csak a kiválasztott uuid-k. */
+
 export default function ChatPage() {
+  const { t } = useTranslation();
+  const navigate = useNavigate();
   const token = useAuthStore((s) => s.token);
   const [messages, setMessages] = useState<ChatMessageType[]>([]);
   const [loading, setLoading] = useState(false);
@@ -65,10 +73,35 @@ export default function ChatPage() {
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const rowHeights = useRef<Record<number, number>>({});
   const [listSize, setListSize] = useState({ width: 400, height: 300 });
+  const { data: kbList = [] } = useKbList();
+  const [selectedKbUuids, setSelectedKbUuids] = useState<string[]>([]);
+  const [kbDropdownOpen, setKbDropdownOpen] = useState(false);
+  const kbDropdownRef = useRef<HTMLDivElement | null>(null);
 
   const setRowHeight = useCallback((index: number, height: number) => {
     rowHeights.current[index] = height;
   }, []);
+
+  const isAllKbs = selectedKbUuids.length === 0;
+  const toggleAllKbs = useCallback(() => {
+    setSelectedKbUuids([]);
+  }, []);
+  const toggleKb = useCallback((uuid: string) => {
+    setSelectedKbUuids((prev) =>
+      prev.includes(uuid) ? prev.filter((id) => id !== uuid) : [...prev, uuid]
+    );
+  }, []);
+
+  useEffect(() => {
+    if (!kbDropdownOpen) return;
+    const onDocClick = (e: MouseEvent) => {
+      if (kbDropdownRef.current && !kbDropdownRef.current.contains(e.target as Node)) {
+        setKbDropdownOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
+  }, [kbDropdownOpen]);
 
   const getItemSize = useCallback((index: number) => {
     return rowHeights.current[index] ?? ESTIMATED_ROW_HEIGHT;
@@ -138,83 +171,17 @@ export default function ChatPage() {
     };
   }, []);
 
-  const send = useCallback(async () => {
+  const send = useCallback(() => {
     const el = inputRef.current;
     const raw = el?.value?.trim() ?? "";
-    if (!raw || loading) return;
+    if (!raw) return;
 
     const question = sanitizeMessage(raw);
     if (el) el.value = "";
 
     appendMessage({ role: "user", text: question });
-    setLoading(true);
-    appendMessage({ role: "assistant", text: "" });
-
-    const ws = await ensureConnection();
-    if (!ws) {
-      setMessages((prev) => {
-        const next = [...prev];
-        if (next.length > 0 && next[next.length - 1].role === "assistant" && next[next.length - 1].text === "") {
-          next[next.length - 1] = { role: "assistant", text: "⚠️ Nincs kapcsolat. Jelentkezz be újra." };
-        }
-        return next;
-      });
-      setLoading(false);
-      setTimeout(() => inputRef.current?.focus(), 50);
-      return;
-    }
-
-    const onMessage = (ev: MessageEvent) => {
-      try {
-        const data = JSON.parse(ev.data as string);
-        if (data.chunk !== undefined) {
-          appendChunkToLast(data.chunk);
-        }
-        if (data.done === true) {
-          setLoading(false);
-          ws.removeEventListener("message", onMessage);
-          setTimeout(() => inputRef.current?.focus(), 50);
-        }
-        if (data.error) {
-          appendChunkToLast(`⚠️ ${data.error}`);
-          setLoading(false);
-          ws.removeEventListener("message", onMessage);
-        }
-      } catch {
-        setLoading(false);
-        ws.removeEventListener("message", onMessage);
-      }
-    };
-
-    const onOpen = () => {
-      ws.send(JSON.stringify({ question: raw }));
-    };
-
-    const onError = () => {
-      setMessages((prev) => {
-        const next = [...prev];
-        if (next.length > 0 && next[next.length - 1].role === "assistant" && next[next.length - 1].text === "") {
-          next[next.length - 1] = { role: "assistant", text: "⚠️ Hiba történt a válasz lekérése közben." };
-        }
-        return next;
-      });
-      setLoading(false);
-      setTimeout(() => inputRef.current?.focus(), 50);
-    };
-
-    if (ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ question: raw }));
-      ws.addEventListener("message", onMessage);
-    } else {
-      ws.addEventListener("open", onOpen, { once: true });
-      ws.addEventListener("message", onMessage);
-      ws.addEventListener("error", onError, { once: true });
-      ws.addEventListener("close", () => {
-        setLoading(false);
-        ws.removeEventListener("message", onMessage);
-      }, { once: true });
-    }
-  }, [loading, appendMessage, appendChunkToLast, ensureConnection]);
+    setTimeout(() => inputRef.current?.focus(), 50);
+  }, [appendMessage]);
 
   const listData = {
     messages,
@@ -222,6 +189,13 @@ export default function ChatPage() {
     rowHeights,
     setRowHeight,
   };
+
+  const kbButtonLabel =
+    isAllKbs
+      ? t("chat.allKbs")
+      : selectedKbUuids.length === 1
+        ? kbList.find((k) => k.uuid === selectedKbUuids[0])?.name ?? selectedKbUuids[0]
+        : t("chat.kbCount").replace("{n}", String(selectedKbUuids.length));
 
   return (
     <div className="flex-1 flex flex-col min-h-0 bg-[var(--color-background)] text-[var(--color-foreground)]">
@@ -254,7 +228,74 @@ export default function ChatPage() {
         )}
       </div>
 
-      <div className="shrink-0 w-full bg-[var(--color-background)] border-t border-[var(--color-border)] p-4 flex items-center gap-2">
+      {/* Egy sor: tudástár legördülő + Tanítás gomb alatta | chat mező + Küldés */}
+      <div className="shrink-0 w-full bg-[var(--color-background)] border-t border-[var(--color-border)] px-4 py-3 flex items-center gap-2">
+        <div className="flex flex-col gap-1.5 shrink-0">
+          <div className="relative" ref={kbDropdownRef}>
+            <button
+              type="button"
+              onClick={() => setKbDropdownOpen((o) => !o)}
+              className="flex items-center gap-1 px-2 py-1.5 rounded border border-[var(--color-border)] bg-[var(--color-card)] text-[var(--color-foreground)] text-xs hover:bg-[var(--color-border)]/30 w-[20ch] min-w-[20ch] max-w-[20ch]"
+            >
+              <span className="truncate flex-1 min-w-0 text-left">{kbButtonLabel}</span>
+              <svg className="w-3 h-3 shrink-0 ml-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={kbDropdownOpen ? "M5 15l7-7 7 7" : "M19 9l-7 7-7-7"} />
+              </svg>
+            </button>
+            {kbDropdownOpen && (
+              <div className="absolute left-0 bottom-full mb-1 z-20 min-w-[10rem] max-w-[14rem] max-h-56 overflow-y-auto rounded border border-[var(--color-border)] bg-[var(--color-card)] shadow-lg py-0.5">
+                <button
+                  type="button"
+                  onClick={() => { toggleAllKbs(); }}
+                  className="w-full flex items-center gap-1.5 px-2 py-1.5 text-left text-xs hover:bg-[var(--color-border)]/30"
+                >
+                  <span className="w-3.5 h-3.5 flex items-center justify-center border border-[var(--color-border)] rounded bg-[var(--color-background)] shrink-0">
+                    {isAllKbs ? "✓" : ""}
+                  </span>
+                  {t("chat.allKbs")}
+                </button>
+                {kbList.map((kb) => {
+                  const checked = selectedKbUuids.includes(kb.uuid);
+                  return (
+                    <button
+                      key={kb.uuid}
+                      type="button"
+                      onClick={() => toggleKb(kb.uuid)}
+                      className="w-full flex items-center gap-1.5 px-2 py-1.5 text-left text-xs hover:bg-[var(--color-border)]/30"
+                    >
+                      <span className="w-3.5 h-3.5 flex items-center justify-center border border-[var(--color-border)] rounded bg-[var(--color-background)] shrink-0">
+                        {checked ? "✓" : ""}
+                      </span>
+                      <span className="truncate">{kb.name}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              if (selectedKbUuids.length !== 1) {
+                toast.info("A tanításhoz ki kell választani egy tudástárat.");
+                return;
+              }
+              const selected = kbList.find((k) => k.uuid === selectedKbUuids[0]);
+              if (!selected?.can_train) {
+                toast.info("Ehhez a tudástárhoz nincs tanítási jogosultságod.");
+                return;
+              }
+              navigate(`/kb/train/${selectedKbUuids[0]}`);
+            }}
+            className={`flex items-center justify-center px-2 py-1.5 rounded text-xs ${
+              selectedKbUuids.length === 1 && kbList.find((k) => k.uuid === selectedKbUuids[0])?.can_train === true
+                ? "bg-black text-white hover:opacity-90"
+                : "bg-gray-300 text-gray-600 dark:bg-gray-600 dark:text-gray-400 cursor-not-allowed"
+            }`}
+          >
+            <span>Tanítás</span>
+          </button>
+        </div>
         <textarea
           ref={inputRef}
           defaultValue=""
@@ -264,14 +305,14 @@ export default function ChatPage() {
               send();
             }
           }}
-          className="flex-1 bg-[var(--color-background)] text-[var(--color-foreground)] border border-[var(--color-border)] p-3 rounded-lg resize-none h-16 focus:outline-none focus:ring-2 focus:ring-[var(--color-border)]"
+          className="flex-1 min-w-0 bg-[var(--color-background)] text-[var(--color-foreground)] border border-[var(--color-border)] px-3 py-2 rounded-lg resize-none h-[66px] min-h-[66px] box-border text-sm focus:outline-none focus:border-gray-500 dark:focus:border-gray-400"
           placeholder="Írd be a kérdésed és nyomj Entert..."
           disabled={loading}
         />
         <button
           onClick={send}
           disabled={loading}
-          className={`px-6 py-3 rounded-lg font-semibold transition-all ${
+          className={`shrink-0 px-6 py-3 rounded-lg font-semibold transition-all ${
             loading
               ? "bg-[var(--color-border)] text-[var(--color-muted)] cursor-not-allowed"
               : "bg-[var(--color-primary)] hover:opacity-90 text-[var(--color-on-primary)]"

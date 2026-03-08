@@ -11,14 +11,47 @@ import {
   createKb,
   updateKb,
   deleteKb,
+  getKbPermissions,
+  setKbPermissions,
   type KbItem,
+  type KbPermissionItem,
   type CreateKbPayload,
   type UpdateKbPayload,
   type DeleteKbPayload,
 } from "../services";
 import { queryKeys } from "../../../queryKeys";
 
-export type { KbItem, CreateKbPayload, UpdateKbPayload, DeleteKbPayload };
+export type { KbItem, KbPermissionItem, CreateKbPayload, UpdateKbPayload, DeleteKbPayload };
+
+export function useKbPermissions(
+  kbUuid: string | undefined,
+  options?: Omit<UseQueryOptions<KbPermissionItem[]>, "queryKey" | "queryFn">
+) {
+  return useQuery({
+    queryKey: [...queryKeys.kb, kbUuid ?? "", "permissions"],
+    queryFn: () => getKbPermissions(kbUuid!),
+    enabled: !!kbUuid,
+    ...options,
+  });
+}
+
+export function useSetKbPermissionsMutation(
+  options?: UseMutationOptions<
+    unknown,
+    Error,
+    { uuid: string; permissions: Array<{ user_id: number; permission: string }> }
+  >
+) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ uuid, permissions }) => setKbPermissions(uuid, permissions),
+    onSuccess: (_, { uuid }) => {
+      queryClient.invalidateQueries({ queryKey: [...queryKeys.kb, uuid, "permissions"] });
+      queryClient.invalidateQueries({ queryKey: queryKeys.kb });
+    },
+    ...options,
+  });
+}
 
 export function useKbList(options?: Omit<UseQueryOptions<KbItem[]>, "queryKey" | "queryFn">) {
   return useQuery({

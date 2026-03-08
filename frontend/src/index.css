@@ -6,6 +6,7 @@
   --color-muted: #6b7280;
   --color-label: #374151;
   --color-border: #e5e7eb;
+  --color-readonly-bg: #9ca3af;
   --color-input-bg: #ffffff;
   --color-card: #ffffff;
   --color-primary: #171717;
@@ -22,6 +23,7 @@
   --color-muted: #9ca3af;
   --color-label: #e5e7eb;
   --color-border: #374151;
+  --color-readonly-bg: #6b7280;
   --color-input-bg: #000000;
   --color-card: #000000;
   --color-primary: #4b5563;
@@ -51,6 +53,86 @@ input, textarea, select {
   color: var(--color-foreground);
   border: 1px solid var(--color-border);
   @apply rounded-md px-3 py-2 w-full focus:outline-none focus:ring-2 focus:ring-gray-400 focus:border-gray-400;
+}
+
+input[type="checkbox"]:focus {
+  outline: none !important;
+  box-shadow: none !important;
+  --tw-ring-shadow: 0 0 #0000 !important;
+}
+
+/* Readonly checkbox: középső szürke (border és muted között), fehér pipa, fix négyzet, szögletes */
+input[type="checkbox"][readonly] {
+  appearance: none;
+  -webkit-appearance: none;
+  box-sizing: border-box;
+  width: 16px !important;
+  height: 16px !important;
+  min-width: 16px !important;
+  max-width: 16px !important;
+  min-height: 16px !important;
+  max-height: 16px !important;
+  padding: 0 !important;
+  border: none !important;
+  border-radius: 0 !important;
+  flex-shrink: 0;
+  background-color: var(--color-readonly-bg);
+}
+input[type="checkbox"][readonly]:checked {
+  background-color: var(--color-readonly-bg);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='white'%3E%3Cpath d='M12.207 4.793a1 1 0 0 1 0 1.414l-5 5a1 1 0 0 1-1.414 0l-2-2a1 1 0 0 1 1.414-1.414L6.5 9.086l4.293-4.293a1 1 0 0 1 1.414 0z'/%3E%3C/svg%3E");
+  background-size: 100% 100%;
+}
+
+.dark input[type="checkbox"][readonly],
+.dark input[type="checkbox"][readonly]:checked {
+  background-color: var(--color-background);
+}
+.dark input[type="checkbox"][readonly]:checked {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='white'%3E%3Cpath d='M12.207 4.793a1 1 0 0 1 0 1.414l-5 5a1 1 0 0 1-1.414 0l-2-2a1 1 0 0 1 1.414-1.414L6.5 9.086l4.293-4.293a1 1 0 0 1 1.414 0z'/%3E%3C/svg%3E");
+}
+
+/* Jelölhető (aktív) checkbox: nincs kijelölve = csak keret, kijelölve = kék, tiltott = kitöltött szürke */
+.kb-perm-checkbox {
+  appearance: none;
+  -webkit-appearance: none;
+  box-sizing: border-box;
+  width: 16px !important;
+  height: 16px !important;
+  min-width: 16px !important;
+  max-width: 16px !important;
+  min-height: 16px !important;
+  max-height: 16px !important;
+  padding: 0 !important;
+  border: 1px solid var(--color-border) !important;
+  border-radius: 0 !important;
+  flex-shrink: 0;
+  background-color: transparent;
+  cursor: pointer;
+}
+.kb-perm-checkbox:checked {
+  background-color: var(--color-primary);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='white'%3E%3Cpath d='M12.207 4.793a1 1 0 0 1 0 1.414l-5 5a1 1 0 0 1-1.414 0l-2-2a1 1 0 0 1 1.414-1.414L6.5 9.086l4.293-4.293a1 1 0 0 1 1.414 0z'/%3E%3C/svg%3E");
+  background-size: 100% 100%;
+  border-color: var(--color-primary) !important;
+}
+.kb-perm-checkbox:disabled {
+  background-color: var(--color-border);
+  opacity: 0.6;
+  cursor: default;
+}
+
+/* Fekete skin: tiltott = fekete háttér + szürke keret, állítható üres = fehér keret */
+.dark .kb-perm-checkbox {
+  border-color: var(--color-foreground) !important;
+}
+.dark .kb-perm-checkbox:checked {
+  border-color: var(--color-primary) !important;
+}
+.dark .kb-perm-checkbox:disabled {
+  background-color: var(--color-background) !important;
+  border-color: var(--color-border) !important;
+  opacity: 1;
 }
 
 label {

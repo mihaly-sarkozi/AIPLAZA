@@ -1,22 +1,58 @@
 from __future__ import annotations
 
-from typing import List
-from apps.knowledge.ports.repositories import KnowledgeBaseRepositoryPort
+from typing import List, Optional, Any
+from apps.knowledge.ports.repositories import KnowledgeBaseRepositoryPort, KbPermissionItem
 from apps.knowledge.domain.kb import KnowledgeBase
 import uuid
 
+
+def _user_repo_list_all(user_repo: Any) -> List[Any]:
+    if user_repo is None:
+        return []
+    return user_repo.list_all()
+
+
 class KnowledgeBaseService:
 
-    def __init__(self, repo: KnowledgeBaseRepositoryPort, qdrant_service: "QdrantClientWrapper") -> None:
+    def __init__(
+        self,
+        repo: KnowledgeBaseRepositoryPort,
+        qdrant_service: "QdrantClientWrapper",
+        user_repo: Any = None,
+    ) -> None:
         self.repo = repo
         self.qdrant = qdrant_service
+        self.user_repo = user_repo
 
-    def list_all(self) -> List[KnowledgeBase]:
-        """Összes knowledge base listázása."""
+    def list_all(
+        self,
+        current_user_id: Optional[int] = None,
+        current_user_role: Optional[str] = None,
+    ) -> List[KnowledgeBase]:
+        """Owner mindent lát; admin csak a kezelhető (train) KB-kat; user csak use/train jogosat."""
+        if current_user_id is None:
+            return []
+        all_kbs = self.repo.list_all()
+        if current_user_role == "owner":
+            return all_kbs
+        if current_user_role == "admin":
+            allowed_ids = set(self.repo.get_kb_ids_with_permission(current_user_id, "train"))
+        else:
+            allowed_ids = set(self.repo.get_kb_ids_with_permission(current_user_id, "use"))
+        return [kb for kb in all_kbs if kb.id is not None and kb.id in allowed_ids]
+
+    def list_all_unfiltered(self) -> List[KnowledgeBase]:
+        """Összes knowledge base (admin listához)."""
         return self.repo.list_all()
 
-    def create(self, name: str, description: str | None = None) -> KnowledgeBase:
-        """Új knowledge base létrehozása."""
+    def create(
+        self,
+        name: str,
+        description: str | None = None,
+        permissions: Optional[List[KbPermissionItem]] = None,
+        current_user_id: Optional[int] = None,
+    ) -> KnowledgeBase:
+        """Új knowledge base létrehozása; opcionálisan jogosultságokkal. A létrehozó mindig train jogot kap."""
         if self.repo.get_by_name(name):
             raise ValueError("KB name already exists")
 
@@ -35,7 +71,12 @@ class KnowledgeBaseService:
             updated_at=None
         )
 
-        return self.repo.create(kb)
+        created = self.repo.create(kb)
+        perms = [(uid, p) for uid, p in (permissions or []) if p and p != "none"]
+        if current_user_id is not None and not any(uid == current_user_id for uid, _ in perms):
+            perms.append((current_user_id, "train"))
+        self.repo.set_permissions(created.uuid, perms)
+        return created
 
     def update(self, uuid: str, name: str, description: str) -> KnowledgeBase:
         """Knowledge base frissítése."""
@@ -59,6 +100,64 @@ class KnowledgeBaseService:
 
         self.qdrant.delete_collection(kb.qdrant_collection_name)
         self.repo.delete(uuid)
+
+    def get_permissions_with_users(self, kb_uuid: str) -> List[dict]:
+        """Jogosultságok listája user adatokkal: { user_id, email, name, permission }."""
+        perm_list = self.repo.list_permissions(kb_uuid)
+        perm_by_user = {uid: p for uid, p in perm_list}
+        users = _user_repo_list_all(self.user_repo)
+        result = []
+        for u in users:
+            if getattr(u, "id", None) is None:
+                continue
+            result.append({
+                "user_id": u.id,
+                "email": getattr(u, "email", "") or "",
+                "name": getattr(u, "name", None),
+                "permission": perm_by_user.get(u.id, "none"),
+                "role": getattr(u, "role", "user"),
+            })
+        return result
+
+    def set_permissions(
+        self, kb_uuid: str, permissions: List[KbPermissionItem], current_user_id: Optional[int] = None
+    ) -> None:
+        """Jogosultságok beállítása. A current_user saját jogát egyáltalán nem módosítjuk."""
+        if current_user_id is not None:
+            existing = self.repo.list_permissions(kb_uuid)
+            existing_self = next((p for uid, p in existing if uid == current_user_id), "train")
+            perms = []
+            for uid, perm in permissions:
+                if uid == current_user_id:
+                    continue
+                if perm and perm != "none":
+                    perms.append((uid, perm))
+            perms.append((current_user_id, existing_self if existing_self else "train"))
+            self.repo.set_permissions(kb_uuid, perms)
+        else:
+            self.repo.set_permissions(
+                kb_uuid, [(uid, p) for uid, p in permissions if p and p != "none"]
+            )
+
+    def user_can_use(self, kb_uuid: str, user_id: int, user_role: Optional[str]) -> bool:
+        """Owner mindent használhat; különben csak ha van use/train joga."""
+        if user_role == "owner":
+            return True
+        kb = self.repo.get_by_uuid(kb_uuid)
+        if not kb or kb.id is None:
+            return False
+        allowed = self.repo.get_kb_ids_with_permission(user_id, "use")
+        return kb.id in allowed
+
+    def user_can_train(self, kb_uuid: str, user_id: int, user_role: Optional[str]) -> bool:
+        """Owner mindent taníthat és kezelhet; különben csak ha van train joga."""
+        if user_role == "owner":
+            return True
+        kb = self.repo.get_by_uuid(kb_uuid)
+        if not kb or kb.id is None:
+            return False
+        allowed = self.repo.get_kb_ids_with_permission(user_id, "train")
+        return kb.id in allowed
 
     # ------------------------------------------------------------
     #  ADD BLOCK – SZÖVEGES TANÍTÁS

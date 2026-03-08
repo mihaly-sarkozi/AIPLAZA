@@ -161,7 +161,8 @@ class AppContainer:
 
         self.knowledge = KnowledgeBaseService(
             repo=self.kb_repo,
-            qdrant_service=self.qdrant
+            qdrant_service=self.qdrant,
+            user_repo=self.user_repo,
         )
 
         # --- CHAT ---

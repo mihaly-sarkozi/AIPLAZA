@@ -8,7 +8,7 @@ from sqlalchemy.engine import Engine
 from apps.auth.infrastructure.db.models import TenantSchemaBase
 from apps.users.infrastructure.db.models import UserORM, UserInviteTokenORM  # noqa: F401 – users, user_invite_tokens
 from apps.audit.infrastructure.db.models import AuditLogORM  # noqa: F401 – audit_log tábla
-from apps.knowledge.infrastructure.db.models import KBORM  # noqa: F401 – knowledge_bases tábla
+from apps.knowledge.infrastructure.db.models import KBORM, KbUserPermissionORM  # noqa: F401 – knowledge_bases, kb_user_permission
 
 
 def create_tenant_schema(engine: Engine, slug: str) -> None:
