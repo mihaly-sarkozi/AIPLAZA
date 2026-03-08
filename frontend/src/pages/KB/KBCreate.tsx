@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useCreateKbMutation } from "../../hooks/useApi";
+import { getApiErrorMessage } from "../../utils/getApiErrorMessage";
 
 export default function KBCreate() {
   const [name, setName] = useState("");
@@ -17,7 +18,7 @@ export default function KBCreate() {
       {
         onSuccess: () => navigate("/kb"),
         onError: (err: unknown) => {
-          setError((err as { response?: { data?: { detail?: string } } })?.response?.data?.detail || "Hiba történt.");
+          setError(getApiErrorMessage(err) ?? "Hiba történt.");
         },
       }
     );

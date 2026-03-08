@@ -4,6 +4,7 @@ import type { Locale } from "../../../i18n";
 import type { Theme } from "../../../i18n";
 import { useAuthStore } from "../../auth/state/authStore";
 import { usePatchMeMutation } from "../hooks/useUsers";
+import { validateRequired } from "../../../utils/formValidation";
 
 const LOCALE_OPTIONS: { value: Locale; label: string }[] = [
   { value: "hu", label: "Magyar" },
@@ -39,6 +40,11 @@ export default function ProfileModal({ isOpen, onClose }: ProfileModalProps) {
     e.preventDefault();
     if (!user) return;
     setError(null);
+    const nameError = validateRequired(name);
+    if (nameError) {
+      setError(t(nameError));
+      return;
+    }
     patchMe.mutate(
       { name: name.trim() || null, preferred_locale: preferredLocale, preferred_theme: preferredTheme },
       {

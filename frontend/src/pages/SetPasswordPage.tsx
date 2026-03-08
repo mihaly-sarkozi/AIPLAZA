@@ -2,8 +2,27 @@ import { useState, useEffect } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import api from "../api/axiosClient";
 import { useSetPasswordMutation } from "../hooks/useApi";
+import {
+  validatePassword,
+  PASSWORD_ERROR_MIN_LENGTH,
+  PASSWORD_ERROR_REQUIRES_LOWER,
+  PASSWORD_ERROR_REQUIRES_UPPER,
+  PASSWORD_ERROR_REQUIRES_NUMBER,
+} from "../utils/passwordValidation";
+import { getApiErrorMessage } from "../utils/getApiErrorMessage";
 
 type TokenStatus = "loading" | "valid" | "invalid" | "expired" | "missing";
+
+const PASSWORD_ERROR_MESSAGES: Record<string, string> = {
+  [PASSWORD_ERROR_MIN_LENGTH]: "A jelszónak legalább 6 karakter hosszúnak kell lennie.",
+  [PASSWORD_ERROR_REQUIRES_LOWER]: "A jelszónak tartalmaznia kell legalább egy kisbetűt.",
+  [PASSWORD_ERROR_REQUIRES_UPPER]: "A jelszónak tartalmaznia kell legalább egy nagybetűt.",
+  [PASSWORD_ERROR_REQUIRES_NUMBER]: "A jelszónak tartalmaznia kell legalább egy számot.",
+};
+
+function getPasswordValidationMessage(code: string): string {
+  return PASSWORD_ERROR_MESSAGES[code] ?? "Érvénytelen jelszó.";
+}
 
 export default function SetPasswordPage() {
   const [searchParams] = useSearchParams();
@@ -35,24 +54,14 @@ export default function SetPasswordPage() {
       })
       .catch((err: unknown) => {
         if (cancelled) return;
-        const axErr = err as { response?: { status?: number; data?: { detail?: unknown } } };
-        const d = axErr.response?.data?.detail;
-        const msg = typeof d === "object" && d && "message" in d ? String((d as { message?: string }).message) : String(d || "A link nem érvényes.");
-        setTokenMessage(msg);
+        const axErr = err as { response?: { status?: number } };
+        setTokenMessage(getApiErrorMessage(err) ?? "A link nem érvényes.");
         setTokenStatus(axErr.response?.status === 410 ? "expired" : "invalid");
       });
     return () => {
       cancelled = true;
     };
   }, [token]);
-
-  const getDetailMessage = (err: unknown) => {
-    const axErr = err as { response?: { data?: { detail?: unknown } } };
-    const d = axErr.response?.data?.detail;
-    if (typeof d === "string") return d;
-    if (d && typeof d === "object" && "message" in d) return String((d as { message?: string }).message);
-    return null;
-  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -61,20 +70,9 @@ export default function SetPasswordPage() {
       setError("A két jelszó nem egyezik.");
       return;
     }
-    if (password.length < 6) {
-      setError("A jelszónak legalább 6 karakter hosszúnak kell lennie.");
-      return;
-    }
-    if (!/[a-z]/.test(password)) {
-      setError("A jelszónak tartalmaznia kell legalább egy kisbetűt.");
-      return;
-    }
-    if (!/[A-Z]/.test(password)) {
-      setError("A jelszónak tartalmaznia kell legalább egy nagybetűt.");
-      return;
-    }
-    if (!/\d/.test(password)) {
-      setError("A jelszónak tartalmaznia kell legalább egy számot.");
+    const passwordError = validatePassword(password);
+    if (passwordError) {
+      setError(getPasswordValidationMessage(passwordError));
       return;
     }
     if (!token) return;
@@ -82,7 +80,7 @@ export default function SetPasswordPage() {
       { token, password },
       {
         onSuccess: () => setSuccess(true),
-        onError: (err) => setError(getDetailMessage(err) || "Ismeretlen hiba. Próbáld újra."),
+        onError: (err) => setError(getApiErrorMessage(err) ?? "Ismeretlen hiba. Próbáld újra."),
       }
     );
   };

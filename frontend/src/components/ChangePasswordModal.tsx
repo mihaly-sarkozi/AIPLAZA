@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { useTranslation } from "../i18n";
 import { useChangePasswordMutation } from "../hooks/useApi";
+import { validatePassword } from "../utils/passwordValidation";
+import { getApiErrorMessage } from "../utils/getApiErrorMessage";
 
 interface ChangePasswordModalProps {
   isOpen: boolean;
@@ -17,13 +19,7 @@ export default function ChangePasswordModal({ isOpen, onClose }: ChangePasswordM
   const changePasswordMutation = useChangePasswordMutation();
   const saving = changePasswordMutation.isPending;
 
-  const getErrorMsg = (err: unknown) => {
-    const res = err as { response?: { data?: { detail?: string | { message?: string } } } };
-    const detail = res.response?.data?.detail;
-    return typeof detail === "string"
-      ? detail
-      : (detail && typeof detail === "object" && "message" in detail ? String((detail as { message?: string }).message) : null) || t("common.errorGeneric");
-  };
+  const getErrorMsg = (err: unknown) => getApiErrorMessage(err) ?? t("common.errorGeneric");
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -39,20 +35,9 @@ export default function ChangePasswordModal({ isOpen, onClose }: ChangePasswordM
       setError(t("profile.passwordMismatch"));
       return;
     }
-    if (newP.length < 6) {
-      setError(t("profile.passwordMinLength"));
-      return;
-    }
-    if (!/[a-z]/.test(newP)) {
-      setError(t("profile.passwordRequiresLower"));
-      return;
-    }
-    if (!/[A-Z]/.test(newP)) {
-      setError(t("profile.passwordRequiresUpper"));
-      return;
-    }
-    if (!/\d/.test(newP)) {
-      setError(t("profile.passwordRequiresNumber"));
+    const passwordError = validatePassword(newP);
+    if (passwordError) {
+      setError(t(passwordError));
       return;
     }
     changePasswordMutation.mutate(

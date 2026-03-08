@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useTranslation } from "../../../i18n";
 import { useChangePasswordMutation } from "../hooks/useUsers";
+import { validateRequired, validatePassword } from "../../../utils/formValidation";
 
 interface ChangePasswordModalProps {
   isOpen: boolean;
@@ -31,28 +32,28 @@ export default function ChangePasswordModal({ isOpen, onClose }: ChangePasswordM
     const cur = currentPassword.trim();
     const newP = newPassword.trim();
     const conf = confirmPassword.trim();
-    if (!cur || !newP || !conf) {
-      setError(t("profile.allFieldsRequired"));
+    const requiredCur = validateRequired(cur);
+    if (requiredCur) {
+      setError(t(requiredCur));
+      return;
+    }
+    const requiredNew = validateRequired(newP);
+    if (requiredNew) {
+      setError(t(requiredNew));
+      return;
+    }
+    const requiredConf = validateRequired(conf);
+    if (requiredConf) {
+      setError(t(requiredConf));
       return;
     }
     if (newP !== conf) {
       setError(t("profile.passwordMismatch"));
       return;
     }
-    if (newP.length < 6) {
-      setError(t("profile.passwordMinLength"));
-      return;
-    }
-    if (!/[a-z]/.test(newP)) {
-      setError(t("profile.passwordRequiresLower"));
-      return;
-    }
-    if (!/[A-Z]/.test(newP)) {
-      setError(t("profile.passwordRequiresUpper"));
-      return;
-    }
-    if (!/\d/.test(newP)) {
-      setError(t("profile.passwordRequiresNumber"));
+    const passwordError = validatePassword(newP);
+    if (passwordError) {
+      setError(t(passwordError));
       return;
     }
     changePasswordMutation.mutate(

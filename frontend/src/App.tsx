@@ -1,10 +1,10 @@
 import { useEffect, lazy, Suspense, type JSX } from "react";
-import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 
 import MainLayout from "./layouts/MainLayout";
+import ProtectedRoute from "./components/ProtectedRoute";
 import { useAuthStore } from "./store/authStore";
 import { fetchCsrfToken } from "./api/axiosClient";
-import { getSafeLoginRedirect } from "./utils/loginRedirect";
 import { useLocaleStore } from "./i18n";
 import type { Locale } from "./i18n";
 import type { Theme } from "./i18n";
@@ -32,26 +32,6 @@ const GuardFallback = () => (
         Betöltés…
     </div>
 );
-
-function AuthGuard({ children }: { children: JSX.Element }) {
-    const user = useAuthStore((s) => s.user);
-    const loadingUser = useAuthStore((s) => s.loadingUser);
-    const location = useLocation();
-    if (loadingUser) return <GuardFallback />;
-    if (!user) {
-        const safePath = getSafeLoginRedirect(location.pathname || "/chat");
-        const redirect = safePath !== "/chat" ? `?redirect=${encodeURIComponent(safePath)}` : "";
-        return <Navigate to={`/login${redirect}`} replace />;
-    }
-    return children;
-}
-
-function AdminGuard({ children }: { children: JSX.Element }) {
-    const user = useAuthStore((s) => s.user);
-    const loadingUser = useAuthStore((s) => s.loadingUser);
-    if (loadingUser) return <GuardFallback />;
-    return (user?.role === "admin" || user?.role === "owner") ? children : <Navigate to="/chat" replace />;
-}
 
 export default function App() {
     const loadUser = useAuthStore((s) => s.loadUser);
@@ -100,9 +80,9 @@ export default function App() {
                     <Route
                         path="/chat"
                         element={
-                            <AuthGuard>
+                            <ProtectedRoute loadingFallback={<GuardFallback />}>
                                 <ChatPage/>
-                            </AuthGuard>
+                            </ProtectedRoute>
                         }
                     />
 
@@ -119,27 +99,27 @@ export default function App() {
                     <Route
                         path="/admin/roles"
                         element={
-                            <AdminGuard>
+                            <ProtectedRoute allowedRoles={["admin", "owner"]} loadingFallback={<GuardFallback />}>
                                 <RolesPage/>
-                            </AdminGuard>
+                            </ProtectedRoute>
                         }
                     />
 
                     <Route
                         path="/admin/train"
                         element={
-                            <AdminGuard>
+                            <ProtectedRoute allowedRoles={["admin", "owner"]} loadingFallback={<GuardFallback />}>
                                 <TrainPage/>
-                            </AdminGuard>
+                            </ProtectedRoute>
                         }
                     />
 
                     <Route
                         path="/admin/settings"
                         element={
-                            <AdminGuard>
+                            <ProtectedRoute allowedRoles={["admin", "owner"]} loadingFallback={<GuardFallback />}>
                                 <SettingsPage/>
-                            </AdminGuard>
+                            </ProtectedRoute>
                         }
                     />
 
@@ -147,9 +127,9 @@ export default function App() {
                     <Route
                         path="/kb"
                         element={
-                            <AdminGuard>
+                            <ProtectedRoute allowedRoles={["admin", "owner"]} loadingFallback={<GuardFallback />}>
                                 <KBList/>
-                            </AdminGuard>
+                            </ProtectedRoute>
                         }
                     />
 
@@ -161,9 +141,9 @@ export default function App() {
                     <Route
                         path="/kb/edit/:uuid"
                         element={
-                            <AdminGuard>
+                            <ProtectedRoute allowedRoles={["admin", "owner"]} loadingFallback={<GuardFallback />}>
                                 <KBEdit/>
-                            </AdminGuard>
+                            </ProtectedRoute>
                         }
                     />
 

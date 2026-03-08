@@ -6,6 +6,7 @@ import { getSafeLoginRedirect } from "../utils/loginRedirect";
 import { useLocaleStore } from "../i18n";
 import { useDefaultSettings, useLoginMutation } from "../hooks/useApi";
 import { fetchCsrfToken } from "../api/axiosClient";
+import { validateRequired, validateEmail } from "../utils/formValidation";
 import type { Locale } from "../i18n";
 
 const LOGIN_REMEMBER_EMAIL_KEY = "AIPLAZA_login_remember_email";
@@ -69,6 +70,25 @@ export default function Login() {
     e.preventDefault();
     if (submitting || cooldownSecondsRemaining > 0) return;
     setError("");
+
+    if (!pendingToken) {
+      const emailError = validateRequired(email) ?? validateEmail(email);
+      if (emailError) {
+        setError(t(emailError));
+        return;
+      }
+      const passwordError = validateRequired(password);
+      if (passwordError) {
+        setError(t(passwordError));
+        return;
+      }
+    } else {
+      const codeError = validateRequired(twoFactorCode);
+      if (codeError) {
+        setError(t(codeError));
+        return;
+      }
+    }
 
     const payload = pendingToken
       ? { pending_token: pendingToken, two_factor_code: twoFactorCode, auto_login: autoLogin }

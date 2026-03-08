@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { useTranslation } from "../i18n";
 import { useChangePasswordMutation } from "../hooks/useApi";
+import { validateRequired, validatePassword } from "../utils/formValidation";
+import { getApiErrorMessage } from "../utils/getApiErrorMessage";
 
 export default function ChangePasswordPage() {
   const { t } = useTranslation();
@@ -12,13 +14,7 @@ export default function ChangePasswordPage() {
   const changePasswordMutation = useChangePasswordMutation();
   const saving = changePasswordMutation.isPending;
 
-  const getErrorMsg = (err: unknown) => {
-    const res = err as { response?: { data?: { detail?: string | { message?: string } } } };
-    const detail = res.response?.data?.detail;
-    return typeof detail === "string"
-      ? detail
-      : (detail && typeof detail === "object" && "message" in detail ? String((detail as { message?: string }).message) : null) || t("common.errorGeneric");
-  };
+  const getErrorMsg = (err: unknown) => getApiErrorMessage(err) ?? t("common.errorGeneric");
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -26,28 +22,28 @@ export default function ChangePasswordPage() {
     const cur = currentPassword.trim();
     const newP = newPassword.trim();
     const conf = confirmPassword.trim();
-    if (!cur || !newP || !conf) {
-      setError(t("profile.allFieldsRequired"));
+    const requiredCur = validateRequired(cur);
+    if (requiredCur) {
+      setError(t(requiredCur));
+      return;
+    }
+    const requiredNew = validateRequired(newP);
+    if (requiredNew) {
+      setError(t(requiredNew));
+      return;
+    }
+    const requiredConf = validateRequired(conf);
+    if (requiredConf) {
+      setError(t(requiredConf));
       return;
     }
     if (newP !== conf) {
       setError(t("profile.passwordMismatch"));
       return;
     }
-    if (newP.length < 6) {
-      setError(t("profile.passwordMinLength"));
-      return;
-    }
-    if (!/[a-z]/.test(newP)) {
-      setError(t("profile.passwordRequiresLower"));
-      return;
-    }
-    if (!/[A-Z]/.test(newP)) {
-      setError(t("profile.passwordRequiresUpper"));
-      return;
-    }
-    if (!/\d/.test(newP)) {
-      setError(t("profile.passwordRequiresNumber"));
+    const passwordError = validatePassword(newP);
+    if (passwordError) {
+      setError(t(passwordError));
       return;
     }
     changePasswordMutation.mutate(

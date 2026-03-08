@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useKbList, useUpdateKbMutation } from "../../hooks/useApi";
+import { getApiErrorMessage } from "../../utils/getApiErrorMessage";
 
 export default function KBEdit() {
   const { uuid } = useParams();
@@ -35,7 +36,7 @@ export default function KBEdit() {
       {
         onSuccess: () => navigate("/kb"),
         onError: (err: unknown) => {
-          setError((err as { response?: { data?: { detail?: string } } })?.response?.data?.detail || "Hiba történt.");
+          setError(getApiErrorMessage(err) ?? "Hiba történt.");
         },
       }
     );

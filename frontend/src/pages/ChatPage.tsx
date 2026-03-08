@@ -4,11 +4,17 @@ import { useAuthStore } from "../store/authStore";
 import { sanitizeMessage } from "../utils/sanitize";
 import { getChatWsUrl } from "../utils/chatWs";
 import ChatMessage from "../components/ChatMessage";
+import { useTranslation } from "../i18n";
 
 const MAX_CHAT_MESSAGES = 100;
 const ESTIMATED_ROW_HEIGHT = 72;
 /** Virtualized list: only visible rows are rendered (react-window). Reduces DOM size for long chats. */
 const LIST_OVERSCAN_COUNT = 5;
+
+/** Exponential backoff delays (ms): 1s → 2s → 5s → 10s → max 30s */
+const WS_BACKOFF_MS = [1000, 2000, 5000, 10000, 30000];
+
+export type WsConnectionState = "connecting" | "connected" | "reconnecting" | "offline";
 
 export type ChatMessageType = { role: string; text: string };
 
@@ -64,9 +70,15 @@ function MessageRow({ index, style, data }: MessageRowProps) {
  */
 export default function ChatPage() {
   const token = useAuthStore((s) => s.token);
+  const { t } = useTranslation();
   const [messages, setMessages] = useState<ChatMessageType[]>([]);
   const [loading, setLoading] = useState(false);
+  const [connectionState, setConnectionState] = useState<WsConnectionState>("offline");
   const wsRef = useRef<WebSocket | null>(null);
+  const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const unmountedRef = useRef(false);
+  const attemptRef = useRef(0);
+  const reconnectScheduledRef = useRef(false);
   const listRef = useRef<List | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
@@ -122,24 +134,69 @@ export default function ChatPage() {
     });
   }, []);
 
-  const ensureConnection = useCallback((): WebSocket | null => {
-    if (!token) return null;
-    if (wsRef.current?.readyState === WebSocket.OPEN) return wsRef.current;
+  const connect = useCallback(() => {
+    if (!token) return;
     const url = getChatWsUrl(token);
-    if (!url) return null;
+    if (!url) return;
     const ws = new WebSocket(url);
     wsRef.current = ws;
-    return ws;
+    setConnectionState("connecting");
+
+    ws.addEventListener("open", () => {
+      if (unmountedRef.current) return;
+      attemptRef.current = 0;
+      setConnectionState("connected");
+    }, { once: true });
+
+    const scheduleReconnect = () => {
+      if (unmountedRef.current || reconnectScheduledRef.current) return;
+      reconnectScheduledRef.current = true;
+      if (wsRef.current === ws) {
+        wsRef.current = null;
+      }
+      setConnectionState("reconnecting");
+      const delay = WS_BACKOFF_MS[Math.min(attemptRef.current, WS_BACKOFF_MS.length - 1)];
+      attemptRef.current += 1;
+      reconnectTimeoutRef.current = setTimeout(() => {
+        reconnectTimeoutRef.current = null;
+        reconnectScheduledRef.current = false;
+        if (unmountedRef.current) return;
+        connect();
+      }, delay);
+    };
+
+    ws.addEventListener("close", scheduleReconnect, { once: true });
+    ws.addEventListener("error", scheduleReconnect, { once: true });
   }, [token]);
 
   useEffect(() => {
+    unmountedRef.current = false;
+    if (!token) {
+      setConnectionState("offline");
+      return;
+    }
+    connect();
     return () => {
+      unmountedRef.current = true;
+      reconnectScheduledRef.current = false;
+      attemptRef.current = 0;
+      if (reconnectTimeoutRef.current) {
+        clearTimeout(reconnectTimeoutRef.current);
+        reconnectTimeoutRef.current = null;
+      }
       if (wsRef.current) {
         wsRef.current.close();
         wsRef.current = null;
       }
+      setConnectionState("offline");
     };
-  }, []);
+  }, [token, connect]);
+
+  const ensureConnection = useCallback((): WebSocket | null => {
+    if (!token) return null;
+    if (wsRef.current?.readyState === WebSocket.OPEN) return wsRef.current;
+    return null;
+  }, [token]);
 
   const send = useCallback(() => {
     const el = inputRef.current;
@@ -226,8 +283,33 @@ export default function ChatPage() {
     setRowHeight,
   };
 
+  const connectionLabel =
+    connectionState === "connecting"
+      ? t("chat.wsConnecting")
+      : connectionState === "connected"
+        ? t("chat.wsConnected")
+        : connectionState === "reconnecting"
+          ? t("chat.wsReconnecting")
+          : t("chat.wsOffline");
+
   return (
     <div className="flex-1 flex flex-col min-h-0 bg-[var(--color-background)] text-[var(--color-foreground)]">
+      <div className="shrink-0 flex justify-end px-4 py-1">
+        <span
+          className={`text-xs font-medium px-2 py-0.5 rounded-full ${
+            connectionState === "connected"
+              ? "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400"
+              : connectionState === "connecting"
+                ? "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400"
+                : connectionState === "reconnecting"
+                  ? "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400"
+                  : "bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400"
+          }`}
+          aria-live="polite"
+        >
+          {connectionLabel}
+        </span>
+      </div>
       <div ref={containerRef} className="flex-1 min-h-0 flex flex-col p-4">
         {messages.length > 0 ? (
           <List

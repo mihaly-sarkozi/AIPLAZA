@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { useKbList, useCreateKbMutation, useDeleteKbMutation, type KbItem } from "../../hooks/useApi";
+import { getApiErrorMessage } from "../../utils/getApiErrorMessage";
 
 export default function KBList() {
   const { data: items = [], isLoading: loading } = useKbList();
@@ -40,7 +41,7 @@ export default function KBList() {
       {
         onSuccess: () => setShowCreateModal(false),
         onError: (err: unknown) => {
-          setCreateError((err as { response?: { data?: { detail?: string } } })?.response?.data?.detail || "Hiba történt.");
+          setCreateError(getApiErrorMessage(err) ?? "Hiba történt.");
         },
       }
     );

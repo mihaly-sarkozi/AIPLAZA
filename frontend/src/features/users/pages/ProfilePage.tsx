@@ -4,6 +4,7 @@ import type { Locale } from "../../../i18n";
 import type { Theme } from "../../../i18n";
 import { useAuthStore } from "../../auth/state/authStore";
 import { usePatchMeMutation } from "../hooks/useUsers";
+import { validateRequired } from "../../../utils/formValidation";
 
 const LOCALE_OPTIONS: { value: Locale; label: string }[] = [
   { value: "hu", label: "Magyar" },
@@ -21,6 +22,7 @@ export default function ProfilePage() {
   const [preferredLocale, setPreferredLocale] = useState<Locale>(locale);
   const [preferredTheme, setPreferredTheme] = useState<Theme>(theme);
   const [savedMessage, setSavedMessage] = useState(false);
+  const [nameError, setNameError] = useState<string | null>(null);
   const patchMe = usePatchMeMutation();
   const saving = patchMe.isPending;
   const savedTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -66,6 +68,7 @@ export default function ProfilePage() {
           const newName = (data.name as string)?.trim() ?? "";
           setName(newName);
           originalNameRef.current = newName;
+          setNameError(null);
         }
         showSavedBriefly();
       },
@@ -78,6 +81,12 @@ export default function ProfilePage() {
   };
 
   const handleSaveName = () => {
+    setNameError(null);
+    const err = validateRequired(name);
+    if (err) {
+      setNameError(t(err));
+      return;
+    }
     save({ name: name.trim() || null });
   };
 
@@ -107,11 +116,14 @@ export default function ProfilePage() {
         )}
         <div>
           <label className="block mb-1 text-[var(--color-label)]">{t("profile.nameLabel")}</label>
+          {nameError && (
+            <p className="text-sm text-red-600 dark:text-red-400 mb-1">{nameError}</p>
+          )}
           <div className="flex gap-2 items-center">
             <input
               type="text"
               value={name}
-              onChange={(e) => setName(e.target.value)}
+              onChange={(e) => { setName(e.target.value); setNameError(null); }}
               className="flex-1 min-w-0 p-2 rounded border border-[var(--color-border)] bg-[var(--color-input-bg)] text-[var(--color-foreground)]"
               placeholder={t("roles.placeholderName")}
               maxLength={100}

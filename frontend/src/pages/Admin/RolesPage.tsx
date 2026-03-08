@@ -10,6 +10,7 @@ import {
   useResendInviteMutation,
   type UserListItem,
 } from "../../hooks/useApi";
+import { getApiErrorMessage } from "../../utils/getApiErrorMessage";
 
 type User = UserListItem & { pending_registration?: boolean };
 
@@ -36,12 +37,7 @@ export default function RolesPage() {
     deleteUserMutation.isPending ||
     resendInviteMutation.isPending;
 
-  const error =
-    usersError && (usersError as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-      ? String((usersError as { response?: { data?: { detail?: string } } }).response?.data?.detail)
-      : usersError
-        ? t("roles.errorLoad")
-        : null;
+  const error = usersError ? (getApiErrorMessage(usersError) ?? t("roles.errorLoad")) : null;
 
   const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -84,15 +80,13 @@ export default function RolesPage() {
           setCreateFormError(null);
         },
         onError: (err: unknown) => {
-          const axErr = err as { response?: { status?: number; data?: { detail?: { code?: string; message?: string } } } };
+          const axErr = err as { response?: { status?: number; data?: { detail?: { code?: string } } } };
           const detail = axErr.response?.data?.detail;
           const code = typeof detail === "object" && detail?.code;
           if (axErr.response?.status === 400 && code === "email_already_exists") {
             setCreateFormError(t("roles.createErrorEmailExists"));
           } else {
-            alert(
-              typeof detail === "object" && detail?.message ? detail.message : (detail as string) ?? t("roles.errorCreate")
-            );
+            alert(getApiErrorMessage(err) ?? t("roles.errorCreate"));
           }
         },
       }
@@ -138,15 +132,13 @@ export default function RolesPage() {
         setEditFormError(null);
       },
       onError: (err: unknown) => {
-        const axErr = err as { response?: { status?: number; data?: { detail?: { code?: string; message?: string } } } };
+        const axErr = err as { response?: { status?: number; data?: { detail?: { code?: string } } } };
         const detail = axErr.response?.data?.detail;
         const code = typeof detail === "object" && detail?.code;
         if (axErr.response?.status === 400 && code === "email_already_exists") {
           setEditFormError(t("roles.createErrorEmailExists"));
         } else {
-          alert(
-            typeof detail === "object" && detail?.message ? detail.message : (detail as string) ?? t("roles.errorUpdate")
-          );
+          alert(getApiErrorMessage(err) ?? t("roles.errorUpdate"));
         }
       },
     });
@@ -156,9 +148,7 @@ export default function RolesPage() {
     deleteUserMutation.mutate(userId, {
       onSuccess: () => setDeleteConfirmUser(null),
       onError: (err: unknown) => {
-        const detail = (err as { response?: { data?: { detail?: { message?: string } } } })?.response?.data?.detail;
-        const msg = typeof detail === "object" && detail?.message ? detail.message : (detail as string);
-        alert(msg || t("roles.errorDelete"));
+        alert(getApiErrorMessage(err) ?? t("roles.errorDelete"));
       },
     });
   };
@@ -170,9 +160,7 @@ export default function RolesPage() {
         alert(t("roles.resendSuccess"));
       },
       onError: (err: unknown) => {
-        const detail = (err as { response?: { data?: { detail?: { message?: string } } } })?.response?.data?.detail;
-        const msg = typeof detail === "object" && detail?.message ? detail.message : (detail as string);
-        alert(msg || t("roles.resendError"));
+        alert(getApiErrorMessage(err) ?? t("roles.resendError"));
       },
     });
   };

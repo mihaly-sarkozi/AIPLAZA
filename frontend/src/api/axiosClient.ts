@@ -7,6 +7,7 @@ import { useAuthStore } from "../store/authStore";
 import { getSafeLoginRedirect } from "../utils/loginRedirect";
 import { getCsrfToken, setCsrfToken } from "../utils/csrf";
 import { useLocaleStore } from "../i18n";
+import { getApiErrorMessage } from "../utils/getApiErrorMessage";
 
 // Dev proxy: baseURL legyen relatív (/api), hogy a kérés ugyanarra az originra menjen → refresh_token cookie (SameSite=Lax) elküldésre kerül.
 const api = axios.create({
@@ -52,13 +53,6 @@ async function doRefresh(): Promise<string> {
 
 const PERMISSIONS_CHANGED_CODE = "permissions_changed";
 
-function getDetailMessage(err: unknown): string | undefined {
-  const detail = err && typeof err === "object" && "response" in err
-    ? (err as { response?: { data?: { detail?: { message?: string; code?: string } } } }).response?.data?.detail
-    : undefined;
-  return detail && typeof detail === "object" && "message" in detail ? detail.message : undefined;
-}
-
 function isPermissionsChanged(err: unknown): boolean {
   const detail = err && typeof err === "object" && "response" in err
     ? (err as { response?: { data?: { detail?: { code?: string } } } }).response?.data?.detail
@@ -68,7 +62,7 @@ function isPermissionsChanged(err: unknown): boolean {
 
 function redirectToLogin(err?: unknown): void {
   if (typeof window !== "undefined" && isPermissionsChanged(err)) {
-    const msg = getDetailMessage(err) ?? "Változás történt a jogosultságokban. Jelentkezz be újra.";
+    const msg = getApiErrorMessage(err) ?? "Változás történt a jogosultságokban. Jelentkezz be újra.";
     alert(msg);
   }
   useAuthStore.getState().logout();

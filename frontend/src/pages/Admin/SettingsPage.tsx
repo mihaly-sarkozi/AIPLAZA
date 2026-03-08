@@ -2,6 +2,7 @@ import { Suspense } from "react";
 import { useTranslation } from "../../i18n";
 import { useAuthStore } from "../../store/authStore";
 import { useSettingsSuspense, usePatchSettingsMutation } from "../../hooks/useApi";
+import { getApiErrorMessage } from "../../utils/getApiErrorMessage";
 
 function SettingsContent() {
   const { t } = useTranslation();
@@ -9,9 +10,7 @@ function SettingsContent() {
   const patchMutation = usePatchSettingsMutation();
   const twoFactorEnabled = settings?.two_factor_enabled ?? true;
   const patchErrMsg = patchMutation.error
-    ? (typeof (patchMutation.error as { response?: { data?: { detail?: string } } })?.response?.data?.detail === "string"
-        ? (patchMutation.error as { response?: { data?: { detail?: string } } }).response?.data?.detail
-        : t("common.errorGeneric"))
+    ? (getApiErrorMessage(patchMutation.error) ?? t("common.errorGeneric"))
     : null;
 
   const handleTwoFactorToggle = () => {

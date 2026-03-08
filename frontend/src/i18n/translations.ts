@@ -18,6 +18,9 @@ export const translations: Record<Locale, Record<string, Record<string, string>>
       send: "Küldés",
       errorGeneric: "Hiba történt.",
       required: " (kötelező)",
+      fieldRequired: "A mező kitöltése kötelező.",
+      invalidEmail: "Érvényes email címet adj meg.",
+      accessDenied: "Nincs jogosultságod az oldal megtekintéséhez.",
     },
     app: {
       name: "BrainBankCenter",
@@ -31,6 +34,12 @@ export const translations: Record<Locale, Record<string, Record<string, string>>
       knowledgeBase: "Tudástár",
       permissions: "Jogosultság",
       settings: "Beállítások",
+    },
+    chat: {
+      wsConnecting: "connecting",
+      wsConnected: "connected",
+      wsReconnecting: "reconnecting",
+      wsOffline: "offline",
     },
     roles: {
       title: "Jogosultságkezelés",
@@ -155,6 +164,9 @@ export const translations: Record<Locale, Record<string, Record<string, string>>
       send: "Send",
       errorGeneric: "An error occurred.",
       required: " (required)",
+      fieldRequired: "This field is required.",
+      invalidEmail: "Please enter a valid email address.",
+      accessDenied: "You do not have permission to view this page.",
     },
     app: {
       name: "BrainBankCenter",
@@ -168,6 +180,12 @@ export const translations: Record<Locale, Record<string, Record<string, string>>
       knowledgeBase: "Knowledge base",
       permissions: "Permissions",
       settings: "Settings",
+    },
+    chat: {
+      wsConnecting: "connecting",
+      wsConnected: "connected",
+      wsReconnecting: "reconnecting",
+      wsOffline: "offline",
     },
     roles: {
       title: "Permission management",
@@ -292,6 +310,9 @@ export const translations: Record<Locale, Record<string, Record<string, string>>
       send: "Enviar",
       errorGeneric: "Ha ocurrido un error.",
       required: " (obligatorio)",
+      fieldRequired: "Este campo es obligatorio.",
+      invalidEmail: "Introduce una dirección de correo válida.",
+      accessDenied: "No tienes permiso para ver esta página.",
     },
     app: {
       name: "BrainBankCenter",
@@ -305,6 +326,12 @@ export const translations: Record<Locale, Record<string, Record<string, string>>
       knowledgeBase: "Base de conocimiento",
       permissions: "Permisos",
       settings: "Ajustes",
+    },
+    chat: {
+      wsConnecting: "connecting",
+      wsConnected: "connected",
+      wsReconnecting: "reconnecting",
+      wsOffline: "offline",
     },
     roles: {
       title: "Gestión de permisos",

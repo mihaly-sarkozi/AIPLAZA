@@ -7,6 +7,7 @@ import {
   type UseMutationOptions,
 } from "@tanstack/react-query";
 import api from "../api/axiosClient";
+import { queryKeys } from "../queryKeys";
 import { useAuthStore } from "../store/authStore";
 
 // ----- Auth / settings (unauthenticated or public) -----
@@ -135,7 +136,7 @@ export function usePatchMeMutation(
       return res.data;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["auth", "me"] });
+      queryClient.invalidateQueries({ queryKey: queryKeys.authMe });
     },
     ...options,
   });
@@ -167,7 +168,7 @@ export type UserListItem = {
 
 export function useUsers(options?: Omit<UseQueryOptions<UserListItem[]>, "queryKey" | "queryFn">) {
   return useQuery({
-    queryKey: ["users"],
+    queryKey: queryKeys.users,
     queryFn: async () => {
       const res = await api.get("/users");
       return res.data as UserListItem[];
@@ -185,7 +186,7 @@ export function useCreateUserMutation(
       const res = await api.post("/users", body);
       return res.data as UserListItem;
     },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["users"] }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.users }),
     ...options,
   });
 }
@@ -207,7 +208,7 @@ export function useUpdateUserMutation(
       const res = await api.put(`/users/${id}`, body);
       return res.data as UserListItem;
     },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["users"] }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.users }),
     ...options,
   });
 }
@@ -219,7 +220,7 @@ export function useDeleteUserMutation(options?: UseMutationOptions<unknown, Erro
       const res = await api.delete(`/users/${userId}`);
       return res.data;
     },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["users"] }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.users }),
     ...options,
   });
 }
@@ -231,7 +232,7 @@ export function useResendInviteMutation(options?: UseMutationOptions<unknown, Er
       const res = await api.post(`/users/${userId}/resend-invite`);
       return res.data;
     },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["users"] }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.users }),
     ...options,
   });
 }
