@@ -120,7 +120,7 @@ export default function ChangePasswordModal({ isOpen, onClose }: ChangePasswordM
               type="button"
               onClick={handleCancel}
               disabled={saving}
-              className="bg-[var(--color-card)] hover:opacity-80 text-[var(--color-foreground)] border border-[var(--color-border)] px-4 py-2 rounded disabled:opacity-50 disabled:cursor-not-allowed"
+              className="bg-[var(--color-card)] hover:bg-[var(--color-button-hover)] text-[var(--color-foreground)] border border-[var(--color-border)] px-4 py-2 rounded disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {t("common.cancel")}
             </button>

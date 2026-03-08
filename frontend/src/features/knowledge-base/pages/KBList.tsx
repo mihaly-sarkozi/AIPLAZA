@@ -1,7 +1,6 @@
 import { useEffect, useState, useMemo, useRef } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { toast } from "sonner";
-import { GearIcon, TrashIcon, BackpackIcon, PersonIcon } from "@radix-ui/react-icons";
 import { useTranslation } from "../../../i18n";
 import { getApiErrorMessage } from "../../../utils/getApiErrorMessage";
 import {
@@ -263,35 +262,11 @@ export default function KBList() {
                 <td className="p-3 text-[var(--color-muted)]">{kb.description ?? "—"}</td>
                 <td className="p-3 text-right w-0 whitespace-nowrap">
                   <div className="flex gap-2 justify-end items-center">
-                    {canManage && kb.can_train && (
-                      <button
-                        type="button"
-                        title={t("kb.actionEdit")}
-                        className="p-2 rounded text-[var(--color-foreground)] bg-[var(--color-card)] border border-[var(--color-border)] hover:opacity-80"
-                        onClick={() => openEditModal(kb)}
-                        disabled={actionLoading}
-                        aria-label={t("kb.actionEdit")}
-                      >
-                        <GearIcon className="w-4 h-4" />
-                      </button>
-                    )}
-                    {canManage && kb.can_train && (
-                      <button
-                        type="button"
-                        title={t("kb.actionSettings")}
-                        className="p-2 rounded text-[var(--color-foreground)] bg-[var(--color-card)] border border-[var(--color-border)] hover:opacity-80"
-                        onClick={() => openSettingsModal(kb)}
-                        disabled={actionLoading}
-                        aria-label={t("kb.actionSettings")}
-                      >
-                        <PersonIcon className="w-4 h-4" />
-                      </button>
-                    )}
                     {isOwner && (
                       <button
                         type="button"
                         title={t("kb.actionDelete")}
-                        className="p-2 rounded text-white bg-red-500 hover:bg-red-600"
+                        className="p-2 rounded text-white bg-red-500 hover:bg-red-600 mr-8 disabled:opacity-50"
                         onClick={() => {
                           setDeleteConfirmKb(kb);
                           setDeleteTypeName("");
@@ -299,19 +274,43 @@ export default function KBList() {
                         disabled={actionLoading}
                         aria-label={t("kb.actionDelete")}
                       >
-                        <TrashIcon className="w-4 h-4" />
+                        <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                      </button>
+                    )}
+                    {canManage && kb.can_train && (
+                      <button
+                        type="button"
+                        title={t("kb.actionSettings")}
+                        className="p-2 rounded text-[var(--color-foreground)] bg-[var(--color-card)] border border-[var(--color-border)] hover:bg-[var(--color-button-hover)] disabled:opacity-50"
+                        onClick={() => openSettingsModal(kb)}
+                        disabled={actionLoading}
+                        aria-label={t("kb.actionSettings")}
+                      >
+                        <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>
                       </button>
                     )}
                     {kb.can_train && (
                       <button
                         type="button"
                         title={t("kb.actionTrain")}
-                        className="p-2 rounded text-[var(--color-foreground)] bg-[var(--color-card)] border border-[var(--color-border)] hover:opacity-80"
+                        className="p-2 rounded text-[var(--color-foreground)] bg-[var(--color-card)] border border-[var(--color-border)] hover:bg-[var(--color-button-hover)] disabled:opacity-50"
                         onClick={() => navigate(`/kb/train/${kb.uuid}`)}
                         disabled={actionLoading}
                         aria-label={t("kb.actionTrain")}
                       >
-                        <BackpackIcon className="w-4 h-4" />
+                        <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" /></svg>
+                      </button>
+                    )}
+                    {canManage && kb.can_train && (
+                      <button
+                        type="button"
+                        title={t("kb.actionEdit")}
+                        className="p-2 rounded text-[var(--color-foreground)] bg-[var(--color-card)] border border-[var(--color-border)] hover:bg-[var(--color-button-hover)] disabled:opacity-50"
+                        onClick={() => openEditModal(kb)}
+                        disabled={actionLoading}
+                        aria-label={t("kb.actionEdit")}
+                      >
+                        <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
                       </button>
                     )}
                   </div>
@@ -328,36 +327,12 @@ export default function KBList() {
           <div key={kb.uuid} className="bg-[var(--color-card)] border border-[var(--color-border)] rounded-lg p-4 space-y-2">
             <div className="font-medium text-[var(--color-foreground)]">{kb.name}</div>
             <div className="text-sm text-[var(--color-muted)]">{kb.description ?? "—"}</div>
-            <div className="flex gap-2 justify-end pt-2">
-              {canManage && kb.can_train && (
-                <button
-                  type="button"
-                  title={t("kb.actionEdit")}
-                  className="p-2 rounded hover:bg-[var(--color-border)] disabled:opacity-50"
-                  onClick={() => openEditModal(kb)}
-                  disabled={actionLoading}
-                  aria-label={t("kb.actionEdit")}
-                >
-                  <GearIcon className="w-4 h-4" />
-                </button>
-              )}
-              {canManage && kb.can_train && (
-                <button
-                  type="button"
-                  title={t("kb.actionSettings")}
-                  className="p-2 rounded hover:bg-[var(--color-border)] disabled:opacity-50"
-                  onClick={() => openSettingsModal(kb)}
-                  disabled={actionLoading}
-                  aria-label={t("kb.actionSettings")}
-                >
-                  <PersonIcon className="w-4 h-4" />
-                </button>
-              )}
+            <div className="flex gap-2 justify-end pt-2 items-center">
               {isOwner && (
                 <button
                   type="button"
                   title={t("kb.actionDelete")}
-                  className="p-2 rounded text-red-600 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-900/30"
+                  className="p-2 rounded text-white bg-red-500 hover:bg-red-600 mr-8 disabled:opacity-50"
                   onClick={() => {
                     setDeleteConfirmKb(kb);
                     setDeleteTypeName("");
@@ -365,19 +340,43 @@ export default function KBList() {
                   disabled={actionLoading}
                   aria-label={t("kb.actionDelete")}
                 >
-                  <TrashIcon className="w-4 h-4" />
+                  <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                </button>
+              )}
+              {canManage && kb.can_train && (
+                <button
+                  type="button"
+                  title={t("kb.actionSettings")}
+                  className="p-2 rounded text-[var(--color-foreground)] bg-[var(--color-card)] border border-[var(--color-border)] hover:bg-[var(--color-button-hover)] disabled:opacity-50"
+                  onClick={() => openSettingsModal(kb)}
+                  disabled={actionLoading}
+                  aria-label={t("kb.actionSettings")}
+                >
+                  <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>
                 </button>
               )}
               {kb.can_train && (
                 <button
                   type="button"
                   title={t("kb.actionTrain")}
-                  className="p-2 rounded hover:bg-[var(--color-border)] disabled:opacity-50"
+                  className="p-2 rounded text-[var(--color-foreground)] bg-[var(--color-card)] border border-[var(--color-border)] hover:bg-[var(--color-button-hover)] disabled:opacity-50"
                   onClick={() => navigate(`/kb/train/${kb.uuid}`)}
                   disabled={actionLoading}
                   aria-label={t("kb.actionTrain")}
                 >
-                  <BackpackIcon className="w-4 h-4" />
+                  <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" /></svg>
+                </button>
+              )}
+              {canManage && kb.can_train && (
+                <button
+                  type="button"
+                  title={t("kb.actionEdit")}
+                  className="p-2 rounded text-[var(--color-foreground)] bg-[var(--color-card)] border border-[var(--color-border)] hover:bg-[var(--color-button-hover)] disabled:opacity-50"
+                  onClick={() => openEditModal(kb)}
+                  disabled={actionLoading}
+                  aria-label={t("kb.actionEdit")}
+                >
+                  <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
                 </button>
               )}
             </div>
@@ -469,7 +468,7 @@ export default function KBList() {
                     resetForm();
                   }}
                   disabled={actionLoading}
-                  className="bg-[var(--color-card)] hover:opacity-80 text-[var(--color-foreground)] border border-[var(--color-border)] px-4 py-2 rounded disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="bg-[var(--color-card)] hover:bg-[var(--color-button-hover)] text-[var(--color-foreground)] border border-[var(--color-border)] px-4 py-2 rounded disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {t("common.cancel")}
                 </button>
@@ -530,7 +529,7 @@ export default function KBList() {
                   resetForm();
                 }}
                 disabled={actionLoading}
-                className="px-4 py-2 rounded text-[var(--color-foreground)] hover:opacity-80 bg-[var(--color-card)] border border-[var(--color-border)] disabled:opacity-50 disabled:cursor-not-allowed"
+                className="px-4 py-2 rounded text-[var(--color-foreground)] hover:bg-[var(--color-button-hover)] bg-[var(--color-card)] border border-[var(--color-border)] disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {t("common.cancel")}
               </button>
@@ -551,8 +550,9 @@ export default function KBList() {
       {settingsKb && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-[var(--color-card)] border border-[var(--color-border)] p-6 rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto shadow-lg">
-            <h2 className="text-2xl font-bold mb-1 text-[var(--color-foreground)]">{t("kb.actionSettings")} – {settingsKb.name}</h2>
-            <p className="text-sm text-[var(--color-muted)] mb-4">{t("kb.permissionsHint")}</p>
+            <p className="text-sm text-[var(--color-muted)] mb-0.5">{t("nav.knowledgeBase")}</p>
+            <h2 className="text-2xl font-bold mb-1 text-[var(--color-foreground)]">{settingsKb.name}</h2>
+            <p className="text-sm text-[var(--color-muted)] mb-4" style={{ marginTop: 10 }}>{t("kb.settingsUsageHint")}</p>
             {settingsPermsLoading ? (
               <p className="text-[var(--color-muted)]">{t("common.loading")}</p>
             ) : (
@@ -685,7 +685,7 @@ export default function KBList() {
                     type="button"
                     onClick={() => setSettingsKb(null)}
                     disabled={actionLoading}
-                    className="px-4 py-2 rounded text-[var(--color-foreground)] hover:opacity-80 bg-[var(--color-card)] border border-[var(--color-border)] disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="px-4 py-2 rounded text-[var(--color-foreground)] hover:bg-[var(--color-button-hover)] bg-[var(--color-card)] border border-[var(--color-border)] disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     {t("common.cancel")}
                   </button>
@@ -727,7 +727,7 @@ export default function KBList() {
                   setDeleteTypeName("");
                 }}
                 disabled={actionLoading}
-                className="px-4 py-2 rounded text-[var(--color-foreground)] hover:opacity-80 bg-[var(--color-card)] border border-[var(--color-border)] disabled:opacity-50 disabled:cursor-not-allowed"
+                className="px-4 py-2 rounded text-[var(--color-foreground)] hover:bg-[var(--color-button-hover)] bg-[var(--color-card)] border border-[var(--color-border)] disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {t("common.cancel")}
               </button>

@@ -86,7 +86,7 @@ export default function KBEdit() {
           <button
             type="button"
             onClick={() => navigate("/kb")}
-            className="px-4 py-2 rounded text-[var(--color-foreground)] hover:opacity-80 bg-[var(--color-card)] border border-[var(--color-border)]"
+            className="px-4 py-2 rounded text-[var(--color-foreground)] hover:bg-[var(--color-button-hover)] bg-[var(--color-card)] border border-[var(--color-border)]"
           >
             {t("common.cancel")}
           </button>

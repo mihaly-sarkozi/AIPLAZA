@@ -108,7 +108,7 @@ export default function ProfilePage() {
               type="button"
               onClick={handleSaveName}
               disabled={saving}
-              className="p-2 rounded border border-[var(--color-border)] bg-[var(--color-card)] hover:opacity-80 disabled:opacity-60 shrink-0 text-[var(--color-foreground)]"
+              className="p-2 rounded border border-[var(--color-border)] bg-[var(--color-card)] hover:bg-[var(--color-button-hover)] disabled:opacity-60 shrink-0 text-[var(--color-foreground)]"
               title={t("common.save")}
               aria-label={t("common.save")}
             >
@@ -119,7 +119,7 @@ export default function ProfilePage() {
             <button
               type="button"
               onClick={handleRevertName}
-              className="p-2 rounded border border-[var(--color-border)] bg-[var(--color-card)] hover:opacity-80 shrink-0 text-[var(--color-foreground)]"
+              className="p-2 rounded border border-[var(--color-border)] bg-[var(--color-card)] hover:bg-[var(--color-button-hover)] shrink-0 text-[var(--color-foreground)]"
               title={t("profile.revert")}
               aria-label={t("profile.revert")}
             >
@@ -143,7 +143,7 @@ export default function ProfilePage() {
                   className={`px-4 py-2 rounded text-sm border ${
                     preferredLocale === opt.value
                       ? "bg-[var(--color-primary)] text-[var(--color-on-primary)] border-[var(--color-primary)] hover:opacity-90"
-                      : "bg-[var(--color-card)] text-[var(--color-foreground)] border-[var(--color-border)] hover:opacity-80"
+                      : "bg-[var(--color-card)] text-[var(--color-foreground)] border-[var(--color-border)] hover:bg-[var(--color-button-hover)]"
                   } disabled:opacity-60`}
                 >
                   {opt.label}
@@ -161,7 +161,7 @@ export default function ProfilePage() {
                 className={`px-4 py-2 rounded text-sm border ${
                   preferredTheme === "light"
                     ? "bg-[var(--color-primary)] text-[var(--color-on-primary)] border-[var(--color-primary)] hover:opacity-90"
-                    : "bg-[var(--color-card)] text-[var(--color-foreground)] border-[var(--color-border)] hover:opacity-80"
+                    : "bg-[var(--color-card)] text-[var(--color-foreground)] border-[var(--color-border)] hover:bg-[var(--color-button-hover)]"
                 } disabled:opacity-60`}
               >
                 {t("profile.themeLight")}
@@ -173,7 +173,7 @@ export default function ProfilePage() {
                 className={`px-4 py-2 rounded text-sm border ${
                   preferredTheme === "dark"
                     ? "bg-[var(--color-primary)] text-[var(--color-on-primary)] border-[var(--color-primary)] hover:opacity-90"
-                    : "bg-[var(--color-card)] text-[var(--color-foreground)] border-[var(--color-border)] hover:opacity-80"
+                    : "bg-[var(--color-card)] text-[var(--color-foreground)] border-[var(--color-border)] hover:bg-[var(--color-button-hover)]"
                 } disabled:opacity-60`}
               >
                 {t("profile.themeDark")}

@@ -6,6 +6,7 @@
   --color-muted: #6b7280;
   --color-label: #374151;
   --color-border: #e5e7eb;
+  --color-button-hover: #d1d5db;
   --color-readonly-bg: #9ca3af;
   --color-input-bg: #ffffff;
   --color-card: #ffffff;
@@ -14,6 +15,8 @@
   --color-on-primary: #ffffff;
   --color-table-head: #f3f4f6;
   --color-inactive: #4b5563;
+  --color-kb-selector-bg: #f3f4f6;
+  --color-kb-selector-hover: #e5e7eb;
 }
 
 /* Dark theme: fekete alapon fehér (html.dark a documentElement-en) */
@@ -23,6 +26,7 @@
   --color-muted: #9ca3af;
   --color-label: #e5e7eb;
   --color-border: #374151;
+  --color-button-hover: #374151;
   --color-readonly-bg: #6b7280;
   --color-input-bg: #000000;
   --color-card: #000000;
@@ -31,6 +35,8 @@
   --color-on-primary: #ffffff;
   --color-table-head: #1f2937;
   --color-inactive: #6b7280;
+  --color-kb-selector-bg: #1f2937;
+  --color-kb-selector-hover: #374151;
 }
 
 html {

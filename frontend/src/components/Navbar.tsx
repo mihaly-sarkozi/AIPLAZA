@@ -41,6 +41,9 @@ export default function Navbar({ onOpenProfile, onOpenChangePassword }: NavbarPr
           <button onClick={() => go("/kb")} className="text-sm text-[var(--color-muted)] hover:text-[var(--color-foreground)] py-2">
             {t("nav.knowledgeBase")}
           </button>
+          <button onClick={() => go("/kb")} className="text-sm text-[var(--color-muted)] hover:text-[var(--color-foreground)] py-2">
+            {t("nav.train")}
+          </button>
           <button onClick={() => go("/admin/roles")} className="text-sm text-[var(--color-muted)] hover:text-[var(--color-foreground)] py-2">
             {t("nav.permissions")}
           </button>
@@ -56,7 +59,7 @@ export default function Navbar({ onOpenProfile, onOpenChangePassword }: NavbarPr
 
   return (
     <nav className="w-full bg-[var(--color-background)] text-[var(--color-foreground)] border-b border-[var(--color-border)] fixed top-0 left-0 z-50">
-      <div className="p-4 flex justify-between items-center">
+      <div className="p-2 flex justify-between items-center">
         {/* Bal oldal: hamburger + AIPLAZA */}
         <div className="flex items-center gap-2 min-w-0">
           <button

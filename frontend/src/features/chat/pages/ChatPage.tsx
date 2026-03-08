@@ -1,11 +1,9 @@
 import { useState, useEffect, useRef, useCallback, useLayoutEffect } from "react";
-import { useNavigate } from "react-router-dom";
 import { VariableSizeList as List } from "react-window";
 import { useAuthStore } from "../../../store/authStore";
 import { sanitizeMessage } from "../../../utils/sanitize";
 import { ensureChatWsToken, getChatWsUrl } from "../api/chatWs";
 import ChatMessage from "../components/ChatMessage";
-import { toast } from "sonner";
 import { useKbList } from "../../knowledge-base/hooks/useKb";
 import { useTranslation } from "../../../i18n";
 
@@ -63,7 +61,6 @@ function MessageRow({ index, style, data }: MessageRowProps) {
 
 export default function ChatPage() {
   const { t } = useTranslation();
-  const navigate = useNavigate();
   const token = useAuthStore((s) => s.token);
   const [messages, setMessages] = useState<ChatMessageType[]>([]);
   const [loading, setLoading] = useState(false);
@@ -77,6 +74,13 @@ export default function ChatPage() {
   const [selectedKbUuids, setSelectedKbUuids] = useState<string[]>([]);
   const [kbDropdownOpen, setKbDropdownOpen] = useState(false);
   const kbDropdownRef = useRef<HTMLDivElement | null>(null);
+
+  /** Ha csak egy tudástár érhető el, alapból az legyen kijelölve */
+  useEffect(() => {
+    if (kbList.length === 1) {
+      setSelectedKbUuids([kbList[0].uuid]);
+    }
+  }, [kbList]);
 
   const setRowHeight = useCallback((index: number, height: number) => {
     rowHeights.current[index] = height;
@@ -199,7 +203,55 @@ export default function ChatPage() {
 
   return (
     <div className="flex-1 flex flex-col min-h-0 bg-[var(--color-background)] text-[var(--color-foreground)]">
-      <div ref={containerRef} className="flex-1 min-h-0 flex flex-col p-4">
+      {/* Felső fül: tudástár választó középen, lelóg – a fejléc vonalához ér */}
+      <div className="shrink-0 flex justify-center -mt-6">
+        <div className="relative" ref={kbDropdownRef}>
+          <button
+            type="button"
+            onClick={() => setKbDropdownOpen((o) => !o)}
+            className="flex items-center gap-1 px-3 py-1 rounded-t-none rounded-b-md border-x border-b border-t border-[var(--color-border)] bg-[var(--color-kb-selector-bg)] text-[var(--color-foreground)] text-xs hover:bg-[var(--color-kb-selector-hover)] shadow-sm min-w-[12rem] max-w-[18rem]"
+          >
+            <span className="truncate flex-1 min-w-0 text-left">{kbButtonLabel}</span>
+            <svg className="w-3 h-3 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={kbDropdownOpen ? "M5 15l7-7 7 7" : "M19 9l-7 7-7-7"} />
+            </svg>
+          </button>
+          {kbDropdownOpen && (
+            <div className="absolute left-1/2 -translate-x-1/2 top-full mt-1 z-20 min-w-[14rem] max-w-[20rem] max-h-56 overflow-y-auto rounded border border-[var(--color-border)] bg-[var(--color-kb-selector-bg)] shadow-lg py-0.5">
+              {kbList.length > 1 && (
+                <button
+                  type="button"
+                  onClick={() => { toggleAllKbs(); }}
+                  className="w-full flex items-center gap-1.5 px-2 py-1.5 text-left text-xs hover:bg-[var(--color-border)]/30"
+                >
+                  <span className="w-3.5 h-3.5 flex items-center justify-center border border-[var(--color-border)] rounded bg-[var(--color-background)] shrink-0">
+                    {isAllKbs ? "✓" : ""}
+                  </span>
+                  {t("chat.allKbs")}
+                </button>
+              )}
+              {kbList.map((kb) => {
+                const checked = selectedKbUuids.includes(kb.uuid);
+                return (
+                  <button
+                    key={kb.uuid}
+                    type="button"
+                    onClick={() => toggleKb(kb.uuid)}
+                    className="w-full flex items-center gap-1.5 px-2 py-1.5 text-left text-xs hover:bg-[var(--color-border)]/30"
+                  >
+                    <span className="w-3.5 h-3.5 flex items-center justify-center border border-[var(--color-border)] rounded bg-[var(--color-background)] shrink-0">
+                      {checked ? "✓" : ""}
+                    </span>
+                    <span className="truncate">{kb.name}</span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div ref={containerRef} className="flex-1 min-h-0 flex flex-col px-4 pt-2 pb-2">
         {messages.length > 0 ? (
           <List
             ref={listRef}
@@ -228,74 +280,8 @@ export default function ChatPage() {
         )}
       </div>
 
-      {/* Egy sor: tudástár legördülő + Tanítás gomb alatta | chat mező + Küldés */}
+      {/* Input sor: chat mező + Küldés */}
       <div className="shrink-0 w-full bg-[var(--color-background)] border-t border-[var(--color-border)] px-4 py-3 flex items-center gap-2">
-        <div className="flex flex-col gap-1.5 shrink-0">
-          <div className="relative" ref={kbDropdownRef}>
-            <button
-              type="button"
-              onClick={() => setKbDropdownOpen((o) => !o)}
-              className="flex items-center gap-1 px-2 py-1.5 rounded border border-[var(--color-border)] bg-[var(--color-card)] text-[var(--color-foreground)] text-xs hover:bg-[var(--color-border)]/30 w-[20ch] min-w-[20ch] max-w-[20ch]"
-            >
-              <span className="truncate flex-1 min-w-0 text-left">{kbButtonLabel}</span>
-              <svg className="w-3 h-3 shrink-0 ml-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={kbDropdownOpen ? "M5 15l7-7 7 7" : "M19 9l-7 7-7-7"} />
-              </svg>
-            </button>
-            {kbDropdownOpen && (
-              <div className="absolute left-0 bottom-full mb-1 z-20 min-w-[10rem] max-w-[14rem] max-h-56 overflow-y-auto rounded border border-[var(--color-border)] bg-[var(--color-card)] shadow-lg py-0.5">
-                <button
-                  type="button"
-                  onClick={() => { toggleAllKbs(); }}
-                  className="w-full flex items-center gap-1.5 px-2 py-1.5 text-left text-xs hover:bg-[var(--color-border)]/30"
-                >
-                  <span className="w-3.5 h-3.5 flex items-center justify-center border border-[var(--color-border)] rounded bg-[var(--color-background)] shrink-0">
-                    {isAllKbs ? "✓" : ""}
-                  </span>
-                  {t("chat.allKbs")}
-                </button>
-                {kbList.map((kb) => {
-                  const checked = selectedKbUuids.includes(kb.uuid);
-                  return (
-                    <button
-                      key={kb.uuid}
-                      type="button"
-                      onClick={() => toggleKb(kb.uuid)}
-                      className="w-full flex items-center gap-1.5 px-2 py-1.5 text-left text-xs hover:bg-[var(--color-border)]/30"
-                    >
-                      <span className="w-3.5 h-3.5 flex items-center justify-center border border-[var(--color-border)] rounded bg-[var(--color-background)] shrink-0">
-                        {checked ? "✓" : ""}
-                      </span>
-                      <span className="truncate">{kb.name}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-          <button
-            type="button"
-            onClick={() => {
-              if (selectedKbUuids.length !== 1) {
-                toast.info("A tanításhoz ki kell választani egy tudástárat.");
-                return;
-              }
-              const selected = kbList.find((k) => k.uuid === selectedKbUuids[0]);
-              if (!selected?.can_train) {
-                toast.info("Ehhez a tudástárhoz nincs tanítási jogosultságod.");
-                return;
-              }
-              navigate(`/kb/train/${selectedKbUuids[0]}`);
-            }}
-            className={`flex items-center justify-center px-2 py-1.5 rounded text-xs ${
-              selectedKbUuids.length === 1 && kbList.find((k) => k.uuid === selectedKbUuids[0])?.can_train === true
-                ? "bg-black text-white hover:opacity-90"
-                : "bg-gray-300 text-gray-600 dark:bg-gray-600 dark:text-gray-400 cursor-not-allowed"
-            }`}
-          >
-            <span>Tanítás</span>
-          </button>
-        </div>
         <textarea
           ref={inputRef}
           defaultValue=""

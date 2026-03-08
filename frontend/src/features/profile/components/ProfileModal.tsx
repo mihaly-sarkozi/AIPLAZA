@@ -93,7 +93,7 @@ export default function ProfileModal({ isOpen, onClose }: ProfileModalProps) {
                   className={`px-4 py-2 rounded text-sm border ${
                     preferredLocale === opt.value
                       ? "bg-[var(--color-primary)] text-[var(--color-on-primary)] border-[var(--color-primary)] hover:opacity-90"
-                      : "bg-[var(--color-card)] text-[var(--color-foreground)] border-[var(--color-border)] hover:opacity-80"
+                      : "bg-[var(--color-card)] text-[var(--color-foreground)] border-[var(--color-border)] hover:bg-[var(--color-button-hover)]"
                   }`}
                 >
                   {opt.label}
@@ -110,7 +110,7 @@ export default function ProfileModal({ isOpen, onClose }: ProfileModalProps) {
                 className={`px-4 py-2 rounded text-sm border ${
                   preferredTheme === "light"
                     ? "bg-[var(--color-primary)] text-[var(--color-on-primary)] border-[var(--color-primary)] hover:opacity-90"
-                    : "bg-[var(--color-card)] text-[var(--color-foreground)] border-[var(--color-border)] hover:opacity-80"
+                    : "bg-[var(--color-card)] text-[var(--color-foreground)] border-[var(--color-border)] hover:bg-[var(--color-button-hover)]"
                 }`}
               >
                 {t("profile.themeLight")}
@@ -121,7 +121,7 @@ export default function ProfileModal({ isOpen, onClose }: ProfileModalProps) {
                 className={`px-4 py-2 rounded text-sm border ${
                   preferredTheme === "dark"
                     ? "bg-[var(--color-primary)] text-[var(--color-on-primary)] border-[var(--color-primary)] hover:opacity-90"
-                    : "bg-[var(--color-card)] text-[var(--color-foreground)] border-[var(--color-border)] hover:opacity-80"
+                    : "bg-[var(--color-card)] text-[var(--color-foreground)] border-[var(--color-border)] hover:bg-[var(--color-button-hover)]"
                 }`}
               >
                 {t("profile.themeDark")}
@@ -133,7 +133,7 @@ export default function ProfileModal({ isOpen, onClose }: ProfileModalProps) {
               type="button"
               onClick={handleCancel}
               disabled={saving}
-              className="bg-[var(--color-card)] hover:opacity-80 text-[var(--color-foreground)] border border-[var(--color-border)] px-4 py-2 rounded disabled:opacity-50 disabled:cursor-not-allowed"
+              className="bg-[var(--color-card)] hover:bg-[var(--color-button-hover)] text-[var(--color-foreground)] border border-[var(--color-border)] px-4 py-2 rounded disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {t("common.cancel")}
             </button>
