@@ -1,12 +1,11 @@
 import { useState, useEffect } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import api from "../api/axiosClient";
 import { useTranslation } from "../i18n";
 import { useAuthStore } from "../store/authStore";
 import { getSafeLoginRedirect } from "../utils/loginRedirect";
 import { useLocaleStore } from "../i18n";
+import { useDefaultSettings, useLoginMutation } from "../hooks/useApi";
 import type { Locale } from "../i18n";
-import type { Theme } from "../i18n";
 
 const LOGIN_REMEMBER_EMAIL_KEY = "AIPLAZA_login_remember_email";
 const LOGIN_COOLDOWN_SECONDS = 30;
@@ -18,16 +17,15 @@ export default function Login() {
   const returnTo = getSafeLoginRedirect(searchParams.get("redirect"));
   const { setToken, logout, loadUser } = useAuthStore();
   const setLocaleAndTheme = useLocaleStore((s) => s.setLocaleAndTheme);
+  const token = useAuthStore((s) => s.token);
+  const { data: defaultSettings } = useDefaultSettings({ enabled: !token });
 
   useEffect(() => {
-    const token = useAuthStore.getState().token;
-    if (token) return;
-    api.get("/auth/default-settings").then((res) => {
-      const loc = (res.data?.locale || "hu") as Locale;
-      const currentTheme = useLocaleStore.getState().theme;
-      setLocaleAndTheme(loc, currentTheme);
-    }).catch(() => {});
-  }, [setLocaleAndTheme]);
+    if (!defaultSettings) return;
+    const loc = (defaultSettings.locale || "hu") as Locale;
+    const currentTheme = useLocaleStore.getState().theme;
+    setLocaleAndTheme(loc, currentTheme);
+  }, [defaultSettings, setLocaleAndTheme]);
 
   const handleLoginSuccess = async (access_token: string) => {
     setToken(access_token); // memory only (auth store); never persist to localStorage/sessionStorage
@@ -54,8 +52,9 @@ export default function Login() {
   });
   const [error, setError] = useState("");
   const [pendingToken, setPendingToken] = useState<string | null>(null);
-  const [submitting, setSubmitting] = useState(false);
   const [cooldownSecondsRemaining, setCooldownSecondsRemaining] = useState(0);
+  const loginMutation = useLoginMutation();
+  const submitting = loginMutation.isPending;
 
   useEffect(() => {
     if (cooldownSecondsRemaining <= 0) return;
@@ -69,21 +68,21 @@ export default function Login() {
     e.preventDefault();
     if (submitting || cooldownSecondsRemaining > 0) return;
     setError("");
-    setSubmitting(true);
 
     const payload = pendingToken
       ? { pending_token: pendingToken, two_factor_code: twoFactorCode, auto_login: autoLogin }
       : { email, password, auto_login: autoLogin };
 
     const doLogin = async () => {
-      const res = await api.post("/auth/login", payload);
-      if (res.data.pending_token) {
-        setPendingToken(res.data.pending_token);
+      const data = await loginMutation.mutateAsync(payload);
+      if (data.pending_token) {
+        setPendingToken(data.pending_token);
         setTwoFactorCode("");
         setError("");
         return;
       }
-      const { access_token } = res.data;
+      const access_token = data.access_token;
+      if (!access_token) return;
       try {
         if (autoLogin && email) {
           localStorage.setItem(LOGIN_REMEMBER_EMAIL_KEY, email);
@@ -99,7 +98,6 @@ export default function Login() {
     } catch (err: unknown) {
       const axErr = err as { response?: { status?: number } };
       if (axErr.response?.status === 409) {
-        // Régi token maradt (pl. becsukott fül, új lap): töröljük, majd újrapróbáljuk
         logout();
         try {
           await doLogin();
@@ -107,11 +105,7 @@ export default function Login() {
           const retry = retryErr as { response?: { status?: number } };
           console.error("Login retry error:", retryErr);
           if (retry.response?.status === 401) {
-            if (pendingToken) {
-              setError(t("login.errorBad2FA"));
-            } else {
-              setError(t("login.errorBadCredentials"));
-            }
+            setError(pendingToken ? t("login.errorBad2FA") : t("login.errorBadCredentials"));
           } else if (retry.response?.status === 429) {
             setError(t("login.errorTooMany"));
             setCooldownSecondsRemaining(LOGIN_COOLDOWN_SECONDS);
@@ -125,17 +119,11 @@ export default function Login() {
         setError(t("login.errorTooMany"));
         setCooldownSecondsRemaining(LOGIN_COOLDOWN_SECONDS);
       } else if (axErr.response?.status === 401) {
-        if (pendingToken) {
-          setError(t("login.errorBad2FA"));
-        } else {
-          setError(t("login.errorBadCredentials"));
-        }
+        setError(pendingToken ? t("login.errorBad2FA") : t("login.errorBadCredentials"));
       } else {
         setError(t("login.errorUnknown"));
       }
       console.error("Login error:", err);
-    } finally {
-      setSubmitting(false);
     }
   };
 

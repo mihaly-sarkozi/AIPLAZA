@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useTranslation } from "../i18n";
-import api from "../api/axiosClient";
+import { useChangePasswordMutation } from "../hooks/useApi";
 
 export default function ChangePasswordPage() {
   const { t } = useTranslation();
@@ -8,10 +8,19 @@ export default function ChangePasswordPage() {
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [error, setError] = useState("");
-  const [saving, setSaving] = useState(false);
   const [success, setSuccess] = useState(false);
+  const changePasswordMutation = useChangePasswordMutation();
+  const saving = changePasswordMutation.isPending;
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const getErrorMsg = (err: unknown) => {
+    const res = err as { response?: { data?: { detail?: string | { message?: string } } } };
+    const detail = res.response?.data?.detail;
+    return typeof detail === "string"
+      ? detail
+      : (detail && typeof detail === "object" && "message" in detail ? String((detail as { message?: string }).message) : null) || t("common.errorGeneric");
+  };
+
+  const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
     const cur = currentPassword.trim();
@@ -41,27 +50,18 @@ export default function ChangePasswordPage() {
       setError(t("profile.passwordRequiresNumber"));
       return;
     }
-    setSaving(true);
-    try {
-      await api.post("/auth/me/change-password", {
-        current_password: cur,
-        new_password: newP,
-      });
-      setSuccess(true);
-      setCurrentPassword("");
-      setNewPassword("");
-      setConfirmPassword("");
-    } catch (err: unknown) {
-      const res = err as { response?: { data?: { detail?: string | { message?: string } } } };
-      const detail = res.response?.data?.detail;
-      const msg =
-        typeof detail === "string"
-          ? detail
-          : (detail && typeof detail === "object" && "message" in detail ? String((detail as { message?: string }).message) : null) || t("common.errorGeneric");
-      setError(msg);
-    } finally {
-      setSaving(false);
-    }
+    changePasswordMutation.mutate(
+      { current_password: cur, new_password: newP },
+      {
+        onSuccess: () => {
+          setSuccess(true);
+          setCurrentPassword("");
+          setNewPassword("");
+          setConfirmPassword("");
+        },
+        onError: (err) => setError(getErrorMsg(err)),
+      }
+    );
   };
 
   return (
@@ -90,7 +90,7 @@ export default function ChangePasswordPage() {
               onChange={(e) => setCurrentPassword(e.target.value)}
               className="w-full p-2 rounded bg-[var(--color-input-bg)] border border-[var(--color-border)] text-[var(--color-foreground)]"
               autoComplete="current-password"
-              disabled={saving}
+              disabled={saving || success}
               required
             />
           </div>
@@ -102,7 +102,7 @@ export default function ChangePasswordPage() {
               onChange={(e) => setNewPassword(e.target.value)}
               className="w-full p-2 rounded bg-[var(--color-input-bg)] border border-[var(--color-border)] text-[var(--color-foreground)]"
               autoComplete="new-password"
-              disabled={saving}
+              disabled={saving || success}
               required
             />
             <p className="text-sm text-[var(--color-muted)] mt-1">{t("profile.passwordRules")}</p>
@@ -115,7 +115,7 @@ export default function ChangePasswordPage() {
               onChange={(e) => setConfirmPassword(e.target.value)}
               className="w-full p-2 rounded bg-[var(--color-input-bg)] border border-[var(--color-border)] text-[var(--color-foreground)]"
               autoComplete="new-password"
-              disabled={saving}
+              disabled={saving || success}
               required
             />
           </div>

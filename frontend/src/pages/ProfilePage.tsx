@@ -3,7 +3,7 @@ import { useTranslation } from "../i18n";
 import type { Locale } from "../i18n";
 import type { Theme } from "../i18n";
 import { useAuthStore } from "../store/authStore";
-import api from "../api/axiosClient";
+import { usePatchMeMutation } from "../hooks/useApi";
 
 const LOCALE_OPTIONS: { value: Locale; label: string }[] = [
   { value: "hu", label: "Magyar" },
@@ -20,8 +20,9 @@ export default function ProfilePage() {
   const originalNameRef = useRef("");
   const [preferredLocale, setPreferredLocale] = useState<Locale>(locale);
   const [preferredTheme, setPreferredTheme] = useState<Theme>(theme);
-  const [saving, setSaving] = useState(false);
   const [savedMessage, setSavedMessage] = useState(false);
+  const patchMe = usePatchMeMutation();
+  const saving = patchMe.isPending;
   const savedTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -49,31 +50,31 @@ export default function ProfilePage() {
     }, SAVED_MESSAGE_MS);
   };
 
-  const save = async (payload: { name?: string | null; preferred_locale?: Locale; preferred_theme?: Theme }) => {
+  const save = (payload: { name?: string | null; preferred_locale?: Locale; preferred_theme?: Theme }) => {
     if (!user) return;
-    setSaving(true);
-    try {
-      const res = await api.patch("/auth/me", {
-        name: payload.name !== undefined ? payload.name : name.trim() || null,
-        preferred_locale: payload.preferred_locale ?? preferredLocale,
-        preferred_theme: payload.preferred_theme ?? preferredTheme,
-      });
-      setUser(res.data);
-      setLocale(res.data.locale as Locale);
-      setTheme(res.data.theme as Theme);
-      if (payload.name !== undefined) {
-        const newName = (res.data.name as string)?.trim() ?? "";
-        setName(newName);
-        originalNameRef.current = newName;
-      }
-      showSavedBriefly();
-    } catch (err: unknown) {
-      const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
-      setSavedMessage(false);
-      alert(typeof detail === "string" ? detail : t("common.errorGeneric"));
-    } finally {
-      setSaving(false);
-    }
+    const body = {
+      name: payload.name !== undefined ? payload.name : name.trim() || null,
+      preferred_locale: payload.preferred_locale ?? preferredLocale,
+      preferred_theme: payload.preferred_theme ?? preferredTheme,
+    };
+    patchMe.mutate(body, {
+      onSuccess: (data: { name?: string; locale?: string; theme?: string }) => {
+        setUser({ ...user, ...data });
+        if (data.locale) setLocale(data.locale as Locale);
+        if (data.theme) setTheme(data.theme as Theme);
+        if (payload.name !== undefined && data.name !== undefined) {
+          const newName = (data.name as string)?.trim() ?? "";
+          setName(newName);
+          originalNameRef.current = newName;
+        }
+        showSavedBriefly();
+      },
+      onError: (err: unknown) => {
+        const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+        setSavedMessage(false);
+        alert(typeof detail === "string" ? detail : t("common.errorGeneric"));
+      },
+    });
   };
 
   const handleSaveName = () => {

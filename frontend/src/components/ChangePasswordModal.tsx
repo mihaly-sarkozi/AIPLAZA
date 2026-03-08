@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useTranslation } from "../i18n";
-import api from "../api/axiosClient";
+import { useChangePasswordMutation } from "../hooks/useApi";
 
 interface ChangePasswordModalProps {
   isOpen: boolean;
@@ -13,10 +13,19 @@ export default function ChangePasswordModal({ isOpen, onClose }: ChangePasswordM
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [error, setError] = useState("");
-  const [saving, setSaving] = useState(false);
   const [success, setSuccess] = useState(false);
+  const changePasswordMutation = useChangePasswordMutation();
+  const saving = changePasswordMutation.isPending;
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const getErrorMsg = (err: unknown) => {
+    const res = err as { response?: { data?: { detail?: string | { message?: string } } } };
+    const detail = res.response?.data?.detail;
+    return typeof detail === "string"
+      ? detail
+      : (detail && typeof detail === "object" && "message" in detail ? String((detail as { message?: string }).message) : null) || t("common.errorGeneric");
+  };
+
+  const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
     const cur = currentPassword.trim();
@@ -46,31 +55,22 @@ export default function ChangePasswordModal({ isOpen, onClose }: ChangePasswordM
       setError(t("profile.passwordRequiresNumber"));
       return;
     }
-    setSaving(true);
-    try {
-      await api.post("/auth/me/change-password", {
-        current_password: cur,
-        new_password: newP,
-      });
-      setSuccess(true);
-      setCurrentPassword("");
-      setNewPassword("");
-      setConfirmPassword("");
-      setTimeout(() => {
-        onClose();
-        setSuccess(false);
-      }, 1500);
-    } catch (err: unknown) {
-      const res = err as { response?: { data?: { detail?: string | { message?: string } } } };
-      const detail = res.response?.data?.detail;
-      const msg =
-        typeof detail === "string"
-          ? detail
-          : (detail && typeof detail === "object" && "message" in detail ? String((detail as { message?: string }).message) : null) || t("common.errorGeneric");
-      setError(msg);
-    } finally {
-      setSaving(false);
-    }
+    changePasswordMutation.mutate(
+      { current_password: cur, new_password: newP },
+      {
+        onSuccess: () => {
+          setSuccess(true);
+          setCurrentPassword("");
+          setNewPassword("");
+          setConfirmPassword("");
+          setTimeout(() => {
+            onClose();
+            setSuccess(false);
+          }, 1500);
+        },
+        onError: (err) => setError(getErrorMsg(err)),
+      }
+    );
   };
 
   const handleCancel = () => {

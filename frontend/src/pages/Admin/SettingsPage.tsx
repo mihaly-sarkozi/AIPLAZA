@@ -1,50 +1,29 @@
-import { useEffect, useState } from "react";
-import api from "../../api/axiosClient";
 import { useTranslation } from "../../i18n";
 import { useAuthStore } from "../../store/authStore";
+import { useSettings, usePatchSettingsMutation } from "../../hooks/useApi";
 
 export default function SettingsPage() {
   const { t } = useTranslation();
   const { user } = useAuthStore();
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [twoFactorEnabled, setTwoFactorEnabled] = useState(true);
-  const [updating, setUpdating] = useState(false);
+  const { data: settings, isLoading: loading, error: settingsError } = useSettings();
+  const patchMutation = usePatchSettingsMutation();
+  const twoFactorEnabled = settings?.two_factor_enabled ?? true;
+  const settingsErrMsg =
+    settingsError && typeof (settingsError as { response?: { data?: { detail?: string } } })?.response?.data?.detail === "string"
+      ? (settingsError as { response?: { data?: { detail?: string } } }).response!.data!.detail
+      : settingsError
+        ? t("settings.errorLoad")
+        : null;
+  const patchErrMsg = patchMutation.error
+    ? (typeof (patchMutation.error as { response?: { data?: { detail?: string } } })?.response?.data?.detail === "string"
+        ? (patchMutation.error as { response?: { data?: { detail?: string } } }).response?.data?.detail
+        : t("common.errorGeneric"))
+    : null;
+  const displayError = patchErrMsg ?? settingsErrMsg;
 
-  useEffect(() => {
-    if (user?.role === "owner") {
-      loadSettings();
-    }
-  }, [user?.role]);
-
-  const loadSettings = async () => {
-    try {
-      setLoading(true);
-      const res = await api.get("/settings");
-      setError(null);
-      setTwoFactorEnabled(res.data?.two_factor_enabled ?? true);
-    } catch (err: unknown) {
-      const d = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
-      setError(typeof d === "string" ? d : t("settings.errorLoad"));
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleTwoFactorToggle = async () => {
-    if (updating) return;
-    const next = !twoFactorEnabled;
-    setUpdating(true);
-    setError(null);
-    try {
-      const res = await api.patch("/settings", { two_factor_enabled: next });
-      setTwoFactorEnabled(res.data?.two_factor_enabled ?? next);
-    } catch (err: unknown) {
-      const d = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
-      setError(typeof d === "string" ? d : t("common.errorGeneric"));
-    } finally {
-      setUpdating(false);
-    }
+  const handleTwoFactorToggle = () => {
+    if (patchMutation.isPending) return;
+    patchMutation.mutate({ two_factor_enabled: !twoFactorEnabled });
   };
 
   if (!user || user.role !== "owner") {
@@ -61,8 +40,10 @@ export default function SettingsPage() {
     <div className="p-6 w-full min-h-full bg-[var(--color-background)] text-[var(--color-foreground)]">
       <h1 className="text-3xl font-bold mb-6">{t("settings.title")}</h1>
 
-      {error && (
-        <div className="bg-[var(--color-card)] border border-[var(--color-border)] text-[var(--color-foreground)] p-4 rounded mb-4">{error}</div>
+      {displayError && (
+        <div className="bg-[var(--color-card)] border border-[var(--color-border)] text-[var(--color-foreground)] p-4 rounded mb-4">
+          {displayError}
+        </div>
       )}
 
       {loading ? (
@@ -86,7 +67,7 @@ export default function SettingsPage() {
                   type="button"
                   role="switch"
                   aria-checked={twoFactorEnabled}
-                  disabled={updating}
+                  disabled={patchMutation.isPending}
                   onClick={handleTwoFactorToggle}
                   className={`relative inline-flex h-6 w-11 shrink-0 rounded-full border border-transparent transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[var(--color-primary)] disabled:opacity-50 ${
                     twoFactorEnabled ? "bg-[var(--color-primary)]" : "bg-[var(--color-border)]"

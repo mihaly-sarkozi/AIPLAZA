@@ -1,34 +1,47 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import api from "../../api/axiosClient";
+import { useMemo, useState } from "react";
 import { useTranslation } from "../../i18n";
 import { useLocaleStore } from "../../i18n";
 import { useAuthStore } from "../../store/authStore";
+import {
+  useUsers,
+  useCreateUserMutation,
+  useUpdateUserMutation,
+  useDeleteUserMutation,
+  useResendInviteMutation,
+  type UserListItem,
+} from "../../hooks/useApi";
 
-interface User {
-  id: number;
-  email: string;
-  name?: string | null;
-  role: "user" | "admin" | "owner";
-  is_active: boolean;
-  created_at: string;
-  /** Megerősítésre vár = még nem regisztrált (linket kapott). Ha false és !is_active = admin felfüggesztette. */
-  pending_registration?: boolean;
-}
+type User = UserListItem & { pending_registration?: boolean };
 
 export default function RolesPage() {
   const { t } = useTranslation();
   const { user: currentUser } = useAuthStore();
-  const [users, setUsers] = useState<User[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const canManage = currentUser?.role === "admin" || currentUser?.role === "owner";
+  const { data: usersData, isLoading: loading, error: usersError } = useUsers({ enabled: canManage });
+  const users = (usersData ?? []) as User[];
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [createFormError, setCreateFormError] = useState<string | null>(null);
   const [editFormError, setEditFormError] = useState<string | null>(null);
   const [editingUser, setEditingUser] = useState<User | null>(null);
   const [deleteConfirmUser, setDeleteConfirmUser] = useState<User | null>(null);
   const [resendConfirmUser, setResendConfirmUser] = useState<User | null>(null);
-  const [actionLoading, setActionLoading] = useState(false);
-  const initialLoadDone = useRef(false);
+
+  const createUserMutation = useCreateUserMutation();
+  const updateUserMutation = useUpdateUserMutation();
+  const deleteUserMutation = useDeleteUserMutation();
+  const resendInviteMutation = useResendInviteMutation();
+  const actionLoading =
+    createUserMutation.isPending ||
+    updateUserMutation.isPending ||
+    deleteUserMutation.isPending ||
+    resendInviteMutation.isPending;
+
+  const error =
+    usersError && (usersError as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+      ? String((usersError as { response?: { data?: { detail?: string } } }).response?.data?.detail)
+      : usersError
+        ? t("roles.errorLoad")
+        : null;
 
   const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -50,28 +63,7 @@ export default function RolesPage() {
     });
   }, [users]);
 
-  useEffect(() => {
-    const canManage = currentUser?.role === "admin" || currentUser?.role === "owner";
-    if (!canManage) return;
-    if (initialLoadDone.current) return;
-    initialLoadDone.current = true;
-    loadUsers();
-  }, [currentUser?.role]);
-
-  const loadUsers = async () => {
-    try {
-      setLoading(true);
-      const res = await api.get("/users");
-      setUsers(res.data);
-      setError(null);
-    } catch (err: any) {
-      setError(err.response?.data?.detail || t("roles.errorLoad"));
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleCreate = async () => {
+  const handleCreate = () => {
     const nameTrim = formData.name?.trim() ?? "";
     const emailTrim = formData.email?.trim() ?? "";
     setCreateFormError(null);
@@ -83,31 +75,31 @@ export default function RolesPage() {
       setCreateFormError(t("roles.createErrorEmailInvalid"));
       return;
     }
-    setActionLoading(true);
-    try {
-      await api.post("/users", {
-        email: emailTrim,
-        name: nameTrim,
-        role: formData.role,
-      });
-      setShowCreateModal(false);
-      resetForm();
-      setCreateFormError(null);
-      loadUsers();
-    } catch (err: any) {
-      const detail = err.response?.data?.detail;
-      const code = typeof detail === "object" && detail?.code;
-      if (err.response?.status === 400 && code === "email_already_exists") {
-        setCreateFormError(t("roles.createErrorEmailExists"));
-      } else {
-        alert(typeof detail === "object" && detail?.message ? detail.message : detail ?? t("roles.errorCreate"));
+    createUserMutation.mutate(
+      { email: emailTrim, name: nameTrim, role: formData.role },
+      {
+        onSuccess: () => {
+          setShowCreateModal(false);
+          resetForm();
+          setCreateFormError(null);
+        },
+        onError: (err: unknown) => {
+          const axErr = err as { response?: { status?: number; data?: { detail?: { code?: string; message?: string } } } };
+          const detail = axErr.response?.data?.detail;
+          const code = typeof detail === "object" && detail?.code;
+          if (axErr.response?.status === 400 && code === "email_already_exists") {
+            setCreateFormError(t("roles.createErrorEmailExists"));
+          } else {
+            alert(
+              typeof detail === "object" && detail?.message ? detail.message : (detail as string) ?? t("roles.errorCreate")
+            );
+          }
+        },
       }
-    } finally {
-      setActionLoading(false);
-    }
+    );
   };
 
-  const handleUpdate = async () => {
+  const handleUpdate = () => {
     if (!editingUser) return;
 
     const nameTrim = formData.name?.trim() ?? "";
@@ -130,65 +122,59 @@ export default function RolesPage() {
       }
     }
 
-    setActionLoading(true);
-    try {
-      const payload: { name?: string; is_active?: boolean; email?: string; role?: string } = {
-        name: nameTrim,
-      };
-      if (editingUser.role !== "owner") {
-        if (!editingUser.pending_registration) payload.is_active = formData.is_active;
-        if (canEditEmail) payload.email = emailTrim;
-        if (editingUser.id !== currentUser?.id) payload.role = formData.role;
-      }
-      await api.put(`/users/${editingUser.id}`, payload);
-      setEditingUser(null);
-      resetForm();
-      setEditFormError(null);
-      loadUsers();
-    } catch (err: any) {
-      const detail = err.response?.data?.detail;
-      const code = typeof detail === "object" && detail?.code;
-      if (err.response?.status === 400 && code === "email_already_exists") {
-        setEditFormError(t("roles.createErrorEmailExists"));
-      } else {
-        alert(typeof detail === "object" && detail?.message ? detail.message : detail ?? t("roles.errorUpdate"));
-      }
-    } finally {
-      setActionLoading(false);
+    const payload: { id: number; name: string; is_active?: boolean; email?: string; role?: string } = {
+      id: editingUser.id,
+      name: nameTrim,
+    };
+    if (editingUser.role !== "owner") {
+      if (!editingUser.pending_registration) payload.is_active = formData.is_active;
+      if (canEditEmail) payload.email = emailTrim;
+      if (editingUser.id !== currentUser?.id) payload.role = formData.role;
     }
+    updateUserMutation.mutate(payload, {
+      onSuccess: () => {
+        setEditingUser(null);
+        resetForm();
+        setEditFormError(null);
+      },
+      onError: (err: unknown) => {
+        const axErr = err as { response?: { status?: number; data?: { detail?: { code?: string; message?: string } } } };
+        const detail = axErr.response?.data?.detail;
+        const code = typeof detail === "object" && detail?.code;
+        if (axErr.response?.status === 400 && code === "email_already_exists") {
+          setEditFormError(t("roles.createErrorEmailExists"));
+        } else {
+          alert(
+            typeof detail === "object" && detail?.message ? detail.message : (detail as string) ?? t("roles.errorUpdate")
+          );
+        }
+      },
+    });
   };
 
-  const handleDelete = async (userId: number): Promise<boolean> => {
-    setActionLoading(true);
-    try {
-      await api.delete(`/users/${userId}`);
-      setDeleteConfirmUser(null);
-      loadUsers();
-      return true;
-    } catch (err: any) {
-      const detail = err.response?.data?.detail;
-      const msg = typeof detail === "object" && detail?.message ? detail.message : detail;
-      alert(msg || t("roles.errorDelete"));
-      return false;
-    } finally {
-      setActionLoading(false);
-    }
+  const handleDelete = (userId: number): void => {
+    deleteUserMutation.mutate(userId, {
+      onSuccess: () => setDeleteConfirmUser(null),
+      onError: (err: unknown) => {
+        const detail = (err as { response?: { data?: { detail?: { message?: string } } } })?.response?.data?.detail;
+        const msg = typeof detail === "object" && detail?.message ? detail.message : (detail as string);
+        alert(msg || t("roles.errorDelete"));
+      },
+    });
   };
 
-  const handleResendInvite = async (userId: number) => {
-    setActionLoading(true);
-    try {
-      await api.post(`/users/${userId}/resend-invite`);
-      setResendConfirmUser(null);
-      loadUsers();
-      alert(t("roles.resendSuccess"));
-    } catch (err: any) {
-      const detail = err.response?.data?.detail;
-      const msg = typeof detail === "object" && detail?.message ? detail.message : detail;
-      alert(msg || t("roles.resendError"));
-    } finally {
-      setActionLoading(false);
-    }
+  const handleResendInvite = (userId: number) => {
+    resendInviteMutation.mutate(userId, {
+      onSuccess: () => {
+        setResendConfirmUser(null);
+        alert(t("roles.resendSuccess"));
+      },
+      onError: (err: unknown) => {
+        const detail = (err as { response?: { data?: { detail?: { message?: string } } } })?.response?.data?.detail;
+        const msg = typeof detail === "object" && detail?.message ? detail.message : (detail as string);
+        alert(msg || t("roles.resendError"));
+      },
+    });
   };
 
   const resetForm = () => {
@@ -207,14 +193,13 @@ export default function RolesPage() {
     setFormData({
       email: user.email,
       name: user.name ?? "",
-      role: user.role === "owner" ? "admin" : user.role,
+      role: (user.role === "owner" ? "admin" : user.role) as "user" | "admin",
       is_active: user.is_active,
     });
   };
 
   const localeMap = { hu: "hu-HU", en: "en-GB", es: "es-ES" } as const;
   const dateLocale = localeMap[useLocaleStore((s) => s.locale)] ?? "hu-HU";
-  const canManage = currentUser?.role === "admin" || currentUser?.role === "owner";
   if (!canManage) {
     return (
       <div className="p-6 min-h-full bg-[var(--color-background)]">
@@ -301,7 +286,7 @@ export default function RolesPage() {
                     <td className={`p-3 ${!user.is_active ? "text-[var(--color-inactive)]" : "text-[var(--color-foreground)]"}`}>{user.name || "—"}</td>
                     <td className={`p-3 ${!user.is_active ? "text-[var(--color-inactive)]" : "text-[var(--color-foreground)]"}`}>{user.email}</td>
                     <td className={`p-3 text-sm ${!user.is_active ? "text-[var(--color-inactive)]" : "text-[var(--color-muted)]"}`}>
-                      {new Date(user.created_at).toLocaleDateString(dateLocale)}
+                      {user.created_at ? new Date(user.created_at).toLocaleDateString(dateLocale) : "—"}
                     </td>
                     <td className="p-3">
                       <div className="flex flex-wrap gap-1">
@@ -375,7 +360,7 @@ export default function RolesPage() {
                   >
                     {user.role === "owner" ? t("roles.roleOwner") : user.role === "admin" ? t("roles.roleAdmin") : t("roles.roleUser")}
                   </span>
-                  <span className={`ml-auto text-xs shrink-0 ${!user.is_active ? "text-[var(--color-inactive)]" : "text-[var(--color-muted)]"}`}>{new Date(user.created_at).toLocaleDateString(dateLocale)}</span>
+                  <span className={`ml-auto text-xs shrink-0 ${!user.is_active ? "text-[var(--color-inactive)]" : "text-[var(--color-muted)]"}`}>{user.created_at ? new Date(user.created_at).toLocaleDateString(dateLocale) : "—"}</span>
                 </div>
                 <div className="flex items-center gap-2 min-w-0">
                   <div className={`font-medium min-w-0 truncate ${!user.is_active ? "text-[var(--color-inactive)]" : "text-[var(--color-foreground)]"}`}>{user.name || "—"}</div>

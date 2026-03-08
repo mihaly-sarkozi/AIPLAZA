@@ -1,8 +1,9 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, lazy, Suspense } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import Navbar from "../components/Navbar";
-import Footer from "../components/Footer";
 import ProfileModal from "../components/ProfileModal";
+
+const Footer = lazy(() => import("../components/Footer"));
 import ChangePasswordModal from "../components/ChangePasswordModal";
 import { Outlet } from "react-router-dom";
 
@@ -43,7 +44,11 @@ export default function MainLayout() {
         <Outlet />
       </main>
 
-      {showFooter && <Footer />}
+      {showFooter && (
+        <Suspense fallback={null}>
+          <Footer />
+        </Suspense>
+      )}
 
       <ProfileModal isOpen={showProfileModal} onClose={() => setShowProfileModal(false)} />
       <ChangePasswordModal isOpen={showChangePasswordModal} onClose={() => setShowChangePasswordModal(false)} />

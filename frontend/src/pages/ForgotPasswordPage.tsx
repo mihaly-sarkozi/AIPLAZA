@@ -1,28 +1,26 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useTranslation } from "../i18n";
-import api from "../api/axiosClient";
+import { useForgotPasswordMutation } from "../hooks/useApi";
 
 export default function ForgotPasswordPage() {
   const { t } = useTranslation();
   const [email, setEmail] = useState("");
   const [done, setDone] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
   const [requestError, setRequestError] = useState("");
+  const forgotMutation = useForgotPasswordMutation();
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (submitting) return;
+    if (forgotMutation.isPending) return;
     setRequestError("");
-    setSubmitting(true);
-    try {
-      await api.post("/auth/forgot-password", { email: email.trim() });
-      setDone(true);
-    } catch {
-      setRequestError(t("common.errorGeneric"));
-    } finally {
-      setSubmitting(false);
-    }
+    forgotMutation.mutate(
+      { email: email.trim() },
+      {
+        onSuccess: () => setDone(true),
+        onError: () => setRequestError(t("common.errorGeneric")),
+      }
+    );
   };
 
   return (
@@ -66,10 +64,10 @@ export default function ForgotPasswordPage() {
               </div>
               <button
                 type="submit"
-                disabled={submitting}
+                disabled={forgotMutation.isPending}
                 className="w-full bg-[var(--color-primary)] hover:opacity-90 text-[var(--color-on-primary)] disabled:opacity-60 disabled:cursor-not-allowed font-semibold py-3 rounded-md transition"
               >
-                {submitting ? t("common.loading") : t("forgot.send")}
+                {forgotMutation.isPending ? t("common.loading") : t("forgot.send")}
               </button>
             </form>
             <p className="mt-4 text-center">

@@ -1,35 +1,44 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import api from "../../api/axiosClient";
+import { useKbList, useUpdateKbMutation } from "../../hooks/useApi";
 
 export default function KBEdit() {
   const { uuid } = useParams();
   const navigate = useNavigate();
+  const { data: kbList = [], isLoading: kbListLoading } = useKbList();
+  const updateKbMutation = useUpdateKbMutation();
 
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [error, setError] = useState("");
 
+  const kb = uuid ? kbList.find((x) => x.uuid === uuid) : null;
+
   useEffect(() => {
-    api.get("/kb").then((res) => {
-      const kb = res.data.find((x: any) => x.uuid === uuid);
-      if (!kb) return navigate("/kb");
-
-      setName(kb.name);
-      setDescription(kb.description);
-    });
-  }, [uuid]);
-
-  const handleSave = async (e: any) => {
-    e.preventDefault();
-    setError("");
-
-    try {
-      await api.put(`/kb/${uuid}`, { name, description });
+    if (!uuid) return;
+    if (!kbListLoading && !kb) {
       navigate("/kb");
-    } catch (err: any) {
-      setError(err.response?.data?.detail || "Hiba történt.");
+      return;
     }
+    if (kb) {
+      setName(kb.name);
+      setDescription(kb.description ?? "");
+    }
+  }, [kb, kbListLoading, uuid, navigate]);
+
+  const handleSave = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!uuid) return;
+    setError("");
+    updateKbMutation.mutate(
+      { uuid, name, description },
+      {
+        onSuccess: () => navigate("/kb"),
+        onError: (err: unknown) => {
+          setError((err as { response?: { data?: { detail?: string } } })?.response?.data?.detail || "Hiba történt.");
+        },
+      }
+    );
   };
 
   return (
@@ -64,8 +73,12 @@ export default function KBEdit() {
           />
         </div>
 
-        <button className="bg-black hover:bg-gray-800 text-white py-3 rounded">
-          Mentés
+        <button
+          type="submit"
+          className="bg-black hover:bg-gray-800 text-white py-3 rounded disabled:opacity-50"
+          disabled={updateKbMutation.isPending}
+        >
+          {updateKbMutation.isPending ? "Mentés…" : "Mentés"}
         </button>
       </form>
     </div>

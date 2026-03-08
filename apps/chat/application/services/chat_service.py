@@ -1,4 +1,5 @@
 import logging
+from collections.abc import AsyncIterator
 from typing import Optional
 
 from openai import AsyncOpenAI
@@ -16,7 +17,7 @@ class ChatService:
         self.client = chat_model or AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
 
     async def chat(self, question: str) -> str:
-        """Chat üzenet küldése OpenAI API-nak."""
+        """Chat üzenet küldése OpenAI API-nak (egyszeri válasz)."""
         try:
             response = await self.client.chat.completions.create(
                 model="gpt-4o-mini",
@@ -44,3 +45,33 @@ class ChatService:
         except Exception as e:
             logger.error(f"Váratlan hiba a chat szolgáltatásban: {e}", exc_info=True)
             return "⚠️ Nem sikerült választ kapni a modellből."
+
+    async def chat_stream(self, question: str) -> AsyncIterator[str]:
+        """Streamelt chat válasz: tokenenként yield-eli a tartalmat."""
+        try:
+            stream = await self.client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": "Te egy segítőkész asszisztens vagy az AIPLAZA rendszerben."},
+                    {"role": "user", "content": question},
+                ],
+                stream=True,
+            )
+            async for chunk in stream:
+                if chunk.choices and chunk.choices[0].delta.content:
+                    yield chunk.choices[0].delta.content
+        except RateLimitError as e:
+            logger.error(f"OpenAI rate limit hiba: {e}", exc_info=True)
+            yield "⚠️ Túl sok kérés. Kérlek, próbáld újra később."
+        except APITimeoutError as e:
+            logger.error(f"OpenAI timeout hiba: {e}", exc_info=True)
+            yield "⚠️ A válasz túl sokáig tartott. Kérlek, próbáld újra."
+        except APIConnectionError as e:
+            logger.error(f"OpenAI kapcsolati hiba: {e}", exc_info=True)
+            yield "⚠️ Kapcsolati probléma történt. Kérlek, próbáld újra."
+        except APIError as e:
+            logger.error(f"OpenAI API hiba: {e}", exc_info=True)
+            yield "⚠️ Nem sikerült választ kapni a modellből."
+        except Exception as e:
+            logger.error(f"Váratlan hiba a chat szolgáltatásban: {e}", exc_info=True)
+            yield "⚠️ Nem sikerült választ kapni a modellből."

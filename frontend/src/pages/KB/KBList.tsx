@@ -1,21 +1,19 @@
 import { useEffect, useState } from "react";
-import api from "../../api/axiosClient";
 import { useNavigate, useLocation } from "react-router-dom";
+import { useKbList, useCreateKbMutation, useDeleteKbMutation, type KbItem } from "../../hooks/useApi";
 
 export default function KBList() {
-  const [items, setItems] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const { data: items = [], isLoading: loading } = useKbList();
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [createName, setCreateName] = useState("");
   const [createDescription, setCreateDescription] = useState("");
   const [createError, setCreateError] = useState("");
-  const [createLoading, setCreateLoading] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
 
-  useEffect(() => {
-    load();
-  }, []);
+  const createKbMutation = useCreateKbMutation();
+  const deleteKbMutation = useDeleteKbMutation();
+  const createLoading = createKbMutation.isPending;
 
   useEffect(() => {
     if ((location.state as { openKbCreate?: boolean })?.openKbCreate) {
@@ -27,15 +25,6 @@ export default function KBList() {
     }
   }, [location.state, location.pathname, navigate]);
 
-  const load = async () => {
-    try {
-      const res = await api.get("/kb");
-      setItems(res.data);
-    } finally {
-      setLoading(false);
-    }
-  };
-
   const openCreateModal = () => {
     setCreateName("");
     setCreateDescription("");
@@ -43,36 +32,32 @@ export default function KBList() {
     setShowCreateModal(true);
   };
 
-  const handleCreate = async (e: React.FormEvent) => {
+  const handleCreate = (e: React.FormEvent) => {
     e.preventDefault();
     setCreateError("");
-    setCreateLoading(true);
-    try {
-      await api.post("/kb", { name: createName.trim(), description: createDescription.trim() });
-      setShowCreateModal(false);
-      load();
-    } catch (err: any) {
-      setCreateError(err.response?.data?.detail || "Hiba történt.");
-    } finally {
-      setCreateLoading(false);
-    }
+    createKbMutation.mutate(
+      { name: createName.trim(), description: createDescription.trim() },
+      {
+        onSuccess: () => setShowCreateModal(false),
+        onError: (err: unknown) => {
+          setCreateError((err as { response?: { data?: { detail?: string } } })?.response?.data?.detail || "Hiba történt.");
+        },
+      }
+    );
   };
 
-  const deleteKB = async (kb: any) => {
-    const confirm = window.prompt(
+  const deleteKB = (kb: KbItem) => {
+    const confirmName = window.prompt(
       `Törlés megerősítése.\nÍrd be a tudástár nevét: "${kb.name}"`
     );
 
-    if (confirm !== kb.name) {
+    if (confirmName !== kb.name) {
       alert("A beírt név nem egyezik.");
       return;
     }
+    if (confirmName == null) return;
 
-    await api.delete(`/kb/${kb.uuid}`, {
-      data: { confirm_name: confirm }
-    });
-
-    load();
+    deleteKbMutation.mutate({ uuid: kb.uuid, confirm_name: confirmName });
   };
 
   if (loading) return <div className="p-10 text-[var(--color-foreground)]">Betöltés...</div>;
@@ -102,7 +87,7 @@ export default function KBList() {
             </tr>
           </thead>
           <tbody>
-            {items.map((kb: any) => (
+            {items.map((kb: KbItem) => (
               <tr key={kb.uuid} className="border-t border-[var(--color-border)]">
                 <td className="p-3 text-[var(--color-foreground)]">{kb.name}</td>
                 <td className="p-3 text-[var(--color-muted)]">{kb.description}</td>

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useParams } from "react-router-dom";
-import api from "../../api/axiosClient";
+import { useKbTrainTextMutation, useKbTrainFileMutation } from "../../hooks/useApi";
 
 export default function KBTrain() {
   const { uuid } = useParams();
@@ -9,20 +9,26 @@ export default function KBTrain() {
   const [file, setFile] = useState<File | null>(null);
   const [dragOver, setDragOver] = useState(false);
 
-  const trainText = async () => {
-    await api.post(`/kb/${uuid}/train/text`, { title, content });
-    alert("Szöveg betanítva!");
+  const trainTextMutation = useKbTrainTextMutation();
+  const trainFileMutation = useKbTrainFileMutation();
+
+  const trainText = () => {
+    if (!uuid) return;
+    trainTextMutation.mutate(
+      { uuid, title, content },
+      { onSuccess: () => alert("Szöveg betanítva!") }
+    );
   };
 
-  const trainFile = async () => {
+  const trainFile = () => {
+    if (!uuid) return;
     if (!file) return alert("Nincs fájl kiválasztva!");
     const formData = new FormData();
     formData.append("file", file);
-
-    await api.post(`/kb/${uuid}/train/file`, formData, {
-      headers: { "Content-Type": "multipart/form-data" }
-    });
-    alert("Fájl betanítva!");
+    trainFileMutation.mutate(
+      { uuid, formData },
+      { onSuccess: () => alert("Fájl betanítva!") }
+    );
   };
 
   const handleDrop = (e: any) => {
@@ -56,10 +62,11 @@ export default function KBTrain() {
         ></textarea>
 
         <button
-          className="bg-black text-white px-4 py-2 rounded hover:bg-gray-800"
+          className="bg-black text-white px-4 py-2 rounded hover:bg-gray-800 disabled:opacity-50"
           onClick={trainText}
+          disabled={trainTextMutation.isPending}
         >
-          Tanítás szöveggel
+          {trainTextMutation.isPending ? "Feldolgozás…" : "Tanítás szöveggel"}
         </button>
       </div>
 
@@ -93,10 +100,11 @@ export default function KBTrain() {
         </div>
 
         <button
-          className="bg-gray-800 text-white px-4 py-2 rounded mt-5 hover:bg-gray-700"
+          className="bg-gray-800 text-white px-4 py-2 rounded mt-5 hover:bg-gray-700 disabled:opacity-50"
           onClick={trainFile}
+          disabled={trainFileMutation.isPending}
         >
-          Tanítás fájllal
+          {trainFileMutation.isPending ? "Feldolgozás…" : "Tanítás fájllal"}
         </button>
       </div>
     </div>

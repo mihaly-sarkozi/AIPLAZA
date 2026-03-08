@@ -1,24 +1,26 @@
 import { useState } from "react";
-import api from "../../api/axiosClient";
 import { useNavigate } from "react-router-dom";
+import { useCreateKbMutation } from "../../hooks/useApi";
 
 export default function KBCreate() {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [error, setError] = useState("");
-
   const navigate = useNavigate();
+  const createKbMutation = useCreateKbMutation();
 
-  const handleSave = async (e: any) => {
+  const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
-
-    try {
-      await api.post("/kb", { name, description });
-      navigate("/kb");
-    } catch (err: any) {
-      setError(err.response?.data?.detail || "Hiba történt.");
-    }
+    createKbMutation.mutate(
+      { name, description },
+      {
+        onSuccess: () => navigate("/kb"),
+        onError: (err: unknown) => {
+          setError((err as { response?: { data?: { detail?: string } } })?.response?.data?.detail || "Hiba történt.");
+        },
+      }
+    );
   };
 
   return (
@@ -53,8 +55,12 @@ export default function KBCreate() {
           />
         </div>
 
-        <button className="bg-black hover:bg-gray-800 text-white py-3 rounded">
-          Mentés
+        <button
+          type="submit"
+          className="bg-black hover:bg-gray-800 text-white py-3 rounded disabled:opacity-50"
+          disabled={createKbMutation.isPending}
+        >
+          {createKbMutation.isPending ? "Mentés…" : "Mentés"}
         </button>
       </form>
     </div>

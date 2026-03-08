@@ -17,6 +17,7 @@
 Segédmodulok importálása
 """
 
+import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 from dotenv import load_dotenv

@@ -1,12 +1,7 @@
 import { useState, useEffect } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
-import axios from "axios";
-
-const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL,
-  withCredentials: true,
-});
-api.defaults.headers.common["Accept-Language"] = "hu";
+import api from "../api/axiosClient";
+import { useSetPasswordMutation } from "../hooks/useApi";
 
 type TokenStatus = "loading" | "valid" | "invalid" | "expired" | "missing";
 
@@ -21,9 +16,9 @@ export default function SetPasswordPage() {
   const [showConfirm, setShowConfirm] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState(false);
-  const [loading, setLoading] = useState(false);
   const [tokenStatus, setTokenStatus] = useState<TokenStatus>("loading");
   const [tokenMessage, setTokenMessage] = useState("");
+  const setPasswordMutation = useSetPasswordMutation();
 
   useEffect(() => {
     if (!token) {
@@ -38,22 +33,24 @@ export default function SetPasswordPage() {
       .then((res) => {
         if (!cancelled && res.data?.valid) setTokenStatus("valid");
       })
-      .catch((err: any) => {
+      .catch((err: unknown) => {
         if (cancelled) return;
-        const d = err.response?.data?.detail;
-        const msg = typeof d === "object" && d?.message ? d.message : String(d || "A link nem érvényes.");
+        const axErr = err as { response?: { status?: number; data?: { detail?: unknown } } };
+        const d = axErr.response?.data?.detail;
+        const msg = typeof d === "object" && d && "message" in d ? String((d as { message?: string }).message) : String(d || "A link nem érvényes.");
         setTokenMessage(msg);
-        setTokenStatus(err.response?.status === 410 ? "expired" : "invalid");
+        setTokenStatus(axErr.response?.status === 410 ? "expired" : "invalid");
       });
     return () => {
       cancelled = true;
     };
   }, [token]);
 
-  const getDetailMessage = (err: any) => {
-    const d = err.response?.data?.detail;
+  const getDetailMessage = (err: unknown) => {
+    const axErr = err as { response?: { data?: { detail?: unknown } } };
+    const d = axErr.response?.data?.detail;
     if (typeof d === "string") return d;
-    if (d && typeof d === "object" && d.message) return d.message;
+    if (d && typeof d === "object" && "message" in d) return String((d as { message?: string }).message);
     return null;
   };
 
@@ -81,16 +78,13 @@ export default function SetPasswordPage() {
       return;
     }
     if (!token) return;
-    setLoading(true);
-    try {
-      await api.post("/users/set-password", { token, password });
-      setSuccess(true);
-    } catch (err: any) {
-      const msg = getDetailMessage(err) || "Ismeretlen hiba. Próbáld újra.";
-      setError(msg);
-    } finally {
-      setLoading(false);
-    }
+    setPasswordMutation.mutate(
+      { token, password },
+      {
+        onSuccess: () => setSuccess(true),
+        onError: (err) => setError(getDetailMessage(err) || "Ismeretlen hiba. Próbáld újra."),
+      }
+    );
   };
 
   if (success) {
@@ -196,10 +190,10 @@ export default function SetPasswordPage() {
             </div>
             <button
               type="submit"
-              disabled={loading}
+              disabled={setPasswordMutation.isPending}
               className="w-full bg-[var(--color-primary)] hover:opacity-90 text-[var(--color-on-primary)] py-3 rounded disabled:opacity-50"
             >
-              {loading ? "Feldolgozás..." : "Jelszó mentése"}
+              {setPasswordMutation.isPending ? "Feldolgozás..." : "Jelszó mentése"}
             </button>
           </form>
         )}

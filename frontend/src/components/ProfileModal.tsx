@@ -3,7 +3,7 @@ import { useTranslation } from "../i18n";
 import type { Locale } from "../i18n";
 import type { Theme } from "../i18n";
 import { useAuthStore } from "../store/authStore";
-import api from "../api/axiosClient";
+import { usePatchMeMutation } from "../hooks/useApi";
 
 const LOCALE_OPTIONS: { value: Locale; label: string }[] = [
   { value: "hu", label: "Magyar" },
@@ -22,8 +22,9 @@ export default function ProfileModal({ isOpen, onClose }: ProfileModalProps) {
   const [name, setName] = useState("");
   const [preferredLocale, setPreferredLocale] = useState<Locale>("hu");
   const [preferredTheme, setPreferredTheme] = useState<Theme>("light");
-  const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const patchMe = usePatchMeMutation();
+  const saving = patchMe.isPending;
 
   useEffect(() => {
     if (isOpen && user) {
@@ -34,27 +35,26 @@ export default function ProfileModal({ isOpen, onClose }: ProfileModalProps) {
     }
   }, [isOpen, user]);
 
-  const handleSave = async (e: React.FormEvent) => {
+  const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
     if (!user) return;
-    setSaving(true);
     setError(null);
-    try {
-      const res = await api.patch("/auth/me", {
-        name: name.trim() || null,
-        preferred_locale: preferredLocale,
-        preferred_theme: preferredTheme,
-      });
-      setUser(res.data);
-      setLocale(res.data.locale as Locale);
-      setTheme(res.data.theme as Theme);
-      onClose();
-    } catch (err: unknown) {
-      const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
-      setError(typeof detail === "string" ? detail : t("common.errorGeneric"));
-    } finally {
-      setSaving(false);
-    }
+    patchMe.mutate(
+      { name: name.trim() || null, preferred_locale: preferredLocale, preferred_theme: preferredTheme },
+      {
+        onSuccess: (data) => {
+          const d = data as { locale?: string; theme?: string };
+          setUser({ ...user, ...data });
+          if (d.locale) setLocale(d.locale as Locale);
+          if (d.theme) setTheme(d.theme as Theme);
+          onClose();
+        },
+        onError: (err: unknown) => {
+          const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+          setError(typeof detail === "string" ? detail : t("common.errorGeneric"));
+        },
+      }
+    );
   };
 
   const handleCancel = () => {

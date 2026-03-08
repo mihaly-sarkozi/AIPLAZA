@@ -77,6 +77,14 @@ export default function App() {
         }
     }, [user?.id, user?.locale, user?.theme, setLocaleAndTheme]);
 
+    // Prefetch likely next routes (KB pages) after login so navigation is instant
+    useEffect(() => {
+        if (!user) return;
+        import("./pages/KB/KBList");
+        import("./pages/KB/KBEdit");
+        import("./pages/KB/KBTrain");
+    }, [user]);
+
     return (
         <BrowserRouter>
             <Suspense fallback={<PageFallback />}>
