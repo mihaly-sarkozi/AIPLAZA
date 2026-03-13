@@ -1,5 +1,6 @@
 from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, VectorParams
+from qdrant_client.http.models import PointIdsList
 from qdrant_client.http.exceptions import UnexpectedResponse
 from openai import AsyncOpenAI
 from typing import Any
@@ -72,15 +73,22 @@ class QdrantClientWrapper:
         """Kollekció törlése Qdrant-ból."""
         self.client.delete_collection(collection_name=name)
 
-    async def insert(self, collection: str, title: str, content: str, vector: list[float]) -> Any:
-        """Beszúrás Qdrant kollekcióba (async wrapper sync hívásra)."""
-        point_id = str(uuid_lib.uuid4())
-        
+    async def insert(
+        self,
+        collection: str,
+        title: str,
+        content: str,
+        vector: list[float],
+        point_id: str | None = None,
+    ) -> str:
+        """Beszúrás Qdrant kollekcióba. Visszaadja a használt point_id-t (loghoz)."""
+        pid = point_id or str(uuid_lib.uuid4())
+
         def _upsert():
             return self.client.upsert(
                 collection_name=collection,
                 points=[{
-                    "id": point_id,
+                    "id": pid,
                     "vector": vector,
                     "payload": {
                         "title": title,
@@ -88,4 +96,12 @@ class QdrantClientWrapper:
                     }
                 }]
             )
-        return await asyncio.to_thread(_upsert)
+        await asyncio.to_thread(_upsert)
+        return pid
+
+    def delete_points(self, collection_name: str, point_ids: list[str]) -> None:
+        """Point(ok) törlése a kollekcióból (UUID string id-k)."""
+        self.client.delete_points(
+            collection_name=collection_name,
+            points_selector=PointIdsList(points=point_ids),
+        )

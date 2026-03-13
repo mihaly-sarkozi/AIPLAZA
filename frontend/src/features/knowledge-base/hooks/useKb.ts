@@ -13,15 +13,20 @@ import {
   deleteKb,
   getKbPermissions,
   setKbPermissions,
+  getKbTrainingLog,
+  deleteKbTrainingPoint,
   type KbItem,
   type KbPermissionItem,
+  type KbTrainingLogEntry,
   type CreateKbPayload,
   type UpdateKbPayload,
   type DeleteKbPayload,
+  type PersonalDataMode,
+  type PersonalDataSensitivity,
 } from "../services";
 import { queryKeys } from "../../../queryKeys";
 
-export type { KbItem, KbPermissionItem, CreateKbPayload, UpdateKbPayload, DeleteKbPayload };
+export type { KbItem, KbPermissionItem, KbTrainingLogEntry, CreateKbPayload, UpdateKbPayload, DeleteKbPayload, PersonalDataMode, PersonalDataSensitivity };
 
 export function useKbPermissions(
   kbUuid: string | undefined,
@@ -94,32 +99,91 @@ export function useDeleteKbMutation(
   });
 }
 
+export function useKbTrainingLog(
+  kbUuid: string | undefined,
+  options?: Omit<UseQueryOptions<KbTrainingLogEntry[]>, "queryKey" | "queryFn">
+) {
+  return useQuery({
+    queryKey: [...queryKeys.kb, kbUuid ?? "", "train", "log"],
+    queryFn: () => getKbTrainingLog(kbUuid!),
+    enabled: !!kbUuid,
+    ...options,
+  });
+}
+
+function invalidateKbTrainLog(queryClient: ReturnType<typeof useQueryClient>, uuid: string) {
+  queryClient.invalidateQueries({ queryKey: [...queryKeys.kb, uuid, "train", "log"] });
+  queryClient.invalidateQueries({ queryKey: queryKeys.kb });
+}
+
 export function useKbTrainTextMutation(
-  options?: UseMutationOptions<unknown, Error, { uuid: string; title: string; content: string }>
+  options?: UseMutationOptions<
+    unknown,
+    Error,
+    { uuid: string; title: string; content: string; confirm_pii?: boolean }
+  >
 ) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async ({ uuid, title, content }: { uuid: string; title: string; content: string }) => {
-      const res = await api.post(`/kb/${uuid}/train/text`, { title, content });
+    mutationFn: async ({
+      uuid,
+      title,
+      content,
+      confirm_pii = false,
+    }: {
+      uuid: string;
+      title: string;
+      content: string;
+      confirm_pii?: boolean;
+    }) => {
+      const res = await api.post(`/kb/${uuid}/train/text`, {
+        title,
+        content,
+        confirm_pii,
+      });
       return res.data;
     },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.kb }),
+    onSuccess: (_, { uuid }) => invalidateKbTrainLog(queryClient, uuid),
     ...options,
   });
 }
 
 export function useKbTrainFileMutation(
-  options?: UseMutationOptions<unknown, Error, { uuid: string; formData: FormData }>
+  options?: UseMutationOptions<
+    unknown,
+    Error,
+    { uuid: string; formData: FormData; confirm_pii?: boolean }
+  >
 ) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async ({ uuid, formData }: { uuid: string; formData: FormData }) => {
+    mutationFn: async ({
+      uuid,
+      formData,
+      confirm_pii = false,
+    }: {
+      uuid: string;
+      formData: FormData;
+      confirm_pii?: boolean;
+    }) => {
+      if (confirm_pii) formData.append("confirm_pii", "true");
       const res = await api.post(`/kb/${uuid}/train/file`, formData, {
         headers: { "Content-Type": "multipart/form-data" },
       });
       return res.data;
     },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.kb }),
+    onSuccess: (_, { uuid }) => invalidateKbTrainLog(queryClient, uuid),
+    ...options,
+  });
+}
+
+export function useDeleteKbTrainingPointMutation(
+  options?: UseMutationOptions<unknown, Error, { uuid: string; pointId: string }>
+) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ uuid, pointId }) => deleteKbTrainingPoint(uuid, pointId),
+    onSuccess: (_, { uuid }) => invalidateKbTrainLog(queryClient, uuid),
     ...options,
   });
 }

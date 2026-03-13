@@ -1,0 +1,3 @@
+-- Tanítási napló: ki, mikor, milyen címmel/tartalommal tanított (Qdrant point_id egyezik).
+-- PostgreSQL: futtasd a Python scriptet: python scripts/add_kb_training_log_table.py
+-- (Minden tenant sémában létrehozza a táblát. MySQL esetén használd a régi szintaxist külön.)

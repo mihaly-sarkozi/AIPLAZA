@@ -50,3 +50,32 @@ class KnowledgeBaseRepositoryPort(ABC):
     def get_kb_ids_with_permission(self, user_id: int, permission: str) -> List[int]:
         """KB id-k where user has this permission (or higher: train implies use)."""
         ...
+
+    # --- Tanítási napló ---
+    @abstractmethod
+    def add_training_log(
+        self,
+        kb_id: int,
+        point_id: str,
+        user_id: Optional[int],
+        user_display: Optional[str],
+        title: str,
+        content: Optional[str],
+    ) -> None:
+        """Tanítási naplóbejegyzés hozzáadása (add_block után). user_display = név vagy email."""
+        ...
+
+    @abstractmethod
+    def list_training_log(self, kb_uuid: str) -> List[dict]:
+        """Tanítási napló listája: user name/email, title, content, created_at, point_id. Legújabb elől."""
+        ...
+
+    @abstractmethod
+    def delete_training_log_by_point_id(self, kb_id: int, point_id: str) -> bool:
+        """Törlés point_id alapján. True ha töröltünk."""
+        ...
+
+    @abstractmethod
+    def add_personal_data(self, kb_id: int, data_type: str, extracted_value: str) -> str:
+        """Kiszűrt személyes adat tárolása; visszaadja a reference_id-t (a [típus_reference_id] helyettesítőhöz)."""
+        ...

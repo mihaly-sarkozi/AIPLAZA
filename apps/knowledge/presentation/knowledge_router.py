@@ -1,4 +1,5 @@
-from fastapi import APIRouter, Depends, HTTPException, Request, File, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
+from openai import AuthenticationError as OpenAIAuthError, APIError as OpenAIAPIError
 from apps.core.middleware.rate_limit_middleware import limiter
 from apps.core.qdrant.qdrant_wrapper import QdrantUnavailableError
 from apps.users.domain.user import User
@@ -16,6 +17,7 @@ from apps.core.security.auth_dependencies import get_current_user_admin, get_cur
 from apps.core.di import get_kb_service, set_tenant_context_from_request
 from apps.knowledge.application.knowledge_service import KnowledgeBaseService
 from apps.knowledge.ports.repositories import KbPermissionItem
+from apps.knowledge.application.pii_filter import PiiConfirmationRequiredError
 
 router = APIRouter(dependencies=[Depends(set_tenant_context_from_request)])
 
@@ -44,6 +46,8 @@ def list_kb(
             name=kb.name,
             description=kb.description,
             qdrant_collection_name=kb.qdrant_collection_name,
+            personal_data_mode=getattr(kb, "personal_data_mode", None) or "no_personal_data",
+            personal_data_sensitivity=getattr(kb, "personal_data_sensitivity", None) or "medium",
             created_at=kb.created_at,
             updated_at=kb.updated_at,
             can_train=svc.user_can_train(kb.uuid, user.id, user.role),
@@ -116,7 +120,13 @@ def update_kb(
     if not svc.user_can_train(uuid, user.id, user.role):
         raise HTTPException(status_code=403, detail="No permission to edit this knowledge base")
     try:
-        return svc.update(uuid, data.name, data.description)
+        return svc.update(
+            uuid,
+            data.name,
+            data.description,
+            personal_data_mode=data.personal_data_mode,
+            personal_data_sensitivity=data.personal_data_sensitivity,
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -136,6 +146,20 @@ def delete_kb(
         raise HTTPException(status_code=400, detail=str(e))
 
 
+def _handle_openai_error(e: Exception) -> None:
+    """OpenAI (embedding) hibák → 502, felhasználónak érthető üzenettel."""
+    if isinstance(e, OpenAIAuthError):
+        raise HTTPException(
+            status_code=502,
+            detail="A tanítás az embedding szolgáltatás hibája miatt nem sikerült (érvénytelen API kulcs). A rendszergazda ellenőrizze a szerver OPENAI_API_KEY beállítását.",
+        ) from e
+    if isinstance(e, OpenAIAPIError):
+        raise HTTPException(
+            status_code=502,
+            detail="A tanítás az embedding szolgáltatás átmeneti elérhetetlensége miatt nem sikerült. Próbáld később újra.",
+        ) from e
+
+
 # --- TRAIN TEXT (nyers szöveg) ---
 @router.post("/kb/{uuid}/train")
 async def train_raw_text(
@@ -146,7 +170,25 @@ async def train_raw_text(
 ):
     if not svc.user_can_train(uuid, user.id, user.role):
         raise HTTPException(status_code=403, detail="No permission to train this knowledge base")
-    return await svc.add_block(uuid, data.title, data.content)
+    try:
+        return await svc.add_block(
+            uuid, data.title or "", data.content,
+            current_user_id=user.id,
+            confirm_pii=data.confirm_pii,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except PiiConfirmationRequiredError as e:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "requires_pii_confirmation": True,
+                "message": "Személyes adatok észlelve; erősítsd meg a folytatáshoz.",
+                "detected_types": e.detected_types,
+            },
+        ) from e
+    except (OpenAIAuthError, OpenAIAPIError) as ex:
+        _handle_openai_error(ex)
 
 
 # --- TRAIN TEXT (külön endpoint, ha kell) ---
@@ -159,16 +201,84 @@ async def train_text(
 ):
     if not svc.user_can_train(uuid, user.id, user.role):
         raise HTTPException(status_code=403, detail="No permission to train this knowledge base")
-    return await svc.add_block(uuid, data.title, data.content)
+    try:
+        return await svc.add_block(
+            uuid, data.title or "", data.content,
+            current_user_id=user.id,
+            confirm_pii=data.confirm_pii,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except PiiConfirmationRequiredError as e:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "requires_pii_confirmation": True,
+                "message": "Személyes adatok észlelve; erősítsd meg a folytatáshoz.",
+                "detected_types": e.detected_types,
+            },
+        ) from e
+    except (OpenAIAuthError, OpenAIAPIError) as ex:
+        _handle_openai_error(ex)
+
 
 # --- TRAIN FILE ---
 @router.post("/kb/{uuid}/train/file")
 async def train_file(
     uuid: str,
     file: UploadFile = File(...),
+    confirm_pii: bool = Form(False),
     svc: KnowledgeBaseService = Depends(get_kb_service),
     user: User = Depends(get_current_user),
 ):
     if not svc.user_can_train(uuid, user.id, user.role):
         raise HTTPException(status_code=403, detail="No permission to train this knowledge base")
-    return await svc.train_from_file(uuid, file)
+    try:
+        return await svc.train_from_file(
+            uuid, file,
+            current_user_id=user.id,
+            confirm_pii=confirm_pii,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except PiiConfirmationRequiredError as e:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "requires_pii_confirmation": True,
+                "message": "Személyes adatok észlelve; erősítsd meg a folytatáshoz.",
+                "detected_types": e.detected_types,
+            },
+        ) from e
+    except (OpenAIAuthError, OpenAIAPIError) as ex:
+        _handle_openai_error(ex)
+
+
+# --- TRAIN LOG (lista + törlés) ---
+@router.get("/kb/{uuid}/train/log")
+def get_training_log(
+    uuid: str,
+    svc: KnowledgeBaseService = Depends(get_kb_service),
+    user: User = Depends(get_current_user),
+):
+    """Tanítási napló: ki, mikor, milyen címmel/tartalommal tanított. Csak train joggal."""
+    if not svc.user_can_train(uuid, user.id, user.role):
+        raise HTTPException(status_code=403, detail="No permission to view this knowledge base")
+    return svc.list_training_log(uuid)
+
+
+@router.delete("/kb/{uuid}/train/points/{point_id}")
+async def delete_training_point(
+    uuid: str,
+    point_id: str,
+    svc: KnowledgeBaseService = Depends(get_kb_service),
+    user: User = Depends(get_current_user),
+):
+    """Egy tanítási bejegyzés törlése a naplóból és a vektortárból. Csak train joggal."""
+    if not svc.user_can_train(uuid, user.id, user.role):
+        raise HTTPException(status_code=403, detail="No permission to manage this knowledge base")
+    try:
+        await svc.delete_training_point(uuid, point_id)
+        return {"status": "ok"}
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))

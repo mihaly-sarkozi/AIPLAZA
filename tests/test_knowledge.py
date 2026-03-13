@@ -62,12 +62,13 @@ def test_get_kb_without_auth_returns_401(client: TestClient):
     assert r.status_code == 401
 
 
-def test_get_kb_non_admin_returns_403(client, sample_user_role_user):
-    """GET /kb user szerepkörrel (nem admin/owner) → 403."""
+def test_get_kb_user_returns_200_filtered_list(client, sample_user_role_user):
+    """GET /kb user szerepkörrel → 200, lista (csak use/train jogosult KB-k; mock üres repo → üres lista)."""
     app.dependency_overrides[get_current_user] = lambda: sample_user_role_user
     try:
         r = client.get("/api/kb")
-        assert r.status_code == 403
+        assert r.status_code == 200
+        assert isinstance(r.json(), list)
     finally:
         app.dependency_overrides.pop(get_current_user, None)
 

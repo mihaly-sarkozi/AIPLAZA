@@ -11,6 +11,8 @@ import {
   useKbPermissions,
   useSetKbPermissionsMutation,
   type KbItem,
+  type PersonalDataMode,
+  type PersonalDataSensitivity,
 } from "../hooks/useKb";
 import { useUsers } from "../../users/hooks/useUsers";
 import { useAuthStore } from "../../../store/authStore";
@@ -51,6 +53,9 @@ export default function KBList() {
   const [createPermissions, setCreatePermissions] = useState<Record<number, string>>({});
   /** Beállítás modál: user_id -> permission; API-ból szinkronizálva */
   const [settingsPermissions, setSettingsPermissions] = useState<Record<number, string>>({});
+  const [settingsPersonalDataMode, setSettingsPersonalDataMode] = useState<PersonalDataMode>("no_personal_data");
+  const [settingsPersonalDataSensitivity, setSettingsPersonalDataSensitivity] =
+    useState<PersonalDataSensitivity>("medium");
 
   const { data: settingsPermsList = [], isLoading: settingsPermsLoading } = useKbPermissions(
     settingsKb?.uuid ?? undefined,
@@ -71,6 +76,14 @@ export default function KBList() {
 
   useEffect(() => {
     if (!settingsKb) settingsPermsSyncedUuid.current = null;
+    else {
+      setSettingsPersonalDataMode(
+        (settingsKb.personal_data_mode as PersonalDataMode) ?? "no_personal_data"
+      );
+      setSettingsPersonalDataSensitivity(
+        (settingsKb.personal_data_sensitivity as PersonalDataSensitivity) ?? "medium"
+      );
+    }
   }, [settingsKb]);
 
   const usersWithPermsCreate = useMemo(() => {
@@ -166,7 +179,13 @@ export default function KBList() {
       return;
     }
     updateKbMutation.mutate(
-      { uuid: editingKb.uuid, name: nameTrim, description: formData.description?.trim() || undefined },
+      {
+        uuid: editingKb.uuid,
+        name: nameTrim,
+        description: formData.description?.trim() || undefined,
+        personal_data_mode: (editingKb.personal_data_mode as "no_personal_data" | "with_confirmation" | "allowed_not_to_ai") ?? "no_personal_data",
+        personal_data_sensitivity: (editingKb.personal_data_sensitivity as "weak" | "medium" | "strong") ?? "medium",
+      },
       {
         onSuccess: () => {
           toast.success(t("profile.saved"));
@@ -180,14 +199,31 @@ export default function KBList() {
     );
   };
 
-  const handleSaveSettingsPermissions = () => {
+  const handleSaveSettings = () => {
     if (!settingsKb) return;
     const permissions = usersWithPermsSettings.map((u) => ({ user_id: u.id, permission: u.permission }));
-    setPermissionsMutation.mutate(
-      { uuid: settingsKb.uuid, permissions },
+    updateKbMutation.mutate(
       {
-        onSuccess: () => setSettingsKb(null),
-        onError: (err: unknown) => toast.error(getApiErrorMessage(err) ?? t("kb.errorPermissions")),
+        uuid: settingsKb.uuid,
+        name: settingsKb.name,
+        description: settingsKb.description ?? "",
+        personal_data_mode: settingsPersonalDataMode,
+        personal_data_sensitivity: settingsPersonalDataSensitivity,
+      },
+      {
+        onSuccess: () => {
+          setPermissionsMutation.mutate(
+            { uuid: settingsKb.uuid, permissions },
+            {
+              onSuccess: () => {
+                toast.success(t("profile.saved"));
+                setSettingsKb(null);
+              },
+              onError: (err: unknown) => toast.error(getApiErrorMessage(err) ?? t("kb.errorPermissions")),
+            }
+          );
+        },
+        onError: (err: unknown) => toast.error(getApiErrorMessage(err) ?? t("kb.errorUpdate")),
       }
     );
   };
@@ -277,7 +313,7 @@ export default function KBList() {
                         <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
                       </button>
                     )}
-                    {canManage && kb.can_train && (
+                    {canManage && (
                       <button
                         type="button"
                         title={t("kb.actionSettings")}
@@ -286,7 +322,7 @@ export default function KBList() {
                         disabled={actionLoading}
                         aria-label={t("kb.actionSettings")}
                       >
-                        <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>
+                        <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
                       </button>
                     )}
                     {kb.can_train && (
@@ -301,8 +337,8 @@ export default function KBList() {
                         <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" /></svg>
                       </button>
                     )}
-                    {canManage && kb.can_train && (
-                      <button
+{canManage && kb.can_train && (
+                        <button
                         type="button"
                         title={t("kb.actionEdit")}
                         className="p-2 rounded text-[var(--color-foreground)] bg-[var(--color-card)] border border-[var(--color-border)] hover:bg-[var(--color-button-hover)] disabled:opacity-50"
@@ -310,7 +346,7 @@ export default function KBList() {
                         disabled={actionLoading}
                         aria-label={t("kb.actionEdit")}
                       >
-                        <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+                        <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
                       </button>
                     )}
                   </div>
@@ -343,7 +379,7 @@ export default function KBList() {
                   <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
                 </button>
               )}
-              {canManage && kb.can_train && (
+              {canManage && (
                 <button
                   type="button"
                   title={t("kb.actionSettings")}
@@ -352,7 +388,7 @@ export default function KBList() {
                   disabled={actionLoading}
                   aria-label={t("kb.actionSettings")}
                 >
-                  <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>
+                  <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
                 </button>
               )}
               {kb.can_train && (
@@ -376,7 +412,7 @@ export default function KBList() {
                   disabled={actionLoading}
                   aria-label={t("kb.actionEdit")}
                 >
-                  <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+                  <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
                 </button>
               )}
             </div>
@@ -553,6 +589,56 @@ export default function KBList() {
             <p className="text-sm text-[var(--color-muted)] mb-0.5">{t("nav.knowledgeBase")}</p>
             <h2 className="text-2xl font-bold mb-1 text-[var(--color-foreground)]">{settingsKb.name}</h2>
             <p className="text-sm text-[var(--color-muted)] mb-4" style={{ marginTop: 10 }}>{t("kb.settingsUsageHint")}</p>
+
+                {/* Személyes adatok beállításai */}
+                <section className="mb-6">
+                  <h3 className="text-sm font-semibold text-[var(--color-foreground)] mb-2">
+                    {t("kb.personalDataSettingsSection")}
+                  </h3>
+                  <p className="text-sm text-[var(--color-muted)] mb-3">
+                    {t("kb.personalDataDescription")}
+                  </p>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div>
+                      <label className="block mb-1 text-xs text-[var(--color-label)]">
+                        {t("kb.personalDataModeLabel")}
+                      </label>
+                      <select
+                        value={settingsPersonalDataMode}
+                        onChange={(e) => setSettingsPersonalDataMode(e.target.value as PersonalDataMode)}
+                        className="w-full p-2 rounded bg-[var(--color-input-bg)] border border-[var(--color-border)] text-[var(--color-foreground)] text-sm"
+                      >
+                        <option value="no_personal_data">{t("kb.personalDataModeNo")}</option>
+                        <option value="with_confirmation">{t("kb.personalDataModeConfirm")}</option>
+                        <option value="allowed_not_to_ai">{t("kb.personalDataModeAllowed")}</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block mb-1 text-xs text-[var(--color-label)]">
+                        {t("kb.personalDataSensitivityLabel")}
+                      </label>
+                      <select
+                        value={settingsPersonalDataSensitivity}
+                        onChange={(e) =>
+                          setSettingsPersonalDataSensitivity(e.target.value as PersonalDataSensitivity)
+                        }
+                        className="w-full p-2 rounded bg-[var(--color-input-bg)] border border-[var(--color-border)] text-[var(--color-foreground)] text-sm"
+                      >
+                        <option value="weak">{t("kb.personalDataSensitivityWeak")}</option>
+                        <option value="medium">{t("kb.personalDataSensitivityMedium")}</option>
+                        <option value="strong">{t("kb.personalDataSensitivityStrong")}</option>
+                      </select>
+                      <p className="mt-1 text-xs text-[var(--color-muted)]">
+                        {t("kb.personalDataSensitivityHelp")}
+                      </p>
+                    </div>
+                  </div>
+                </section>
+
+                {/* Jogosultságok */}
+                <h3 className="text-sm font-semibold text-[var(--color-foreground)] mb-2">
+                  {t("kb.permissionsTitle")}
+                </h3>
             {settingsPermsLoading ? (
               <p className="text-[var(--color-muted)]">{t("common.loading")}</p>
             ) : (
@@ -691,11 +777,13 @@ export default function KBList() {
                   </button>
                   <button
                     type="button"
-                    onClick={handleSaveSettingsPermissions}
+                    onClick={handleSaveSettings}
                     disabled={actionLoading}
                     className="px-4 py-2 rounded bg-[var(--color-primary)] hover:opacity-90 text-[var(--color-on-primary)] disabled:opacity-50 disabled:cursor-not-allowed"
                   >
-                    {setPermissionsMutation.isPending ? t("common.loading") : t("kb.savePermissions")}
+                    {updateKbMutation.isPending || setPermissionsMutation.isPending
+                      ? t("common.loading")
+                      : t("common.save")}
                   </button>
                 </div>
               </>

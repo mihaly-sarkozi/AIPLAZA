@@ -11,6 +11,8 @@ class KBOut(BaseModel):
     name: str
     description: Optional[str]
     qdrant_collection_name: str
+    personal_data_mode: str = "no_personal_data"
+    personal_data_sensitivity: str = "medium"
     created_at: datetime
     updated_at: datetime
     can_train: Optional[bool] = None  # aktuális user taníthatja-e (listánál kitöltve)
