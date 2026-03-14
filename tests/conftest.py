@@ -1,15 +1,12 @@
 # tests/conftest.py
 """
-Közös pytest fixture-ek: app, client, mock login/refresh/logout/user service (dependency override).
-
-Az app és a main modul csak akkor töltődik, ha valamilyen integration fixture (client, client_authenticated, …)
-kell – így a unit tesztek (pytest tests/unit/) nem húzzák be a teljes runtime stacket.
+Shared pytest fixtures. No top-level imports from config or apps so that
+pytest collection does not load the full runtime stack or fail on missing config.
+App and heavy deps are loaded only when a fixture that needs them is used.
 """
 import os
 
-# Login rate limit: tesztekben magasabb limit (ugyanaz az IP = testclient), különben 5/perc 429-et adna
 os.environ.setdefault("RATE_LIMIT_LOGIN_PER_MINUTE", "100")
-# CSRF: tesztekben a TestClient nem küldi a tokent; a middleware kihagyja a validációt
 os.environ.setdefault("DISABLE_CSRF", "1")
 
 from datetime import datetime, timezone
@@ -18,86 +15,34 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
-from config.settings import settings
-from apps.core.di import (
-    get_login_service,
-    get_refresh_service,
-    get_logout_service,
-    get_user_service,
-    get_user_repository,
-    get_settings_service,
-    get_chat_service,
-)
-from apps.core.security.auth_dependencies import get_current_user
-from apps.core.container.app_container import container
-from apps.auth.application.dto import LoginSuccess, LoginTwoFactorRequired
-from apps.users.domain.user import User
-from apps.auth.domain.tenant import Tenant
-
 
 def get_app():
-    """Lazy: a teljes FastAPI appot csak akkor tölti, ha kell (integration tesztek). Unit tesztek ne hívják."""
+    """Lazy: load FastAPI app only when needed (integration tests). Unit tests should not request app."""
     from main import app
     return app
 
 
 @pytest.fixture(scope="session")
 def app():
-    """Teljes FastAPI app – csak integration tesztekhez; session scope, lazy import main."""
-    return get_app()
-
-# Teszt tenant: a middleware ezt várja Host: demo.local esetén (tenant_base_domain=local).
-DEMO_TENANT = Tenant(id=1, slug="demo", name="Demo", created_at=datetime.now(timezone.utc))
-
-
-class MockLoginService:
-    """A login route csak a login(inp) visszatérését használja. Ezt állítjuk teszt szerint."""
-    def __init__(self):
-        self.result = None
-        self.user_repository = None  # refresh route használja: get_by_id(1) → user
-        self.raise_2fa_too_many = False  # True → step2-nál TwoFactorTooManyAttemptsError (429 teszt)
-
-    def login(self, inp):
-        if self.raise_2fa_too_many and getattr(inp, "pending_token", None) and getattr(inp, "two_factor_code", None):
-            from apps.auth.application.exceptions import TwoFactorTooManyAttemptsError
-            raise TwoFactorTooManyAttemptsError()
-        return self.result
-
-
-class MockRefreshService:
-    """Refresh route: refresh(rt, ip, ua) → (access, new_refresh, access_jti) vagy None; tokens.verify(rt) → payload."""
-    def __init__(self):
-        self.result = None  # (access, new_refresh, access_jti, user) vagy None
-        self.verify_payload = {"sub": "1", "typ": "refresh"}
-        self.tokens = MagicMock()
-        self.tokens.verify.side_effect = lambda rt: self.verify_payload
-
-    def refresh(self, refresh_token: str, ip=None, ua=None, tenant_slug=None, *, correlation_id=None, **kwargs):
-        return self.result
-
-
-class MockLogoutService:
-    """Logout route: logout(rt) → True/False."""
-    def __init__(self):
-        self.result = True
-
-    def logout(self, refresh_token: str, ip=None, ua=None, *, tenant_slug=None, correlation_id=None, **kwargs):
-        return self.result
+    """FastAPI app for integration tests; session scope, lazy load."""
+    from tests.app_factory import create_test_app
+    return create_test_app()
 
 
 @pytest.fixture
 def mock_user_repo(sample_user):
-    """Mock user repo: get_by_id(1) → sample_user, get_owner() → sample_user; update(u) → u; update_password, reset_failed_login no-op."""
+    """Mock user repo: get_by_id(1) → sample_user, get_owner() → sample_user; update(u) → u."""
     repo = MagicMock()
     repo.get_by_id.side_effect = lambda id: sample_user if id == 1 else None
     repo.get_owner.return_value = sample_user
-    repo.update.side_effect = lambda u: u  # PATCH /auth/me
+    repo.update.side_effect = lambda u: u
     return repo
 
 
 @pytest.fixture
 def mock_login_service(mock_user_repo):
-    """Login mock; user_repository a refresh tesztekhez (get_by_id(1) → user)."""
+    """Login mock; user_repository for refresh tests (get_by_id(1) → user)."""
+    from tests.conftest import MockLoginService
     svc = MockLoginService()
     svc.user_repository = mock_user_repo
     return svc
@@ -105,16 +50,23 @@ def mock_login_service(mock_user_repo):
 
 @pytest.fixture
 def mock_refresh_service():
+    from tests.conftest import MockRefreshService
     return MockRefreshService()
 
 
 @pytest.fixture
 def client(app, mock_login_service, mock_user_repo):
-    """TestClient a /api prefix alatti végpontokhoz. LoginService + tenant + user_repo mock."""
+    """TestClient with login/user repo overrides and demo tenant."""
+    from config.settings import settings
+    from apps.core.di import get_login_service, get_user_repository
+    from apps.core.container.app_container import container
+    from apps.auth.domain.tenant import Tenant
+
+    demo_tenant = Tenant(id=1, slug="demo", name="Demo", created_at=datetime.now(timezone.utc))
     app.dependency_overrides[get_login_service] = lambda: mock_login_service
     app.dependency_overrides[get_user_repository] = lambda: mock_user_repo
     base_url = f"http://demo.{settings.tenant_base_domain}"
-    with patch.object(container.tenant_repo, "get_by_slug", return_value=DEMO_TENANT):
+    with patch.object(container.tenant_repo, "get_by_slug", return_value=demo_tenant):
         with TestClient(app, base_url=base_url) as c:
             yield c
     app.dependency_overrides.pop(get_login_service, None)
@@ -123,7 +75,7 @@ def client(app, mock_login_service, mock_user_repo):
 
 @pytest.fixture
 def client_with_refresh(app, client, mock_refresh_service):
-    """Client + RefreshService felülírva (refresh tesztekhez)."""
+    from apps.core.di import get_refresh_service
     app.dependency_overrides[get_refresh_service] = lambda: mock_refresh_service
     yield client
     app.dependency_overrides.pop(get_refresh_service, None)
@@ -131,12 +83,14 @@ def client_with_refresh(app, client, mock_refresh_service):
 
 @pytest.fixture
 def mock_logout_service():
+    from tests.conftest import MockLogoutService
     return MockLogoutService()
 
 
 @pytest.fixture
 def client_authenticated(app, client, sample_user, mock_logout_service):
-    """Client ahol get_current_user → sample_user (me, logout tesztekhez). Opcionálisan logout mock."""
+    from apps.core.di import get_logout_service
+    from apps.core.security.auth_dependencies import get_current_user
     app.dependency_overrides[get_current_user] = lambda: sample_user
     app.dependency_overrides[get_logout_service] = lambda: mock_logout_service
     yield client
@@ -146,7 +100,7 @@ def client_authenticated(app, client, sample_user, mock_logout_service):
 
 @pytest.fixture
 def sample_user():
-    """Egy domain User a sikeres login válaszhoz (mock LoginSuccess)."""
+    from apps.users.domain.user import User
     return User(
         id=1,
         email="admin@example.com",
@@ -159,9 +113,8 @@ def sample_user():
 
 @pytest.fixture
 def mock_user_service(sample_user):
-    """Mock UserService: list_all, get_by_id, create, update, delete, validate_invite_token, set_password, resend_invite."""
+    from apps.users.domain.user import User
     svc = MagicMock()
-    # Alapértelmezések: list_all → üres lista, get_by_id(1) → sample_user
     svc.list_all.return_value = []
     svc.get_by_id.side_effect = lambda uid: sample_user if uid == 1 else None
     svc.create.side_effect = lambda **kw: User(
@@ -185,14 +138,15 @@ def mock_user_service(sample_user):
         )
     svc.update.side_effect = _update
     svc.validate_invite_token.return_value = "invalid"
-    svc.set_password.side_effect = None  # success
-    svc.resend_invite.side_effect = None  # success
+    svc.set_password.side_effect = None
+    svc.resend_invite.side_effect = None
     return svc
 
 
 @pytest.fixture
 def client_superuser(app, client, sample_user, mock_user_service, mock_logout_service):
-    """Client superuserral (get_current_user → sample_user), UserService mock (CRUD, resend, set-password)."""
+    from apps.core.di import get_user_service, get_logout_service
+    from apps.core.security.auth_dependencies import get_current_user
     app.dependency_overrides[get_current_user] = lambda: sample_user
     app.dependency_overrides[get_user_service] = lambda: mock_user_service
     app.dependency_overrides[get_logout_service] = lambda: mock_logout_service
@@ -204,7 +158,6 @@ def client_superuser(app, client, sample_user, mock_user_service, mock_logout_se
 
 @pytest.fixture
 def mock_settings_service():
-    """Settings: is_two_factor_enabled, set_two_factor_enabled."""
     svc = MagicMock()
     svc.is_two_factor_enabled.return_value = False
     svc.set_two_factor_enabled.side_effect = None
@@ -213,9 +166,43 @@ def mock_settings_service():
 
 @pytest.fixture
 def mock_chat_service():
-    """Chat: chat(question) async → answer string."""
     svc = MagicMock()
     async def _chat(question: str):
         return f"Echo: {question}"
     svc.chat.side_effect = _chat
     return svc
+
+
+# --- Mock service classes (no app imports; exceptions imported inside methods) ---
+
+
+class MockLoginService:
+    def __init__(self):
+        self.result = None
+        self.user_repository = None
+        self.raise_2fa_too_many = False
+
+    def login(self, inp):
+        if self.raise_2fa_too_many and getattr(inp, "pending_token", None) and getattr(inp, "two_factor_code", None):
+            from apps.auth.application.exceptions import TwoFactorTooManyAttemptsError
+            raise TwoFactorTooManyAttemptsError()
+        return self.result
+
+
+class MockRefreshService:
+    def __init__(self):
+        self.result = None
+        self.verify_payload = {"sub": "1", "typ": "refresh"}
+        self.tokens = MagicMock()
+        self.tokens.verify.side_effect = lambda rt: self.verify_payload
+
+    def refresh(self, refresh_token: str, ip=None, ua=None, tenant_slug=None, *, correlation_id=None, **kwargs):
+        return self.result
+
+
+class MockLogoutService:
+    def __init__(self):
+        self.result = True
+
+    def logout(self, refresh_token: str, ip=None, ua=None, *, tenant_slug=None, correlation_id=None, **kwargs):
+        return self.result

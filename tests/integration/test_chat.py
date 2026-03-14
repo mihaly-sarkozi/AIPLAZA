@@ -35,12 +35,12 @@ def test_chat_success_returns_answer(client_authenticated: TestClient, mock_chat
 
 
 @pytest.mark.integration
-def test_chat_empty_question_rejected(client_authenticated: TestClient):
-    """POST /chat üres question → 422 (validáció) vagy 200; soha 500. Prefer 422."""
+@pytest.mark.release_acceptance
+def test_chat_empty_question_returns_422(client_authenticated: TestClient):
+    """POST /chat with empty question → 422 (validation error)."""
     r = client_authenticated.post("/api/chat", json={"question": ""})
-    assert r.status_code in (200, 422), f"Unexpected {r.status_code}: {r.text[:200]}"
-    if r.status_code == 422:
-        assert "question" in r.json().get("detail", [{}])[0].get("loc", [])
-    elif r.status_code == 200:
-        # If API accepts empty, response should not be a server error
-        assert "detail" not in r.json() or "error" not in str(r.json().get("detail", "")).lower()
+    assert r.status_code == 422, f"Expected 422 for empty question, got {r.status_code}: {r.text[:300]}"
+    detail = r.json().get("detail", [])
+    assert isinstance(detail, list) and len(detail) >= 1
+    loc = detail[0].get("loc", [])
+    assert "question" in loc

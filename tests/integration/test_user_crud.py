@@ -13,15 +13,15 @@ pytestmark = pytest.mark.integration
 
 @pytest.mark.smoke_only
 def test_list_users_success_returns_list(client_superuser: TestClient, mock_user_service):
-    """GET /users superuserral → 200, lista (akár üres)."""
+    """GET /users superuserral → 200, lista (akár üres); minden elem dict id vagy email mezővel."""
     mock_user_service.list_all.return_value = []
     r = client_superuser.get("/api/users")
     assert r.status_code == 200
     data = r.json()
-    assert isinstance(data, list)
+    assert isinstance(data, list), "Response must be a list"
     for item in data:
-        assert isinstance(item, dict)
-        assert "id" in item or "email" in item
+        assert isinstance(item, dict), "Each item must be a dict"
+        assert "id" in item or "email" in item, "Each item must have id or email"
 
 
 def test_list_users_with_users_returns_data(client_superuser: TestClient, mock_user_service, sample_user):

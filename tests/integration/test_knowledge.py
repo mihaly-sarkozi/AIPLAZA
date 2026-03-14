@@ -73,10 +73,10 @@ def test_get_kb_user_returns_200_filtered_list(client, sample_user_role_user):
         r = client.get("/api/kb")
         assert r.status_code == 200
         data = r.json()
-        assert isinstance(data, list)
+        assert isinstance(data, list), "Response must be a list"
         for item in data:
-            assert isinstance(item, dict)
-            assert "uuid" in item or "name" in item
+            assert isinstance(item, dict), "Each item must be a dict"
+            assert "uuid" in item or "name" in item, "Each KB item must have uuid or name"
     finally:
         app.dependency_overrides.pop(get_current_user, None)
 

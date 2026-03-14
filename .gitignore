@@ -26,3 +26,10 @@ env/
 ENV/
 .venv
 .env.example
+
+# Archive / project noise
+__MACOSX/
+node_modules/
+frontend/dist/
+frontend/build/
+*.egg-info/
