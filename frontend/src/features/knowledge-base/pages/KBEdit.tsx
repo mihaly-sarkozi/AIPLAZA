@@ -12,8 +12,9 @@ import {
 
 const PERSONAL_DATA_MODES: PersonalDataMode[] = [
   "no_personal_data",
-  "with_confirmation",
   "allowed_not_to_ai",
+  "with_confirmation",
+  "no_pii_filter",
 ];
 const PERSONAL_DATA_SENSITIVITIES: PersonalDataSensitivity[] = ["weak", "medium", "strong"];
 
@@ -124,8 +125,9 @@ export default function KBEdit() {
             className="w-full p-3 rounded bg-[var(--color-input-bg)] border border-[var(--color-border)] text-[var(--color-foreground)]"
           >
             <option value="no_personal_data">{t("kb.personalDataModeNo")}</option>
-            <option value="with_confirmation">{t("kb.personalDataModeConfirm")}</option>
             <option value="allowed_not_to_ai">{t("kb.personalDataModeAllowed")}</option>
+            <option value="with_confirmation">{t("kb.personalDataModeConfirm")}</option>
+            <option value="no_pii_filter">{t("kb.personalDataModeDisabled")}</option>
           </select>
         </div>
 

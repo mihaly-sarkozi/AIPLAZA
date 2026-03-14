@@ -3,7 +3,7 @@
  */
 import api from "../axiosClient";
 
-export type PersonalDataMode = "no_personal_data" | "with_confirmation" | "allowed_not_to_ai";
+export type PersonalDataMode = "no_personal_data" | "with_confirmation" | "allowed_not_to_ai" | "no_pii_filter";
 export type PersonalDataSensitivity = "weak" | "medium" | "strong";
 
 export type KbItem = {

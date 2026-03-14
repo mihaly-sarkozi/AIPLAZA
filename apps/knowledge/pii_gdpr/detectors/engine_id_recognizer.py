@@ -35,12 +35,13 @@ class EngineIDRecognizer(BaseDetector):
                 entity = EntityType.CHASSIS_IDENTIFIER
             else:
                 entity = EntityType.ENGINE_IDENTIFIER
+            # Csak az azonosító maszkolódik, az "alvázszám" / "motorszám" kulcsszó nem
             results.append(
                 DetectionResult(
                     entity_type=entity,
-                    matched_text=m.group(0),
-                    start=m.start(),
-                    end=m.end(),
+                    matched_text=m.group(1),
+                    start=m.start(1),
+                    end=m.end(1),
                     language=language,
                     source_detector=self.name,
                     confidence_score=0.85,

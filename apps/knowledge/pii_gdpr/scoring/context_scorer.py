@@ -19,6 +19,7 @@ CONTEXT_SENSITIVE_ENTITY_TYPES: Set[EntityType] = {
     EntityType.IMEI,
     EntityType.MAC_ADDRESS,
     EntityType.IP_ADDRESS,
+    EntityType.DEVICE_ID,
 }
 
 # Positive keywords (boost): presence in proximity increases confidence
@@ -39,12 +40,16 @@ POSITIVE_KEYWORDS: Dict[EntityType, List[str]] = {
         "number plate", "placa", "vehicle registration",
     ],
     EntityType.CUSTOMER_ID: [
-        "customer", "ügyfél", "cliente", "client id", "customer id",
+        "customer", "ügyfél", "ügyfélszáma", "cliente", "client id", "customer id",
         "ugyfelszam", "número de cliente",
     ],
     EntityType.IMEI: ["imei", "device id", "mobile"],
     EntityType.MAC_ADDRESS: ["mac", "address", "ethernet", "wifi"],
     EntityType.IP_ADDRESS: ["ip", "address", "server", "host"],
+    EntityType.DEVICE_ID: [
+        "device", "dispositivo", "hostname", "asset tag", "printer",
+        "network identifier", "identificador de dispositivo", "device id",
+    ],
 }
 
 # Negative keywords (penalty): presence in proximity decreases confidence (e.g. product/SKU)
@@ -57,6 +62,7 @@ NEGATIVE_KEYWORDS: Dict[EntityType, List[str]] = {
     EntityType.IMEI: [],
     EntityType.MAC_ADDRESS: [],
     EntityType.IP_ADDRESS: [],
+    EntityType.DEVICE_ID: [],
 }
 
 # Default proximity window (chars before/after match)

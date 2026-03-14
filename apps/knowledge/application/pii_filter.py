@@ -12,6 +12,7 @@ from typing import List, Tuple
 from apps.knowledge.pii.adapter import filter_pii_via_gdpr
 from apps.knowledge.pii.sanitization import (
     apply_pii_replacements as _apply_pii_replacements,
+    apply_pii_replacements_with_decisions as _apply_pii_replacements_with_decisions,
     deduplicate_matches_longer_wins,
 )
 from apps.knowledge.pii.policy import PiiConfirmationRequiredError
@@ -47,9 +48,21 @@ def apply_pii_replacements(
     return _apply_pii_replacements(text, matches, ref_id_by_index, mode=mode)
 
 
+def apply_pii_replacements_with_decisions(
+    text: str,
+    matches: List[PiiMatch],
+    decisions: List[str],
+) -> tuple[str, List[int]]:
+    """
+    Soronkénti döntések alapján cserél. Vissza: (result_text, mask_indices).
+    """
+    return _apply_pii_replacements_with_decisions(text, matches, decisions)
+
+
 __all__ = [
     "filter_pii",
     "apply_pii_replacements",
+    "apply_pii_replacements_with_decisions",
     "PiiMatch",
     "PiiConfirmationRequiredError",
 ]

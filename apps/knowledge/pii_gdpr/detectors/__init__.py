@@ -13,6 +13,8 @@ from apps.knowledge.pii_gdpr.detectors.vin_recognizer import VINRecognizer
 from apps.knowledge.pii_gdpr.detectors.engine_id_recognizer import EngineIDRecognizer
 from apps.knowledge.pii_gdpr.detectors.bank_account_recognizer import BankAccountRecognizer
 from apps.knowledge.pii_gdpr.detectors.document_identifiers_recognizer import DocumentIdentifiersRecognizer
+from apps.knowledge.pii_gdpr.detectors.context_number_recognizer import ContextNumberRecognizer
+from apps.knowledge.pii_gdpr.detectors.number_grouping_detector import NumberGroupingDetector
 
 __all__ = [
     "BaseDetector",
@@ -29,4 +31,6 @@ __all__ = [
     "EngineIDRecognizer",
     "BankAccountRecognizer",
     "DocumentIdentifiersRecognizer",
+    "ContextNumberRecognizer",
+    "NumberGroupingDetector",
 ]

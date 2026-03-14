@@ -11,6 +11,9 @@ from apps.knowledge.pii_gdpr.enums import EntityType, RiskClass, RecommendedActi
 from apps.knowledge.pii_gdpr.models import DetectionResult
 from apps.knowledge.pii_gdpr.detectors.base import BaseDetector
 
+# Szavak, amiket a NER ne detektáljon névként (pl. role-based, role)
+_PERSON_NAME_BLOCKLIST = frozenset({"role", "role-based", "role based", "rolebased"})
+
 # NER label -> our EntityType
 _LABEL_MAP = {
     "PERSON": EntityType.PERSON_NAME,
@@ -73,6 +76,10 @@ class NERDetector(BaseDetector):
                 continue
             if entity_type == EntityType.UNKNOWN:
                 continue
+            if entity_type == EntityType.PERSON_NAME:
+                mt = text[ent.start_char:ent.end_char].strip().lower()
+                if mt in _PERSON_NAME_BLOCKLIST or any(mt.startswith(b) for b in ("role-", "role ")):
+                    continue
             confidence = 0.78
             risk = RiskClass.DIRECT_PII if entity_type == EntityType.PERSON_NAME else RiskClass.INDIRECT_IDENTIFIER
             results.append(
@@ -105,6 +112,10 @@ class NERDetector(BaseDetector):
             if end <= start:
                 continue
             matched = text[start:end]
+            if entity_type == EntityType.PERSON_NAME:
+                mt = matched.strip().lower()
+                if mt in _PERSON_NAME_BLOCKLIST or any(mt.startswith(b) for b in ("role-", "role ")):
+                    continue
             confidence = 0.76
             risk = RiskClass.DIRECT_PII if entity_type == EntityType.PERSON_NAME else RiskClass.INDIRECT_IDENTIFIER
             results.append(

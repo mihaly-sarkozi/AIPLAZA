@@ -2,6 +2,7 @@ import { useState, useCallback } from "react";
 import { useParams } from "react-router-dom";
 import { toast } from "sonner";
 import { useTranslation } from "../../../i18n";
+import { ProcessProgressOverlay } from "../../../components/ProcessProgressOverlay";
 import {
   useKbList,
   useKbTrainingLog,
@@ -9,7 +10,16 @@ import {
   useKbTrainFileMutation,
   useDeleteKbTrainingPointMutation,
   type KbTrainingLogEntry,
+  type PiiDecisionItem,
 } from "../hooks/useKb";
+
+type PiiMatchItem = {
+  index: number;
+  value: string;
+  type: string;
+  context_before: string;
+  context_after: string;
+};
 
 const ACCEPT_TRAIN = ".txt,.pdf,.docx";
 
@@ -28,6 +38,13 @@ function formatDateTime(iso: string | null): string {
 
 function isTxt(file: File): boolean {
   return file.name.toLowerCase().endsWith(".txt");
+}
+
+/** Mondatok száma: . ! ? \n alapján */
+function countSentences(text: string): number {
+  if (!text?.trim()) return 0;
+  const parts = text.split(/(?<=[.!?])\s+|\n+/);
+  return parts.filter((p) => p.trim().length > 0).length;
 }
 
 function readTxtFile(file: File): Promise<string> {
@@ -58,9 +75,15 @@ export default function KBTrain() {
   const [logModalOpen, setLogModalOpen] = useState(false);
   const [viewEntry, setViewEntry] = useState<KbTrainingLogEntry | null>(null);
   const [piiConfirmOpen, setPiiConfirmOpen] = useState(false);
-  const [piiConfirmPayload, setPiiConfirmPayload] = useState<
-    { type: "text"; uuid: string; content: string } | { type: "file"; uuid: string; file: File } | null
-  >(null);
+  const [piiConfirmPayload, setPiiConfirmPayload] = useState<{
+    type: "text" | "file";
+    uuid: string;
+    content?: string;
+    file?: File;
+    matches: PiiMatchItem[];
+  } | null>(null);
+  const [piiDecisions, setPiiDecisions] = useState<Record<number, "delete" | "mask" | "keep">>({});
+  const [processingTotalSentences, setProcessingTotalSentences] = useState<number | null>(null);
 
   const { data: kbList = [] } = useKbList();
   const currentKb = uuid ? kbList.find((k) => k.uuid === uuid) : null;
@@ -71,27 +94,48 @@ export default function KBTrain() {
   const deletePointMutation = useDeleteKbTrainingPointMutation();
 
   const trainWithFile = useCallback(
-    (file: File, confirmPii = false) => {
+    async (file: File, confirmPii = false, piiDecisionsList?: PiiDecisionItem[]) => {
       if (!uuid) return;
+      if (isTxt(file)) {
+        try {
+          const text = await readTxtFile(file);
+          setProcessingTotalSentences(countSentences(text));
+        } catch {
+          setProcessingTotalSentences(null);
+        }
+      } else {
+        setProcessingTotalSentences(null);
+      }
       const formData = new FormData();
       formData.append("file", file);
       trainFileMutation.mutate(
-        { uuid, formData, confirm_pii: confirmPii },
+        { uuid, formData, confirm_pii: confirmPii, pii_decisions: piiDecisionsList },
         {
-          onSuccess: () => {
-            toast.success(t("kb.trainedSuccess"));
+          onSuccess: (data: { masked?: boolean; pii_replaced_with_dots?: boolean }) => {
+            if (data?.pii_replaced_with_dots) {
+              toast.success(t("kb.piiDeletedMessage"));
+            } else if (data?.masked) {
+              toast.success(t("kb.piiMaskedMessage"));
+            } else {
+              toast.success(t("kb.trainedSuccess"));
+            }
             setPiiConfirmOpen(false);
             setPiiConfirmPayload(null);
+            setPiiDecisions({});
           },
           onError: (err: unknown) => {
-            const ax = err as { response?: { status?: number; data?: { detail?: { requires_pii_confirmation?: boolean } } } };
-            if (ax.response?.status === 409 && ax.response?.data?.detail?.requires_pii_confirmation) {
-              setPiiConfirmPayload({ type: "file", uuid, file });
+            const ax = err as { response?: { status?: number; data?: { detail?: { requires_pii_confirmation?: boolean; matches?: PiiMatchItem[] } } } };
+            const detail = ax.response?.data?.detail;
+            if (ax.response?.status === 409 && detail?.requires_pii_confirmation) {
+              const matches = (detail.matches || []) as PiiMatchItem[];
+              setPiiConfirmPayload({ type: "file", uuid, file, matches });
+              setPiiDecisions({});
               setPiiConfirmOpen(true);
               return;
             }
             toast.error(getApiErrorMessage(err, t("kb.errorUpdate")));
           },
+          onSettled: () => setProcessingTotalSentences(null),
         }
       );
     },
@@ -109,7 +153,7 @@ export default function KBTrain() {
           toast.error(t("kb.errorUpdate"));
         }
       } else {
-        trainWithFile(file);
+        await trainWithFile(file);
         setUploadModalOpen(false);
       }
     },
@@ -133,55 +177,87 @@ export default function KBTrain() {
         .then((text) => setContent(text))
         .catch(() => toast.error(t("kb.errorUpdate")));
     } else {
-      trainWithFile(f);
+      trainWithFile(f).catch(() => {});
     }
   };
 
-  const trainText = () => {
+  const trainText = (piiDecisionsList?: PiiDecisionItem[]) => {
     if (!uuid) return;
     if (!content.trim()) {
       toast.error(t("kb.noContentError"));
       return;
     }
+    setProcessingTotalSentences(countSentences(content));
     trainTextMutation.mutate(
-      { uuid, title: "", content },
+      { uuid, title: "", content, confirm_pii: !!piiDecisionsList?.length, pii_decisions: piiDecisionsList },
       {
-        onSuccess: () => {
-          toast.success(t("kb.trainedSuccess"));
+        onSuccess: (data: { masked?: boolean; pii_replaced_with_dots?: boolean }) => {
+          if (data?.pii_replaced_with_dots) {
+            toast.success(t("kb.piiDeletedMessage"));
+          } else if (data?.masked) {
+            toast.success(t("kb.piiMaskedMessage"));
+          } else {
+            toast.success(t("kb.trainedSuccess"));
+          }
           setContent("");
           setPiiConfirmOpen(false);
           setPiiConfirmPayload(null);
+          setPiiDecisions({});
         },
         onError: (err: unknown) => {
-          const ax = err as { response?: { status?: number; data?: { detail?: { requires_pii_confirmation?: boolean } } } };
-          if (ax.response?.status === 409 && ax.response?.data?.detail?.requires_pii_confirmation) {
-            setPiiConfirmPayload({ type: "text", uuid, content });
+          const ax = err as { response?: { status?: number; data?: { detail?: { requires_pii_confirmation?: boolean; matches?: PiiMatchItem[] } } } };
+          const detail = ax.response?.data?.detail;
+          if (ax.response?.status === 409 && detail?.requires_pii_confirmation) {
+            const matches = (detail.matches || []) as PiiMatchItem[];
+            setPiiConfirmPayload({ type: "text", uuid, content, matches });
+            setPiiDecisions({});
             setPiiConfirmOpen(true);
             return;
           }
           toast.error(getApiErrorMessage(err, t("kb.errorUpdate")));
         },
+        onSettled: () => setProcessingTotalSentences(null),
       }
     );
   };
 
-  const confirmPiiAndTrain = () => {
+  const confirmPiiAndTrain = async () => {
     if (!piiConfirmPayload) return;
+    const decisionsList: PiiDecisionItem[] = piiConfirmPayload.matches.map((m) => ({
+      index: m.index,
+      decision: piiDecisions[m.index] ?? "mask",
+    }));
     if (piiConfirmPayload.type === "text") {
+      const cnt = piiConfirmPayload.content ?? "";
+      setProcessingTotalSentences(countSentences(cnt));
       trainTextMutation.mutate(
-        { uuid: piiConfirmPayload.uuid, title: "", content: piiConfirmPayload.content, confirm_pii: true },
         {
-          onSuccess: () => {
-            toast.success(t("kb.trainedSuccess"));
+          uuid: piiConfirmPayload.uuid,
+          title: "",
+          content: piiConfirmPayload.content ?? "",
+          confirm_pii: true,
+          pii_decisions: decisionsList,
+        },
+        {
+          onSuccess: (data: { masked?: boolean; pii_replaced_with_dots?: boolean }) => {
+            if (data?.pii_replaced_with_dots) {
+              toast.success(t("kb.piiDeletedMessage"));
+            } else if (data?.masked) {
+              toast.success(t("kb.piiMaskedMessage"));
+            } else {
+              toast.success(t("kb.trainedSuccess"));
+            }
             setContent("");
             setPiiConfirmOpen(false);
             setPiiConfirmPayload(null);
+            setPiiDecisions({});
           },
           onError: (err) => toast.error(getApiErrorMessage(err, t("kb.errorUpdate"))),
+          onSettled: () => setProcessingTotalSentences(null),
         }
       );
     } else {
-      trainWithFile(piiConfirmPayload.file, true);
+      await trainWithFile(piiConfirmPayload.file!, true, decisionsList);
     }
   };
 
@@ -196,8 +272,17 @@ export default function KBTrain() {
     );
   };
 
+  const isProcessing =
+    trainTextMutation.isPending || trainFileMutation.isPending;
+
   return (
     <div className="p-6 min-h-full bg-[var(--color-background)]">
+      <ProcessProgressOverlay
+        isActive={isProcessing}
+        label={t("kb.processing")}
+        subLabel={piiConfirmOpen ? t("kb.processingTextCleaning") : undefined}
+        totalSentences={processingTotalSentences}
+      />
       <div className="flex flex-wrap items-center gap-3 mb-6">
         <h1 className="text-xl sm:text-2xl font-bold text-[var(--color-foreground)] uppercase tracking-wide">
           {kbName || t("kb.trainPageTitle")}
@@ -391,38 +476,117 @@ export default function KBTrain() {
         </div>
       )}
 
-      {/* Modal: személyes adat megerősítés */}
+      {/* Modal: személyes adat – felhasználói döntés soronként (Törlés/Maszkolás/Megtartás) */}
       {piiConfirmOpen && piiConfirmPayload && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50"
-          onClick={() => { setPiiConfirmOpen(false); setPiiConfirmPayload(null); }}
+          onClick={() => {
+            setPiiConfirmOpen(false);
+            setPiiConfirmPayload(null);
+            setPiiDecisions({});
+          }}
           role="dialog"
           aria-modal="true"
         >
           <div
-            className="bg-[var(--color-card)] border border-[var(--color-border)] rounded-lg shadow-xl max-w-md w-full p-4"
+            className="bg-[var(--color-card)] border border-[var(--color-border)] rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] overflow-hidden flex flex-col"
             onClick={(e) => e.stopPropagation()}
           >
-            <h3 className="font-semibold text-[var(--color-foreground)] mb-2">
-              {t("kb.piiConfirmTitle")}
-            </h3>
-            <p className="text-sm text-[var(--color-muted)] mb-4">
-              {t("kb.piiConfirmMessage")}
-            </p>
-            <div className="flex justify-end gap-2">
+            <div className="p-4 border-b border-[var(--color-border)] shrink-0">
+              <h3 className="font-semibold text-[var(--color-foreground)]">
+                {t("kb.piiReviewTitle")}
+              </h3>
+            </div>
+            <div className="overflow-y-auto flex-1 min-h-0 p-4 space-y-4">
+              {piiConfirmPayload.matches.map((m) => (
+                <div
+                  key={m.index}
+                  className="border border-[var(--color-border)] rounded-lg p-3 bg-[var(--color-input-bg)]"
+                >
+                  <div className="text-sm text-[var(--color-foreground)] mb-2 font-mono break-words">
+                    <span className="text-[var(--color-muted)]">{m.context_before}</span>
+                    <strong className="font-bold text-[var(--color-primary)]">{m.value}</strong>
+                    <span className="text-[var(--color-muted)]">{m.context_after}</span>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    {piiDecisions[m.index] == null ? (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => setPiiDecisions((prev) => ({ ...prev, [m.index]: "delete" }))}
+                          className="px-3 py-1.5 rounded text-sm border border-red-500/50 text-red-600 dark:text-red-400 hover:bg-red-500/10"
+                        >
+                          {t("kb.piiReviewDelete")}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setPiiDecisions((prev) => ({ ...prev, [m.index]: "mask" }))}
+                          className="px-3 py-1.5 rounded text-sm border border-[var(--color-border)] text-[var(--color-foreground)] hover:bg-[var(--color-button-hover)]"
+                        >
+                          {t("kb.piiReviewMask")}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setPiiDecisions((prev) => ({ ...prev, [m.index]: "keep" }))}
+                          className="px-3 py-1.5 rounded text-sm border border-[var(--color-border)] text-[var(--color-foreground)] hover:bg-[var(--color-button-hover)]"
+                        >
+                          {t("kb.piiReviewKeep")}
+                        </button>
+                      </>
+                    ) : (
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm text-[var(--color-muted)]">
+                          {piiDecisions[m.index] === "delete"
+                            ? t("kb.piiReviewActionDelete")
+                            : piiDecisions[m.index] === "mask"
+                              ? t("kb.piiReviewActionMask")
+                              : t("kb.piiReviewActionKeep")}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setPiiDecisions((prev) => {
+                              const next = { ...prev };
+                              delete next[m.index];
+                              return next;
+                            })
+                          }
+                          className="px-2 py-1 rounded text-sm border border-[var(--color-border)] text-[var(--color-foreground)] hover:bg-[var(--color-button-hover)]"
+                        >
+                          {t("kb.piiReviewBack")}
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="p-4 border-t border-[var(--color-border)] flex flex-wrap justify-between gap-3 shrink-0">
               <button
                 type="button"
-                onClick={() => { setPiiConfirmOpen(false); setPiiConfirmPayload(null); }}
+                onClick={() => {
+                  setPiiConfirmOpen(false);
+                  setPiiConfirmPayload(null);
+                  setPiiDecisions({});
+                }}
                 className="px-4 py-2 rounded border border-[var(--color-border)] text-[var(--color-foreground)] hover:bg-[var(--color-button-hover)]"
               >
-                {t("common.cancel")}
+                {t("kb.piiReviewCancel")}
               </button>
               <button
                 type="button"
                 onClick={confirmPiiAndTrain}
-                className="bg-[var(--color-primary)] text-[var(--color-on-primary)] px-4 py-2 rounded hover:opacity-90"
+                disabled={
+                  piiConfirmPayload.matches.some((m) => piiDecisions[m.index] == null) ||
+                  (piiConfirmPayload.type === "text" ? trainTextMutation.isPending : trainFileMutation.isPending)
+                }
+                className="bg-[var(--color-primary)] text-[var(--color-on-primary)] px-4 py-2 rounded hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                {t("kb.piiConfirmButton")}
+                {piiConfirmPayload.type === "text" && trainTextMutation.isPending
+                  ? t("kb.processing")
+                  : piiConfirmPayload.type === "file" && trainFileMutation.isPending
+                    ? t("kb.processing")
+                    : t("kb.piiReviewTrain")}
               </button>
             </div>
           </div>

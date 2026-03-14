@@ -28,8 +28,10 @@ class PiiConfirmationRequiredError(Exception):
         detected_types: List[str],
         counts: dict[str, int] | None = None,
         snippets: List[dict[str, str]] | None = None,
+        matches: List[dict] | None = None,
     ) -> None:
         self.detected_types = list(detected_types)
         self.counts = dict(counts) if counts else {}
         self.snippets = list(snippets) if snippets else []
+        self.matches = list(matches) if matches else []
         super().__init__(f"Személyes adatok észlelve: {', '.join(self.detected_types)}")

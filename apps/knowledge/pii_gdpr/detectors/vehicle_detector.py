@@ -139,17 +139,19 @@ class VehicleDetector(BaseDetector):
                     recommended_action=RecommendedAction.MASK if score >= 0.85 else RecommendedAction.REVIEW_REQUIRED,
                 )
             )
-        # Engine / chassis: multilingual labels (HU, EN, ES)
+        # Engine / chassis: csak az azonosító maszkolódik, a kulcsszó nem
         for m in re.finditer(
             r"(?i)\b(?:motorszám|engine\s*number|número\s*de\s*motor|número\s*de\s*chasis|chassis|alvázszám|chasis)\s*[:\-]?\s*([A-Z0-9\-]{8,20})\b",
             text,
         ):
+            ctx = text[max(0, m.start() - 40) : m.end()].lower()
+            entity = EntityType.CHASSIS_IDENTIFIER if any(x in ctx for x in ("chassis", "alváz", "chasis")) else EntityType.ENGINE_IDENTIFIER
             results.append(
                 DetectionResult(
-                    entity_type=EntityType.ENGINE_IDENTIFIER,
-                    matched_text=m.group(0),
-                    start=m.start(),
-                    end=m.end(),
+                    entity_type=entity,
+                    matched_text=m.group(1),
+                    start=m.start(1),
+                    end=m.end(1),
                     language=language,
                     source_detector=self.name,
                     confidence_score=0.85,

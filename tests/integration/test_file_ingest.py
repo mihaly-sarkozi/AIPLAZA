@@ -119,11 +119,51 @@ def test_empty_txt():
     assert result.extracted_text.strip() == ""
 
 
+# ---- CSV ----
+@pytest.mark.release_acceptance
+def test_csv_extraction():
+    """CSV: rows extracted as tab-separated, status ok."""
+    csv_content = "name,email,phone\nJohn Doe,john@example.com,+36123456789\nJane,jane@test.hu,06201234567"
+    result = extract_file(io.BytesIO(csv_content.encode("utf-8")), "data.csv")
+    assert result.status == STATUS_OK
+    assert "John Doe" in result.extracted_text
+    assert "john@example.com" in result.extracted_text
+    assert result.metadata.filename == "data.csv"
+
+
+def test_empty_csv():
+    """Empty CSV: status empty."""
+    result = extract_file(io.BytesIO(b""), "empty.csv")
+    assert result.status == STATUS_EMPTY
+
+
+# ---- XLSX ----
+@pytest.mark.release_acceptance
+def test_xlsx_extraction():
+    """XLSX: cell values extracted, status ok."""
+    pytest.importorskip("openpyxl")
+    from openpyxl import Workbook
+    buf = io.BytesIO()
+    wb = Workbook()
+    ws = wb.active
+    ws["A1"] = "Header1"
+    ws["B1"] = "Header2"
+    ws["A2"] = "Value one"
+    ws["B2"] = "Value two with enough content for minimum length."
+    wb.save(buf)
+    buf.seek(0)
+    result = extract_file(buf, "sheet.xlsx")
+    assert result.status == STATUS_OK
+    assert "Header1" in result.extracted_text
+    assert "Value one" in result.extracted_text
+    assert result.metadata.filename == "sheet.xlsx"
+
+
 # ---- Unsupported type ----
 def test_unsupported_file_type_raises():
     """Unsupported extension raises ValueError."""
     with pytest.raises(ValueError, match="Unsupported"):
-        extract_file(io.BytesIO(b"x"), "file.xlsx")
+        extract_file(io.BytesIO(b"x"), "file.xyz")
 
 
 # ---- Service layer: train_from_file returns status empty / scanned_review_required ----

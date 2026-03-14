@@ -12,6 +12,7 @@ Status contract:
 """
 from __future__ import annotations
 
+import csv
 import io
 from dataclasses import dataclass, field
 from typing import Any, BinaryIO, Optional
@@ -189,6 +190,112 @@ def extract_txt(stream: BinaryIO, filename: str) -> ExtractedFileResult:
     )
 
 
+def extract_csv(stream: BinaryIO, filename: str) -> ExtractedFileResult:
+    """Extract text from CSV. Rows joined with newlines, cells with tab."""
+    metadata = FileMetadata(filename=filename or "document.csv")
+    try:
+        raw = stream.read()
+        if isinstance(raw, bytes):
+            raw = raw.decode("utf-8", errors="replace")
+        reader = csv.reader(io.StringIO(raw))
+        rows = []
+        for row in reader:
+            rows.append("\t".join(str(c) for c in row))
+        extracted = "\n".join(rows)
+    except Exception:
+        extracted = ""
+    normalized = _normalize(extracted)
+    if not normalized:
+        return ExtractedFileResult(
+            extracted_text="",
+            metadata=metadata,
+            status=STATUS_EMPTY,
+            is_scanned_review_required=False,
+            mime_type="text/csv",
+        )
+    return ExtractedFileResult(
+        extracted_text=extracted,
+        metadata=metadata,
+        status=STATUS_OK,
+        is_scanned_review_required=False,
+        mime_type="text/csv",
+    )
+
+
+def extract_xlsx(stream: BinaryIO, filename: str) -> ExtractedFileResult:
+    """Extract text from Excel XLSX. All sheets, cells joined as tab-separated rows."""
+    from openpyxl import load_workbook
+
+    metadata = FileMetadata(filename=filename or "document.xlsx")
+    try:
+        wb = load_workbook(stream, read_only=True, data_only=True)
+        rows = []
+        for sheet in wb.worksheets:
+            for row in sheet.iter_rows(values_only=True):
+                cells = [str(c) if c is not None else "" for c in row]
+                rows.append("\t".join(cells))
+        wb.close()
+        extracted = "\n".join(rows)
+    except Exception:
+        extracted = ""
+    normalized = _normalize(extracted)
+    if not normalized:
+        return ExtractedFileResult(
+            extracted_text="",
+            metadata=metadata,
+            status=STATUS_EMPTY,
+            is_scanned_review_required=False,
+            mime_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+    return ExtractedFileResult(
+        extracted_text=extracted,
+        metadata=metadata,
+        status=STATUS_OK,
+        is_scanned_review_required=False,
+        mime_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+
+
+def extract_xls(stream: BinaryIO, filename: str) -> ExtractedFileResult:
+    """Extract text from legacy Excel XLS (97-2003). Requires xlrd."""
+    import xlrd
+
+    metadata = FileMetadata(filename=filename or "document.xls")
+    try:
+        wb = xlrd.open_workbook(file_contents=stream.read())
+        rows = []
+        for sheet in wb.sheets():
+            for row_idx in range(sheet.nrows):
+                cells = []
+                for col_idx in range(sheet.ncols):
+                    cell = sheet.cell(row_idx, col_idx)
+                    val = cell.value
+                    if val is not None:
+                        cells.append(str(val))
+                    else:
+                        cells.append("")
+                rows.append("\t".join(cells))
+        extracted = "\n".join(rows)
+    except Exception:
+        extracted = ""
+    normalized = _normalize(extracted)
+    if not normalized:
+        return ExtractedFileResult(
+            extracted_text="",
+            metadata=metadata,
+            status=STATUS_EMPTY,
+            is_scanned_review_required=False,
+            mime_type="application/vnd.ms-excel",
+        )
+    return ExtractedFileResult(
+        extracted_text=extracted,
+        metadata=metadata,
+        status=STATUS_OK,
+        is_scanned_review_required=False,
+        mime_type="application/vnd.ms-excel",
+    )
+
+
 def extract_file(file_like: BinaryIO, filename: str) -> ExtractedFileResult:
     """
     Single entry: raw file → extracted text + metadata.
@@ -203,4 +310,10 @@ def extract_file(file_like: BinaryIO, filename: str) -> ExtractedFileResult:
         return extract_docx(file_like, filename or "document.docx")
     if fn.endswith(".txt"):
         return extract_txt(file_like, filename or "document.txt")
+    if fn.endswith(".csv"):
+        return extract_csv(file_like, filename or "document.csv")
+    if fn.endswith(".xlsx"):
+        return extract_xlsx(file_like, filename or "document.xlsx")
+    if fn.endswith(".xls"):
+        return extract_xls(file_like, filename or "document.xls")
     raise ValueError("Unsupported file type")

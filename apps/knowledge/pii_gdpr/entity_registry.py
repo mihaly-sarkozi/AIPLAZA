@@ -53,8 +53,8 @@ ENTITY_REGISTRY: list[tuple[EntityType, ImplementationStatus, str, FrozenSet[str
     (EntityType.IMEI, ImplementationStatus.IMPLEMENTED, "imei", frozenset({"medium", "strong"}), "15 digits + imei_recognizer"),
     (EntityType.DEVICE_ID, ImplementationStatus.PARTIALLY_IMPLEMENTED, "device_id", frozenset({"medium", "strong"}), "Regex device_id pattern"),
     (EntityType.SESSION_ID, ImplementationStatus.PARTIALLY_IMPLEMENTED, "session_id", frozenset({"medium", "strong"}), "Regex + technical_identifier_detector"),
-    (EntityType.USER_ID, ImplementationStatus.NOT_IMPLEMENTED, "", frozenset(), "No detector; enum/sanitizer placeholder only"),
-    (EntityType.COOKIE_ID, ImplementationStatus.NOT_IMPLEMENTED, "", frozenset(), "No detector; enum/sanitizer placeholder only"),
+    (EntityType.USER_ID, ImplementationStatus.PARTIALLY_IMPLEMENTED, "user_id", frozenset({"medium", "strong"}), "Regex: user id, userid, usr_"),
+    (EntityType.COOKIE_ID, ImplementationStatus.PARTIALLY_IMPLEMENTED, "cookie_id", frozenset({"medium", "strong"}), "Regex: cookie id, cookieid, ck_"),
     # ---- Vehicle ----
     (EntityType.VEHICLE_REGISTRATION, ImplementationStatus.IMPLEMENTED, "rendszám", frozenset({"medium", "strong"}), "Regex HU/ES + vehicle_detector"),
     (EntityType.VIN, ImplementationStatus.IMPLEMENTED, "vin", frozenset({"medium", "strong"}), "17-char + vin_recognizer, vehicle_detector"),
@@ -66,7 +66,7 @@ ENTITY_REGISTRY: list[tuple[EntityType, ImplementationStatus, str, FrozenSet[str
     (EntityType.TICKET_ID, ImplementationStatus.IMPLEMENTED, "ticket_id", frozenset({"medium", "strong"}), "Regex TKT/JIRA etc."),
     (EntityType.EMPLOYEE_ID, ImplementationStatus.IMPLEMENTED, "munkavállalói_azonosító", frozenset({"medium", "strong"}), "Regex EMP/employee/dolgozói/empleado"),
     # ---- Sensitive hints (context/keyword only) ----
-    (EntityType.HEALTH_DATA_HINT, ImplementationStatus.PARTIALLY_IMPLEMENTED, "health_hint", frozenset(), "Context/keyword; no structured detector"),
+    (EntityType.HEALTH_DATA_HINT, ImplementationStatus.IMPLEMENTED, "health_hint", frozenset({"medium", "strong"}), "Regex: dátum+orvosi vizsgálat; context keywords"),
     (EntityType.BIOMETRIC_HINT, ImplementationStatus.PARTIALLY_IMPLEMENTED, "biometric_hint", frozenset(), "Context/keyword"),
     (EntityType.POLITICAL_OPINION_HINT, ImplementationStatus.PARTIALLY_IMPLEMENTED, "political_hint", frozenset(), "Context/keyword"),
     (EntityType.RELIGION_HINT, ImplementationStatus.PARTIALLY_IMPLEMENTED, "religion_hint", frozenset(), "Context/keyword"),

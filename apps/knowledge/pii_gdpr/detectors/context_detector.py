@@ -15,7 +15,7 @@ from apps.knowledge.pii_gdpr.detectors.base import BaseDetector
 
 # (entity_type, keywords_regex, base_confidence) – keywords found in context
 _SENSITIVE_HINTS: List[Tuple[EntityType, str, float]] = [
-    (EntityType.HEALTH_DATA_HINT, r"(?i)\b(cukorbeteg|diabetes|műtét|surgery|operación|egészség|health|salud|lab result|labor|TAJ)\b", 0.65),
+    (EntityType.HEALTH_DATA_HINT, r"(?i)\b(cukorbeteg|diabetes|műtét|surgery|operación|egészség|health|salud|lab result|labor|TAJ|orvosi vizsgálat)\b", 0.65),
     (EntityType.BIOMETRIC_HINT, r"(?i)\b(biometria|biometric|fingerprint|ujjlenyomat|huella|face scan)\b", 0.70),
     (EntityType.POLITICAL_OPINION_HINT, r"(?i)\b(politikai|political|político|párt|party|partido|szavazat|vote|voto)\b", 0.60),
     (EntityType.RELIGION_HINT, r"(?i)\b(vallás|religion|religión|egyház|church|iglesia)\b", 0.65),
@@ -26,11 +26,21 @@ _SENSITIVE_HINTS: List[Tuple[EntityType, str, float]] = [
 # Context labels that boost confidence when near a pattern (used by vehicle/technical)
 CONTEXT_LABELS: dict[str, List[str]] = {
     "phone": ["telefonszám", "phone", "teléfono", "mobile", "mobil", "móvil", "contact"],
-    "address": ["cím", "address", "dirección", "lakcím", "postal", "utca", "street", "calle"],
+    "address": [
+        "cím", "cim", "address", "dirección", "direccion", "lakcím", "postal",
+        "utca", "út", "útja", "tér", "tere", "street", "calle", "avenue", "avenida",
+        "épület", "emelet", "köz", "negyed", "kerület", "ajtó", "város",
+        "lph", "lépcsház", "körút", "sugárút", "sétány", "rakpart", "liget", "park",
+        "lakótelep", "telep", "major", "tanya", "zug", "zsákutca", "hrsz", "helyrajzi szám",
+        "building", "floor", "district", "quarter", "city", "lives at",
+        "edificio", "piso", "puerta", "distrito", "barrio", "ciudad",
+    ],
     "vehicle": ["rendszám", "plate", "matrícula", "motorszám", "engine number", "número de motor", "alvázszám", "chassis", "chasis", "VIN"],
-    "customer": ["ügyfél", "customer", "cliente", "ügyfélszám", "customer id", "azonosító"],
-    "contract": ["szerződés", "contract", "contrato", "szerződésszám", "contract number"],
-    "ticket": ["ticket", "jegy", "incident", "case", "caso"],
+    "customer": ["ügyfél", "customer", "cliente", "ügyfélszám", "customer id", "azonosító", "cust", "cl-", "número de cliente"],
+    "contract": ["szerződés", "contract", "contrato", "szerződésszám", "contract number", "número de contrato", "flottakód", "fleet"],
+    "ticket": ["ticket", "jegy", "incident", "case", "caso", "claim", "panasz", "audit", "clm", "aud"],
+    "device": ["device", "dispositivo", "hostname", "asset tag", "network identifier", "printer", "node"],
+    "document": ["passport", "útlevél", "pasaporte", "dni", "nif", "nie", "személyi igazolvány", "driver license", "jogosítvány", "jogosítványszám"],
 }
 
 

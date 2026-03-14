@@ -1,3 +1,4 @@
+import json
 from typing import Optional
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from openai import AuthenticationError as OpenAIAuthError, APIError as OpenAIAPIError
@@ -179,6 +180,7 @@ async def train_raw_text(
             current_user_id=user.id,
             confirm_pii=data.confirm_pii,
             pii_review_decision=getattr(data, "pii_review_decision", None),
+            pii_decisions=getattr(data, "pii_decisions", None),
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -189,7 +191,7 @@ async def train_raw_text(
 
 
 def _pii_review_detail(e: PiiConfirmationRequiredError) -> dict:
-    """Build rich 409 payload: entity types, counts, preview snippets."""
+    """Build rich 409 payload: entity types, counts, preview snippets, matches (context)."""
     detail = {
         "requires_pii_confirmation": True,
         "message": "Személyes adatok észlelve; erősítsd meg a folytatáshoz.",
@@ -197,6 +199,7 @@ def _pii_review_detail(e: PiiConfirmationRequiredError) -> dict:
         "entity_types": e.detected_types,
         "counts": getattr(e, "counts", None) or {},
         "snippets": getattr(e, "snippets", None) or [],
+        "matches": getattr(e, "matches", None) or [],
     }
     return detail
 
@@ -223,6 +226,7 @@ async def train_text(
             current_user_id=user.id,
             confirm_pii=data.confirm_pii,
             pii_review_decision=getattr(data, "pii_review_decision", None),
+            pii_decisions=getattr(data, "pii_decisions", None),
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -239,11 +243,18 @@ async def train_file(
     file: UploadFile = File(...),
     confirm_pii: bool = Form(False),
     pii_review_decision: Optional[str] = Form(None),
+    pii_decisions: Optional[str] = Form(None),  # JSON string: [{"index":0,"decision":"delete"},...]
     svc: KnowledgeBaseService = Depends(get_kb_service),
     user: User = Depends(get_current_user),
 ):
     if not svc.user_can_train(uuid, user.id, user.role):
         raise HTTPException(status_code=403, detail="No permission to train this knowledge base")
+    pii_decisions_list = None
+    if pii_decisions:
+        try:
+            pii_decisions_list = json.loads(pii_decisions)
+        except (ValueError, TypeError):
+            pass
     try:
         return await svc.train_from_file(
             uuid,
@@ -251,6 +262,7 @@ async def train_file(
             current_user_id=user.id,
             confirm_pii=confirm_pii,
             pii_review_decision=pii_review_decision,
+            pii_decisions=pii_decisions_list,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

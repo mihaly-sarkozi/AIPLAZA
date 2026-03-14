@@ -116,11 +116,19 @@ function invalidateKbTrainLog(queryClient: ReturnType<typeof useQueryClient>, uu
   queryClient.invalidateQueries({ queryKey: queryKeys.kb });
 }
 
+export type PiiDecisionItem = { index: number; decision: "delete" | "mask" | "keep" };
+
 export function useKbTrainTextMutation(
   options?: UseMutationOptions<
     unknown,
     Error,
-    { uuid: string; title: string; content: string; confirm_pii?: boolean }
+    {
+      uuid: string;
+      title: string;
+      content: string;
+      confirm_pii?: boolean;
+      pii_decisions?: PiiDecisionItem[];
+    }
   >
 ) {
   const queryClient = useQueryClient();
@@ -130,17 +138,19 @@ export function useKbTrainTextMutation(
       title,
       content,
       confirm_pii = false,
+      pii_decisions,
     }: {
       uuid: string;
       title: string;
       content: string;
       confirm_pii?: boolean;
+      pii_decisions?: PiiDecisionItem[];
     }) => {
-      const res = await api.post(`/kb/${uuid}/train/text`, {
-        title,
-        content,
-        confirm_pii,
-      });
+      const body: Record<string, unknown> = { title, content, confirm_pii };
+      if (pii_decisions && pii_decisions.length > 0) {
+        body.pii_decisions = pii_decisions;
+      }
+      const res = await api.post(`/kb/${uuid}/train/text`, body);
       return res.data;
     },
     onSuccess: (_, { uuid }) => invalidateKbTrainLog(queryClient, uuid),
@@ -152,7 +162,12 @@ export function useKbTrainFileMutation(
   options?: UseMutationOptions<
     unknown,
     Error,
-    { uuid: string; formData: FormData; confirm_pii?: boolean }
+    {
+      uuid: string;
+      formData: FormData;
+      confirm_pii?: boolean;
+      pii_decisions?: PiiDecisionItem[];
+    }
   >
 ) {
   const queryClient = useQueryClient();
@@ -161,12 +176,17 @@ export function useKbTrainFileMutation(
       uuid,
       formData,
       confirm_pii = false,
+      pii_decisions,
     }: {
       uuid: string;
       formData: FormData;
       confirm_pii?: boolean;
+      pii_decisions?: PiiDecisionItem[];
     }) => {
       if (confirm_pii) formData.append("confirm_pii", "true");
+      if (pii_decisions && pii_decisions.length > 0) {
+        formData.append("pii_decisions", JSON.stringify(pii_decisions));
+      }
       const res = await api.post(`/kb/${uuid}/train/file`, formData, {
         headers: { "Content-Type": "multipart/form-data" },
       });

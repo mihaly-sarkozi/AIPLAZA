@@ -132,11 +132,66 @@ def test_demo_schema_exists(db_engine):
     "pending_2fa_logins",
     "audit_log",
     "knowledge_bases",
+    "kb_training_log",
 ])
 def test_demo_table_exists(db_engine, table):
     if not _schema_exists(db_engine, "demo"):
         pytest.skip("demo séma nincs (init_db)")
     assert _table_exists(db_engine, "demo", table), f"demo.{table} tábla hiányzik"
+
+
+def test_demo_kb_training_log_structure(db_engine):
+    """kb_training_log táblának raw_content és review_decision oszlopok kellenek (PII flow).
+    Ha hiányoznak: python scripts/add_kb_training_log_review_columns.py"""
+    if not _table_exists(db_engine, "demo", "kb_training_log"):
+        pytest.skip("demo.kb_training_log nincs")
+    cols = _columns(db_engine, "demo", "kb_training_log")
+    required = {
+        "id", "kb_id", "point_id", "user_id", "user_display", "title", "content",
+        "raw_content", "review_decision", "created_at",
+    }
+    missing = required - cols
+    assert not missing, (
+        f"demo.kb_training_log hiányzó oszlopok: {missing}. "
+        "Futtasd: python scripts/add_kb_training_log_review_columns.py"
+    )
+
+
+def test_demo_kb_training_log_raw_content_roundtrip(db_engine):
+    """Valós INSERT/SELECT raw_content-tal – ha az oszlop hiányzik, a teszt elbukik.
+    Ez elkapja a 'column raw_content does not exist' hibát."""
+    if not _table_exists(db_engine, "demo", "kb_training_log"):
+        pytest.skip("demo.kb_training_log nincs")
+    if not _table_exists(db_engine, "demo", "knowledge_bases"):
+        pytest.skip("demo.knowledge_bases nincs")
+    point_id = "test-schema-raw-content-roundtrip"
+    with db_engine.connect() as conn:
+        kb_row = conn.execute(
+            text('SELECT id FROM demo.knowledge_bases LIMIT 1')
+        ).fetchone()
+        if not kb_row:
+            pytest.skip("demo.knowledge_bases üres, nincs kb_id")
+        kb_id = kb_row[0]
+        conn.execute(
+            text("""
+                INSERT INTO demo.kb_training_log
+                (kb_id, point_id, user_id, user_display, title, content, raw_content, review_decision, created_at)
+                VALUES (:kb_id, :point_id, 1, 'Test', 'Title', '[EMAIL_ADDRESS]', 'test@example.com', 'mask_all', NOW())
+            """),
+            {"kb_id": kb_id, "point_id": point_id},
+        )
+        conn.commit()
+        row = conn.execute(
+            text(
+                "SELECT content, raw_content, review_decision FROM demo.kb_training_log WHERE point_id = :pid"
+            ),
+            {"pid": point_id},
+        ).fetchone()
+        assert row is not None, "Inserted row not found"
+        assert row[1] == "test@example.com", f"raw_content roundtrip failed: {row[1]!r}"
+        assert row[2] == "mask_all", f"review_decision roundtrip failed: {row[2]!r}"
+        conn.execute(text("DELETE FROM demo.kb_training_log WHERE point_id = :pid"), {"pid": point_id})
+        conn.commit()
 
 
 def test_demo_users_structure(db_engine):

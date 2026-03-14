@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import uuid as uuid_lib
 from typing import List, Optional, Any
 from apps.knowledge.ports.repositories import KnowledgeBaseRepositoryPort, KbPermissionItem
@@ -7,11 +8,14 @@ from apps.knowledge.domain.kb import KnowledgeBase
 from apps.knowledge.application.pii_filter import (
     filter_pii,
     apply_pii_replacements,
+    apply_pii_replacements_with_decisions,
     PiiConfirmationRequiredError,
 )
 from apps.knowledge.infrastructure.db.models import (
     PERSONAL_DATA_MODE_NO,
     PERSONAL_DATA_MODE_CONFIRM,
+    PERSONAL_DATA_MODE_ALLOWED,
+    PERSONAL_DATA_MODE_DISABLED,
 )
 from apps.knowledge.application.file_ingest import (
     extract_file,
@@ -22,6 +26,7 @@ from apps.knowledge.application.file_ingest import (
 )
 from apps.knowledge.domain.pii_review import (
     build_pii_review_payload,
+    build_pii_review_matches,
     PiiReviewDecision,
 )
 
@@ -210,6 +215,7 @@ class KnowledgeBaseService:
         current_user_id: Optional[int] = None,
         confirm_pii: bool = False,
         pii_review_decision: Optional[str] = None,
+        pii_decisions: Optional[List[dict]] = None,
         sanitize_mode: Optional[str] = None,
     ) -> dict[str, Any]:
         """Tanítási tartalom mentése; személyes adatok szűrése a KB beállítások szerint."""
@@ -222,34 +228,80 @@ class KnowledgeBaseService:
         raw = content.strip()
         mode = getattr(kb, "personal_data_mode", None) or PERSONAL_DATA_MODE_NO
         sensitivity = getattr(kb, "personal_data_sensitivity", None) or "medium"
-        matches = filter_pii(raw, sensitivity)
+        if mode == PERSONAL_DATA_MODE_DISABLED:
+            matches = []
+        else:
+            matches = filter_pii(raw, sensitivity)
+
+        # Soronkénti döntések (with_confirmation): pii_decisions = [{index, decision}, ...]
+        has_pii_decisions = (
+            pii_decisions is not None
+            and isinstance(pii_decisions, list)
+            and len(pii_decisions) >= len(matches)
+        )
+        if has_pii_decisions:
+            # index szerint rendezett decisions lista
+            dec_by_idx = {int(d.get("index", -1)): str(d.get("decision", "mask")) for d in pii_decisions if isinstance(d, dict)}
+            decisions_list = [dec_by_idx.get(i, "mask") for i in range(len(matches))]
+        else:
+            decisions_list = None
+
+        # User confirmed but chose to reject upload (régi flow, ha nincs pii_decisions)
+        if matches and confirm_pii and not decisions_list and pii_review_decision == PiiReviewDecision.REJECT_UPLOAD.value:
+            return {"status": "rejected", "message": "A feltöltés elutasítva."}
+
+        # with_confirmation: vagy pii_decisions (soronkénti), vagy régi flow (pii_review_decision=continue_sanitized/mask_all)
+        legacy_confirm = (
+            confirm_pii
+            and not decisions_list
+            and pii_review_decision
+            and pii_review_decision in (
+                PiiReviewDecision.CONTINUE_SANITIZED.value,
+                PiiReviewDecision.MASK_ALL.value,
+            )
+        )
+        user_confirmed = decisions_list is not None or legacy_confirm
 
         if matches:
             if mode == PERSONAL_DATA_MODE_NO:
-                raise ValueError(
-                    "A tartalom személyes adatokat tartalmaz. "
-                    "A tudástár beállításai szerint nem tartalmazhat személyes adatot."
-                )
-            if mode == PERSONAL_DATA_MODE_CONFIRM and not confirm_pii:
+                # Automatikus törlés: cseréljük "..."-ra és tároljuk
+                pass  # nem dobunk hibát, lejjebb cseréljük
+            elif mode == PERSONAL_DATA_MODE_CONFIRM and not user_confirmed:
                 detected_types, counts, snippets = build_pii_review_payload(matches)
+                review_matches = build_pii_review_matches(raw, matches)
                 raise PiiConfirmationRequiredError(
                     detected_types,
                     counts=counts,
                     snippets=snippets,
+                    matches=review_matches,
                 )
 
-        # User confirmed but chose to reject upload
-        if matches and confirm_pii and pii_review_decision == PiiReviewDecision.REJECT_UPLOAD.value:
-            return {"status": "rejected", "message": "A feltöltés elutasítva."}
-
+        masked = False
         if matches:
-            ref_ids = [
-                self.repo.add_personal_data(kb.id, m[2], m[3])
-                for m in matches
-            ]
-            content_to_store = apply_pii_replacements(
-                raw, matches, ref_ids, mode=sanitize_mode or "mask"
-            )
+            if mode == PERSONAL_DATA_MODE_NO:
+                # Automatikus törlés: "..."-ra cseréljük, nem tároljuk personal_data-ban
+                content_to_store = apply_pii_replacements(
+                    raw, matches, [""] * len(matches), mode="remove"
+                )
+            elif decisions_list:
+                # with_confirmation + soronkénti döntések
+                content_to_store, mask_indices = apply_pii_replacements_with_decisions(
+                    raw, matches, decisions_list
+                )
+                for i in mask_indices:
+                    m = matches[i]
+                    self.repo.add_personal_data(kb.id, m[2], m[3])
+                masked = len(mask_indices) > 0
+            else:
+                # allowed_not_to_ai vagy with_confirmation (régi flow): maszkolás mind
+                ref_ids = [
+                    self.repo.add_personal_data(kb.id, m[2], m[3])
+                    for m in matches
+                ]
+                content_to_store = apply_pii_replacements(
+                    raw, matches, ref_ids, mode=sanitize_mode or "mask"
+                )
+                masked = True
         else:
             content_to_store = raw
 
@@ -261,7 +313,11 @@ class KnowledgeBaseService:
 
         display_title = (title or "").strip()
         point_id = str(uuid_lib.uuid4())
-        decision = pii_review_decision if (matches and confirm_pii) else None
+        decision = None
+        if matches and confirm_pii:
+            decision = pii_review_decision
+        if decisions_list:
+            decision = json.dumps([{"index": i, "decision": d} for i, d in enumerate(decisions_list)])
         self.repo.add_training_log(
             kb_id=kb.id,
             point_id=point_id,
@@ -272,7 +328,8 @@ class KnowledgeBaseService:
             raw_content=raw if matches else None,
             review_decision=decision,
         )
-        return {"status": "ok"}
+        pii_replaced_with_dots = bool(matches and mode == PERSONAL_DATA_MODE_NO)
+        return {"status": "ok", "masked": masked, "pii_replaced_with_dots": pii_replaced_with_dots}
 
     def list_training_log(self, kb_uuid: str) -> List[dict]:
         """Tanítási napló listája (train jog kell)."""
@@ -297,6 +354,7 @@ class KnowledgeBaseService:
         current_user_id: Optional[int] = None,
         confirm_pii: bool = False,
         pii_review_decision: Optional[str] = None,
+        pii_decisions: Optional[List[dict]] = None,
     ) -> dict[str, Any]:
         kb = self.repo.get_by_uuid(uuid)
         if not kb:
@@ -334,4 +392,5 @@ class KnowledgeBaseService:
             current_user_id=current_user_id,
             confirm_pii=confirm_pii,
             pii_review_decision=pii_review_decision,
+            pii_decisions=pii_decisions,
         )

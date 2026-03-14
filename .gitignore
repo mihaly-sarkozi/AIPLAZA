@@ -29,6 +29,7 @@ ENV/
 
 # Archive / project noise
 __MACOSX/
+*.zip
 node_modules/
 frontend/dist/
 frontend/build/

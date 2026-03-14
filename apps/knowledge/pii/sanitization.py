@@ -46,6 +46,8 @@ LEGACY_TO_STANDARD_PLACEHOLDER: dict[str, str] = {
     "religion_hint": "[RELIGION_HINT]",
     "union_hint": "[UNION_MEMBERSHIP_HINT]",
     "sexual_orientation_hint": "[SEXUAL_ORIENTATION_HINT]",
+    "user_id": "[USER_ID]",
+    "cookie_id": "[COOKIE_ID]",
 }
 
 # Generalization: legacy type → human-readable generic label (no PII)
@@ -76,6 +78,8 @@ LEGACY_TO_GENERALIZATION: dict[str, str] = {
     "adóazonosító": "[tax id]",
     "útlevél": "[passport]",
     "jogosítvány": "[driver license]",
+    "user_id": "[user id]",
+    "cookie_id": "[cookie id]",
 }
 
 DEFAULT_PLACEHOLDER = "[PII]"
@@ -140,6 +144,8 @@ def apply_pii_replacements(
         start, end, dtype, _ = matches[i]
         if mode == "generalize":
             return _generalization_text(dtype)
+        if mode == "remove" or mode == "dots":
+            return "..."
         return _standard_placeholder(dtype)
 
     # Build (start, end, replacement) and sort by start descending → replace from end
@@ -152,3 +158,47 @@ def apply_pii_replacements(
     for start, end, replacement in repl_list:
         result = result[:start] + replacement + result[end:]
     return result
+
+
+def apply_pii_replacements_with_decisions(
+    text: str,
+    matches: List[Tuple[int, int, str, str]],
+    decisions: List[str],
+) -> tuple[str, List[int]]:
+    """
+    Soronkénti döntések alapján cserél.
+    decisions[i] = "delete"|"mask"|"keep"
+    - delete: "..."-ra cserél
+    - mask: placeholder, a visszaadott mask_indices tartalmazza az i-t
+    - keep: eredeti érték marad
+    Vissza: (result_text, mask_indices) - mask_indices = azon indexek, amiket personal_data-ba kell tenni
+    """
+    if not text or not matches:
+        return text, []
+    if len(decisions) != len(matches):
+        decisions = ["mask"] * len(matches)  # fallback
+
+    def replacement_for(i: int) -> str:
+        start, end, dtype, val = matches[i][0], matches[i][1], matches[i][2], matches[i][3]
+        d = (decisions[i] or "mask").lower()
+        if d == "delete":
+            return "..."
+        if d == "keep":
+            return val
+        return _standard_placeholder(dtype)
+
+    mask_indices: List[int] = []
+    for i in range(len(matches)):
+        d = (decisions[i] or "mask").lower()
+        if d == "mask":
+            mask_indices.append(i)
+
+    repl_list = [
+        (matches[i][0], matches[i][1], replacement_for(i))
+        for i in range(len(matches))
+    ]
+    repl_list.sort(key=lambda x: -x[0])
+    result = text
+    for start, end, replacement in repl_list:
+        result = result[:start] + replacement + result[end:]
+    return result, mask_indices

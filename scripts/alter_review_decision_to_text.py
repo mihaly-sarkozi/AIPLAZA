@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-Add raw_content and review_decision columns to kb_training_log (PII review flow).
-PostgreSQL: ADD COLUMN IF NOT EXISTS.
+Alter kb_training_log.review_decision from VARCHAR(64) to TEXT.
+A soronkénti PII döntések JSON formátumban tárolódnak, ami meghaladja a 64 karaktert.
 
 Usage:
-  python scripts/add_kb_training_log_review_columns.py
+  python scripts/alter_review_decision_to_text.py
 """
 import sys
 from pathlib import Path
@@ -34,14 +34,10 @@ def main():
         with engine.connect() as conn:
             conn.execute(text(f'''
                 ALTER TABLE "{safe}".kb_training_log
-                ADD COLUMN IF NOT EXISTS raw_content TEXT NULL
-            '''))
-            conn.execute(text(f'''
-                ALTER TABLE "{safe}".kb_training_log
-                ADD COLUMN IF NOT EXISTS review_decision TEXT NULL
+                ALTER COLUMN review_decision TYPE TEXT USING review_decision::TEXT
             '''))
             conn.commit()
-        print(f"  {safe}.kb_training_log: raw_content, review_decision")
+        print(f"  {safe}.kb_training_log.review_decision → TEXT")
     print("Done.")
 
 

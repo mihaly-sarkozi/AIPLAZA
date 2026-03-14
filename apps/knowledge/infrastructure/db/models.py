@@ -7,6 +7,7 @@ from apps.auth.infrastructure.db.models.base import TenantSchemaBase
 PERSONAL_DATA_MODE_NO = "no_personal_data"
 PERSONAL_DATA_MODE_CONFIRM = "with_confirmation"
 PERSONAL_DATA_MODE_ALLOWED = "allowed_not_to_ai"
+PERSONAL_DATA_MODE_DISABLED = "no_pii_filter"
 
 PERSONAL_DATA_SENSITIVITY_WEAK = "weak"
 PERSONAL_DATA_SENSITIVITY_MEDIUM = "medium"
@@ -39,7 +40,7 @@ class KbTrainingLogORM(TenantSchemaBase):
     title = Column(String(512), nullable=False)
     content = Column(Text, nullable=True)  # sanitized content (PII replaced with refs)
     raw_content = Column(Text, nullable=True)  # original content before PII replacement
-    review_decision = Column(String(64), nullable=True)  # mask_all | keep_role_based_emails | reject | continue_sanitized
+    review_decision = Column(Text, nullable=True)  # mask_all | continue_sanitized | JSON pii_decisions
     created_at = Column(DateTime, default=datetime.utcnow)
 
 

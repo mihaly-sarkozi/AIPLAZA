@@ -63,6 +63,38 @@ def build_pii_review_payload(
     return detected_types, type_counts, snippets
 
 
+def build_pii_review_matches(
+    text: str,
+    matches: List[tuple],
+    context_len: int = 30,
+) -> List[Dict[str, Any]]:
+    """
+    Minden találathoz: index, value, type, context_before, context_after.
+    A UI-ban megjelenítéshez: előtte/utána kontextus, középen a PII (vastag).
+    """
+    result: List[Dict[str, Any]] = []
+    for i, m in enumerate(matches):
+        if len(m) < 4:
+            continue
+        start, end, data_type, value = m[0], m[1], m[2], m[3]
+        data_type = (data_type or "").strip()
+        value = (value or "").strip()
+        before_start = max(0, start - context_len)
+        after_end = min(len(text), end + context_len)
+        context_before = text[before_start:start]
+        context_after = text[end:after_end]
+        result.append({
+            "index": i,
+            "start": start,
+            "end": end,
+            "value": value,
+            "type": data_type,
+            "context_before": context_before,
+            "context_after": context_after,
+        })
+    return result
+
+
 def _redact_preview(entity_type: str, value: str, max_len: int) -> str:
     """Produce a short redacted preview for UI (avoid leaking full PII)."""
     if not value:

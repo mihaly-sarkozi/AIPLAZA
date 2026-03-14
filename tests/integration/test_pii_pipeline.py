@@ -331,12 +331,155 @@ class TestNemImplementaltTipusok:
         assert all(len(m) == 4 and isinstance(m[2], str) for m in matches)
         assert any(m[2] == "ip_cím" for m in matches), f"Expected ip_cím in {[(m[2], m[3]) for m in matches]}"
 
-    def test_gps_koordinata_nincs(self):
-        """GPS: 47.4979, 19.0402 – nincs recognizer; xfail until implemented."""
+    def test_gps_koordinata_detektalva(self):
+        """GPS: Pozíció: 47.4979, 19.0402 – koordináta kontextusban cím/helyadatként."""
         text = "Pozíció: 47.4979, 19.0402"
         matches = filter_pii(text, "medium")
         assert isinstance(matches, list)
         assert all(len(m) == 4 for m in matches)
         types = {m[2] for m in matches}
-        # When GPS recognizer exists: expect gps/latitude/longitude; today expect none
-        assert "gps" in types or "latitude" in types or "longitude" in types or len(types) == 0
+        # GPS koordináta kontextusban címként vagy helyadatként detektálódik
+        assert "cím" in types or "gps" in types or "latitude" in types or "longitude" in types
+
+
+# --- 8. Korábban nem detektált esetek (tanítási tesztszöveg) ---
+
+
+class TestKorabbanNemDetektaltEsetek:
+    """Születési dátum magyar hónapnévvel, cím 3/12., HU-45821, adóazonosító 10 jegy, dátum+egészségügyi kontextus."""
+
+    @pytest.mark.release_acceptance
+    def test_szuletesi_datum_magyar_honappal(self):
+        """szül.: 1992. március 14. – magyar hónapnévvel kell detektálódjon."""
+        text = "Kovács Anna (szül.: 1992. március 14.) a 1123 Budapest"
+        matches = filter_pii(text, "medium")
+        assert _has_match(matches, "születési_dátum", "1992. március 14."), (
+            f"szül.: 1992. március 14. kellett volna: {[(m[2], m[3]) for m in matches]}"
+        )
+
+    @pytest.mark.release_acceptance
+    def test_cim_emelet_ajto_3_12(self):
+        """Cím: 1123 Budapest, Alkotás utca 15. 3/12. – a 3/12. is a cím része."""
+        text = "1123 Budapest, Alkotás utca 15. 3/12. cím alatt lakik"
+        matches = filter_pii(text, "medium")
+        assert any(m[2] == "cím" for m in matches), (
+            f"Cím (3/12.-vel) kellett volna: {[(m[2], m[3]) for m in matches]}"
+        )
+        content = " ".join(m[3] for m in matches if m[2] == "cím")
+        assert "3/12" in content or "15" in content, (
+            "A cím match-nek tartalmaznia kell a 15. 3/12. részt"
+        )
+
+    @pytest.mark.release_acceptance
+    def test_ugyfelszama_HU_45821(self):
+        """Ügyfélszáma HU-45821 – HU- prefixű ügyfélazonosító."""
+        text = "Az ügyfélszáma HU-45821, adóazonosító jele 1234567890"
+        matches = filter_pii(text, "medium")
+        assert _has_match(matches, "ügyfélazonosító", "HU-45821"), (
+            f"HU-45821 kellett volna: {[(m[2], m[3]) for m in matches]}"
+        )
+
+    @pytest.mark.release_acceptance
+    def test_adoazonosito_10_jegy_kontextusban(self):
+        """adóazonosító jele 1234567890 – 10 számjegy adó kontextusban."""
+        text = "adóazonosító jele 1234567890, bankszámlaszáma pedig"
+        matches = filter_pii(text, "medium")
+        assert _has_match(matches, "adóazonosító", "1234567890"), (
+            f"1234567890 kellett volna: {[(m[2], m[3]) for m in matches]}"
+        )
+
+    @pytest.mark.release_acceptance
+    def test_passport_number_is_AB1234567(self):
+        """passport number is AB1234567 – 'number is' formátum, nem csak 'passport:'."""
+        text = "his passport number is AB1234567, and his employee ID is EMP-20451"
+        matches = filter_pii(text, "medium")
+        assert _has_match(matches, "útlevél", "AB1234567"), (
+            f"passport number is AB1234567 kellett volna: {[(m[2], m[3]) for m in matches]}"
+        )
+
+    @pytest.mark.release_acceptance
+    def test_device_identifier_DEV_998877(self):
+        """device identifier DEV-998877 – 'identifier' nem csak 'device id'."""
+        text = "and a device identifier DEV-998877"
+        matches = filter_pii(text, "medium")
+        assert _has_match(matches, "device_id", "DEV-998877"), (
+            f"device identifier DEV-998877 kellett volna: {[(m[2], m[3]) for m in matches]}"
+        )
+
+    @pytest.mark.release_acceptance
+    def test_szerzodes_szam_teljes_CONTRACT_2025_00481(self):
+        """A szolgáltatási szerződés száma CONTRACT-2025-00481 – a sor végéig, ne csak CONTRACT-2025."""
+        text = "A szolgáltatási szerződés száma CONTRACT-2025-00481"
+        matches = filter_pii(text, "medium")
+        assert _has_match(matches, "szerződésszám", "CONTRACT-2025-00481"), (
+            f"CONTRACT-2025-00481 teljes egészében kellett volna: {[(m[2], m[3]) for m in matches]}"
+        )
+
+    @pytest.mark.release_acceptance
+    def test_datum_orvosi_vizsgálat_egeszsegugyi_kontextus(self):
+        """2025. február 18-án orvosi vizsgálat miatt – dátum + egészségügyi kontextus."""
+        text = "2025. február 18-án orvosi vizsgálat miatt nem tudott megjelenni"
+        matches = filter_pii(text, "medium")
+        assert any(m[2] == "health_hint" for m in matches), (
+            f"Dátum+orvosi vizsgálat kellett volna: {[(m[2], m[3]) for m in matches]}"
+        )
+        content = " ".join(m[3] for m in matches if m[2] == "health_hint")
+        assert "orvosi" in content or "február" in content, (
+            "A health_hint match-nek tartalmaznia kell a dátumot és/vagy orvosi vizsgálatot"
+        )
+
+    @pytest.mark.release_acceptance
+    def test_teljes_teszt_szoveg_minden_detektalva(self):
+        """A teljes tanítási tesztszöveg: mind az 5 korábban hibás eset detektálódjon."""
+        text = (
+            "Kovács Anna (szül.: 1992. március 14.) a 1123 Budapest, Alkotás utca 15. 3/12. cím alatt lakik, "
+            "és az anna.kovacs@example.com email-címen, valamint a +36 30 123 4567 telefonszámon érhető el. "
+            "Az ügyfélszáma HU-45821, adóazonosító jele 1234567890, bankszámlaszáma pedig 11773016-11111018-00000000. "
+            "2025. február 18-án orvosi vizsgálat miatt nem tudott megjelenni."
+        )
+        matches = filter_pii(text, "medium")
+        types = {m[2] for m in matches}
+        values = [m[3] for m in matches]
+        assert "születési_dátum" in types, f"szül.: 1992. március 14. hiányzik: {types}"
+        assert "cím" in types, f"Cím (3/12.-vel) hiányzik: {types}"
+        assert "ügyfélazonosító" in types, f"HU-45821 hiányzik: {types}"
+        assert "adóazonosító" in types, f"1234567890 hiányzik: {types}"
+        assert "health_hint" in types, f"2025. február 18-án orvosi vizsgálat hiányzik: {types}"
+        assert any("1992" in v or "március" in v for v in values), "Születési dátum érték"
+        assert any("HU-45821" in v for v in values), "HU-45821 érték"
+        assert any("1234567890" in v for v in values), "Adóazonosító érték"
+
+    @pytest.mark.release_acceptance
+    def test_teljes_szoveg_passport_es_device_eltavolitva(self):
+        """A teljes tanítási szöveg: passport number AB1234567 és device identifier DEV-998877 maszkolva."""
+        text = (
+            "John Smith confirmed that his date of birth is 1988-07-21, his passport number is AB1234567, "
+            "and his employee ID is EMP-20451. The login record shows IP address 192.168.1.24, "
+            "MAC address 00:1A:2B:3C:4D:5E, and a device identifier DEV-998877."
+        )
+        matches = filter_pii(text, "medium")
+        ref_ids = [f"ref_{i}" for i in range(len(matches))]
+        result = apply_pii_replacements(text, matches, ref_ids, mode="mask")
+        assert "AB1234567" not in result, "Passport number AB1234567 nem lett eltávolítva"
+        assert "DEV-998877" not in result, "Device identifier DEV-998877 nem lett eltávolítva"
+
+    @pytest.mark.release_acceptance
+    def test_kontextus_azonosítok_hu_en_es(self):
+        """Kontextus alapú azonosítók: személyi igazolvány, DNI, NIF, user ID, cookie ID, stb."""
+        cases = [
+            ("személyi igazolvány száma AA123456", "személyi_azonosító", "AA123456"),
+            ("útlevélszáma AB1234567", "útlevél", "AB1234567"),
+            ("su DNI 12345678Z", "személyi_azonosító", "12345678Z"),
+            ("su NIF ESX1234567Y", "adóazonosító", "ESX1234567Y"),
+            ("user ID usr_882211", "user_id", "usr_882211"),
+            ("cookie ID ck_abcd9988", "cookie_id", "ck_abcd9988"),
+            ("belső audit azonosító AUD-2026-0044", "ticket_id", "AUD-2026-0044"),
+            ("GPS coordinate pair 47.4979, 19.0402", "cím", "47.4979"),
+            ("su NIE X1234567Y", "személyi_azonosító", "X1234567Y"),
+            ("jogosítványszám AB123456", "jogosítvány", "AB123456"),
+        ]
+        for text, expected_type, expected_substr in cases:
+            matches = filter_pii(text, "medium")
+            assert _has_match(matches, expected_type, expected_substr), (
+                f"Várt: {expected_type} tartalmazza {expected_substr!r} a {text!r}-ben: {[(m[2], m[3]) for m in matches]}"
+            )

@@ -6,7 +6,13 @@ from __future__ import annotations
 
 from typing import List, Optional
 
+from apps.knowledge.pii_gdpr.enums import EntityType
 from apps.knowledge.pii_gdpr.models import AnalyzerConfig, DetectionResult
+from apps.knowledge.pii_gdpr.pipeline.span_extender import (
+    extend_adjacent_spans,
+    extend_address_street_names,
+    find_address_blocks,
+)
 from apps.knowledge.pii_gdpr.detectors import (
     RegexDetector,
     NERDetector,
@@ -21,6 +27,8 @@ from apps.knowledge.pii_gdpr.detectors import (
     EngineIDRecognizer,
     BankAccountRecognizer,
     DocumentIdentifiersRecognizer,
+    ContextNumberRecognizer,
+    NumberGroupingDetector,
 )
 from apps.knowledge.pii_gdpr.pipeline.language_utils import detect_language, detect_language_per_chunk
 from apps.knowledge.pii_gdpr.scoring import (
@@ -47,7 +55,21 @@ def merge_and_dedupe(detections: List[DetectionResult]) -> List[DetectionResult]
             merged.append(d)
             continue
         best = max(overlapping, key=lambda m: m.confidence_score)
-        if d.confidence_score > best.confidence_score:
+        # Prefer POSTAL_ADDRESS over CUSTOMER_ID when address span is much longer (merge artifact fix)
+        keep_best = (
+            best.entity_type == EntityType.POSTAL_ADDRESS
+            and d.entity_type == EntityType.CUSTOMER_ID
+            and (best.end - best.start) >= 2 * (d.end - d.start)
+        )
+        prefer_d = (
+            d.confidence_score > best.confidence_score
+            or (
+                d.entity_type == EntityType.POSTAL_ADDRESS
+                and best.entity_type == EntityType.CUSTOMER_ID
+                and (d.end - d.start) >= 2 * (best.end - best.start)
+            )
+        )
+        if prefer_d and not keep_best:
             for m in overlapping:
                 merged.remove(m)
             merged.append(d)
@@ -72,19 +94,24 @@ class MultilingualAnalyzer:
         self._engine_id = EngineIDRecognizer()
         self._bank_account = BankAccountRecognizer()
         self._document_id = DocumentIdentifiersRecognizer()
+        self._context_number = ContextNumberRecognizer()
+        self._number_grouping = NumberGroupingDetector()
         self._context_scorer = ContextScorer(window=self.config.context_window_chars)
 
     def analyze(self, text: str, language: Optional[str] = None) -> List[DetectionResult]:
         """
-        Run all detectors. Regex and pattern-based detectors run language-independently on full text.
-        NER runs per chunk with chunk-level language detection for mixed-language content.
+        Run all detectors. Első fázis: számos szavak csoportosítása + kontextus alapú típus.
+        Második fázis: maradék szabályok (regex, NER, stb.).
         """
         doc_lang = language or detect_language(text)
         if doc_lang not in self.config.supported_languages:
             doc_lang = "en"
         all_results: List[DetectionResult] = []
 
-        # Pattern-based detectors: language-agnostic (run once on full text)
+        # 1. Első fázis: számot tartalmazó szavak csoportosítása, kontextus alapú azonosító típus
+        all_results.extend(self._number_grouping.detect(text, doc_lang))
+
+        # 2. Maradék szabályok: regex, context, email, vehicle, technical, stb.
         if self.config.enable_regex:
             all_results.extend(self._regex.detect(text, doc_lang))
         if self.config.enable_context:
@@ -102,6 +129,7 @@ class MultilingualAnalyzer:
         all_results.extend(self._engine_id.detect(text, doc_lang))
         all_results.extend(self._bank_account.detect(text, doc_lang))
         all_results.extend(self._document_id.detect(text, doc_lang))
+        all_results.extend(self._context_number.detect(text, doc_lang))
 
         # NER: per-chunk language so mixed-language text is handled correctly
         if self.config.enable_ner and self._ner.available():
@@ -147,4 +175,11 @@ class MultilingualAnalyzer:
             elif d.confidence_score >= self.config.review_threshold:
                 d.recommended_action = RecommendedAction.REVIEW_REQUIRED
 
-        return merge_and_dedupe(filtered)
+        # Címblokkok: szám + emelet/épület/ajtó/lépcsőház → első–utolsó szám egybe
+        address_blocks = find_address_blocks(text, doc_lang)
+        combined = filtered + address_blocks
+        # Span kiterjesztés: számok + köztes szavak (épület, út, emelet, február) egy blokk
+        extended = extend_adjacent_spans(text, combined)
+        # Cím: utca név bevonása (HU: közterület előtti szó, ES/EN: utána/előtte)
+        extended = extend_address_street_names(text, extended)
+        return merge_and_dedupe(extended)

@@ -10,7 +10,7 @@ class KBCreate(BaseModel):
 class KBUpdate(BaseModel):
     name: str = Field(..., max_length=20)
     description: Optional[str] = None
-    personal_data_mode: str = Field(..., description="no_personal_data | with_confirmation | allowed_not_to_ai")
+    personal_data_mode: str = Field(..., description="no_personal_data | with_confirmation | allowed_not_to_ai | no_pii_filter")
     personal_data_sensitivity: str = Field(..., description="weak | medium | strong")
 
 class KBDelete(BaseModel):
@@ -23,8 +23,14 @@ class KBPermissionItem(BaseModel):
 class KBPermissionsUpdate(BaseModel):
     permissions: List[KBPermissionItem]
 
+class PiiDecisionItem(BaseModel):
+    index: int
+    decision: str  # "delete" | "mask" | "keep"
+
+
 class KBTrainRequest(BaseModel):
     title: Optional[str] = ""
     content: str
     confirm_pii: bool = False
     pii_review_decision: Optional[str] = None  # mask_all | keep_role_based_emails | reject_upload | continue_sanitized
+    pii_decisions: Optional[List[dict]] = None  # [{"index": int, "decision": "delete"|"mask"|"keep"}]
