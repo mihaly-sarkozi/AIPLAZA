@@ -1,4 +1,4 @@
-# tests/test_user_crud.py
+# tests/integration/test_user_crud.py
 """User CRUD és resend-invite végpont tesztek (superuser kell)."""
 from datetime import datetime, timezone
 from unittest.mock import MagicMock
@@ -8,13 +8,20 @@ from fastapi.testclient import TestClient
 
 from apps.users.domain.user import User
 
+pytestmark = pytest.mark.integration
 
+
+@pytest.mark.smoke_only
 def test_list_users_success_returns_list(client_superuser: TestClient, mock_user_service):
     """GET /users superuserral → 200, lista (akár üres)."""
     mock_user_service.list_all.return_value = []
     r = client_superuser.get("/api/users")
     assert r.status_code == 200
-    assert isinstance(r.json(), list)
+    data = r.json()
+    assert isinstance(data, list)
+    for item in data:
+        assert isinstance(item, dict)
+        assert "id" in item or "email" in item
 
 
 def test_list_users_with_users_returns_data(client_superuser: TestClient, mock_user_service, sample_user):
@@ -31,8 +38,9 @@ def test_list_users_with_users_returns_data(client_superuser: TestClient, mock_u
 
 def test_list_users_non_superuser_returns_403(client_superuser: TestClient):
     """GET /users nem superuserrel → 403."""
-    from main import app
+    from tests.conftest import get_app
     from apps.core.security.auth_dependencies import get_current_user
+    app = get_app()
     non_admin = User(
         id=2,
         email="user@example.com",

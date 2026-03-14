@@ -1,7 +1,7 @@
 # apps/knowledge/pii/recognizers.py
 """
-Egyéni Presidio PatternRecognizer-ek a biztos mintákra (regex).
-Réteg 1: email, telefonszám, IBAN, rendszám, ügyfélazonosító, szerződésszám, ticket ID, dátum.
+DEPRECATED: Detection is in pii_gdpr only. This module is no longer used by the pipeline.
+Egyéni Presidio PatternRecognizer-ek a biztos mintákra (regex). Kept for reference only; do not extend.
 """
 from __future__ import annotations
 

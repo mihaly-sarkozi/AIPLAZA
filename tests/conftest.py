@@ -1,5 +1,10 @@
 # tests/conftest.py
-"""Közös pytest fixture-ek: app, client, mock login/refresh/logout/user service (dependency override)."""
+"""
+Közös pytest fixture-ek: app, client, mock login/refresh/logout/user service (dependency override).
+
+Az app és a main modul csak akkor töltődik, ha valamilyen integration fixture (client, client_authenticated, …)
+kell – így a unit tesztek (pytest tests/unit/) nem húzzák be a teljes runtime stacket.
+"""
 import os
 
 # Login rate limit: tesztekben magasabb limit (ugyanaz az IP = testclient), különben 5/perc 429-et adna
@@ -13,7 +18,6 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
-from main import app
 from config.settings import settings
 from apps.core.di import (
     get_login_service,
@@ -29,6 +33,18 @@ from apps.core.container.app_container import container
 from apps.auth.application.dto import LoginSuccess, LoginTwoFactorRequired
 from apps.users.domain.user import User
 from apps.auth.domain.tenant import Tenant
+
+
+def get_app():
+    """Lazy: a teljes FastAPI appot csak akkor tölti, ha kell (integration tesztek). Unit tesztek ne hívják."""
+    from main import app
+    return app
+
+
+@pytest.fixture(scope="session")
+def app():
+    """Teljes FastAPI app – csak integration tesztekhez; session scope, lazy import main."""
+    return get_app()
 
 # Teszt tenant: a middleware ezt várja Host: demo.local esetén (tenant_base_domain=local).
 DEMO_TENANT = Tenant(id=1, slug="demo", name="Demo", created_at=datetime.now(timezone.utc))
@@ -93,7 +109,7 @@ def mock_refresh_service():
 
 
 @pytest.fixture
-def client(mock_login_service, mock_user_repo):
+def client(app, mock_login_service, mock_user_repo):
     """TestClient a /api prefix alatti végpontokhoz. LoginService + tenant + user_repo mock."""
     app.dependency_overrides[get_login_service] = lambda: mock_login_service
     app.dependency_overrides[get_user_repository] = lambda: mock_user_repo
@@ -106,7 +122,7 @@ def client(mock_login_service, mock_user_repo):
 
 
 @pytest.fixture
-def client_with_refresh(client, mock_refresh_service):
+def client_with_refresh(app, client, mock_refresh_service):
     """Client + RefreshService felülírva (refresh tesztekhez)."""
     app.dependency_overrides[get_refresh_service] = lambda: mock_refresh_service
     yield client
@@ -119,7 +135,7 @@ def mock_logout_service():
 
 
 @pytest.fixture
-def client_authenticated(client, sample_user, mock_logout_service):
+def client_authenticated(app, client, sample_user, mock_logout_service):
     """Client ahol get_current_user → sample_user (me, logout tesztekhez). Opcionálisan logout mock."""
     app.dependency_overrides[get_current_user] = lambda: sample_user
     app.dependency_overrides[get_logout_service] = lambda: mock_logout_service
@@ -175,7 +191,7 @@ def mock_user_service(sample_user):
 
 
 @pytest.fixture
-def client_superuser(client, sample_user, mock_user_service, mock_logout_service):
+def client_superuser(app, client, sample_user, mock_user_service, mock_logout_service):
     """Client superuserral (get_current_user → sample_user), UserService mock (CRUD, resend, set-password)."""
     app.dependency_overrides[get_current_user] = lambda: sample_user
     app.dependency_overrides[get_user_service] = lambda: mock_user_service

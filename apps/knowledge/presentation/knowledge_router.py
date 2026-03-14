@@ -1,3 +1,4 @@
+from typing import Optional
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from openai import AuthenticationError as OpenAIAuthError, APIError as OpenAIAPIError
 from apps.core.middleware.rate_limit_middleware import limiter
@@ -172,23 +173,36 @@ async def train_raw_text(
         raise HTTPException(status_code=403, detail="No permission to train this knowledge base")
     try:
         return await svc.add_block(
-            uuid, data.title or "", data.content,
+            uuid,
+            data.title or "",
+            data.content,
             current_user_id=user.id,
             confirm_pii=data.confirm_pii,
+            pii_review_decision=getattr(data, "pii_review_decision", None),
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except PiiConfirmationRequiredError as e:
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "requires_pii_confirmation": True,
-                "message": "Személyes adatok észlelve; erősítsd meg a folytatáshoz.",
-                "detected_types": e.detected_types,
-            },
-        ) from e
+        _raise_pii_review_409(e)
     except (OpenAIAuthError, OpenAIAPIError) as ex:
         _handle_openai_error(ex)
+
+
+def _pii_review_detail(e: PiiConfirmationRequiredError) -> dict:
+    """Build rich 409 payload: entity types, counts, preview snippets."""
+    detail = {
+        "requires_pii_confirmation": True,
+        "message": "Személyes adatok észlelve; erősítsd meg a folytatáshoz.",
+        "detected_types": e.detected_types,
+        "entity_types": e.detected_types,
+        "counts": getattr(e, "counts", None) or {},
+        "snippets": getattr(e, "snippets", None) or [],
+    }
+    return detail
+
+
+def _raise_pii_review_409(e: PiiConfirmationRequiredError) -> None:
+    raise HTTPException(status_code=409, detail=_pii_review_detail(e))
 
 
 # --- TRAIN TEXT (külön endpoint, ha kell) ---
@@ -203,21 +217,17 @@ async def train_text(
         raise HTTPException(status_code=403, detail="No permission to train this knowledge base")
     try:
         return await svc.add_block(
-            uuid, data.title or "", data.content,
+            uuid,
+            data.title or "",
+            data.content,
             current_user_id=user.id,
             confirm_pii=data.confirm_pii,
+            pii_review_decision=getattr(data, "pii_review_decision", None),
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except PiiConfirmationRequiredError as e:
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "requires_pii_confirmation": True,
-                "message": "Személyes adatok észlelve; erősítsd meg a folytatáshoz.",
-                "detected_types": e.detected_types,
-            },
-        ) from e
+        _raise_pii_review_409(e)
     except (OpenAIAuthError, OpenAIAPIError) as ex:
         _handle_openai_error(ex)
 
@@ -228,6 +238,7 @@ async def train_file(
     uuid: str,
     file: UploadFile = File(...),
     confirm_pii: bool = Form(False),
+    pii_review_decision: Optional[str] = Form(None),
     svc: KnowledgeBaseService = Depends(get_kb_service),
     user: User = Depends(get_current_user),
 ):
@@ -235,21 +246,16 @@ async def train_file(
         raise HTTPException(status_code=403, detail="No permission to train this knowledge base")
     try:
         return await svc.train_from_file(
-            uuid, file,
+            uuid,
+            file,
             current_user_id=user.id,
             confirm_pii=confirm_pii,
+            pii_review_decision=pii_review_decision,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except PiiConfirmationRequiredError as e:
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "requires_pii_confirmation": True,
-                "message": "Személyes adatok észlelve; erősítsd meg a folytatáshoz.",
-                "detected_types": e.detected_types,
-            },
-        ) from e
+        _raise_pii_review_409(e)
     except (OpenAIAuthError, OpenAIAPIError) as ex:
         _handle_openai_error(ex)
 

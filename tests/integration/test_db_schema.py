@@ -1,4 +1,4 @@
-# tests/test_db_schema.py
+# tests/integration/test_db_schema.py
 """DB séma tesztek: public és demo táblák/szerkezet létezik és megfelelő."""
 import os
 import sys
@@ -8,16 +8,19 @@ import pytest
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
 
-# Projekt gyökér (config, apps importok)
-_root = Path(__file__).resolve().parent.parent
+# Projekt gyökér (config, apps importok). Pytest repo gyökeréből futtatva már a pythonpath=.
+# miatt eléri; ez a sor direkt futtatáshoz kell (pl. python tests/integration/test_db_schema.py).
+_root = Path(__file__).resolve().parent.parent.parent  # repo root: integration -> tests -> root
 if str(_root) not in sys.path:
     sys.path.insert(0, str(_root))
 
-# .env betöltése (tesztek futtatásakor a cwd lehet tests/)
+# .env betöltése (tesztek futtatásakor a cwd lehet tests/integration/)
 _env = _root / ".env"
 if _env.exists():
     from dotenv import load_dotenv
     load_dotenv(_env)
+
+pytestmark = pytest.mark.integration
 
 
 def _get_engine() -> Engine | None:

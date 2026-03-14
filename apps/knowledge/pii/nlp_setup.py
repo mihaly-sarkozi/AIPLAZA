@@ -1,7 +1,8 @@
 # apps/knowledge/pii/nlp_setup.py
 """
+DEPRECATED: Detection is in pii_gdpr only. This module is no longer used by the pipeline.
 Presidio NLP engine és analyzer példányok: angol + spanyol = spaCy, magyar = Stanza.
-Lazy init: csak az első használatkor töltődnek a modellek.
+Kept for reference only; do not extend. May be removed in a future cleanup.
 """
 from __future__ import annotations
 

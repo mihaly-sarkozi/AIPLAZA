@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "aiplaza"
+version = "0.1.0"
+description = "AIPLAZA alkalmazás"
+readme = "README.md"
+requires-python = ">=3.10"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["apps*", "config*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]
+pythonpath = ["."]
+addopts = "-ra -q"
+markers = [
+    "unit: gyors, külső függőség nélküli tesztek",
+    "integration: API/DB vagy több komponens tesztek",
+    "slow: lassú tesztek (pl. NER modellek)",
+    "must_pass: valódi viselkedés teszt (sikeresen kell lefutnia)",
+    "expected_fail_not_implemented: funkció még nincs implementálva (xfail)",
+    "smoke_only: csak triviális ellenőrzés (pl. lista visszatérés)",
+    "release_acceptance: minimum release acceptance suite – minden ilyen tesztnek át kell mennie a ship előtt",
+]

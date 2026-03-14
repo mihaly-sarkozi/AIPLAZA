@@ -1,6 +1,34 @@
 # Tesztek – funkciónkénti lefedettség
 
-## Auth (`test_auth_login.py`)
+## Futtatás (projekt gyökeréből)
+
+A tesztek **mindig a repo gyökeréből** futtatandók. Importok: kizárólag **`apps.*`** és **`config.*`** (nincs top-level `knowledge`; a knowledge modul az `apps.knowledge`).
+
+- A projekt gyökerének a `PYTHONPATH`-on kell lennie (pytest: `pythonpath = .` → a „.” a futtatás cwd-ja, ezért **pytest a repo gyökeréből**).
+- Ajánlott: `pip install -e .` a repo gyökeréből, így az `apps` és `config` mindenhol elérhető.
+- Részletek: [docs/PACKAGING.md](../docs/PACKAGING.md).
+
+```bash
+# Külön parancsok
+pytest tests/unit          # unit tesztek
+pytest tests/integration   # integration tesztek
+pytest -m slow             # csak lassú tesztek (pl. NER pipeline)
+pytest -m "not slow"       # slow nélkül
+
+# Makefile
+make test-unit
+make test-integration
+make test-slow
+make lint
+```
+
+- **Unit** (`tests/unit/`): token service, PII detektorok, sanitizer, legacy adapter.
+- **Integration** (`tests/integration/`): auth, users, settings, chat, knowledge, PII pipeline (API/DB vagy több komponens).
+- **slow** marker: NER/pipeline.run() tesztek (pl. `test_pii_gdpr_pipeline` egyes esetei).
+
+---
+
+## Auth (`integration/test_auth_login.py`)
 - **Login**: üres/rossz body 422, invalid credentials 401, step1 → 2FA required, step2 → tokens + cookie, 5× rossz jelszó 401, rate limit (step2 too many attempts) 429
 - **Refresh**: nincs cookie/header 401, invalid/revoked 401, success + cookie, X-Refresh-Token header, fingerprint mismatch → re_2fa_required, same fingerprint → success
 - **Me**: 401 nélkül, 200 + user adat
@@ -11,7 +39,7 @@
 - **GET /auth/default-settings**: 200, locale + theme
 - **2FA**: step2 too many attempts 429, 5× rossz kód majd 6. 429
 
-## Users CRUD (`test_user_crud.py`)
+## Users CRUD (`integration/test_user_crud.py`)
 - **List**: success, with data, non-superuser 403
 - **Get**: success, 404
 - **Create**: success, duplicate email 400
@@ -19,25 +47,25 @@
 - **Delete**: success, delete self 400
 - **Resend invite**: success, active user 400, not found 400
 
-## Regisztráció / set-password (`test_registration.py`)
+## Regisztráció / set-password (`integration/test_registration.py`)
 - **Validate token**: invalid/missing 400, expired 410, valid 200
 - **Set password**: invalid 400, expired 410, success
 
-## Settings (`test_settings.py`)
+## Settings (`integration/test_settings.py`)
 - **GET/PATCH**: 401 auth nélkül, 403 nem owner, 200 success
 
-## Chat (`test_chat.py`)
+## Chat (`integration/test_chat.py`)
 - **POST /chat**: 401 auth nélkül, 200 success (mock), üres question 422/200
 
-## Knowledge base (`test_knowledge.py`)
+## Knowledge base (`integration/test_knowledge.py`)
 - **GET /kb**: 401 auth nélkül, 403 nem admin, 200 lista (mock)
 - **POST /kb**: 401 auth nélkül, 200 created (mock)
 - Opcionális később: PUT, DELETE, train/text, train/file (401/403/success)
 
-## Token service – unit (`test_token_service.py`)
+## Token service – unit (`unit/test_token_service.py`)
 - Verify: helyes/rossz issuer, audience, nbf jövőbeni, decode_ignore_exp
 
-## DB séma (`test_db_schema.py`)
+## DB séma (`integration/test_db_schema.py`)
 - public.tenants, tenant_configs, tenant_domains; demo séma, users, knowledge_bases tábla szerkezet
 
 ---

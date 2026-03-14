@@ -1,4 +1,4 @@
-# tests/test_token_service.py
+# tests/unit/test_token_service.py
 """TokenService tesztek: JWT iss / aud / nbf ellenőrzés verify() és decode_ignore_exp() esetén."""
 import datetime
 from datetime import timezone
@@ -7,6 +7,8 @@ import jwt
 import pytest
 
 from apps.core.security.token_service import TokenService
+
+pytestmark = [pytest.mark.unit, pytest.mark.must_pass]
 
 
 @pytest.fixture

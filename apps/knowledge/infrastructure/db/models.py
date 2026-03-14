@@ -37,7 +37,9 @@ class KbTrainingLogORM(TenantSchemaBase):
     user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
     user_display = Column(String(255), nullable=True)  # név vagy email a megjelenítéshez
     title = Column(String(512), nullable=False)
-    content = Column(Text, nullable=True)
+    content = Column(Text, nullable=True)  # sanitized content (PII replaced with refs)
+    raw_content = Column(Text, nullable=True)  # original content before PII replacement
+    review_decision = Column(String(64), nullable=True)  # mask_all | keep_role_based_emails | reject | continue_sanitized
     created_at = Column(DateTime, default=datetime.utcnow)
 
 

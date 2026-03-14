@@ -1,4 +1,4 @@
-# tests/test_knowledge.py
+# tests/integration/test_knowledge.py
 """Knowledge base API tesztek: GET/POST /kb (admin), 401/403/success."""
 from datetime import datetime, timezone
 from unittest.mock import MagicMock
@@ -6,10 +6,12 @@ from unittest.mock import MagicMock
 import pytest
 from fastapi.testclient import TestClient
 
-from main import app
+from tests.conftest import get_app
 from apps.core.di import get_kb_service
 from apps.core.security.auth_dependencies import get_current_user
 from apps.users.domain.user import User
+
+pytestmark = pytest.mark.integration
 
 
 class _KBOutLike:
@@ -34,7 +36,7 @@ def mock_kb_service():
 
 
 @pytest.fixture
-def client_kb(client, sample_user, mock_kb_service):
+def client_kb(app, client, sample_user, mock_kb_service):
     """Client + admin user (owner) + KB service mock."""
     app.dependency_overrides[get_current_user] = lambda: sample_user
     app.dependency_overrides[get_kb_service] = lambda: mock_kb_service
@@ -62,13 +64,19 @@ def test_get_kb_without_auth_returns_401(client: TestClient):
     assert r.status_code == 401
 
 
+@pytest.mark.smoke_only
 def test_get_kb_user_returns_200_filtered_list(client, sample_user_role_user):
     """GET /kb user szerepkörrel → 200, lista (csak use/train jogosult KB-k; mock üres repo → üres lista)."""
+    app = get_app()
     app.dependency_overrides[get_current_user] = lambda: sample_user_role_user
     try:
         r = client.get("/api/kb")
         assert r.status_code == 200
-        assert isinstance(r.json(), list)
+        data = r.json()
+        assert isinstance(data, list)
+        for item in data:
+            assert isinstance(item, dict)
+            assert "uuid" in item or "name" in item
     finally:
         app.dependency_overrides.pop(get_current_user, None)
 

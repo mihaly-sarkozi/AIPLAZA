@@ -107,6 +107,8 @@ class MySQLKnowledgeBaseRepository(KnowledgeBaseRepositoryPort):
         user_display: Optional[str],
         title: str,
         content: Optional[str],
+        raw_content: Optional[str] = None,
+        review_decision: Optional[str] = None,
     ) -> None:
         with self.session_factory() as session:
             session.add(
@@ -117,6 +119,8 @@ class MySQLKnowledgeBaseRepository(KnowledgeBaseRepositoryPort):
                     user_display=user_display or None,
                     title=title,
                     content=content,
+                    raw_content=raw_content,
+                    review_decision=review_decision,
                 )
             )
             session.commit()
@@ -139,6 +143,8 @@ class MySQLKnowledgeBaseRepository(KnowledgeBaseRepositoryPort):
                     "user_display": r.user_display or "",
                     "title": r.title,
                     "content": r.content,
+                    "raw_content": getattr(r, "raw_content", None),
+                    "review_decision": getattr(r, "review_decision", None),
                     "created_at": r.created_at.isoformat() if r.created_at else None,
                 }
                 for r in rows

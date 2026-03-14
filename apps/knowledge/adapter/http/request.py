@@ -27,3 +27,4 @@ class KBTrainRequest(BaseModel):
     title: Optional[str] = ""
     content: str
     confirm_pii: bool = False
+    pii_review_decision: Optional[str] = None  # mask_all | keep_role_based_emails | reject_upload | continue_sanitized

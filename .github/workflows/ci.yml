@@ -1,0 +1,53 @@
+# Minimális CI: lint, unit tesztek, integration tesztek
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install ruff
+        run: pip install ruff
+      - name: Lint
+        run: ruff check . --output-format=concise
+        continue-on-error: true
+
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Install package (editable)
+        run: pip install -e .
+      - name: Unit tests
+        run: pytest tests/unit -v --tb=short
+
+  integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Install package (editable)
+        run: pip install -e .
+      - name: Integration tests
+        run: pytest tests/integration -v --tb=short
+        env:
+          DISABLE_CSRF: "1"
+          RATE_LIMIT_LOGIN_PER_MINUTE: "100"

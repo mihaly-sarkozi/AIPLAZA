@@ -1,74 +1,35 @@
 # apps/knowledge/pii/policy.py
 """
-Saját szabálymotor: mely entitástípust maszkoljuk, melyiket engedjük.
-Nem jogi döntés – csak jelöltek; a policy eldönti: maszkolás / általánosítás / review.
-Erősség szerint: weak = kevesebb típus, strong = minden érzékeny típus.
+Thin compatibility layer: sensitivity scope (weak/medium/strong) and confirmation error.
+
+- entities_for_sensitivity(sensitivity) → set of legacy type names for that scope.
+  Source: pii_gdpr.entity_registry.get_sensitivity_set. Used by pipeline and tests.
+- PiiConfirmationRequiredError: exception with detected_types (legacy type strings).
+
+All policy decisions (MASK/KEEP/review) and detection logic live in pii_gdpr.
 """
 from __future__ import annotations
 
 from typing import List, Set
 
-# weak: csak email, telefonszám
-# medium: + IBAN, rendszám, dátum, ügyfélazonosító, szerződésszám, ticket_id, név, cím (legacy regex)
-# strong: + szervezet, hely (NER)
-WEAK_ENTITIES: Set[str] = {"email", "telefonszám"}
-MEDIUM_ENTITIES: Set[str] = WEAK_ENTITIES | {
-    "iban",
-    "rendszám",
-    "dátum",
-    "ügyfélazonosító",
-    "szerződésszám",
-    "ticket_id",
-    "név",
-    "cím",
-}
-STRONG_ENTITIES: Set[str] = MEDIUM_ENTITIES | {"szervezet", "hely"}
-
-# Presidio / spaCy / Stanza NER típusok → tárolt entitásnév (napló, placeholder)
-NER_ENTITY_TO_TYPE: dict[str, str] = {
-    "PERSON": "név",
-    "PER": "név",
-    "ORG": "szervezet",
-    "ORGANIZATION": "szervezet",
-    "GPE": "hely",
-    "LOC": "hely",
-    "LOCATION": "hely",
-    "DATE": "dátum",
-}
+from apps.knowledge.pii_gdpr.entity_registry import get_sensitivity_set
 
 
 def entities_for_sensitivity(sensitivity: str) -> Set[str]:
-    """Az adott erősséghez engedélyezett entitástípusok."""
-    s = (sensitivity or "medium").lower()
-    if s == "weak":
-        return WEAK_ENTITIES
-    if s == "strong":
-        return STRONG_ENTITIES
-    return MEDIUM_ENTITIES
-
-
-def map_entity_type(presidio_entity: str) -> str:
-    """Presidio/spaCy/Stanza entity típus → tárolt típusnév (név, szervezet, hely, dátum, stb.)."""
-    key = (presidio_entity or "").strip().upper()
-    return NER_ENTITY_TO_TYPE.get(key, presidio_entity)
-
-
-def filter_by_policy(
-    entity_type: str,
-    sensitivity: str,
-    _context: dict | None = None,
-) -> bool:
-    """
-    Policy döntés: ez az entitás menjen maszkolásra az adott erősségnél?
-    context később: céges email maradhat-e, stb.
-    """
-    allowed = entities_for_sensitivity(sensitivity)
-    return entity_type.lower() in allowed
+    """Return the set of legacy entity type names allowed for the given sensitivity."""
+    return set(get_sensitivity_set(sensitivity))
 
 
 class PiiConfirmationRequiredError(Exception):
-    """A tartalom személyes adatokat tartalmaz, megerősítés szükséges (with_confirmation mód)."""
+    """Raised when content contains PII and user confirmation is required (with_confirmation mode)."""
 
-    def __init__(self, detected_types: List[str]) -> None:
+    def __init__(
+        self,
+        detected_types: List[str],
+        counts: dict[str, int] | None = None,
+        snippets: List[dict[str, str]] | None = None,
+    ) -> None:
         self.detected_types = list(detected_types)
+        self.counts = dict(counts) if counts else {}
+        self.snippets = list(snippets) if snippets else []
         super().__init__(f"Személyes adatok észlelve: {', '.join(self.detected_types)}")

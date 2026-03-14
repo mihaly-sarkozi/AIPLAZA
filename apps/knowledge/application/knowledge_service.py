@@ -13,6 +13,26 @@ from apps.knowledge.infrastructure.db.models import (
     PERSONAL_DATA_MODE_NO,
     PERSONAL_DATA_MODE_CONFIRM,
 )
+from apps.knowledge.application.file_ingest import (
+    extract_file,
+    ExtractedFileResult,
+    FileMetadata,
+    STATUS_EMPTY,
+    STATUS_SCANNED_REVIEW_REQUIRED,
+)
+from apps.knowledge.domain.pii_review import (
+    build_pii_review_payload,
+    PiiReviewDecision,
+)
+
+
+def _metadata_for_response(meta: FileMetadata) -> dict[str, Any]:
+    return {
+        "filename": meta.filename,
+        "author": meta.author,
+        "creator": meta.creator,
+        "modified_by": meta.modified_by,
+    }
 
 
 def _user_repo_list_all(user_repo: Any) -> List[Any]:
@@ -189,6 +209,8 @@ class KnowledgeBaseService:
         content: str,
         current_user_id: Optional[int] = None,
         confirm_pii: bool = False,
+        pii_review_decision: Optional[str] = None,
+        sanitize_mode: Optional[str] = None,
     ) -> dict[str, Any]:
         """Tanítási tartalom mentése; személyes adatok szűrése a KB beállítások szerint."""
         kb = self.repo.get_by_uuid(uuid)
@@ -209,15 +231,25 @@ class KnowledgeBaseService:
                     "A tudástár beállításai szerint nem tartalmazhat személyes adatot."
                 )
             if mode == PERSONAL_DATA_MODE_CONFIRM and not confirm_pii:
-                detected = list({m[2] for m in matches})
-                raise PiiConfirmationRequiredError(detected)
+                detected_types, counts, snippets = build_pii_review_payload(matches)
+                raise PiiConfirmationRequiredError(
+                    detected_types,
+                    counts=counts,
+                    snippets=snippets,
+                )
+
+        # User confirmed but chose to reject upload
+        if matches and confirm_pii and pii_review_decision == PiiReviewDecision.REJECT_UPLOAD.value:
+            return {"status": "rejected", "message": "A feltöltés elutasítva."}
 
         if matches:
             ref_ids = [
                 self.repo.add_personal_data(kb.id, m[2], m[3])
                 for m in matches
             ]
-            content_to_store = apply_pii_replacements(raw, matches, ref_ids)
+            content_to_store = apply_pii_replacements(
+                raw, matches, ref_ids, mode=sanitize_mode or "mask"
+            )
         else:
             content_to_store = raw
 
@@ -229,6 +261,7 @@ class KnowledgeBaseService:
 
         display_title = (title or "").strip()
         point_id = str(uuid_lib.uuid4())
+        decision = pii_review_decision if (matches and confirm_pii) else None
         self.repo.add_training_log(
             kb_id=kb.id,
             point_id=point_id,
@@ -236,6 +269,8 @@ class KnowledgeBaseService:
             user_display=user_display or None,
             title=display_title or content_to_store[:80],
             content=content_to_store,
+            raw_content=raw if matches else None,
+            review_decision=decision,
         )
         return {"status": "ok"}
 
@@ -261,41 +296,42 @@ class KnowledgeBaseService:
         file,
         current_user_id: Optional[int] = None,
         confirm_pii: bool = False,
+        pii_review_decision: Optional[str] = None,
     ) -> dict[str, Any]:
         kb = self.repo.get_by_uuid(uuid)
         if not kb:
             raise ValueError("KB not found")
 
-        ext = file.filename.lower()
-        content = ""
+        filename = (getattr(file, "filename", None) or "").strip() or ""
+        file_like = getattr(file, "file", file)
+        try:
+            result: ExtractedFileResult = extract_file(file_like, filename)
+        except ValueError as e:
+            raise e
 
-        if ext.endswith(".pdf"):
-            import pdfplumber
-            with pdfplumber.open(file.file) as pdf:
-                for page in pdf.pages:
-                    text = page.extract_text()
-                    if text:
-                        content += text + "\n"
+        if result.status == STATUS_EMPTY:
+            return {
+                "status": "empty",
+                "message": "A fájl tartalma üres, nincs betölthető szöveg.",
+                "metadata": _metadata_for_response(result.metadata),
+            }
 
-        elif ext.endswith(".docx"):
-            import docx
-            doc = docx.Document(file.file)
-            for p in doc.paragraphs:
-                content += p.text + "\n"
+        if result.status == STATUS_SCANNED_REVIEW_REQUIRED:
+            return {
+                "status": "scanned_review_required",
+                "message": "A dokumentum valószínűleg szkennelt; OCR vagy manuális ellenőrzés ajánlott.",
+                "metadata": _metadata_for_response(result.metadata),
+            }
 
-        elif ext.endswith(".txt"):
-            content = file.file.read().decode("utf-8")
-
-        else:
-            raise ValueError("Unsupported file type")
-
-        if not content or not content.strip():
-            raise ValueError("A fájl tartalma üres, nincs betölthető szöveg.")
-
+        # Layer: extracted text → sanitized (PII) and stored via add_block
+        title = result.metadata.filename or filename or "document"
+        if result.metadata.author:
+            title = f"{title} (szerző: {result.metadata.author})"
         return await self.add_block(
             uuid,
-            (file.filename or "").strip() or "",
-            content,
+            title,
+            result.extracted_text,
             current_user_id=current_user_id,
             confirm_pii=confirm_pii,
+            pii_review_decision=pii_review_decision,
         )

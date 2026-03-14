@@ -1,6 +1,9 @@
-# tests/test_registration.py
+# tests/integration/test_registration.py
 """Regisztráció (set-password link) tesztek: token validálás és jelszó beállítás auth nélkül (a link token a hitelesítés)."""
+import pytest
 from fastapi.testclient import TestClient
+
+pytestmark = pytest.mark.integration
 
 
 def test_validate_set_password_invalid_token_returns_400(client_superuser: TestClient, mock_user_service):

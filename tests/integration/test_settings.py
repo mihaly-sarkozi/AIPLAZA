@@ -1,13 +1,16 @@
-# tests/test_settings.py
+# tests/integration/test_settings.py
 """Settings modul tesztek: GET/PATCH /settings (csak owner)."""
 from datetime import datetime, timezone
 
+import pytest
 from fastapi.testclient import TestClient
 
-from main import app
+from tests.conftest import get_app
 from apps.core.di import get_settings_service
 from apps.core.security.auth_dependencies import get_current_user
 from apps.users.domain.user import User
+
+pytestmark = pytest.mark.integration
 
 
 def test_get_settings_without_auth_returns_401(client: TestClient):
@@ -18,6 +21,7 @@ def test_get_settings_without_auth_returns_401(client: TestClient):
 
 def test_get_settings_non_owner_returns_403(client: TestClient, mock_settings_service):
     """GET /settings user/admin role-lal (nem owner) → 403."""
+    app = get_app()
     app.dependency_overrides[get_settings_service] = lambda: mock_settings_service
     non_owner = User(
         id=2,
@@ -38,6 +42,7 @@ def test_get_settings_non_owner_returns_403(client: TestClient, mock_settings_se
 
 def test_get_settings_success(client_authenticated: TestClient, mock_settings_service):
     """GET /settings ownerrel → 200, two_factor_enabled."""
+    app = get_app()
     app.dependency_overrides[get_settings_service] = lambda: mock_settings_service
     try:
         r = client_authenticated.get("/api/settings")
@@ -57,6 +62,7 @@ def test_patch_settings_without_auth_returns_401(client: TestClient):
 
 def test_patch_settings_non_owner_returns_403(client: TestClient, mock_settings_service):
     """PATCH /settings nem ownerrel → 403."""
+    app = get_app()
     app.dependency_overrides[get_settings_service] = lambda: mock_settings_service
     non_owner = User(
         id=2,
@@ -77,6 +83,7 @@ def test_patch_settings_non_owner_returns_403(client: TestClient, mock_settings_
 
 def test_patch_settings_success(client_authenticated: TestClient, mock_settings_service):
     """PATCH /settings ownerrel → 200, two_factor_enabled frissítve."""
+    app = get_app()
     mock_settings_service.is_two_factor_enabled.return_value = True
     app.dependency_overrides[get_settings_service] = lambda: mock_settings_service
     try:

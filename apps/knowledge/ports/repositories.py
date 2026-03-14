@@ -61,8 +61,10 @@ class KnowledgeBaseRepositoryPort(ABC):
         user_display: Optional[str],
         title: str,
         content: Optional[str],
+        raw_content: Optional[str] = None,
+        review_decision: Optional[str] = None,
     ) -> None:
-        """Tanítási naplóbejegyzés hozzáadása (add_block után). user_display = név vagy email."""
+        """Tanítási naplóbejegyzés hozzáadása. content = sanitized; raw_content/review_decision optional (PII review flow)."""
         ...
 
     @abstractmethod
