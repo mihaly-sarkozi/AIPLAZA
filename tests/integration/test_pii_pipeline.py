@@ -295,7 +295,6 @@ class TestNemImplementaltTipusok:
     hogy a pipeline nem dob hibát; implementáláskor a teszt átírható és xfail eltávolítva.
     """
 
-    @pytest.mark.xfail(reason="becenév/felhasználónév nincs dedikált recognizer")
     def test_becenev_felhasznalonev_nem_szurodik(self):
         """becenév/felhasználónév pl. annakovacs92 – nincs recognizer; when implemented assert entity."""
         text = "User: annakovacs92"
@@ -304,9 +303,8 @@ class TestNemImplementaltTipusok:
         assert all(len(m) == 4 for m in matches)
         assert not any(m[2] in ("felhasználónév", "becenév") for m in matches), "When implemented: expect one of these types"
 
-    @pytest.mark.xfail(reason="TAJ/adóazonosító/útlevél/személyi/jogosítvány formátumok korlátozott support")
     def test_taj_ado_azonosito_nincs(self):
-        """TAJ, adóazonosító – xfail until supported; when implemented assert detection."""
+        """TAJ, adóazonosító – detected as személyi_azonosító / adóazonosító (document_identifiers_recognizer)."""
         text = "TAJ: 123 456 789. Adóazonosító: 12345678-1-12."
         matches = filter_pii(text, "medium")
         assert isinstance(matches, list)
@@ -315,7 +313,6 @@ class TestNemImplementaltTipusok:
             "When TAJ/adó support is added, expect at least one of these types."
         )
 
-    @pytest.mark.xfail(reason="kártyaszám recognizer lehet pii_gdpr-ben; teszt dokumentálja")
     def test_bankkartya_szam_nincs(self):
         """Bankkártya: 4111 1111 1111 1111 – nincs/korlátolt recognizer; pipeline nem dob hibát."""
         text = "Kártya: 4111 1111 1111 1111"
@@ -334,7 +331,6 @@ class TestNemImplementaltTipusok:
         assert all(len(m) == 4 and isinstance(m[2], str) for m in matches)
         assert any(m[2] == "ip_cím" for m in matches), f"Expected ip_cím in {[(m[2], m[3]) for m in matches]}"
 
-    @pytest.mark.xfail(reason="GPS koordináta recognizer nincs")
     def test_gps_koordinata_nincs(self):
         """GPS: 47.4979, 19.0402 – nincs recognizer; xfail until implemented."""
         text = "Pozíció: 47.4979, 19.0402"

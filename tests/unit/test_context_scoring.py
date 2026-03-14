@@ -132,7 +132,6 @@ def test_pipeline_engine_number_vs_sku():
 
 
 @pytest.mark.slow
-@pytest.mark.xfail(reason="Pipeline does not yet apply context scoring to demote regex-only VIN in non-VIN context")
 def test_pipeline_vin_vs_random_17char():
     """VIN with label → high score; random 17-char without VIN context → lower or ignored."""
     pipeline = IngestionPipeline()
@@ -153,7 +152,6 @@ def test_pipeline_vin_vs_random_17char():
 
 
 @pytest.mark.slow
-@pytest.mark.xfail(reason="Pipeline does not yet apply context scoring to demote plate in product context")
 def test_pipeline_license_plate_vs_product_code():
     """License plate in context → detected; ABC-123 as product code → lower score or dropped."""
     pipeline = IngestionPipeline()

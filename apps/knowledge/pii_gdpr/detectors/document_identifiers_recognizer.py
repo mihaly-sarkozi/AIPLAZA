@@ -38,7 +38,7 @@ class DocumentIdentifiersRecognizer(BaseDetector):
                     end=m.end(),
                     language=language,
                     source_detector=self.name,
-                    confidence_score=0.70,
+                    confidence_score=0.90,
                     risk_level=RiskClass.DIRECT_PII,
                     recommended_action=RecommendedAction.MASK,
                 )
@@ -52,7 +52,7 @@ class DocumentIdentifiersRecognizer(BaseDetector):
                     end=m.end(),
                     language=language,
                     source_detector=self.name,
-                    confidence_score=0.75,
+                    confidence_score=0.90,
                     risk_level=RiskClass.DIRECT_PII,
                     recommended_action=RecommendedAction.MASK,
                 )

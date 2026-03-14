@@ -70,6 +70,8 @@ IGNORE_BELOW = 0.60
 # Context score contribution (max boost/penalty)
 CONTEXT_BOOST_MAX = 0.20
 CONTEXT_PENALTY_MAX = -0.35
+# When no positive keyword found for ambiguous types, apply this penalty so unlabeled matches get composite < MASK_THRESHOLD
+NO_POSITIVE_CONTEXT_PENALTY = -0.20
 
 
 def get_context_window(text: str, start: int, end: int, window: int = DEFAULT_PROXIMITY_WINDOW) -> str:
@@ -94,9 +96,11 @@ def context_score(
         return 0.0
     ctx = get_context_window(text, start, end, window)
     score = 0.0
+    positive_found = False
     for kw in POSITIVE_KEYWORDS.get(entity_type, []):
         if kw.lower() in ctx:
             score += 0.08
+            positive_found = True
             if score >= CONTEXT_BOOST_MAX:
                 break
     score = min(score, CONTEXT_BOOST_MAX)
@@ -106,6 +110,9 @@ def context_score(
             if score <= -CONTEXT_PENALTY_MAX:
                 break
     score = max(score, -CONTEXT_PENALTY_MAX)
+    # Ambiguous types: if no positive context, apply penalty so unlabeled (e.g. "Random code XYWZZZ...", "Product ABC-123") get composite < MASK
+    if not positive_found and entity_type in (EntityType.VIN, EntityType.VEHICLE_REGISTRATION):
+        score = min(score, NO_POSITIVE_CONTEXT_PENALTY)
     return score
 
 
@@ -154,9 +161,11 @@ class ContextScorer:
             return 0.0
         ctx = get_context_window(text, start, end, self.window)
         score = 0.0
+        positive_found = False
         for kw in self.positive.get(entity_type, []):
             if kw.lower() in ctx:
                 score += 0.08
+                positive_found = True
                 if score >= CONTEXT_BOOST_MAX:
                     break
         score = min(score, CONTEXT_BOOST_MAX)
@@ -165,7 +174,10 @@ class ContextScorer:
                 score -= 0.12
                 if score <= -CONTEXT_PENALTY_MAX:
                     break
-        return max(score, -CONTEXT_PENALTY_MAX)
+        score = max(score, -CONTEXT_PENALTY_MAX)
+        if not positive_found and entity_type in (EntityType.VIN, EntityType.VEHICLE_REGISTRATION):
+            score = min(score, NO_POSITIVE_CONTEXT_PENALTY)
+        return score
 
     def rescore_detection(
         self,
