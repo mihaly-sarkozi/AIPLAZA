@@ -2,6 +2,7 @@ import { useEffect, useState, useMemo, useRef } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { toast } from "sonner";
 import { useTranslation } from "../../../i18n";
+import { SavedModal } from "../../../components/SavedModal";
 import { getApiErrorMessage } from "../../../utils/getApiErrorMessage";
 import {
   useKbList,
@@ -36,6 +37,7 @@ export default function KBList() {
   const [settingsKb, setSettingsKb] = useState<KbItem | null>(null);
   const [deleteConfirmKb, setDeleteConfirmKb] = useState<KbItem | null>(null);
   const [deleteTypeName, setDeleteTypeName] = useState("");
+  const [savedModalOpen, setSavedModalOpen] = useState(false);
 
   const createKbMutation = useCreateKbMutation();
   const updateKbMutation = useUpdateKbMutation();
@@ -147,7 +149,7 @@ export default function KBList() {
       },
       {
         onSuccess: () => {
-          toast.success(t("profile.saved"));
+          setSavedModalOpen(true);
           setShowCreateModal(false);
           resetForm();
         },
@@ -176,7 +178,7 @@ export default function KBList() {
       },
       {
         onSuccess: () => {
-          toast.success(t("profile.saved"));
+          setSavedModalOpen(true);
           setEditingKb(null);
           resetForm();
         },
@@ -194,7 +196,7 @@ export default function KBList() {
       { uuid: settingsKb.uuid, permissions },
       {
         onSuccess: () => {
-          toast.success(t("profile.saved"));
+          setSavedModalOpen(true);
           setSettingsKb(null);
         },
         onError: (err: unknown) => toast.error(getApiErrorMessage(err) ?? t("kb.errorPermissions")),
@@ -734,6 +736,11 @@ export default function KBList() {
           </div>
         </div>
       )}
+
+      <SavedModal
+        open={savedModalOpen}
+        onClose={() => setSavedModalOpen(false)}
+      />
 
       {/* Delete confirm */}
       {deleteConfirmKb && (

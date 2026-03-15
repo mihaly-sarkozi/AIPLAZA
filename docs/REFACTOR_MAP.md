@@ -108,9 +108,9 @@ Realistic assessment: strengths, risks, and recommended next refactors. Not a fu
 
 **Strengths:** Thin adapter only: delegates to pii_gdpr; exposes legacy API (filter_pii, apply_pii_replacements, PiiConfirmationRequiredError). entities and policy now derive from entity_registry. Sanitization: placeholders and generalization; dedupe and replace from end.
 
-**Risks:** pii.entities and pii.sanitization must stay aligned with pii_gdpr (registry + legacy_mapping). Deprecated nlp_setup/recognizers still in tree; can be removed later.
+**Risks:** pii.entities and pii.sanitization must stay aligned with pii_gdpr (registry + legacy_mapping).
 
-**Recommended next:** Rely on entity_registry as single source; run a CI check that pii.entities sensitivity sets match registry. Remove nlp_setup/recognizers when no longer needed.
+**Recommended next:** Rely on entity_registry as single source; run a CI check that pii.entities sensitivity sets match registry.
 
 ---
 

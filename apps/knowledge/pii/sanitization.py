@@ -121,6 +121,16 @@ def deduplicate_matches_longer_wins(
     return sorted(kept, key=lambda m: m[0])
 
 
+def _placeholder_with_ref(legacy_type: str, ref_id: str) -> str:
+    """Placeholder ref_id-val: [TYPE_ref_id], így később elővehető az eredeti érték."""
+    base = LEGACY_TO_STANDARD_PLACEHOLDER.get(
+        (legacy_type or "").strip().lower(), DEFAULT_PLACEHOLDER
+    )
+    if ref_id:
+        return base.rstrip("]") + "_" + ref_id + "]"
+    return base
+
+
 def apply_pii_replacements(
     text: str,
     matches: List[Tuple[int, int, str, str]],
@@ -130,8 +140,8 @@ def apply_pii_replacements(
     """
     Replace PII spans with standardized placeholders (mask) or generalization text.
     Replaces from end to start so character offsets remain valid.
-    ref_id_by_index is still used by caller for add_personal_data; replacement text
-    does not include ref_id (standardized placeholder only).
+    Ha ref_id_by_index[i] megadott és mode=mask: [TYPE_ref_id] formátum, így az
+    eredeti érték a reference_id alapján elővehető.
     """
     if not text:
         return text
@@ -146,7 +156,8 @@ def apply_pii_replacements(
             return _generalization_text(dtype)
         if mode == "remove" or mode == "dots":
             return "..."
-        return _standard_placeholder(dtype)
+        ref_id = ref_id_by_index[i] if i < len(ref_id_by_index) else ""
+        return _placeholder_with_ref(dtype, ref_id)
 
     # Build (start, end, replacement) and sort by start descending → replace from end
     repl_list = [
@@ -164,34 +175,42 @@ def apply_pii_replacements_with_decisions(
     text: str,
     matches: List[Tuple[int, int, str, str]],
     decisions: List[str],
+    ref_id_by_index: List[str] | None = None,
 ) -> tuple[str, List[int]]:
     """
     Soronkénti döntések alapján cserél.
     decisions[i] = "delete"|"mask"|"keep"
-    - delete: "..."-ra cserél
-    - mask: placeholder, a visszaadott mask_indices tartalmazza az i-t
+    - delete: placeholder ref_id-val (ha van), különben "..."; tároljuk personal_data-ban
+    - mask: placeholder ref_id-val; tároljuk personal_data-ban
     - keep: eredeti érték marad
-    Vissza: (result_text, mask_indices) - mask_indices = azon indexek, amiket personal_data-ba kell tenni
+    ref_id_by_index: ha megadott, a mask és delete helyettesítés [TYPE_ref_id] formátumot kap.
+    Vissza: (result_text, store_indices) - store_indices = mask és delete indexek (personal_data-ba kell tenni)
     """
     if not text or not matches:
         return text, []
     if len(decisions) != len(matches):
         decisions = ["mask"] * len(matches)  # fallback
+    ref_id_by_index = ref_id_by_index or [""] * len(matches)
+    if len(ref_id_by_index) != len(matches):
+        ref_id_by_index = [""] * len(matches)
 
     def replacement_for(i: int) -> str:
         start, end, dtype, val = matches[i][0], matches[i][1], matches[i][2], matches[i][3]
         d = (decisions[i] or "mask").lower()
-        if d == "delete":
-            return "..."
         if d == "keep":
             return val
-        return _standard_placeholder(dtype)
+        if d == "delete":
+            ref_id = ref_id_by_index[i] if i < len(ref_id_by_index) else ""
+            return _placeholder_with_ref(dtype, ref_id) if ref_id else "..."
+        # mask
+        ref_id = ref_id_by_index[i] if i < len(ref_id_by_index) else ""
+        return _placeholder_with_ref(dtype, ref_id) if ref_id else _standard_placeholder(dtype)
 
-    mask_indices: List[int] = []
+    store_indices: List[int] = []
     for i in range(len(matches)):
         d = (decisions[i] or "mask").lower()
-        if d == "mask":
-            mask_indices.append(i)
+        if d in ("mask", "delete"):
+            store_indices.append(i)
 
     repl_list = [
         (matches[i][0], matches[i][1], replacement_for(i))
@@ -201,4 +220,4 @@ def apply_pii_replacements_with_decisions(
     result = text
     for start, end, replacement in repl_list:
         result = result[:start] + replacement + result[end:]
-    return result, mask_indices
+    return result, store_indices

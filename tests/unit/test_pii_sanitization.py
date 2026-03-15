@@ -24,9 +24,10 @@ def test_standard_placeholders_email_phone_person():
     ]
     refs = ["r1", "r2", "r3"]
     out = apply_pii_replacements(text, matches, refs, mode="mask")
-    assert "[PERSON_NAME]" in out
-    assert "[EMAIL_ADDRESS]" in out
-    assert "[PHONE_NUMBER]" in out
+    # ref_id-val: [PERSON_NAME_r1]; ref nélkül: [PERSON_NAME]
+    assert "PERSON_NAME" in out
+    assert "EMAIL_ADDRESS" in out
+    assert "PHONE_NUMBER" in out
     assert "Jane Doe" not in out
     assert "jane@example.com" not in out
     assert "+36 1 234 5678" not in out
@@ -106,8 +107,8 @@ def test_replacement_order_end_to_start_preserves_offsets():
     out = apply_pii_replacements(text, matches, refs, mode="mask")
     assert out.startswith("A ")
     assert out.endswith(" C")
-    assert "[EMAIL_ADDRESS]" in out
-    assert out.count("[EMAIL_ADDRESS]") == 2
+    assert "EMAIL_ADDRESS" in out
+    assert out.count("EMAIL_ADDRESS") == 2
     assert "x" not in out and "y" not in out
 
 
@@ -116,7 +117,7 @@ def test_replacement_longer_match_wins_in_final_text():
     text = "John@acme.com"
     matches = [(0, 4, "név", "John"), (0, 14, "email", "John@acme.com")]
     deduped = deduplicate_matches_longer_wins(matches)
-    refs = ["r1"]
+    refs = [""]  # ref nélkül: [EMAIL_ADDRESS]
     out = apply_pii_replacements(text, deduped, refs, mode="mask")
     assert out == "[EMAIL_ADDRESS]"
     assert "John" not in out

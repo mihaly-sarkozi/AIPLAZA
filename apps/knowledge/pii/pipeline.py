@@ -32,8 +32,9 @@ def filter_pii(text: str, sensitivity: str) -> List[PiiMatch]:
         from apps.knowledge.pii.adapter import filter_pii_via_gdpr
         matches = filter_pii_via_gdpr(text, sensitivity)
         return deduplicate_matches_longer_wins(matches)
-    except Exception:
-        return []
+    except Exception as exc:
+        # Fail-closed: detection hiba esetén ne engedjük át a nyers tartalmat.
+        raise RuntimeError("PII detection pipeline failed") from exc
 
 
 def apply_pii_replacements(

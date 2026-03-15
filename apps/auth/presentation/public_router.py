@@ -5,6 +5,7 @@
 import logging
 from fastapi import APIRouter, Request, HTTPException
 from pydantic import BaseModel
+from apps.core.middleware.rate_limit_middleware import limiter
 
 _log = logging.getLogger(__name__)
 
@@ -39,6 +40,7 @@ def _tenant_set_password_base_url(request: Request, slug: str) -> str:
 
 
 @router.get("/public/check-slug")
+@limiter.limit("30/minute")
 def check_slug(slug: str = ""):
     """
     Tudástár slug foglaltság ellenőrzés. Nyilvános.
@@ -65,6 +67,7 @@ def check_slug(slug: str = ""):
 
 
 @router.post("/public/demo-signup")
+@limiter.limit("5/minute")
 def demo_signup(request: Request, body: DemoSignupBody):
     """
     Demo regisztráció: tenant + séma + első user (meghívás). Emailben set-password link a tenant hostra.

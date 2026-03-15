@@ -56,6 +56,15 @@ export async function getKbPermissions(kbUuid: string): Promise<KbPermissionItem
   return res.data as KbPermissionItem[];
 }
 
+export type KbPermissionsBatchResponse = Record<string, KbPermissionItem[]>;
+
+export async function getKbPermissionsBatch(kbUuids: string[]): Promise<KbPermissionsBatchResponse> {
+  const unique = Array.from(new Set((kbUuids || []).map((x) => (x || "").trim()).filter(Boolean)));
+  if (unique.length === 0) return {};
+  const res = await api.post("/kb/permissions/batch", { uuids: unique });
+  return (res.data || {}) as KbPermissionsBatchResponse;
+}
+
 export async function setKbPermissions(
   kbUuid: string,
   permissions: Array<{ user_id: number; permission: string }>

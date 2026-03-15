@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { useTranslation } from "../../../i18n";
+import { SavedModal } from "../../../components/SavedModal";
 import { useLocaleStore } from "../../../i18n";
 import { useAuthStore } from "../../../store/authStore";
 import {
@@ -30,6 +31,7 @@ export default function RolesPage() {
   const [deleteConfirmUser, setDeleteConfirmUser] = useState<User | null>(null);
   const [resendConfirmUser, setResendConfirmUser] = useState<User | null>(null);
   const [userForKbModal, setUserForKbModal] = useState<User | null>(null);
+  const [savedModalOpen, setSavedModalOpen] = useState(false);
 
   const { data: kbListData } = useKbList({ enabled: canManage });
   const kbList = useMemo(() => (kbListData ?? []).filter((kb) => kb.can_train), [kbListData]);
@@ -82,7 +84,7 @@ export default function RolesPage() {
       { email: emailTrim, name: nameTrim, role: formData.role },
       {
         onSuccess: () => {
-          toast.success(t("profile.saved"));
+          setSavedModalOpen(true);
           setShowCreateModal(false);
           resetForm();
           setCreateFormError(null);
@@ -135,7 +137,7 @@ export default function RolesPage() {
     }
     updateUserMutation.mutate(payload, {
       onSuccess: () => {
-        toast.success(t("profile.saved"));
+        setSavedModalOpen(true);
         setEditingUser(null);
         resetForm();
         setEditFormError(null);
@@ -646,6 +648,11 @@ export default function RolesPage() {
           </div>
         </div>
       )}
+
+      <SavedModal
+        open={savedModalOpen}
+        onClose={() => setSavedModalOpen(false)}
+      />
 
       {/* Delete confirm */}
       {deleteConfirmUser && (

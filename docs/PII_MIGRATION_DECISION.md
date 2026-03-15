@@ -37,7 +37,7 @@ This removes duplicate logic and ensures one implementation path: all detection 
 |------|----------|------|
 | **Legacy pipeline implementation** | **REMOVED** | `pii.pipeline` now only delegates to the adapter; no regex/NER/Presidio code. |
 | **Legacy policy implementation** | `apps.knowledge.pii.policy` | `filter_by_policy`, `entities_for_sensitivity`, and the old WEAK/MEDIUM/STRONG sets are **deprecated** for use inside the pipeline. They remain only for: (1) adapter’s sensitivity → allowed legacy types, and (2) `PiiConfirmationRequiredError`. Policy logic for “what to detect” lives in `pii_gdpr`. |
-| **Legacy NLP/Presidio** | `apps.knowledge.pii.nlp_setup`, `recognizers` | **Deprecated, unused.** Detection is only in `pii_gdpr`. Can be deleted in a future cleanup. |
+| **Legacy NLP/Presidio** | ~~`apps.knowledge.pii.nlp_setup`, `recognizers`~~ | **Removed.** Detection is only in `pii_gdpr`. |
 
 Deprecated code is kept only so that the adapter can:
 - Map **sensitivity** (weak/medium/strong) to the set of **legacy type names** allowed in the adapter output (`entities_for_sensitivity`).
@@ -52,7 +52,7 @@ No new features should be added to the deprecated pipeline or policy logic.
 | Item | When / condition |
 |------|-------------------|
 | **Legacy regex/patterns in `pii.pipeline`** | After the adapter is stable and all tests (including `test_pii_pipeline.py`) pass via the adapter. Then `_filter_pii_legacy`, `_LEGACY_PATTERNS`, and the Presidio branch in `pii.pipeline` can be removed; `filter_pii` will only call the adapter. |
-| **Presidio/NER in `pii`** | When removal of legacy pipeline happens; `pii.nlp_setup` and `pii.recognizers` can be deleted if nothing else uses them. |
+| **Presidio/NER in `pii`** | `pii.nlp_setup` and `pii.recognizers` removed. Detection only in `pii_gdpr`. |
 | **Duplicate tests** | Tests in `tests/test_pii_pipeline.py` that duplicate `test_pii_gdpr_*` can be migrated to run against the adapter (same contract) or removed in favor of `test_pii_gdpr_*` plus one adapter test. |
 
 ---

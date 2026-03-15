@@ -5,6 +5,7 @@ import type { Theme } from "../../../i18n";
 import { useAuthStore } from "../../../store/authStore";
 import { usePatchMeMutation } from "../hooks";
 import { toast } from "sonner";
+import { SavedModal } from "../../../components/SavedModal";
 import { getApiErrorMessage } from "../../../utils/getApiErrorMessage";
 import { validateRequired } from "../../../utils/formValidation";
 
@@ -27,6 +28,7 @@ export default function ProfileModal({ isOpen, onClose }: ProfileModalProps) {
   const [preferredTheme, setPreferredTheme] = useState<Theme>("light");
   const patchMe = usePatchMeMutation();
   const saving = patchMe.isPending;
+  const [savedModalOpen, setSavedModalOpen] = useState(false);
 
   useEffect(() => {
     if (isOpen && user) {
@@ -52,8 +54,7 @@ export default function ProfileModal({ isOpen, onClose }: ProfileModalProps) {
           setUser({ ...user, name: data.name ?? undefined, preferred_locale: data.preferred_locale, preferred_theme: data.preferred_theme, locale: d.locale, theme: d.theme });
           if (d.locale) setLocale(d.locale as Locale);
           if (d.theme) setTheme(d.theme as Theme);
-          toast.success(t("profile.saved"));
-          onClose();
+          setSavedModalOpen(true);
         },
         onError: (err: unknown) => toast.error(getApiErrorMessage(err) ?? t("common.errorGeneric")),
       }
@@ -67,6 +68,14 @@ export default function ProfileModal({ isOpen, onClose }: ProfileModalProps) {
   if (!isOpen) return null;
 
   return (
+    <>
+      <SavedModal
+        open={savedModalOpen}
+        onClose={() => {
+          setSavedModalOpen(false);
+          onClose();
+        }}
+      />
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
       <div className="bg-[var(--color-card)] border border-[var(--color-border)] p-6 rounded-lg w-full max-w-md shadow-lg max-h-[90vh] overflow-y-auto">
         <h2 className="text-2xl font-bold mb-4 text-[var(--color-foreground)]">{t("profile.title")}</h2>
@@ -148,5 +157,6 @@ export default function ProfileModal({ isOpen, onClose }: ProfileModalProps) {
         </form>
       </div>
     </div>
+    </>
   );
 }

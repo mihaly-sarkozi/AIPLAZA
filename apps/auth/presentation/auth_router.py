@@ -188,14 +188,16 @@ def login(
 # -------------------------------------------------
 
 def _frontend_base_url_for_set_password(request: Request) -> str:
-    """Set-password link alap URL: host a kérésből, opcionális frontend port."""
-    scheme = request.headers.get("x-forwarded-proto") or request.url.scheme
-    host = request.headers.get("x-forwarded-host") or request.headers.get("host") or request.url.netloc
-    hostname = host.split(":")[0] if ":" in host else host
+    """Set-password link alap URL: fix frontend URL-ből vagy tenant slug alapján."""
+    if getattr(settings, "frontend_base_url", ""):
+        return str(settings.frontend_base_url).rstrip("/")
+    scheme = request.url.scheme
+    tenant_slug = getattr(request.state, "tenant_slug", None)
+    hostname = f"{tenant_slug}.{settings.tenant_base_domain}" if tenant_slug else request.url.hostname
     port = getattr(settings, "frontend_set_password_port", None)
     if port is not None:
         return f"{scheme}://{hostname}:{port}"
-    return f"{scheme}://{host}"
+    return f"{scheme}://{hostname}"
 
 
 class ForgotPasswordBody(BaseModel):

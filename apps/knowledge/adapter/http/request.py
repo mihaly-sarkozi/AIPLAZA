@@ -23,6 +23,23 @@ class KBPermissionItem(BaseModel):
 class KBPermissionsUpdate(BaseModel):
     permissions: List[KBPermissionItem]
 
+
+class KBBatchPermissionsRequest(BaseModel):
+    uuids: List[str] = Field(default_factory=list, max_length=100)
+
+
+class KBDsarSearchRequest(BaseModel):
+    query: str = Field(..., min_length=1, max_length=256)
+    limit: int = Field(default=100, ge=1, le=1000)
+    scan_limit: int = Field(default=2000, ge=10, le=10000)
+
+
+class KBDsarDeleteRequest(BaseModel):
+    query: str = Field(..., min_length=1, max_length=256)
+    limit: int = Field(default=100, ge=1, le=1000)
+    scan_limit: int = Field(default=5000, ge=10, le=20000)
+    dry_run: bool = False
+
 class PiiDecisionItem(BaseModel):
     index: int
     decision: str  # "delete" | "mask" | "keep"

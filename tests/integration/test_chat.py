@@ -5,9 +5,6 @@ from unittest.mock import AsyncMock
 import pytest
 from fastapi.testclient import TestClient
 
-from tests.conftest import get_app
-from apps.core.di import get_chat_service
-
 pytestmark = pytest.mark.integration
 
 
@@ -17,9 +14,9 @@ def test_chat_without_auth_returns_401(client: TestClient):
     assert r.status_code == 401
 
 
-def test_chat_success_returns_answer(client_authenticated: TestClient, mock_chat_service):
+def test_chat_success_returns_answer(client_authenticated: TestClient, mock_chat_service, app):
     """POST /chat bejelentkezett userrel → 200, answer a válaszban."""
-    app = get_app()
+    from apps.core.di import get_chat_service
     async def _chat(question: str):
         return f"Válasz: {question}"
     mock_chat_service.chat = AsyncMock(side_effect=_chat)

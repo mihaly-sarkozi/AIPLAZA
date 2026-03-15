@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { toast } from "sonner";
 import { useTranslation } from "../../../i18n";
+import { SavedModal } from "../../../components/SavedModal";
 import type { Locale } from "../../../i18n";
 import type { Theme } from "../../../i18n";
 import { useAuthStore } from "../../../store/authStore";
@@ -22,6 +23,7 @@ export default function ProfilePage() {
   const [preferredLocale, setPreferredLocale] = useState<Locale>(locale);
   const [preferredTheme, setPreferredTheme] = useState<Theme>(theme);
   const [nameError, setNameError] = useState<string | null>(null);
+  const [savedModalOpen, setSavedModalOpen] = useState(false);
   const patchMe = usePatchMeMutation();
   const saving = patchMe.isPending;
 
@@ -53,7 +55,7 @@ export default function ProfilePage() {
           originalNameRef.current = newName;
           setNameError(null);
         }
-        toast.success(t("profile.saved"));
+        setSavedModalOpen(true);
       },
       onError: (err: unknown) => {
         toast.error(getApiErrorMessage(err) ?? t("common.errorGeneric"));

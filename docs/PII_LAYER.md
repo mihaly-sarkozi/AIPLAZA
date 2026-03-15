@@ -23,7 +23,7 @@
 
 ## Deprecated / unused
 
-- **`pii.nlp_setup`**, **`pii.recognizers`**: No longer used. Detection is only in pii_gdpr. Safe to delete in a future cleanup.
+- **`pii.nlp_setup`**, **`pii.recognizers`**: Removed. Detection is only in pii_gdpr.
 - **`pii.pipeline`**: No detection logic; only delegates to the adapter and to `pii.sanitization` for replacements.
 
 ## Adding new PII types

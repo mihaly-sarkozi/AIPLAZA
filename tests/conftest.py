@@ -3,6 +3,8 @@
 Shared pytest fixtures. No top-level imports from config or apps so that
 pytest collection does not load the full runtime stack or fail on missing config.
 App and heavy deps are loaded only when a fixture that needs them is used.
+Use the app fixture (from tests.app_factory) for tests that need the API; avoid
+importing main.app directly in tests.
 """
 import os
 
@@ -13,18 +15,11 @@ from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 
 import pytest
-from fastapi.testclient import TestClient
-
-
-def get_app():
-    """Lazy: load FastAPI app only when needed (integration tests). Unit tests should not request app."""
-    from main import app
-    return app
 
 
 @pytest.fixture(scope="session")
 def app():
-    """FastAPI app for integration tests; session scope, lazy load."""
+    """FastAPI app for integration tests; session scope, lazy load via app_factory."""
     from tests.app_factory import create_test_app
     return create_test_app()
 
@@ -42,7 +37,6 @@ def mock_user_repo(sample_user):
 @pytest.fixture
 def mock_login_service(mock_user_repo):
     """Login mock; user_repository for refresh tests (get_by_id(1) → user)."""
-    from tests.conftest import MockLoginService
     svc = MockLoginService()
     svc.user_repository = mock_user_repo
     return svc
@@ -50,13 +44,14 @@ def mock_login_service(mock_user_repo):
 
 @pytest.fixture
 def mock_refresh_service():
-    from tests.conftest import MockRefreshService
     return MockRefreshService()
 
 
 @pytest.fixture
 def client(app, mock_login_service, mock_user_repo):
     """TestClient with login/user repo overrides and demo tenant."""
+    from fastapi.testclient import TestClient
+
     from config.settings import settings
     from apps.core.di import get_login_service, get_user_repository
     from apps.core.container.app_container import container

@@ -52,8 +52,8 @@ class IngestionPipeline:
         raw_detections = self.analyzer.analyze(raw_text, lang)
         # Egyetlen policy: sensitivity (weak/medium/strong) a scope – csak ezek a típusok maradnak
         if getattr(self.policy_config, "sensitivity", None):
-            from apps.knowledge.pii.policy import entities_for_sensitivity
-            allowed = entities_for_sensitivity(self.policy_config.sensitivity)
+            from apps.knowledge.pii_gdpr.entity_registry import get_sensitivity_set
+            allowed = get_sensitivity_set(self.policy_config.sensitivity)
             raw_detections = [d for d in raw_detections if get_legacy_name(d.entity_type) in allowed]
         policy_decisions = self.policy_engine.decide_all(raw_detections)
         summary = self._build_summary(raw_detections, policy_decisions, raw_text, lang)

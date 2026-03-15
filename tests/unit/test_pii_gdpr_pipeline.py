@@ -170,5 +170,5 @@ def test_legacy_pii_adapter_contract():
     refs = [f"r{i}" for i in range(len(matches))]
     out = apply_pii_replacements(text, matches, refs)
     assert "user@example.com" not in out
-    # Standard placeholders (pii.sanitization contract)
-    assert "[EMAIL_ADDRESS]" in out or "[PHONE_NUMBER]" in out
+    # Standard placeholders (ref_id-val: [EMAIL_ADDRESS_r0]; ref nélkül: [EMAIL_ADDRESS])
+    assert "EMAIL_ADDRESS" in out or "PHONE_NUMBER" in out

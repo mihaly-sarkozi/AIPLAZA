@@ -1,21 +1,16 @@
 # tests/integration/test_auth_login.py
 """Login és refresh végpont automata tesztek: validáció, 401, sikeres login/refresh."""
+from __future__ import annotations
+
 from datetime import datetime, timezone, timedelta
 from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
 
-from tests.conftest import get_app
-from apps.core.di import get_login_service
-from apps.core.security.auth_dependencies import get_current_user
-from apps.core.container.app_container import container
-from apps.auth.application.dto import LoginSuccess, LoginTwoFactorRequired
-from apps.auth.application.services.two_factor_service import TwoFactorService
-from apps.auth.application.services.login_service import LoginService
-from apps.users.domain.user import User
-from config.settings import settings
-from apps.auth.domain.tenant import Tenant
+# Lightweight imports only. Heavy imports (apps.core.di, container, config, etc.)
+# are deferred inside test bodies or fixtures that need them.
+from apps.users.domain.user import User  # lightweight dataclass
 
 pytestmark = pytest.mark.integration
 
@@ -123,6 +118,7 @@ def test_login_five_times_wrong_password_all_return_401(client: TestClient):
 
 def test_login_step1_success_returns_two_factor_required(client: TestClient, mock_login_service):
     """Érvényes 1. lépés: service LoginTwoFactorRequired → 200, pending_token a válaszban."""
+    from apps.auth.application.dto import LoginTwoFactorRequired
     mock_login_service.result = LoginTwoFactorRequired(pending_token="pending-xyz")
     r = client.post(
         "/api/auth/login",
@@ -140,6 +136,7 @@ def test_login_step2_success_returns_tokens_and_cookie(
     client: TestClient, mock_login_service, sample_user: User
 ):
     """Érvényes 2. lépés: service LoginSuccess → 200, access_token, user; refresh csak cookie-ban (policy)."""
+    from apps.auth.application.dto import LoginSuccess
     mock_login_service.result = LoginSuccess(
         access_token="access-abc",
         refresh_token="refresh-xyz",
@@ -373,10 +370,9 @@ def test_logout_success_returns_ok(client_authenticated: TestClient, mock_logout
 # ---------- Forgot password ----------
 
 
-def test_forgot_password_returns_200(client: TestClient, mock_user_service):
+def test_forgot_password_returns_200(client: TestClient, mock_user_service, app):
     """POST /auth/forgot-password bármilyen emaillel → 200, { ok: true } (ne lehessen kideríteni, hogy létezik-e)."""
     from apps.core.di import get_user_service
-    app = get_app()
     app.dependency_overrides[get_user_service] = lambda: mock_user_service
     try:
         r = client.post("/api/auth/forgot-password", json={"email": "any@example.com"})
@@ -404,12 +400,12 @@ def test_change_password_without_auth_returns_401(client: TestClient):
     assert r.status_code == 401
 
 
-def test_change_password_wrong_current_returns_400(client_authenticated: TestClient, sample_user: User):
+def test_change_password_wrong_current_returns_400(client_authenticated: TestClient, sample_user: User, app):
     """Hibás jelenlegi jelszó → 400 (érvényes hash, de rossz jelszó)."""
     from dataclasses import replace
     from passlib.hash import bcrypt_sha256 as pwd_hasher
+    from apps.core.security.auth_dependencies import get_current_user
     # Érvényes hash kell, különben passlib InvalidHashError-t dob; verify("wrong", hash) → False → 400
-    app = get_app()
     user_with_hash = replace(sample_user, password_hash=pwd_hasher.hash("correct"))
     app.dependency_overrides[get_current_user] = lambda: user_with_hash
     try:
@@ -425,11 +421,11 @@ def test_change_password_wrong_current_returns_400(client_authenticated: TestCli
         app.dependency_overrides.pop(get_current_user, None)
 
 
-def test_change_password_success_returns_200(client_authenticated: TestClient, sample_user: User):
+def test_change_password_success_returns_200(client_authenticated: TestClient, sample_user: User, app):
     """Helyes jelenlegi + erős új jelszó → 200, { ok: true }."""
     from dataclasses import replace
     from passlib.hash import bcrypt_sha256 as pwd_hasher
-    app = get_app()
+    from apps.core.security.auth_dependencies import get_current_user
     user_with_pass = replace(sample_user, password_hash=pwd_hasher.hash("oldpass"))
     app.dependency_overrides[get_current_user] = lambda: user_with_pass
     try:
@@ -559,10 +555,15 @@ class InMemory2FAAttemptRepo:
 
 
 def test_login_step2_five_wrong_codes_then_sixth_returns_429(
-    mock_user_repo, sample_user,
+    mock_user_repo, sample_user, app,
 ):
     """5 rossz 2FA kód után a 6. step2 hívás 429 (too many attempts); új login step1 kell."""
-    app = get_app()
+    from apps.core.di import get_login_service
+    from apps.core.container.app_container import container
+    from config.settings import settings
+    from apps.auth.domain.tenant import Tenant
+    from apps.auth.application.services.two_factor_service import TwoFactorService
+    from apps.auth.application.services.login_service import LoginService
     DEMO_TENANT = Tenant(id=1, slug="demo", name="Demo", created_at=datetime.now(timezone.utc))
     in_memory_attempt_repo = InMemory2FAAttemptRepo(max_attempts=5, window_minutes=15)
     mock_two_factor_repo = MagicMock()

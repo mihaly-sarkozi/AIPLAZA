@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { toast } from "sonner";
 import { useTranslation } from "../../../i18n";
+import { SavedModal } from "../../../components/SavedModal";
 import { getApiErrorMessage } from "../../../utils/getApiErrorMessage";
 import {
   useKbList,
@@ -31,6 +31,7 @@ export default function KBEdit() {
   const [personalDataSensitivity, setPersonalDataSensitivity] =
     useState<PersonalDataSensitivity>("medium");
   const [error, setError] = useState("");
+  const [savedModalOpen, setSavedModalOpen] = useState(false);
 
   const kb = uuid ? kbList.find((x) => x.uuid === uuid) : null;
 
@@ -66,8 +67,7 @@ export default function KBEdit() {
       },
       {
         onSuccess: () => {
-          toast.success(t("profile.saved"));
-          navigate("/kb");
+          setSavedModalOpen(true);
         },
         onError: (err: unknown) => {
           setError(getApiErrorMessage(err) ?? t("kb.errorUpdate"));
@@ -77,6 +77,14 @@ export default function KBEdit() {
   };
 
   return (
+    <>
+      <SavedModal
+        open={savedModalOpen}
+        onClose={() => {
+          setSavedModalOpen(false);
+          navigate("/kb");
+        }}
+      />
     <div className="p-6 min-h-full bg-[var(--color-background)] max-w-xl mx-auto">
       <h1 className="text-xl sm:text-2xl md:text-3xl font-bold mb-6 text-[var(--color-foreground)]">
         {t("kb.editPageTitle")}
@@ -168,7 +176,8 @@ export default function KBEdit() {
             {updateKbMutation.isPending ? t("common.loading") : t("common.save")}
           </button>
         </div>
-      </form>
+        </form>
     </div>
+    </>
   );
 }

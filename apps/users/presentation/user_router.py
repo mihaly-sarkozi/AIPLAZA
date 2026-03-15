@@ -33,15 +33,17 @@ def _request_base_url(request: Request) -> str:
 
 
 def _frontend_base_url_for_set_password(request: Request) -> str:
-    """A set-password link alap URL-je: host a kérésből, port a frontend port (ha megadva), különben a kérés portja."""
+    """A set-password link alap URL-je: fix frontend URL vagy tenant slug + base domain."""
     from config.settings import settings
-    scheme = request.headers.get("x-forwarded-proto") or request.url.scheme
-    host = request.headers.get("x-forwarded-host") or request.headers.get("host") or request.url.netloc
-    hostname = host.split(":")[0] if ":" in host else host
+    if getattr(settings, "frontend_base_url", ""):
+        return str(settings.frontend_base_url).rstrip("/")
+    scheme = request.url.scheme
+    tenant_slug = getattr(request.state, "tenant_slug", None)
+    hostname = f"{tenant_slug}.{settings.tenant_base_domain}" if tenant_slug else request.url.hostname
     port = getattr(settings, "frontend_set_password_port", None)
     if port is not None:
         return f"{scheme}://{hostname}:{port}"
-    return f"{scheme}://{host}"
+    return f"{scheme}://{hostname}"
 
 # Tenant ID lekérése a request.state.tenant_id alapján, ami a host alapján van beállítva a TenantMiddleware-ben.
 def get_tenant_id(request: Request) -> int:

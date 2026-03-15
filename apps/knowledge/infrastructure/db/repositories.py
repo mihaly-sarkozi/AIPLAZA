@@ -1,14 +1,18 @@
-from typing import Optional
-from sqlalchemy import select, delete
+from datetime import datetime, timedelta
+from typing import List, Optional, Tuple
+from sqlalchemy import select, delete, or_, func
+from config.settings import settings
 from apps.knowledge.domain.kb import KnowledgeBase
 from apps.knowledge.infrastructure.db.models import KBORM, KbUserPermissionORM, KbTrainingLogORM, KbPersonalDataORM
 from apps.knowledge.ports.repositories import KnowledgeBaseRepositoryPort, KbPermissionItem
+from apps.knowledge.pii.encryption import PiiEncryptor
 
 
 class MySQLKnowledgeBaseRepository(KnowledgeBaseRepositoryPort):
 
     def __init__(self, session_factory):
         self.session_factory = session_factory
+        self._pii_encryptor = PiiEncryptor()
 
     def _to_domain(self, orm: KBORM) -> KnowledgeBase:
         return KnowledgeBase(
@@ -99,6 +103,30 @@ class MySQLKnowledgeBaseRepository(KnowledgeBaseRepositoryPort):
             rows = session.execute(stmt).all()
             return [(r[0], r[1]) for r in rows]
 
+    def list_permissions_batch(self, kb_uuids: list[str]) -> dict[str, list[KbPermissionItem]]:
+        if not kb_uuids:
+            return {}
+        with self.session_factory() as session:
+            kb_rows = session.execute(
+                select(KBORM.id, KBORM.uuid).where(KBORM.uuid.in_(kb_uuids))
+            ).all()
+            id_to_uuid = {row[0]: row[1] for row in kb_rows}
+            if not id_to_uuid:
+                return {u: [] for u in kb_uuids}
+
+            perm_rows = session.execute(
+                select(KbUserPermissionORM.kb_id, KbUserPermissionORM.user_id, KbUserPermissionORM.permission).where(
+                    KbUserPermissionORM.kb_id.in_(list(id_to_uuid.keys()))
+                )
+            ).all()
+            out: dict[str, list[KbPermissionItem]] = {u: [] for u in kb_uuids}
+            for kb_id, user_id, permission in perm_rows:
+                kb_uuid = id_to_uuid.get(kb_id)
+                if kb_uuid is None:
+                    continue
+                out[kb_uuid].append((user_id, permission))
+            return out
+
     def add_training_log(
         self,
         kb_id: int,
@@ -126,6 +154,15 @@ class MySQLKnowledgeBaseRepository(KnowledgeBaseRepositoryPort):
             session.commit()
 
     def list_training_log(self, kb_uuid: str) -> list[dict]:
+        return self.list_training_log_paginated(kb_uuid=kb_uuid, limit=50, offset=0, include_raw_content=False)
+
+    def list_training_log_paginated(
+        self,
+        kb_uuid: str,
+        limit: int = 50,
+        offset: int = 0,
+        include_raw_content: bool = False,
+    ) -> list[dict]:
         with self.session_factory() as session:
             kb = session.execute(select(KBORM).where(KBORM.uuid == kb_uuid)).scalar_one_or_none()
             if not kb:
@@ -134,6 +171,8 @@ class MySQLKnowledgeBaseRepository(KnowledgeBaseRepositoryPort):
                 select(KbTrainingLogORM)
                 .where(KbTrainingLogORM.kb_id == kb.id)
                 .order_by(KbTrainingLogORM.created_at.desc())
+                .limit(max(1, min(limit, 200)))
+                .offset(max(0, offset))
             )
             rows = session.execute(stmt).scalars().all()
             return [
@@ -143,7 +182,7 @@ class MySQLKnowledgeBaseRepository(KnowledgeBaseRepositoryPort):
                     "user_display": r.user_display or "",
                     "title": r.title,
                     "content": r.content,
-                    "raw_content": getattr(r, "raw_content", None),
+                    "raw_content": getattr(r, "raw_content", None) if include_raw_content else None,
                     "review_decision": getattr(r, "review_decision", None),
                     "created_at": r.created_at.isoformat() if r.created_at else None,
                 }
@@ -152,6 +191,10 @@ class MySQLKnowledgeBaseRepository(KnowledgeBaseRepositoryPort):
 
     def delete_training_log_by_point_id(self, kb_id: int, point_id: str) -> bool:
         with self.session_factory() as session:
+            session.execute(delete(KbPersonalDataORM).where(
+                KbPersonalDataORM.kb_id == kb_id,
+                KbPersonalDataORM.point_id == point_id,
+            ))
             stmt = delete(KbTrainingLogORM).where(
                 KbTrainingLogORM.kb_id == kb_id,
                 KbTrainingLogORM.point_id == point_id,
@@ -189,17 +232,124 @@ class MySQLKnowledgeBaseRepository(KnowledgeBaseRepositoryPort):
             rows = session.execute(stmt).scalars().all()
             return list(rows)
 
-    def add_personal_data(self, kb_id: int, data_type: str, extracted_value: str) -> str:
+    def list_personal_data_by_point_id(self, kb_id: int, point_id: str) -> List[Tuple[str, str]]:
+        """point_id-hez tartozó személyes adatok: [(reference_id, extracted_value), ...]."""
+        with self.session_factory() as session:
+            stmt = select(KbPersonalDataORM.reference_id, KbPersonalDataORM.extracted_value).where(
+                KbPersonalDataORM.kb_id == kb_id,
+                KbPersonalDataORM.point_id == point_id,
+                or_(KbPersonalDataORM.expires_at.is_(None), KbPersonalDataORM.expires_at > datetime.utcnow()),
+            )
+            rows = session.execute(stmt).all()
+            out: List[Tuple[str, str]] = []
+            for ref_id, enc_value in rows:
+                out.append((ref_id, self._pii_encryptor.decrypt(enc_value)))
+            return out
+
+    def add_personal_data(
+        self, kb_id: int, point_id: str, data_type: str, extracted_value: str
+    ) -> str:
         import uuid as uuid_mod
         ref_id = str(uuid_mod.uuid4())
+        retention_days = int(getattr(settings, "pii_retention_days", 90) or 90)
+        now = datetime.utcnow()
+        expires_at = now + timedelta(days=retention_days) if retention_days > 0 else None
+        encrypted = self._pii_encryptor.encrypt(extracted_value)
         with self.session_factory() as session:
             session.add(
                 KbPersonalDataORM(
                     kb_id=kb_id,
+                    point_id=point_id,
                     data_type=data_type,
-                    extracted_value=extracted_value,
+                    extracted_value=encrypted,
                     reference_id=ref_id,
+                    created_at=now,
+                    expires_at=expires_at,
                 )
             )
             session.commit()
         return ref_id
+
+    def purge_expired_personal_data(self) -> int:
+        with self.session_factory() as session:
+            stmt = delete(KbPersonalDataORM).where(
+                KbPersonalDataORM.expires_at.is_not(None),
+                KbPersonalDataORM.expires_at <= datetime.utcnow(),
+            )
+            result = session.execute(stmt)
+            session.commit()
+            return int(result.rowcount or 0)
+
+    def list_personal_data_records(self, kb_id: int, limit: int = 1000, offset: int = 0) -> List[dict]:
+        with self.session_factory() as session:
+            stmt = (
+                select(
+                    KbPersonalDataORM.reference_id,
+                    KbPersonalDataORM.point_id,
+                    KbPersonalDataORM.data_type,
+                    KbPersonalDataORM.extracted_value,
+                    KbPersonalDataORM.created_at,
+                    KbPersonalDataORM.expires_at,
+                )
+                .where(KbPersonalDataORM.kb_id == kb_id)
+                .order_by(KbPersonalDataORM.created_at.desc())
+                .limit(max(1, min(limit, 20000)))
+                .offset(max(0, offset))
+            )
+            rows = session.execute(stmt).all()
+            out: List[dict] = []
+            for ref_id, point_id, data_type, enc_value, created_at, expires_at in rows:
+                out.append(
+                    {
+                        "reference_id": ref_id,
+                        "point_id": point_id,
+                        "data_type": data_type,
+                        "value": self._pii_encryptor.decrypt(enc_value),
+                        "created_at": created_at.isoformat() if created_at else None,
+                        "expires_at": expires_at.isoformat() if expires_at else None,
+                    }
+                )
+            return out
+
+    def delete_personal_data_by_reference_ids(self, kb_id: int, reference_ids: List[str]) -> int:
+        if not reference_ids:
+            return 0
+        with self.session_factory() as session:
+            stmt = delete(KbPersonalDataORM).where(
+                KbPersonalDataORM.kb_id == kb_id,
+                KbPersonalDataORM.reference_id.in_(reference_ids),
+            )
+            result = session.execute(stmt)
+            session.commit()
+            return int(result.rowcount or 0)
+
+    def personal_data_metrics(self, kb_id: int) -> dict:
+        now = datetime.utcnow()
+        with self.session_factory() as session:
+            total_stmt = select(func.count()).select_from(KbPersonalDataORM).where(
+                KbPersonalDataORM.kb_id == kb_id,
+                or_(KbPersonalDataORM.expires_at.is_(None), KbPersonalDataORM.expires_at > now),
+            )
+            expired_stmt = select(func.count()).select_from(KbPersonalDataORM).where(
+                KbPersonalDataORM.kb_id == kb_id,
+                KbPersonalDataORM.expires_at.is_not(None),
+                KbPersonalDataORM.expires_at <= now,
+            )
+            by_type_stmt = (
+                select(KbPersonalDataORM.data_type, func.count())
+                .where(
+                    KbPersonalDataORM.kb_id == kb_id,
+                    or_(KbPersonalDataORM.expires_at.is_(None), KbPersonalDataORM.expires_at > now),
+                )
+                .group_by(KbPersonalDataORM.data_type)
+                .order_by(func.count().desc())
+            )
+            total = int(session.execute(total_stmt).scalar() or 0)
+            expired = int(session.execute(expired_stmt).scalar() or 0)
+            by_type_rows = session.execute(by_type_stmt).all()
+            by_type = [{"data_type": row[0], "count": int(row[1] or 0)} for row in by_type_rows]
+            return {
+                "total_active": total,
+                "expired": expired,
+                "by_type": by_type,
+            }

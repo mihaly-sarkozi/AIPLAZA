@@ -277,12 +277,13 @@ class TestPolicyEsReplace:
         refs = [f"ref{i}" for i in range(len(matches))]
         result = apply_pii_replacements(text, matches, refs)
         assert "anna@example.com" not in result
-        assert "[EMAIL_ADDRESS]" in result
+        # ref_id-val: [EMAIL_ADDRESS_ref0]; ref nélkül: [EMAIL_ADDRESS]
+        assert "EMAIL_ADDRESS" in result
         # Név is kiszűrve (legacy fallback vagy NER), ha van név találat
         name_matches = [m for m in matches if m[2] == "név"]
         if name_matches:
             assert "Kovács Anna" not in result
-            assert "[PERSON_NAME]" in result
+            assert "PERSON_NAME" in result
 
 
 # --- Nem (még) implementált típusok – dokumentációs tesztek (xfail) ---

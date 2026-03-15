@@ -36,11 +36,9 @@ def test_list_users_with_users_returns_data(client_superuser: TestClient, mock_u
     assert "password_hash" not in data[0]
 
 
-def test_list_users_non_superuser_returns_403(client_superuser: TestClient):
+def test_list_users_non_superuser_returns_403(client_superuser: TestClient, app):
     """GET /users nem superuserrel → 403."""
-    from tests.conftest import get_app
     from apps.core.security.auth_dependencies import get_current_user
-    app = get_app()
     non_admin = User(
         id=2,
         email="user@example.com",

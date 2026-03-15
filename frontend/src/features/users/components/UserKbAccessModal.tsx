@@ -1,8 +1,6 @@
-import { useEffect, useState } from "react";
-import { useQueries } from "@tanstack/react-query";
+import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "../../../i18n";
-import { getKbPermissions } from "../../knowledge-base/services";
-import { queryKeys } from "../../../queryKeys";
+import { getKbPermissionsBatch } from "../../knowledge-base/services";
 import { useSetKbPermissionsMutation } from "../../knowledge-base/hooks/useKb";
 import type { KbItem, KbPermissionItem } from "../../knowledge-base/services";
 import type { UserListItem } from "../hooks/useUsers";
@@ -22,31 +20,64 @@ interface UserKbAccessModalProps {
 export default function UserKbAccessModal({ user, onClose, kbList }: UserKbAccessModalProps) {
   const { t } = useTranslation();
   const [permissionsByKb, setPermissionsByKb] = useState<Record<string, Array<{ user_id: number; permission: string }>>>({});
-
-  const permissionQueries = useQueries({
-    queries: kbList.map((kb) => ({
-      queryKey: [...queryKeys.kb, kb.uuid, "permissions"],
-      queryFn: () => getKbPermissions(kb.uuid),
-      enabled: !!user?.id && !!kb.uuid,
-    })),
-  });
+  const [initialPermissionsByKb, setInitialPermissionsByKb] = useState<Record<string, Array<{ user_id: number; permission: string }>>>({});
+  const [isLoadingPermissions, setIsLoadingPermissions] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   const setPermissionsMutation = useSetKbPermissionsMutation();
-  const actionLoading = setPermissionsMutation.isPending;
-
-  const allLoaded = permissionQueries.every((q) => !q.isLoading && q.data != null);
-  const isLoading = permissionQueries.some((q) => q.isLoading);
+  const actionLoading = isLoadingPermissions || setPermissionsMutation.isPending;
 
   useEffect(() => {
-    if (!allLoaded || !user?.id) return;
-    const next: Record<string, Array<{ user_id: number; permission: string }>> = {};
-    permissionQueries.forEach((q, i) => {
-      const kb = kbList[i];
-      if (!kb || !q.data) return;
-      next[kb.uuid] = (q.data as KbPermissionItem[]).map((p) => ({ user_id: p.user_id, permission: p.permission }));
-    });
-    setPermissionsByKb(next);
-  }, [allLoaded, user?.id, kbList, permissionQueries.map((q) => q.dataUpdatedAt).join(",")]);
+    let cancelled = false;
+    async function loadPermissions() {
+      if (!user?.id) {
+        setPermissionsByKb({});
+        setInitialPermissionsByKb({});
+        setIsLoadingPermissions(false);
+        return;
+      }
+      setIsLoadingPermissions(true);
+      setLoadError(null);
+      const next: Record<string, Array<{ user_id: number; permission: string }>> = {};
+      const kbUuids = kbList.map((kb) => kb.uuid).filter(Boolean);
+      try {
+        const byKb = await getKbPermissionsBatch(kbUuids);
+        kbList.forEach((kb) => {
+          const rows = (byKb[kb.uuid] || []) as KbPermissionItem[];
+          next[kb.uuid] = rows.map((p) => ({ user_id: p.user_id, permission: p.permission }));
+        });
+      } catch {
+        kbList.forEach((kb) => {
+          next[kb.uuid] = [];
+        });
+        if (!cancelled) {
+          setLoadError("A jogosultságokat nem sikerült betölteni.");
+        }
+      }
+      if (cancelled) return;
+      setPermissionsByKb(next);
+      setInitialPermissionsByKb(next);
+      setIsLoadingPermissions(false);
+    }
+    loadPermissions();
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.id, kbList]);
+
+  const changedKbUuids = useMemo(() => {
+    const normalize = (items: Array<{ user_id: number; permission: string }> = []) =>
+      items
+        .filter((p) => p.permission && p.permission !== PERM_NONE)
+        .map((p) => ({ user_id: p.user_id, permission: p.permission }))
+        .sort((a, b) => a.user_id - b.user_id);
+    const same = (a: Array<{ user_id: number; permission: string }> = [], b: Array<{ user_id: number; permission: string }> = []) =>
+      JSON.stringify(normalize(a)) === JSON.stringify(normalize(b));
+    return kbList
+      .filter((kb) => !same(permissionsByKb[kb.uuid] ?? [], initialPermissionsByKb[kb.uuid] ?? []))
+      .map((kb) => kb.uuid);
+  }, [kbList, permissionsByKb, initialPermissionsByKb]);
 
   const getPermissionForUser = (kbUuid: string) => {
     const list = permissionsByKb[kbUuid] ?? [];
@@ -62,11 +93,21 @@ export default function UserKbAccessModal({ user, onClose, kbList }: UserKbAcces
     });
   };
 
-  const handleSave = () => {
-    kbList.forEach((kb) => {
-      const list = permissionsByKb[kb.uuid];
-      if (list) setPermissionsMutation.mutate({ uuid: kb.uuid, permissions: list });
-    });
+  const handleSave = async () => {
+    setSaveError(null);
+    if (changedKbUuids.length === 0) {
+      onClose();
+      return;
+    }
+    try {
+      for (const kbUuid of changedKbUuids) {
+        const list = permissionsByKb[kbUuid] ?? [];
+        await setPermissionsMutation.mutateAsync({ uuid: kbUuid, permissions: list });
+      }
+    } catch {
+      setSaveError("A mentés közben hiba történt. Ellenőrizd a kapcsolatot, majd próbáld újra.");
+      return;
+    }
     onClose();
   };
 
@@ -80,10 +121,12 @@ export default function UserKbAccessModal({ user, onClose, kbList }: UserKbAcces
           {user.name ?? user.email}
         </h2>
         <p className="text-sm text-[var(--color-muted)] mb-4">{t("roles.kbAccessHint")}</p>
-        {isLoading ? (
+        {isLoadingPermissions ? (
           <p className="text-[var(--color-muted)]">{t("common.loading")}</p>
         ) : (
           <>
+            {loadError ? <p className="text-sm text-red-500 mb-3">{loadError}</p> : null}
+            {saveError ? <p className="text-sm text-red-500 mb-3">{saveError}</p> : null}
             <div className="border border-[var(--color-border)] rounded overflow-hidden max-h-64 overflow-y-auto">
               <table className="w-full text-sm">
                 <tbody>
@@ -150,7 +193,7 @@ export default function UserKbAccessModal({ user, onClose, kbList }: UserKbAcces
               <button
                 type="button"
                 onClick={handleSave}
-                disabled={actionLoading}
+                disabled={actionLoading || changedKbUuids.length === 0}
                 className="px-4 py-2 rounded bg-[var(--color-primary)] hover:opacity-90 text-[var(--color-on-primary)] disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {setPermissionsMutation.isPending ? t("common.loading") : t("kb.savePermissions")}

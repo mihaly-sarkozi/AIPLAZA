@@ -50,9 +50,12 @@ class KbPersonalDataORM(TenantSchemaBase):
 
     id = Column(Integer, primary_key=True)
     kb_id = Column(Integer, ForeignKey("knowledge_bases.id", ondelete="CASCADE"), nullable=False, index=True)
+    point_id = Column(String(36), nullable=False, index=True)  # kb_training_log.point_id – melyik bejegyzéshez tartozik
     data_type = Column(String(64), nullable=False, index=True)  # pl. név, születési_dátum, email
     extracted_value = Column(Text, nullable=False)  # az eredeti érték
     reference_id = Column(String(36), nullable=False, index=True)  # a [típus_reference_id] azonosító
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    expires_at = Column(DateTime, nullable=True, index=True)
 
 
 class KbUserPermissionORM(TenantSchemaBase):

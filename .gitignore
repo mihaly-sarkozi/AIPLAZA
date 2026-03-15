@@ -34,3 +34,4 @@ node_modules/
 frontend/dist/
 frontend/build/
 *.egg-info/
+.env.backup.*

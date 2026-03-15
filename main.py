@@ -26,6 +26,7 @@ from sqlalchemy import text
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.requests import Request
 from slowapi.errors import RateLimitExceeded
 
@@ -149,11 +150,15 @@ else:
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins.split(","),
-    allow_origin_regex=settings.cors_origin_regex,
+    allow_origin_regex=_cors_origin_regex,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["Authorization", "Content-Type", "X-CSRF-Token"],
 )
+
+_trusted_hosts = [h.strip() for h in (getattr(settings, "trusted_hosts", "") or "").split(",") if h.strip()]
+if _trusted_hosts:
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=_trusted_hosts)
 
 """
 Auth middleware (a Tenant UTÁN kell regisztrálni, hogy a stackben a Tenant fusson előbb!)

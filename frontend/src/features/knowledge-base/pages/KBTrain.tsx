@@ -1,6 +1,5 @@
 import { useState, useCallback } from "react";
 import { useParams } from "react-router-dom";
-import { toast } from "sonner";
 import { useTranslation } from "../../../i18n";
 import { ProcessProgressOverlay } from "../../../components/ProcessProgressOverlay";
 import {
@@ -74,6 +73,9 @@ export default function KBTrain() {
   const [contentDragOver, setContentDragOver] = useState(false);
   const [logModalOpen, setLogModalOpen] = useState(false);
   const [viewEntry, setViewEntry] = useState<KbTrainingLogEntry | null>(null);
+  const [deleteConfirmEntry, setDeleteConfirmEntry] = useState<KbTrainingLogEntry | null>(null);
+  const [piiResultModal, setPiiResultModal] = useState<"masked" | "deleted" | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [piiConfirmOpen, setPiiConfirmOpen] = useState(false);
   const [piiConfirmPayload, setPiiConfirmPayload] = useState<{
     type: "text" | "file";
@@ -83,6 +85,7 @@ export default function KBTrain() {
     matches: PiiMatchItem[];
   } | null>(null);
   const [piiDecisions, setPiiDecisions] = useState<Record<number, "delete" | "mask" | "keep">>({});
+  const [piiReviewTab, setPiiReviewTab] = useState<"pending" | "replied">("pending");
   const [processingTotalSentences, setProcessingTotalSentences] = useState<number | null>(null);
 
   const { data: kbList = [] } = useKbList();
@@ -111,17 +114,13 @@ export default function KBTrain() {
       trainFileMutation.mutate(
         { uuid, formData, confirm_pii: confirmPii, pii_decisions: piiDecisionsList },
         {
-          onSuccess: (data: { masked?: boolean; pii_replaced_with_dots?: boolean }) => {
-            if (data?.pii_replaced_with_dots) {
-              toast.success(t("kb.piiDeletedMessage"));
-            } else if (data?.masked) {
-              toast.success(t("kb.piiMaskedMessage"));
-            } else {
-              toast.success(t("kb.trainedSuccess"));
-            }
+          onSuccess: (data: unknown) => {
             setPiiConfirmOpen(false);
             setPiiConfirmPayload(null);
             setPiiDecisions({});
+            const d = data as { masked?: boolean; pii_replaced_with_dots?: boolean };
+            if (d?.pii_replaced_with_dots) setPiiResultModal("deleted");
+            else if (d?.masked) setPiiResultModal("masked");
           },
           onError: (err: unknown) => {
             const ax = err as { response?: { status?: number; data?: { detail?: { requires_pii_confirmation?: boolean; matches?: PiiMatchItem[] } } } };
@@ -133,7 +132,7 @@ export default function KBTrain() {
               setPiiConfirmOpen(true);
               return;
             }
-            toast.error(getApiErrorMessage(err, t("kb.errorUpdate")));
+            setErrorMessage(getApiErrorMessage(err, t("kb.errorUpdate")));
           },
           onSettled: () => setProcessingTotalSentences(null),
         }
@@ -150,7 +149,7 @@ export default function KBTrain() {
           setContent(text);
           setUploadModalOpen(false);
         } catch {
-          toast.error(t("kb.errorUpdate"));
+          setErrorMessage(t("kb.errorUpdate"));
         }
       } else {
         await trainWithFile(file);
@@ -175,7 +174,7 @@ export default function KBTrain() {
     if (isTxt(f)) {
       readTxtFile(f)
         .then((text) => setContent(text))
-        .catch(() => toast.error(t("kb.errorUpdate")));
+        .catch(() => setErrorMessage(t("kb.errorUpdate")));
     } else {
       trainWithFile(f).catch(() => {});
     }
@@ -184,25 +183,21 @@ export default function KBTrain() {
   const trainText = (piiDecisionsList?: PiiDecisionItem[]) => {
     if (!uuid) return;
     if (!content.trim()) {
-      toast.error(t("kb.noContentError"));
+      setErrorMessage(t("kb.noContentError"));
       return;
     }
     setProcessingTotalSentences(countSentences(content));
     trainTextMutation.mutate(
       { uuid, title: "", content, confirm_pii: !!piiDecisionsList?.length, pii_decisions: piiDecisionsList },
       {
-        onSuccess: (data: { masked?: boolean; pii_replaced_with_dots?: boolean }) => {
-          if (data?.pii_replaced_with_dots) {
-            toast.success(t("kb.piiDeletedMessage"));
-          } else if (data?.masked) {
-            toast.success(t("kb.piiMaskedMessage"));
-          } else {
-            toast.success(t("kb.trainedSuccess"));
-          }
+        onSuccess: (data: unknown) => {
           setContent("");
           setPiiConfirmOpen(false);
           setPiiConfirmPayload(null);
           setPiiDecisions({});
+          const d = data as { masked?: boolean; pii_replaced_with_dots?: boolean };
+          if (d?.pii_replaced_with_dots) setPiiResultModal("deleted");
+          else if (d?.masked) setPiiResultModal("masked");
         },
         onError: (err: unknown) => {
           const ax = err as { response?: { status?: number; data?: { detail?: { requires_pii_confirmation?: boolean; matches?: PiiMatchItem[] } } } };
@@ -214,7 +209,7 @@ export default function KBTrain() {
             setPiiConfirmOpen(true);
             return;
           }
-          toast.error(getApiErrorMessage(err, t("kb.errorUpdate")));
+          setErrorMessage(getApiErrorMessage(err, t("kb.errorUpdate")));
         },
         onSettled: () => setProcessingTotalSentences(null),
       }
@@ -239,20 +234,16 @@ export default function KBTrain() {
           pii_decisions: decisionsList,
         },
         {
-          onSuccess: (data: { masked?: boolean; pii_replaced_with_dots?: boolean }) => {
-            if (data?.pii_replaced_with_dots) {
-              toast.success(t("kb.piiDeletedMessage"));
-            } else if (data?.masked) {
-              toast.success(t("kb.piiMaskedMessage"));
-            } else {
-              toast.success(t("kb.trainedSuccess"));
-            }
+          onSuccess: (data: unknown) => {
             setContent("");
             setPiiConfirmOpen(false);
             setPiiConfirmPayload(null);
             setPiiDecisions({});
+            const d = data as { masked?: boolean; pii_replaced_with_dots?: boolean };
+            if (d?.pii_replaced_with_dots) setPiiResultModal("deleted");
+            else if (d?.masked) setPiiResultModal("masked");
           },
-          onError: (err) => toast.error(getApiErrorMessage(err, t("kb.errorUpdate"))),
+          onError: (err) => setErrorMessage(getApiErrorMessage(err, t("kb.errorUpdate"))),
           onSettled: () => setProcessingTotalSentences(null),
         }
       );
@@ -262,12 +253,14 @@ export default function KBTrain() {
   };
 
   const deleteEntry = (entry: KbTrainingLogEntry) => {
-    if (!uuid || !window.confirm(t("kb.trainLogDeleteConfirm"))) return;
+    if (!uuid) return;
     deletePointMutation.mutate(
       { uuid, pointId: entry.point_id },
       {
-        onSuccess: () => toast.success(t("kb.trainedSuccess")),
-        onError: (err) => toast.error(getApiErrorMessage(err, t("kb.errorUpdate"))),
+        onSuccess: () => {
+          setDeleteConfirmEntry(null);
+        },
+        onError: (err) => setErrorMessage(getApiErrorMessage(err, t("kb.errorUpdate"))),
       }
     );
   };
@@ -393,21 +386,27 @@ export default function KBTrain() {
                             {entry.title}
                           </td>
                           <td className="p-3 text-right">
-                            <button
-                              type="button"
-                              onClick={() => setViewEntry(entry)}
-                              className="text-[var(--color-primary)] hover:underline mr-2"
-                            >
-                              {t("kb.trainLogView")}
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => deleteEntry(entry)}
-                              disabled={deletePointMutation.isPending}
-                              className="text-red-600 dark:text-red-400 hover:underline disabled:opacity-50"
-                            >
-                              {t("kb.trainLogDelete")}
-                            </button>
+                            <div className="flex gap-2 justify-end items-center">
+                              <button
+                                type="button"
+                                onClick={() => setViewEntry(entry)}
+                                title={t("kb.trainLogView")}
+                                aria-label={t("kb.trainLogView")}
+                                className="p-2 rounded text-[var(--color-foreground)] bg-[var(--color-card)] border border-[var(--color-border)] hover:bg-[var(--color-button-hover)] disabled:opacity-50"
+                              >
+                                <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setDeleteConfirmEntry(entry)}
+                                disabled={deletePointMutation.isPending}
+                                title={t("kb.trainLogDelete")}
+                                aria-label={t("kb.trainLogDelete")}
+                                className="p-2 rounded text-white bg-red-500 hover:bg-red-600 disabled:opacity-50"
+                              >
+                                <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                              </button>
+                            </div>
                           </td>
                         </tr>
                       ))}
@@ -415,6 +414,80 @@ export default function KBTrain() {
                   </table>
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Hiba felugró – piros model window */}
+      {errorMessage && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white dark:bg-gray-900 border-2 border-red-500 rounded-lg w-96 max-w-[90vw] shadow-xl">
+            <div className="p-4 border-b border-red-500/30 bg-red-50 dark:bg-red-950/30">
+              <h3 className="font-semibold text-red-700 dark:text-red-400">
+                {t("kb.errorTitle")}
+              </h3>
+            </div>
+            <div className="p-4">
+              <p className="text-red-700 dark:text-red-300 text-sm mb-4">
+                {errorMessage}
+              </p>
+              <div className="flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => setErrorMessage(null)}
+                  className="px-4 py-2 rounded bg-red-500 hover:bg-red-600 text-white focus:outline-none"
+                >
+                  {t("kb.piiMaskedModalClose")}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* PII maszkolás/törlés eredmény felugró */}
+      {piiResultModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-[var(--color-card)] border border-[var(--color-border)] p-6 rounded-lg w-96 shadow-lg">
+            <p className="text-[var(--color-foreground)] mb-6">
+              {piiResultModal === "masked" ? t("kb.piiMaskedMessage") : t("kb.piiDeletedMessage")}
+            </p>
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={() => setPiiResultModal(null)}
+                className="px-4 py-2 rounded text-[var(--color-foreground)] hover:bg-[var(--color-button-hover)] bg-[var(--color-card)] border border-[var(--color-border)] focus:outline-none"
+              >
+                {t("kb.piiMaskedModalClose")}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Törlés megerősítés */}
+      {deleteConfirmEntry && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-[var(--color-card)] border border-[var(--color-border)] p-6 rounded-lg w-96 shadow-lg">
+            <p className="text-[var(--color-foreground)] mb-6">{t("kb.trainLogDeleteConfirm")}</p>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setDeleteConfirmEntry(null)}
+                disabled={deletePointMutation.isPending}
+                className="px-4 py-2 rounded text-[var(--color-foreground)] hover:bg-[var(--color-button-hover)] bg-[var(--color-card)] border border-[var(--color-border)] focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {t("common.cancel")}
+              </button>
+              <button
+                type="button"
+                onClick={() => deleteConfirmEntry && deleteEntry(deleteConfirmEntry)}
+                disabled={deletePointMutation.isPending}
+                className="px-4 py-2 rounded bg-red-500 hover:bg-red-600 text-white focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {deletePointMutation.isPending ? t("common.loading") : t("common.delete")}
+              </button>
             </div>
           </div>
         </div>
@@ -484,6 +557,7 @@ export default function KBTrain() {
             setPiiConfirmOpen(false);
             setPiiConfirmPayload(null);
             setPiiDecisions({});
+            setPiiReviewTab("pending");
           }}
           role="dialog"
           aria-modal="true"
@@ -492,74 +566,150 @@ export default function KBTrain() {
             className="bg-[var(--color-card)] border border-[var(--color-border)] rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] overflow-hidden flex flex-col"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="p-4 border-b border-[var(--color-border)] shrink-0">
+            <div className="p-4 border-b border-[var(--color-border)] shrink-0 space-y-1">
               <h3 className="font-semibold text-[var(--color-foreground)]">
                 {t("kb.piiReviewTitle")}
               </h3>
+              <p className="text-sm text-[var(--color-muted)]">
+                {t("kb.piiReviewSubtitle")}
+              </p>
+            </div>
+            <div className="border-b border-[var(--color-border)] shrink-0 flex">
+              <button
+                type="button"
+                onClick={() => setPiiReviewTab("pending")}
+                className={`px-4 py-2 text-sm font-medium transition ${
+                  piiReviewTab === "pending"
+                    ? "text-[var(--color-foreground)] border-b-2 border-[var(--color-primary)]"
+                    : "text-[var(--color-muted)] hover:text-[var(--color-foreground)]"
+                }`}
+              >
+                {t("kb.piiReviewTabPending")} ({piiConfirmPayload.matches.filter((m) => piiDecisions[m.index] == null).length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setPiiReviewTab("replied")}
+                className={`px-4 py-2 text-sm font-medium transition ${
+                  piiReviewTab === "replied"
+                    ? "text-[var(--color-foreground)] border-b-2 border-[var(--color-primary)]"
+                    : "text-[var(--color-muted)] hover:text-[var(--color-foreground)]"
+                }`}
+              >
+                {t("kb.piiReviewTabReplied")} ({piiConfirmPayload.matches.filter((m) => piiDecisions[m.index] != null).length})
+              </button>
             </div>
             <div className="overflow-y-auto flex-1 min-h-0 p-4 space-y-4">
-              {piiConfirmPayload.matches.map((m) => (
-                <div
-                  key={m.index}
-                  className="border border-[var(--color-border)] rounded-lg p-3 bg-[var(--color-input-bg)]"
-                >
-                  <div className="text-sm text-[var(--color-foreground)] mb-2 font-mono break-words">
-                    <span className="text-[var(--color-muted)]">{m.context_before}</span>
-                    <strong className="font-bold text-[var(--color-primary)]">{m.value}</strong>
-                    <span className="text-[var(--color-muted)]">{m.context_after}</span>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    {piiDecisions[m.index] == null ? (
-                      <>
-                        <button
-                          type="button"
-                          onClick={() => setPiiDecisions((prev) => ({ ...prev, [m.index]: "delete" }))}
-                          className="px-3 py-1.5 rounded text-sm border border-red-500/50 text-red-600 dark:text-red-400 hover:bg-red-500/10"
-                        >
-                          {t("kb.piiReviewDelete")}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setPiiDecisions((prev) => ({ ...prev, [m.index]: "mask" }))}
-                          className="px-3 py-1.5 rounded text-sm border border-[var(--color-border)] text-[var(--color-foreground)] hover:bg-[var(--color-button-hover)]"
-                        >
-                          {t("kb.piiReviewMask")}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setPiiDecisions((prev) => ({ ...prev, [m.index]: "keep" }))}
-                          className="px-3 py-1.5 rounded text-sm border border-[var(--color-border)] text-[var(--color-foreground)] hover:bg-[var(--color-button-hover)]"
-                        >
-                          {t("kb.piiReviewKeep")}
-                        </button>
-                      </>
-                    ) : (
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm text-[var(--color-muted)]">
-                          {piiDecisions[m.index] === "delete"
-                            ? t("kb.piiReviewActionDelete")
-                            : piiDecisions[m.index] === "mask"
-                              ? t("kb.piiReviewActionMask")
-                              : t("kb.piiReviewActionKeep")}
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setPiiDecisions((prev) => {
-                              const next = { ...prev };
-                              delete next[m.index];
-                              return next;
-                            })
-                          }
-                          className="px-2 py-1 rounded text-sm border border-[var(--color-border)] text-[var(--color-foreground)] hover:bg-[var(--color-button-hover)]"
-                        >
-                          {t("kb.piiReviewBack")}
-                        </button>
+              {piiReviewTab === "pending"
+                ? piiConfirmPayload.matches
+                    .filter((m) => piiDecisions[m.index] == null)
+                    .map((m) => (
+                      <div
+                        key={m.index}
+                        className="border border-[var(--color-border)] rounded-lg p-3 bg-[var(--color-input-bg)]"
+                      >
+                        <div className="text-sm text-[var(--color-foreground)] mb-2 font-mono break-words">
+                          <span className="text-[var(--color-muted)]">{m.context_before}</span>
+                          <strong className="font-bold text-[var(--color-primary)]">{m.value}</strong>
+                          <span className="text-[var(--color-muted)]">{m.context_after}</span>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setPiiDecisions((prev) => ({ ...prev, [m.index]: "delete" }))}
+                            className="px-3 py-1.5 rounded text-sm bg-black text-white dark:bg-white dark:text-black border-0 hover:opacity-90"
+                          >
+                            {t("kb.piiReviewDelete")}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setPiiDecisions((prev) => ({ ...prev, [m.index]: "mask" }))}
+                            className="px-3 py-1.5 rounded text-sm bg-black text-white dark:bg-white dark:text-black border-0 hover:opacity-90"
+                          >
+                            {t("kb.piiReviewMask")}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setPiiDecisions((prev) => ({ ...prev, [m.index]: "keep" }))}
+                            className="px-3 py-1.5 rounded text-sm bg-black text-white dark:bg-white dark:text-black border-0 hover:opacity-90"
+                          >
+                            {t("kb.piiReviewKeep")}
+                          </button>
+                        </div>
                       </div>
-                    )}
+                    ))
+                : piiConfirmPayload.matches
+                    .filter((m) => piiDecisions[m.index] != null)
+                    .map((m) => (
+                      <div
+                        key={m.index}
+                        className="border border-[var(--color-border)] rounded-lg p-3 bg-[var(--color-input-bg)]"
+                      >
+                        <div className="text-sm text-[var(--color-foreground)] mb-2 font-mono break-words">
+                          <span className="text-[var(--color-muted)]">{m.context_before}</span>
+                          <strong className="font-bold text-[var(--color-primary)]">{m.value}</strong>
+                          <span className="text-[var(--color-muted)]">{m.context_after}</span>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setPiiDecisions((prev) => ({ ...prev, [m.index]: "delete" }))}
+                            className={`px-3 py-1.5 rounded text-sm border-0 hover:opacity-90 ${
+                              piiDecisions[m.index] === "delete"
+                                ? "bg-black text-white dark:bg-white dark:text-black ring-2 ring-[var(--color-foreground)]"
+                                : "bg-black text-white dark:bg-white dark:text-black"
+                            }`}
+                          >
+                            {t("kb.piiReviewDelete")}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setPiiDecisions((prev) => ({ ...prev, [m.index]: "mask" }))}
+                            className={`px-3 py-1.5 rounded text-sm border-0 hover:opacity-90 ${
+                              piiDecisions[m.index] === "mask"
+                                ? "bg-black text-white dark:bg-white dark:text-black ring-2 ring-[var(--color-foreground)]"
+                                : "bg-black text-white dark:bg-white dark:text-black"
+                            }`}
+                          >
+                            {t("kb.piiReviewMask")}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setPiiDecisions((prev) => ({ ...prev, [m.index]: "keep" }))}
+                            className={`px-3 py-1.5 rounded text-sm border-0 hover:opacity-90 ${
+                              piiDecisions[m.index] === "keep"
+                                ? "bg-black text-white dark:bg-white dark:text-black ring-2 ring-[var(--color-foreground)]"
+                                : "bg-black text-white dark:bg-white dark:text-black"
+                            }`}
+                          >
+                            {t("kb.piiReviewKeep")}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setPiiDecisions((prev) => {
+                                const next = { ...prev };
+                                delete next[m.index];
+                                return next;
+                              })
+                            }
+                            className="px-2 py-1 rounded text-sm bg-black text-white dark:bg-white dark:text-black border-0 hover:opacity-90"
+                          >
+                            {t("kb.piiReviewBack")}
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+              {piiReviewTab === "pending" &&
+                piiConfirmPayload.matches.every((m) => piiDecisions[m.index] != null) && (
+                  <div className="space-y-1">
+                    <p className="text-sm text-black dark:text-white">{t("kb.piiReviewAllReplied")}</p>
+                    <p className="text-sm text-black dark:text-white">{t("kb.piiReviewContinueWithTrain")}</p>
                   </div>
-                </div>
-              ))}
+                )}
+              {piiReviewTab === "replied" &&
+                piiConfirmPayload.matches.every((m) => piiDecisions[m.index] == null) && (
+                  <p className="text-sm text-[var(--color-muted)]">{t("kb.piiReviewNoReplied")}</p>
+                )}
             </div>
             <div className="p-4 border-t border-[var(--color-border)] flex flex-wrap justify-between gap-3 shrink-0">
               <button
@@ -568,6 +718,7 @@ export default function KBTrain() {
                   setPiiConfirmOpen(false);
                   setPiiConfirmPayload(null);
                   setPiiDecisions({});
+                  setPiiReviewTab("pending");
                 }}
                 className="px-4 py-2 rounded border border-[var(--color-border)] text-[var(--color-foreground)] hover:bg-[var(--color-button-hover)]"
               >

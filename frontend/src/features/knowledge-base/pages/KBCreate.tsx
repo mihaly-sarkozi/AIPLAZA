@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { toast } from "sonner";
 import { useTranslation } from "../../../i18n";
+import { SavedModal } from "../../../components/SavedModal";
 import { getApiErrorMessage } from "../../../utils/getApiErrorMessage";
 import { useCreateKbMutation } from "../hooks/useKb";
 
@@ -10,6 +10,7 @@ export default function KBCreate() {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [error, setError] = useState("");
+  const [savedModalOpen, setSavedModalOpen] = useState(false);
   const navigate = useNavigate();
   const createKbMutation = useCreateKbMutation();
 
@@ -20,8 +21,7 @@ export default function KBCreate() {
       { name: name.trim(), description: description.trim() || undefined },
       {
         onSuccess: () => {
-          toast.success(t("profile.saved"));
-          navigate("/kb");
+          setSavedModalOpen(true);
         },
         onError: (err: unknown) => {
           setError(getApiErrorMessage(err) ?? t("kb.errorCreate"));
@@ -31,6 +31,14 @@ export default function KBCreate() {
   };
 
   return (
+    <>
+      <SavedModal
+        open={savedModalOpen}
+        onClose={() => {
+          setSavedModalOpen(false);
+          navigate("/kb");
+        }}
+      />
     <div className="p-6 min-h-full bg-[var(--color-background)] max-w-xl mx-auto">
       <h1 className="text-xl sm:text-2xl md:text-3xl font-bold mb-6 text-[var(--color-foreground)]">
         {t("kb.createPageTitle")}
@@ -82,5 +90,6 @@ export default function KBCreate() {
         </div>
       </form>
     </div>
+    </>
   );
 }

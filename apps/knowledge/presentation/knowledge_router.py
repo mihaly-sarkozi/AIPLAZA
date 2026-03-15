@@ -1,7 +1,9 @@
 import json
+from pathlib import Path
 from typing import Optional
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, Query
 from openai import AuthenticationError as OpenAIAuthError, APIError as OpenAIAPIError
+from config.settings import settings
 from apps.core.middleware.rate_limit_middleware import limiter
 from apps.core.qdrant.qdrant_wrapper import QdrantUnavailableError
 from apps.users.domain.user import User
@@ -12,16 +14,30 @@ from apps.knowledge.adapter.http.request import (
     KBDelete,
     KBTrainRequest,
     KBPermissionsUpdate,
+    KBBatchPermissionsRequest,
+    KBDsarSearchRequest,
+    KBDsarDeleteRequest,
 )
 from apps.knowledge.adapter.http.response import KBOut, KBPermissionOut
 
 from apps.core.security.auth_dependencies import get_current_user_admin, get_current_user, get_current_user_owner
-from apps.core.di import get_kb_service, set_tenant_context_from_request
+from apps.core.di import get_kb_service, set_tenant_context_from_request, get_audit_service
 from apps.knowledge.application.knowledge_service import KnowledgeBaseService
 from apps.knowledge.ports.repositories import KbPermissionItem
 from apps.knowledge.application.pii_filter import PiiConfirmationRequiredError
 
 router = APIRouter(dependencies=[Depends(set_tenant_context_from_request)])
+_ALLOWED_UPLOAD_EXTENSIONS = {".pdf", ".docx", ".txt", ".csv", ".xlsx", ".xls"}
+_ALLOWED_UPLOAD_MIME_TYPES = {
+    "application/pdf",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "text/plain",
+    "text/csv",
+    "application/csv",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "application/vnd.ms-excel",
+    "application/octet-stream",
+}
 
 
 def _permissions_from_create(data: KBCreate) -> list[KbPermissionItem]:
@@ -42,6 +58,7 @@ def list_kb(
 ):
     """Lista: admin/owner mindent lát; user csak azt, amire use/train joga van. can_train = user taníthatja-e."""
     kbs = svc.list_all(current_user_id=user.id, current_user_role=user.role)
+    trainable_ids = svc.get_trainable_kb_ids(user.id, user.role)
     return [
         KBOut(
             uuid=kb.uuid,
@@ -52,7 +69,7 @@ def list_kb(
             personal_data_sensitivity=getattr(kb, "personal_data_sensitivity", None) or "medium",
             created_at=kb.created_at,
             updated_at=kb.updated_at,
-            can_train=svc.user_can_train(kb.uuid, user.id, user.role),
+            can_train=bool(kb.id is not None and kb.id in trainable_ids),
         )
         for kb in kbs
     ]
@@ -80,6 +97,7 @@ def create_kb(
 
 
 @router.get("/kb/{uuid}/permissions", response_model=list[KBPermissionOut])
+@limiter.limit("30/minute")
 def get_kb_permissions(
     uuid: str,
     svc: KnowledgeBaseService = Depends(get_kb_service),
@@ -92,7 +110,44 @@ def get_kb_permissions(
     return [KBPermissionOut.model_validate(x) for x in items]
 
 
+@router.post("/kb/permissions/batch")
+@limiter.limit("20/minute")
+def get_kb_permissions_batch(
+    data: KBBatchPermissionsRequest,
+    svc: KnowledgeBaseService = Depends(get_kb_service),
+    user: User = Depends(get_current_user),
+):
+    unique_uuids: list[str] = []
+    seen: set[str] = set()
+    for raw in data.uuids:
+        kb_uuid = (raw or "").strip()
+        if not kb_uuid or kb_uuid in seen:
+            continue
+        seen.add(kb_uuid)
+        unique_uuids.append(kb_uuid)
+    if not unique_uuids:
+        return {}
+    if len(unique_uuids) > 100:
+        raise HTTPException(status_code=400, detail="Too many knowledge base ids.")
+
+    all_kbs = svc.list_all_unfiltered()
+    kb_id_by_uuid = {kb.uuid: kb.id for kb in all_kbs if kb.id is not None}
+    if user.role != "owner":
+        allowed_ids = svc.get_trainable_kb_ids(user.id, user.role)
+        for kb_uuid in unique_uuids:
+            kb_id = kb_id_by_uuid.get(kb_uuid)
+            if kb_id is not None and kb_id not in allowed_ids:
+                raise HTTPException(status_code=403, detail="No permission to manage one or more knowledge bases")
+
+    items_by_kb = svc.get_permissions_with_users_batch(unique_uuids)
+    return {
+        kb_uuid: [KBPermissionOut.model_validate(x) for x in (items_by_kb.get(kb_uuid) or [])]
+        for kb_uuid in unique_uuids
+    }
+
+
 @router.put("/kb/{uuid}/permissions")
+@limiter.limit("20/minute")
 def set_kb_permissions(
     uuid: str,
     data: KBPermissionsUpdate,
@@ -162,8 +217,49 @@ def _handle_openai_error(e: Exception) -> None:
         ) from e
 
 
+def _handle_pii_engine_error(e: Exception) -> None:
+    """PII engine hiba esetén fail-closed, érthető 503 válasszal."""
+    raise HTTPException(
+        status_code=503,
+        detail="A személyesadat-szűrés átmenetileg nem elérhető, ezért a feltöltést biztonsági okból leállítottuk. Próbáld később újra.",
+    ) from e
+
+
+def _validate_upload_size(file: UploadFile) -> None:
+    max_mb = int(getattr(settings, "kb_upload_max_mb", 10) or 10)
+    max_bytes = max_mb * 1024 * 1024
+    try:
+        file.file.seek(0, 2)
+        size = file.file.tell()
+        file.file.seek(0)
+    except Exception:
+        size = None
+    if size is not None and size > max_bytes:
+        raise HTTPException(
+            status_code=413,
+            detail=f"A feltöltött fájl túl nagy. Maximum: {max_mb} MB.",
+        )
+
+
+def _validate_upload_type(file: UploadFile) -> None:
+    filename = (file.filename or "").strip()
+    ext = Path(filename).suffix.lower()
+    if ext not in _ALLOWED_UPLOAD_EXTENSIONS:
+        raise HTTPException(
+            status_code=400,
+            detail="Nem támogatott fájltípus. Engedélyezett: pdf, docx, txt, csv, xlsx, xls.",
+        )
+    content_type = (file.content_type or "").strip().lower()
+    if content_type and content_type not in _ALLOWED_UPLOAD_MIME_TYPES:
+        raise HTTPException(
+            status_code=400,
+            detail="A feltöltött fájl MIME típusa nem engedélyezett.",
+        )
+
+
 # --- TRAIN TEXT (nyers szöveg) ---
 @router.post("/kb/{uuid}/train")
+@limiter.limit("15/minute")
 async def train_raw_text(
     uuid: str,
     data: KBTrainRequest,
@@ -186,6 +282,8 @@ async def train_raw_text(
         raise HTTPException(status_code=400, detail=str(e))
     except PiiConfirmationRequiredError as e:
         _raise_pii_review_409(e)
+    except RuntimeError as ex:
+        _handle_pii_engine_error(ex)
     except (OpenAIAuthError, OpenAIAPIError) as ex:
         _handle_openai_error(ex)
 
@@ -210,6 +308,7 @@ def _raise_pii_review_409(e: PiiConfirmationRequiredError) -> None:
 
 # --- TRAIN TEXT (külön endpoint, ha kell) ---
 @router.post("/kb/{uuid}/train/text")
+@limiter.limit("15/minute")
 async def train_text(
     uuid: str,
     data: KBTrainRequest,
@@ -232,12 +331,15 @@ async def train_text(
         raise HTTPException(status_code=400, detail=str(e))
     except PiiConfirmationRequiredError as e:
         _raise_pii_review_409(e)
+    except RuntimeError as ex:
+        _handle_pii_engine_error(ex)
     except (OpenAIAuthError, OpenAIAPIError) as ex:
         _handle_openai_error(ex)
 
 
 # --- TRAIN FILE ---
 @router.post("/kb/{uuid}/train/file")
+@limiter.limit("10/minute")
 async def train_file(
     uuid: str,
     file: UploadFile = File(...),
@@ -247,6 +349,8 @@ async def train_file(
     svc: KnowledgeBaseService = Depends(get_kb_service),
     user: User = Depends(get_current_user),
 ):
+    _validate_upload_type(file)
+    _validate_upload_size(file)
     if not svc.user_can_train(uuid, user.id, user.role):
         raise HTTPException(status_code=403, detail="No permission to train this knowledge base")
     pii_decisions_list = None
@@ -268,28 +372,38 @@ async def train_file(
         raise HTTPException(status_code=400, detail=str(e))
     except PiiConfirmationRequiredError as e:
         _raise_pii_review_409(e)
+    except RuntimeError as ex:
+        _handle_pii_engine_error(ex)
     except (OpenAIAuthError, OpenAIAPIError) as ex:
         _handle_openai_error(ex)
 
 
 # --- TRAIN LOG (lista + törlés) ---
 @router.get("/kb/{uuid}/train/log")
+@limiter.limit("30/minute")
 def get_training_log(
     uuid: str,
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0, le=10000),
+    include_raw_content: bool = False,
     svc: KnowledgeBaseService = Depends(get_kb_service),
     user: User = Depends(get_current_user),
 ):
     """Tanítási napló: ki, mikor, milyen címmel/tartalommal tanított. Csak train joggal."""
     if not svc.user_can_train(uuid, user.id, user.role):
         raise HTTPException(status_code=403, detail="No permission to view this knowledge base")
-    return svc.list_training_log(uuid)
+    # Nyers tartalom csak ownernek kérhető explicit módon.
+    allow_raw = include_raw_content and user.role == "owner"
+    return svc.list_training_log(uuid, limit=limit, offset=offset, include_raw_content=allow_raw)
 
 
 @router.delete("/kb/{uuid}/train/points/{point_id}")
 async def delete_training_point(
+    request: Request,
     uuid: str,
     point_id: str,
     svc: KnowledgeBaseService = Depends(get_kb_service),
+    audit_service=Depends(get_audit_service),
     user: User = Depends(get_current_user),
 ):
     """Egy tanítási bejegyzés törlése a naplóból és a vektortárból. Csak train joggal."""
@@ -297,6 +411,189 @@ async def delete_training_point(
         raise HTTPException(status_code=403, detail="No permission to manage this knowledge base")
     try:
         await svc.delete_training_point(uuid, point_id)
+        try:
+            audit_service.log(
+                "pii_personal_data_deleted",
+                user_id=user.id,
+                details={"kb_uuid": uuid, "point_id": point_id, "reason": "training_point_deleted"},
+                ip=getattr(request.client, "host", None) if request.client else None,
+                user_agent=request.headers.get("user-agent"),
+                tenant_slug=getattr(request.state, "tenant_slug", None),
+            )
+        except Exception:
+            pass
         return {"status": "ok"}
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.get("/kb/{uuid}/train/points/{point_id}/pii")
+@limiter.limit("15/minute")
+def get_point_personal_data(
+    request: Request,
+    uuid: str,
+    point_id: str,
+    svc: KnowledgeBaseService = Depends(get_kb_service),
+    audit_service=Depends(get_audit_service),
+    user: User = Depends(get_current_user),
+):
+    """PII adatok lekérése egy tanítási bejegyzéshez. Csak ownernek engedett."""
+    if user.role != "owner":
+        raise HTTPException(status_code=403, detail="Only owner can view personal data records")
+    if not svc.user_can_train(uuid, user.id, user.role):
+        raise HTTPException(status_code=403, detail="No permission to view this knowledge base")
+    try:
+        rows = svc.list_personal_data_for_point(uuid, point_id)
+        try:
+            audit_service.log(
+                "pii_personal_data_viewed",
+                user_id=user.id,
+                details={"kb_uuid": uuid, "point_id": point_id, "result_count": len(rows)},
+                ip=getattr(request.client, "host", None) if request.client else None,
+                user_agent=request.headers.get("user-agent"),
+                tenant_slug=getattr(request.state, "tenant_slug", None),
+            )
+        except Exception:
+            pass
+        return rows
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.post("/kb/{uuid}/dsar/search")
+@limiter.limit("10/minute")
+def dsar_search(
+    request: Request,
+    uuid: str,
+    data: KBDsarSearchRequest,
+    svc: KnowledgeBaseService = Depends(get_kb_service),
+    audit_service=Depends(get_audit_service),
+    user: User = Depends(get_current_user),
+):
+    """DSAR keresés PII rekordokban. Csak ownernek."""
+    if user.role != "owner":
+        raise HTTPException(status_code=403, detail="Only owner can run DSAR search")
+    if not svc.user_can_train(uuid, user.id, user.role):
+        raise HTTPException(status_code=403, detail="No permission to access this knowledge base")
+    try:
+        result = svc.dsar_search(uuid, query=data.query, limit=data.limit, scan_limit=data.scan_limit)
+        try:
+            audit_service.log(
+                "dsar_search",
+                user_id=user.id,
+                details={
+                    "kb_uuid": uuid,
+                    "query_hash": result.get("query_hash"),
+                    "matched": result.get("matched"),
+                    "scanned": result.get("scanned"),
+                },
+                ip=getattr(request.client, "host", None) if request.client else None,
+                user_agent=request.headers.get("user-agent"),
+                tenant_slug=getattr(request.state, "tenant_slug", None),
+            )
+        except Exception:
+            pass
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.post("/kb/{uuid}/dsar/export")
+@limiter.limit("10/minute")
+def dsar_export(
+    request: Request,
+    uuid: str,
+    data: KBDsarSearchRequest,
+    svc: KnowledgeBaseService = Depends(get_kb_service),
+    audit_service=Depends(get_audit_service),
+    user: User = Depends(get_current_user),
+):
+    """DSAR export (MVP) – ugyanaz a találati lista export célra. Csak ownernek."""
+    if user.role != "owner":
+        raise HTTPException(status_code=403, detail="Only owner can run DSAR export")
+    if not svc.user_can_train(uuid, user.id, user.role):
+        raise HTTPException(status_code=403, detail="No permission to access this knowledge base")
+    try:
+        result = svc.dsar_search(uuid, query=data.query, limit=data.limit, scan_limit=data.scan_limit)
+        try:
+            audit_service.log(
+                "dsar_export",
+                user_id=user.id,
+                details={
+                    "kb_uuid": uuid,
+                    "query_hash": result.get("query_hash"),
+                    "matched": result.get("matched"),
+                    "scanned": result.get("scanned"),
+                },
+                ip=getattr(request.client, "host", None) if request.client else None,
+                user_agent=request.headers.get("user-agent"),
+                tenant_slug=getattr(request.state, "tenant_slug", None),
+            )
+        except Exception:
+            pass
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.post("/kb/{uuid}/dsar/delete")
+@limiter.limit("5/minute")
+def dsar_delete(
+    request: Request,
+    uuid: str,
+    data: KBDsarDeleteRequest,
+    svc: KnowledgeBaseService = Depends(get_kb_service),
+    audit_service=Depends(get_audit_service),
+    user: User = Depends(get_current_user),
+):
+    """DSAR törlés PII rekordokra. Csak ownernek."""
+    if user.role != "owner":
+        raise HTTPException(status_code=403, detail="Only owner can run DSAR delete")
+    if not svc.user_can_train(uuid, user.id, user.role):
+        raise HTTPException(status_code=403, detail="No permission to access this knowledge base")
+    try:
+        result = svc.dsar_delete(
+            uuid,
+            query=data.query,
+            limit=data.limit,
+            scan_limit=data.scan_limit,
+            dry_run=data.dry_run,
+        )
+        try:
+            audit_service.log(
+                "dsar_delete",
+                user_id=user.id,
+                details={
+                    "kb_uuid": uuid,
+                    "query_hash": result.get("query_hash"),
+                    "matched": result.get("matched"),
+                    "deleted": result.get("deleted"),
+                    "dry_run": result.get("dry_run"),
+                },
+                ip=getattr(request.client, "host", None) if request.client else None,
+                user_agent=request.headers.get("user-agent"),
+                tenant_slug=getattr(request.state, "tenant_slug", None),
+            )
+        except Exception:
+            pass
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.get("/kb/{uuid}/pii/metrics")
+@limiter.limit("20/minute")
+def get_pii_metrics(
+    uuid: str,
+    svc: KnowledgeBaseService = Depends(get_kb_service),
+    user: User = Depends(get_current_user),
+):
+    """PII dashboard alap metrikák. Csak ownernek."""
+    if user.role != "owner":
+        raise HTTPException(status_code=403, detail="Only owner can view PII metrics")
+    if not svc.user_can_train(uuid, user.id, user.role):
+        raise HTTPException(status_code=403, detail="No permission to access this knowledge base")
+    try:
+        return svc.personal_data_metrics(uuid)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))

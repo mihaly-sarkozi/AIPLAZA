@@ -2,7 +2,7 @@
 """
 Compatibility adapter: futtatja a pii_gdpr pipeline-t és legacy formátumra konvertál.
 A detektálás source of truth a pii_gdpr; ez a modul csak (EntityType → legacy név) adapter.
-Az alkalmazás réteg (pii_filter) ezt használja elsődlegesen; a legacy pipeline csak fallback.
+Nincs legacy fallback; a pii.pipeline és pii_filter mindkettő ezen keresztül hívja a pii_gdpr-t.
 """
 from __future__ import annotations
 
@@ -23,8 +23,8 @@ def _detect_via_gdpr(text: str, sensitivity: str) -> List[PiiMatch]:
     try:
         from apps.knowledge.pii_gdpr.pipeline.ingestion_pipeline import IngestionPipeline
         from apps.knowledge.pii_gdpr.models import AnalyzerConfig, PolicyConfig
-    except ImportError:
-        return []
+    except ImportError as exc:
+        raise RuntimeError("PII GDPR pipeline is unavailable") from exc
 
     pipeline = IngestionPipeline(
         analyzer_config=AnalyzerConfig(),

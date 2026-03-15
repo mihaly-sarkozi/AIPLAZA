@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import json
 import uuid as uuid_lib
+import hashlib
 from typing import List, Optional, Any
+from config.settings import settings
 from apps.knowledge.ports.repositories import KnowledgeBaseRepositoryPort, KbPermissionItem
 from apps.knowledge.domain.kb import KnowledgeBase
 from apps.knowledge.application.pii_filter import (
@@ -46,6 +48,14 @@ def _user_repo_list_all(user_repo: Any) -> List[Any]:
     return user_repo.list_all()
 
 
+def _norm(s: str) -> str:
+    return (s or "").strip().lower()
+
+
+def _qhash(s: str) -> str:
+    return hashlib.sha256((s or "").encode("utf-8")).hexdigest()[:16]
+
+
 class KnowledgeBaseService:
 
     def __init__(
@@ -78,6 +88,14 @@ class KnowledgeBaseService:
     def list_all_unfiltered(self) -> List[KnowledgeBase]:
         """Összes knowledge base (admin listához)."""
         return self.repo.list_all()
+
+    def get_trainable_kb_ids(self, user_id: int, user_role: Optional[str]) -> set[int]:
+        """Azon KB id-k, amelyeket a user taníthat (owner: minden)."""
+        if user_role == "owner":
+            return {
+                kb.id for kb in self.repo.list_all() if kb.id is not None
+            }
+        return set(self.repo.get_kb_ids_with_permission(user_id, "train"))
 
     def create(
         self,
@@ -163,6 +181,29 @@ class KnowledgeBaseService:
                 "role": getattr(u, "role", "user"),
             })
         return result
+
+    def get_permissions_with_users_batch(self, kb_uuids: List[str]) -> dict[str, List[dict]]:
+        """Jogosultságok több tudástárra egyben, user adatokkal."""
+        if not kb_uuids:
+            return {}
+        users = _user_repo_list_all(self.user_repo)
+        perms_by_kb = self.repo.list_permissions_batch(kb_uuids)
+        out: dict[str, List[dict]] = {}
+        for kb_uuid in kb_uuids:
+            perm_by_user = {uid: p for uid, p in (perms_by_kb.get(kb_uuid) or [])}
+            rows = []
+            for u in users:
+                if getattr(u, "id", None) is None:
+                    continue
+                rows.append({
+                    "user_id": u.id,
+                    "email": getattr(u, "email", "") or "",
+                    "name": getattr(u, "name", None),
+                    "permission": perm_by_user.get(u.id, "none"),
+                    "role": getattr(u, "role", "user"),
+                })
+            out[kb_uuid] = rows
+        return out
 
     def set_permissions(
         self, kb_uuid: str, permissions: List[KbPermissionItem], current_user_id: Optional[int] = None
@@ -276,26 +317,39 @@ class KnowledgeBaseService:
                     matches=review_matches,
                 )
 
+        display_title = (title or "").strip()
+        point_id = str(uuid_lib.uuid4())
+
         masked = False
         if matches:
             if mode == PERSONAL_DATA_MODE_NO:
-                # Automatikus törlés: "..."-ra cseréljük, nem tároljuk personal_data-ban
+                # Automatikus törlés: tároljuk personal_data-ban, placeholder ref_id-val
+                ref_ids = [
+                    self.repo.add_personal_data(kb.id, point_id, m[2], m[3])
+                    for m in matches
+                ]
                 content_to_store = apply_pii_replacements(
-                    raw, matches, [""] * len(matches), mode="remove"
+                    raw, matches, ref_ids, mode="mask"
                 )
             elif decisions_list:
-                # with_confirmation + soronkénti döntések
-                content_to_store, mask_indices = apply_pii_replacements_with_decisions(
-                    raw, matches, decisions_list
-                )
-                for i in mask_indices:
+                # with_confirmation + soronkénti döntések: mask és delete is tároljuk
+                store_indices = [
+                    i for i in range(len(matches))
+                    if (decisions_list[i] or "mask").lower() in ("mask", "delete")
+                ]
+                ref_id_by_index = [""] * len(matches)
+                for i in store_indices:
                     m = matches[i]
-                    self.repo.add_personal_data(kb.id, m[2], m[3])
-                masked = len(mask_indices) > 0
+                    ref_id = self.repo.add_personal_data(kb.id, point_id, m[2], m[3])
+                    ref_id_by_index[i] = ref_id
+                content_to_store, _ = apply_pii_replacements_with_decisions(
+                    raw, matches, decisions_list, ref_id_by_index=ref_id_by_index
+                )
+                masked = len(store_indices) > 0
             else:
                 # allowed_not_to_ai vagy with_confirmation (régi flow): maszkolás mind
                 ref_ids = [
-                    self.repo.add_personal_data(kb.id, m[2], m[3])
+                    self.repo.add_personal_data(kb.id, point_id, m[2], m[3])
                     for m in matches
                 ]
                 content_to_store = apply_pii_replacements(
@@ -310,9 +364,6 @@ class KnowledgeBaseService:
             u = self.user_repo.get_by_id(current_user_id)
             if u:
                 user_display = (getattr(u, "name", None) or "").strip() or getattr(u, "email", "") or ""
-
-        display_title = (title or "").strip()
-        point_id = str(uuid_lib.uuid4())
         decision = None
         if matches and confirm_pii:
             decision = pii_review_decision
@@ -325,15 +376,100 @@ class KnowledgeBaseService:
             user_display=user_display or None,
             title=display_title or content_to_store[:80],
             content=content_to_store,
-            raw_content=raw if matches else None,
+            raw_content=(
+                raw if matches and bool(getattr(settings, "kb_store_raw_content", False)) else None
+            ),
             review_decision=decision,
         )
         pii_replaced_with_dots = bool(matches and mode == PERSONAL_DATA_MODE_NO)
         return {"status": "ok", "masked": masked, "pii_replaced_with_dots": pii_replaced_with_dots}
 
-    def list_training_log(self, kb_uuid: str) -> List[dict]:
+    def list_training_log(
+        self,
+        kb_uuid: str,
+        limit: int = 50,
+        offset: int = 0,
+        include_raw_content: bool = False,
+    ) -> List[dict]:
         """Tanítási napló listája (train jog kell)."""
-        return self.repo.list_training_log(kb_uuid)
+        return self.repo.list_training_log_paginated(
+            kb_uuid=kb_uuid,
+            limit=limit,
+            offset=offset,
+            include_raw_content=include_raw_content,
+        )
+
+    def list_personal_data_for_point(self, kb_uuid: str, point_id: str) -> List[dict]:
+        """PII rekordok listázása adott train pointhoz (decrypted formában)."""
+        kb = self.repo.get_by_uuid(kb_uuid)
+        if not kb or kb.id is None:
+            raise ValueError("KB not found")
+        rows = self.repo.list_personal_data_by_point_id(kb.id, point_id)
+        return [{"reference_id": ref_id, "value": value} for ref_id, value in rows]
+
+    def purge_expired_personal_data(self) -> int:
+        """Lejárt PII rekordok törlése."""
+        return self.repo.purge_expired_personal_data()
+
+    def dsar_search(self, kb_uuid: str, query: str, limit: int = 100, scan_limit: int = 2000) -> dict:
+        kb = self.repo.get_by_uuid(kb_uuid)
+        if not kb or kb.id is None:
+            raise ValueError("KB not found")
+        needle = _norm(query)
+        if not needle:
+            return {"items": [], "query_hash": _qhash(query), "matched": 0, "scanned": 0}
+        records = self.repo.list_personal_data_records(kb.id, limit=scan_limit, offset=0)
+        items: List[dict] = []
+        for row in records:
+            value = _norm(str(row.get("value", "")))
+            if needle in value:
+                items.append(
+                    {
+                        "reference_id": row.get("reference_id"),
+                        "point_id": row.get("point_id"),
+                        "data_type": row.get("data_type"),
+                        "value": row.get("value"),
+                        "created_at": row.get("created_at"),
+                        "expires_at": row.get("expires_at"),
+                    }
+                )
+                if len(items) >= limit:
+                    break
+        return {
+            "items": items,
+            "query_hash": _qhash(query),
+            "matched": len(items),
+            "scanned": len(records),
+        }
+
+    def dsar_delete(self, kb_uuid: str, query: str, limit: int = 100, scan_limit: int = 5000, dry_run: bool = False) -> dict:
+        search = self.dsar_search(kb_uuid=kb_uuid, query=query, limit=limit, scan_limit=scan_limit)
+        ref_ids = [x.get("reference_id") for x in search["items"] if x.get("reference_id")]
+        if dry_run:
+            return {
+                "query_hash": search["query_hash"],
+                "matched": search["matched"],
+                "scanned": search["scanned"],
+                "deleted": 0,
+                "dry_run": True,
+            }
+        kb = self.repo.get_by_uuid(kb_uuid)
+        if not kb or kb.id is None:
+            raise ValueError("KB not found")
+        deleted = self.repo.delete_personal_data_by_reference_ids(kb.id, ref_ids)
+        return {
+            "query_hash": search["query_hash"],
+            "matched": search["matched"],
+            "scanned": search["scanned"],
+            "deleted": deleted,
+            "dry_run": False,
+        }
+
+    def personal_data_metrics(self, kb_uuid: str) -> dict:
+        kb = self.repo.get_by_uuid(kb_uuid)
+        if not kb or kb.id is None:
+            raise ValueError("KB not found")
+        return self.repo.personal_data_metrics(kb.id)
 
     async def delete_training_point(self, kb_uuid: str, point_id: str) -> None:
         """Egy tanítási bejegyzés törlése a naplóból (nincs Qdrant hívás)."""
