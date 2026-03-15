@@ -3,8 +3,13 @@
 # 2026.03.07 - Sárközi Mihály
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Optional
+
+
+def _utcnow_naive() -> datetime:
+    """UTC now timezone-naive formában."""
+    return datetime.now(UTC).replace(tzinfo=None)
 
 
 @dataclass(frozen=True)
@@ -27,7 +32,7 @@ class TwoFactorCode:
             email=email,
             expires_at=expires_at,
             used=False,
-            created_at=datetime.utcnow()
+            created_at=_utcnow_naive()
         )
     
     def persisted(self, *, id: int, created_at: datetime) -> "TwoFactorCode":
@@ -42,5 +47,5 @@ class TwoFactorCode:
     
     def is_expired(self) -> bool:
         """Ellenőrzi, hogy lejárt-e a kód."""
-        return datetime.utcnow() > self.expires_at
+        return _utcnow_naive() > self.expires_at
 

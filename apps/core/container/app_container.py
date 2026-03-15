@@ -43,10 +43,20 @@ from apps.core.email.email_service import EmailService
 
 # --- Chat ---
 from apps.chat.application.services.chat_service import ChatService
+from apps.knowledge.application.context_builder import KnowledgeContextBuilder
+from apps.knowledge.application.query_parser import QueryParser
+from apps.knowledge.application.retrieval_service import KnowledgeRetrievalService
+from apps.knowledge.application.evaluation import RetrievalEvaluationService
+from apps.knowledge.application.maintenance import KnowledgeMaintenanceService
+from apps.knowledge.application.feedback import RetrievalFeedbackService
 
 # --- Knowledge base ---
 from apps.knowledge.application.knowledge_service import KnowledgeBaseService
+from apps.knowledge.application.indexing_pipeline import KnowledgeIndexingPipeline
+from apps.knowledge.application.vector_outbox_worker import KnowledgeVectorOutboxWorker
 from apps.knowledge.infrastructure.db.repositories import MySQLKnowledgeBaseRepository
+from apps.knowledge.infrastructure.extraction.openai_assertion_extractor import OpenAIAssertionExtractor
+from apps.knowledge.infrastructure.qdrant.knowledge_vector_index import KnowledgeVectorIndex
 
 
 class AppContainer:
@@ -158,15 +168,42 @@ class AppContainer:
 
         # --- KNOWLEDGE BASE SERVICE ---
         self.kb_repo = MySQLKnowledgeBaseRepository(self.db_session_factory)
+        self.kb_vector_index = KnowledgeVectorIndex(self.qdrant)
+        self.assertion_extractor = OpenAIAssertionExtractor()
+        self.kb_indexing_pipeline = KnowledgeIndexingPipeline(
+            repo=self.kb_repo,
+            vector_index=self.kb_vector_index,
+            extractor=self.assertion_extractor,
+        )
 
         self.knowledge = KnowledgeBaseService(
             repo=self.kb_repo,
             qdrant_service=self.qdrant,
             user_repo=self.user_repo,
+            indexing_pipeline=self.kb_indexing_pipeline,
         )
+        self.vector_outbox_worker = None
+        if getattr(settings, "kb_vector_outbox_worker_enabled", True):
+            self.vector_outbox_worker = KnowledgeVectorOutboxWorker(
+                self.knowledge,
+                poll_interval_sec=float(getattr(settings, "kb_vector_outbox_poll_sec", 5.0) or 5.0),
+                batch_limit=int(getattr(settings, "kb_vector_outbox_batch_limit", 50) or 50),
+            )
+            self.vector_outbox_worker.start()
 
         # --- CHAT ---
-        self.chat_service = ChatService()
+        self.query_parser = QueryParser()
+        self.context_builder = KnowledgeContextBuilder()
+        self.retrieval_service = KnowledgeRetrievalService(self.knowledge)
+        self.maintenance_service = KnowledgeMaintenanceService(self.knowledge, self.kb_repo)
+        self.retrieval_evaluation_service = RetrievalEvaluationService(self.retrieval_service)
+        self.retrieval_feedback_service = RetrievalFeedbackService(self.retrieval_service)
+        self.chat_service = ChatService(
+            kb_service=self.knowledge,
+            retrieval_service=self.retrieval_service,
+            query_parser=self.query_parser,
+            context_builder=self.context_builder,
+        )
 
 
 # Singleton

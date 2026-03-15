@@ -47,6 +47,7 @@ class PiiDecisionItem(BaseModel):
 class KBTrainRequest(BaseModel):
     title: Optional[str] = ""
     content: str
+    idempotency_key: Optional[str] = Field(default=None, max_length=128)
     confirm_pii: bool = False
     pii_review_decision: Optional[str] = None  # mask_all | keep_role_based_emails | reject_upload | continue_sanitized
     pii_decisions: Optional[List[dict]] = None  # [{"index": int, "decision": "delete"|"mask"|"keep"}]

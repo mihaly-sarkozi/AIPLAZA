@@ -95,6 +95,8 @@ async def lifespan(app: FastAPI):
         from apps.core.container.app_container import container
         if getattr(container, "event_channel", None) is not None:
             container.event_channel.stop()
+        if getattr(container, "vector_outbox_worker", None) is not None:
+            container.vector_outbox_worker.stop()
     except Exception:
         pass
     # shutdown: központi Redis kapcsolat bezárása (allowlist, rate limit store)

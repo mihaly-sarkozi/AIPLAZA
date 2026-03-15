@@ -49,6 +49,21 @@ def get_kb_service():
     """Knowledge base service provider."""
     return container.knowledge
 
+
+def get_kb_maintenance_service():
+    """Knowledge maintenance service provider."""
+    return container.maintenance_service
+
+
+def get_retrieval_evaluation_service():
+    """Retrieval evaluation service provider."""
+    return container.retrieval_evaluation_service
+
+
+def get_retrieval_feedback_service():
+    """Retrieval feedback service provider."""
+    return container.retrieval_feedback_service
+
 def get_user_service():
     """User service provider."""
     return container.user_service

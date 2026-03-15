@@ -276,6 +276,7 @@ async def train_raw_text(
             uuid,
             data.title or "",
             data.content,
+            idempotency_key=getattr(data, "idempotency_key", None),
             current_user_id=user.id,
             confirm_pii=data.confirm_pii,
             pii_review_decision=getattr(data, "pii_review_decision", None),
@@ -326,6 +327,7 @@ async def train_text(
             uuid,
             data.title or "",
             data.content,
+            idempotency_key=getattr(data, "idempotency_key", None),
             current_user_id=user.id,
             confirm_pii=data.confirm_pii,
             pii_review_decision=getattr(data, "pii_review_decision", None),
@@ -349,6 +351,7 @@ async def train_file(
     uuid: str,
     file: UploadFile = File(...),
     confirm_pii: bool = Form(False),
+    idempotency_key: Optional[str] = Form(None),
     pii_review_decision: Optional[str] = Form(None),
     pii_decisions: Optional[str] = Form(None),  # JSON string: [{"index":0,"decision":"delete"},...]
     svc: KnowledgeBaseService = Depends(get_kb_service),
@@ -368,6 +371,7 @@ async def train_file(
         return await svc.train_from_file(
             uuid,
             file,
+            idempotency_key=idempotency_key,
             current_user_id=user.id,
             confirm_pii=confirm_pii,
             pii_review_decision=pii_review_decision,
@@ -433,6 +437,41 @@ async def delete_training_point(
         raise HTTPException(status_code=404, detail=str(e))
 
 
+@router.post("/kb/{uuid}/reindex")
+@limiter.limit("3/minute")
+async def reindex_kb(
+    request: Request,
+    uuid: str,
+    svc: KnowledgeBaseService = Depends(get_kb_service),
+    user: User = Depends(get_current_user),
+):
+    """Teljes tudástár újraindexelése (train joggal)."""
+    if not svc.user_can_train(uuid, user.id, user.role):
+        raise HTTPException(status_code=403, detail="No permission to manage this knowledge base")
+    try:
+        return await svc.reindex_kb(uuid, current_user_id=user.id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.post("/kb/{uuid}/train/points/{point_id}/reindex")
+@limiter.limit("10/minute")
+async def reindex_training_point(
+    request: Request,
+    uuid: str,
+    point_id: str,
+    svc: KnowledgeBaseService = Depends(get_kb_service),
+    user: User = Depends(get_current_user),
+):
+    """Egy training point újraindexelése (train joggal)."""
+    if not svc.user_can_train(uuid, user.id, user.role):
+        raise HTTPException(status_code=403, detail="No permission to manage this knowledge base")
+    try:
+        return await svc.reindex_training_point(uuid, point_id, current_user_id=user.id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
 @router.get("/kb/{uuid}/train/points/{point_id}/pii")
 @limiter.limit("15/minute")
 def get_point_personal_data(
@@ -462,6 +501,37 @@ def get_point_personal_data(
         except Exception:
             pass
         return rows
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.get("/kb/{uuid}/train/points/{point_id}/source")
+@limiter.limit("20/minute")
+def get_training_point_source(
+    request: Request,
+    uuid: str,
+    point_id: str,
+    svc: KnowledgeBaseService = Depends(get_kb_service),
+    audit_service=Depends(get_audit_service),
+    user: User = Depends(get_current_user),
+):
+    """Sanitized forrás lekérése chat hivatkozáshoz."""
+    if not svc.user_can_use(uuid, user.id, user.role):
+        raise HTTPException(status_code=403, detail="No permission to view this source")
+    try:
+        result = svc.get_training_point_source(uuid, point_id)
+        try:
+            audit_service.log(
+                "kb_source_viewed",
+                user_id=user.id,
+                details={"kb_uuid": uuid, "point_id": point_id},
+                ip=getattr(request.client, "host", None) if request.client else None,
+                user_agent=request.headers.get("user-agent"),
+                tenant_slug=getattr(request.state, "tenant_slug", None),
+            )
+        except Exception:
+            pass
+        return result
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
@@ -602,5 +672,33 @@ def get_pii_metrics(
         raise HTTPException(status_code=403, detail="No permission to access this knowledge base")
     try:
         return svc.personal_data_metrics(uuid)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.post("/kb/outbox/process")
+@limiter.limit("5/minute")
+async def process_vector_outbox(
+    request: Request,
+    limit: int = Query(50, ge=1, le=500),
+    svc: KnowledgeBaseService = Depends(get_kb_service),
+    user: User = Depends(get_current_user_owner),
+):
+    """Vector outbox manuális futtatása (owner)."""
+    return await svc.process_vector_outbox(limit=limit)
+
+
+@router.get("/kb/outbox/stats")
+@limiter.limit("20/minute")
+def get_vector_outbox_stats(
+    request: Request,
+    kb_uuid: Optional[str] = Query(default=None),
+    recent_limit: int = Query(20, ge=1, le=100),
+    svc: KnowledgeBaseService = Depends(get_kb_service),
+    user: User = Depends(get_current_user_owner),
+):
+    """Vector outbox állapot dashboard (owner)."""
+    try:
+        return svc.get_vector_outbox_stats(kb_uuid=kb_uuid, recent_limit=recent_limit)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))

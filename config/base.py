@@ -77,6 +77,43 @@ class BaseConfig(BaseSettings):
     pii_retention_days: int = 90
     pii_allow_legacy_plaintext_read: bool = True
 
+    # Retrieval/rerank súlyok (P3 tuning)
+    rerank_semantic_match_weight: float = 0.22
+    rerank_entity_match_weight: float = 0.20
+    rerank_lexical_match_weight: float = 0.08
+    rerank_time_match_weight: float = 0.16
+    rerank_place_match_weight: float = 0.08
+    rerank_graph_proximity_weight: float = 0.10
+    rerank_strength_weight: float = 0.10
+    rerank_confidence_weight: float = 0.10
+    rerank_recency_weight: float = 0.04
+    rerank_status_weight: float = 1.0
+    rerank_relation_confidence_weight: float = 0.06
+
+    # Hybrid recall tuning (Qdrant score blending)
+    qdrant_fusion_semantic_weight: float = 0.72
+    qdrant_fusion_lexical_weight: float = 0.28
+    qdrant_lexical_overlap_weight: float = 0.72
+    qdrant_lexical_substring_weight: float = 0.28
+
+    # Context/runsize korlátok (P3 adaptive threshold)
+    kb_max_seed_assertions: int = 8
+    kb_max_expanded_assertions: int = 12
+    kb_max_relation_hops: int = 2
+    kb_min_confidence: float = 0.20
+    kb_min_current_strength: float = 0.03
+    kb_context_token_budget: int = 2200
+    kb_context_max_evidence_per_assertion: int = 2
+    kb_context_max_key_assertions: int = 8
+    kb_context_max_supporting_assertions: int = 10
+    kb_context_max_source_chunks: int = 3
+    kb_context_include_conflicts: bool = True
+    kb_context_include_superseded: bool = False
+
+    # Debug/trace persistence
+    kb_debug_trace_persist: bool = True
+    kb_debug_trace_path: str = "logs/retrieval_traces.jsonl"
+
     # Email (SMTP): jelszót .env-ben (smtp_password)
     smtp_host: str = "smtp.gmail.com"
     smtp_port: int = 587

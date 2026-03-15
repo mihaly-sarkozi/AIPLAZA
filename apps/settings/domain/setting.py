@@ -3,8 +3,13 @@
 # 2026.03.07 - Sárközi Mihály
 
 from dataclasses import dataclass, replace
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Optional
+
+
+def _utcnow_naive() -> datetime:
+    """UTC now timezone-naive formában."""
+    return datetime.now(UTC).replace(tzinfo=None)
 
 
 @dataclass(frozen=True)
@@ -21,7 +26,7 @@ class Setting:
             id=None,
             key=key,
             value=value,
-            updated_at=datetime.utcnow(),
+            updated_at=_utcnow_naive(),
             updated_by=updated_by
         )
 
@@ -32,6 +37,6 @@ class Setting:
         return replace(
             self,
             value=value,
-            updated_at=datetime.utcnow(),
+            updated_at=_utcnow_naive(),
             updated_by=updated_by
         )

@@ -1,0 +1,26 @@
+{
+  "cases": [
+    {
+      "query": "Mutasd időrendben hogyan változott Anna státusza 2024-ben",
+      "intent": "timeline",
+      "retrieval_mode": "timeline_first",
+      "expected_keywords": ["anna"],
+      "expected_time_window": {
+        "from": "2024-01-01",
+        "to": "2024-12-31"
+      }
+    },
+    {
+      "query": "Hasonlítsd össze Anna és Béla teljesítményét 2023 és 2024 között",
+      "intent": "comparison",
+      "retrieval_mode": "comparison_first",
+      "expected_keywords": ["anna", "béla"]
+    },
+    {
+      "query": "Ki dolgozik Budapesten a ProjektX-en?",
+      "intent": "activity",
+      "retrieval_mode": "assertion_first",
+      "expected_keywords": ["budapest", "projektx"]
+    }
+  ]
+}

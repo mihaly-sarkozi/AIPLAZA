@@ -16,6 +16,7 @@ const LoginPage = lazy(() => import("./features/auth/pages/LoginPage"));
 const ForgotPasswordPage = lazy(() => import("./features/auth/pages/ForgotPasswordPage"));
 const SetPasswordPage = lazy(() => import("./features/auth/pages/SetPasswordPage"));
 const ChatPage = lazy(() => import("./features/chat/pages/ChatPage"));
+const ChatSourcePage = lazy(() => import("./features/chat/pages/ChatSourcePage"));
 const ProfilePage = lazy(() => import("./features/profile/pages/ProfilePage"));
 const ChangePasswordPage = lazy(() => import("./features/profile/pages/ChangePasswordPage"));
 const RolesPage = lazy(() => import("./features/users/pages/RolesPage"));
@@ -100,6 +101,14 @@ export default function App() {
                         element={
                             <ProtectedRoute loadingFallback={<GuardFallback />}>
                                 <ChatPage/>
+                            </ProtectedRoute>
+                        }
+                    />
+                    <Route
+                        path="/chat/source/:kbUuid/:pointId"
+                        element={
+                            <ProtectedRoute loadingFallback={<GuardFallback />}>
+                                <ChatSourcePage />
                             </ProtectedRoute>
                         }
                     />

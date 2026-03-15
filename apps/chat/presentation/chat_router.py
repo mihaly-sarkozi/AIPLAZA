@@ -1,4 +1,5 @@
 # apps/chat/presentation/chat_router.py
+import inspect
 import json
 from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import Response
@@ -46,8 +47,35 @@ async def chat(
     current_user: User = Depends(get_current_user),
     svc=Depends(get_chat_service),
 ):
-    answer = await svc.chat(req.question)  # ✅ most már await kell
-    return AskResponse(answer=answer)
+    try:
+        if hasattr(svc, "chat_with_sources"):
+            chat_with_sources = getattr(svc, "chat_with_sources")
+            if inspect.iscoroutinefunction(chat_with_sources):
+                payload = await chat_with_sources(
+                    req.question,
+                    user_id=current_user.id,
+                    user_role=current_user.role,
+                    kb_uuid=req.kb_uuid,
+                    debug=req.debug,
+                )
+                return AskResponse(
+                    answer=str(payload.get("answer") or ""),
+                    sources=payload.get("sources") or [],
+                )
+        try:
+            answer = await svc.chat(
+                req.question,
+                user_id=current_user.id,
+                user_role=current_user.role,
+                kb_uuid=req.kb_uuid,
+                debug=req.debug,
+            )
+        except TypeError:
+            # Backward compatibility régi ChatService mock/signature esetére.
+            answer = await svc.chat(req.question)
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    return AskResponse(answer=answer, sources=[])
 
 
 @router.websocket("/chat/ws")
@@ -80,8 +108,12 @@ async def chat_ws(websocket: WebSocket):
             if not question:
                 await websocket.send_json({"error": "Empty question"})
                 continue
-            async for chunk in svc.chat_stream(question):
-                await websocket.send_json({"chunk": chunk})
+            try:
+                async for chunk in svc.chat_stream(question, user_id=user.id, user_role=user.role):
+                    await websocket.send_json({"chunk": chunk})
+            except TypeError:
+                async for chunk in svc.chat_stream(question):
+                    await websocket.send_json({"chunk": chunk})
             await websocket.send_json({"done": True})
     except WebSocketDisconnect:
         pass
