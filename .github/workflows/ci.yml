@@ -1,6 +1,9 @@
 # Minimális CI: lint, unit tesztek, integration tesztek
 name: CI
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 on:
   push:
     branches: [main, master]
@@ -25,6 +28,10 @@ jobs:
 
   unit:
     runs-on: ubuntu-latest
+    env:
+      QDRANT_URL: "http://localhost:6333"
+      QDRANT_API_KEY: "test-qdrant-api-key"
+      OPENAI_API_KEY: "test-openai-api-key"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -43,6 +50,10 @@ jobs:
 
   integration:
     runs-on: ubuntu-latest
+    env:
+      QDRANT_URL: "http://localhost:6333"
+      QDRANT_API_KEY: "test-qdrant-api-key"
+      OPENAI_API_KEY: "test-openai-api-key"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
