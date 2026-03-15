@@ -1,4 +1,6 @@
 # apps/chat/adapter/http/response.py
+from typing import Any
+
 from pydantic import BaseModel, Field
 
 
@@ -12,3 +14,4 @@ class ChatSourceItem(BaseModel):
 class AskResponse(BaseModel):
     answer: str
     sources: list[ChatSourceItem] = Field(default_factory=list)
+    debug: dict[str, Any] | None = Field(default=None)

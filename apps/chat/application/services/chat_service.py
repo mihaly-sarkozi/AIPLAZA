@@ -591,6 +591,41 @@ class ChatService:
                 break
         return out
 
+    def _build_debug_payload(self, packet: dict, context_text: str, sources: list[dict]) -> dict:
+        top_assertions = (
+            packet.get("primary_assertions")
+            or packet.get("seed_assertions")
+            or packet.get("summary_assertions")
+            or packet.get("top_assertions")
+            or []
+        )
+        evidence_sentences = packet.get("evidence_sentences") or []
+        source_chunks = packet.get("source_chunks") or []
+        related_entities = packet.get("related_entities") or []
+        top_assertion_ids = [
+            str(row.get("id"))
+            for row in top_assertions
+            if row.get("id") is not None
+        ]
+        source_point_ids = self._dedupe_keep_order(
+            [
+                str(item.get("point_id") or "").strip()
+                for item in (sources or [])
+                if str(item.get("point_id") or "").strip()
+            ]
+        )
+        return {
+            "query_focus": self._sanitize_debug_value(packet.get("query_focus") or {}),
+            "scoring_summary": self._sanitize_debug_value(packet.get("scoring_summary") or {}),
+            "top_assertion_count": len(top_assertions),
+            "evidence_sentence_count": len(evidence_sentences),
+            "source_chunk_count": len(source_chunks),
+            "related_entity_count": len(related_entities),
+            "context_preview": self._sanitize_debug_text((context_text or "")[:500]),
+            "top_assertion_ids": top_assertion_ids[:12],
+            "source_point_ids": source_point_ids[:12],
+        }
+
     async def chat(
         self,
         question: str,
@@ -714,10 +749,11 @@ class ChatService:
                     except Exception:
                         pass
         if debug:
-            payload["debug"] = {
-                "query_focus": self._sanitize_debug_value(packet.get("query_focus") if packet else {}),
-                "scoring_summary": self._sanitize_debug_value(packet.get("scoring_summary") if packet else {}),
-            }
+            payload["debug"] = self._build_debug_payload(
+                packet=packet or {},
+                context_text=context_text,
+                sources=payload.get("sources") or [],
+            )
         return payload
 
     async def chat_stream(

@@ -39,7 +39,12 @@ async def chat_ws_token(request: Request, current_user: User = Depends(get_curre
     return response
 
 
-@router.post("/chat", response_model=AskResponse, dependencies=[Depends(set_tenant_context_from_request)])
+@router.post(
+    "/chat",
+    response_model=AskResponse,
+    response_model_exclude_none=True,
+    dependencies=[Depends(set_tenant_context_from_request)],
+)
 @limiter.limit("30/minute")
 async def chat(
     request: Request,
@@ -61,6 +66,7 @@ async def chat(
                 return AskResponse(
                     answer=str(payload.get("answer") or ""),
                     sources=payload.get("sources") or [],
+                    debug=(payload.get("debug") if req.debug else None),
                 )
         try:
             answer = await svc.chat(
@@ -75,7 +81,7 @@ async def chat(
             answer = await svc.chat(req.question)
     except PermissionError as e:
         raise HTTPException(status_code=403, detail=str(e))
-    return AskResponse(answer=answer, sources=[])
+    return AskResponse(answer=answer, sources=[], debug=None)
 
 
 @router.websocket("/chat/ws")
