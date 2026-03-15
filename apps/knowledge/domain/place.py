@@ -4,6 +4,12 @@ from pydantic import BaseModel
 
 
 class Place(BaseModel):
+    """Feloldott place dimenzió.
+
+    A `normalized_key` a retrieval-kompatibilis canonical kulcs.
+    A `parent_place_id` a hierarchy szervező tengelye, amelyet query resolve,
+    place match és context build is használhat.
+    """
     id: int | None = None
     kb_id: int
     canonical_name: str

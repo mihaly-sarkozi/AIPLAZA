@@ -1,6 +1,7 @@
 import logging
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
+from time import perf_counter
 from typing import Any, Optional
 
 from openai import AsyncOpenAI
@@ -98,7 +99,9 @@ class ChatService:
             }
         if kb_uuid and user_id is not None and not self.kb_service.user_can_use(kb_uuid, user_id, user_role):
             raise PermissionError("Nincs jogosultság a megadott tudástár használatához.")
+        t_parse = perf_counter()
         parsed = self.query_parser.parse(question) if self.query_parser is not None else {"intent": "summary"}
+        parsed["parse_time_ms"] = round((perf_counter() - t_parse) * 1000.0, 2)
 
         if user_id is not None:
             if self.retrieval_service is not None and hasattr(self.retrieval_service, "build_context_for_chat"):
@@ -111,6 +114,10 @@ class ChatService:
                     debug=debug,
                 )
                 packet["query_focus"] = parsed
+                packet["parser_audit"] = parsed.get("parser_audit") or {}
+                packet.setdefault("scoring_summary", {})
+                packet.setdefault("scoring_summary", {}).setdefault("latency_ms", {})
+                packet["scoring_summary"]["latency_ms"]["parse"] = float(parsed.get("parse_time_ms") or 0.0)
                 packet["is_followup"] = self._is_followup(user_id, parsed)
                 return packet
             if hasattr(self.kb_service, "build_context_for_chat"):
@@ -122,6 +129,10 @@ class ChatService:
                     kb_uuid=kb_uuid,
                 )
                 packet["query_focus"] = parsed
+                packet["parser_audit"] = parsed.get("parser_audit") or {}
+                packet.setdefault("scoring_summary", {})
+                packet.setdefault("scoring_summary", {}).setdefault("latency_ms", {})
+                packet["scoring_summary"]["latency_ms"]["parse"] = float(parsed.get("parse_time_ms") or 0.0)
                 packet["is_followup"] = self._is_followup(user_id, parsed)
                 return packet
 
@@ -140,6 +151,10 @@ class ChatService:
             else {"top_assertions": assertions}
         )
         packet["query_focus"] = parsed
+        packet["parser_audit"] = parsed.get("parser_audit") or {}
+        packet.setdefault("scoring_summary", {})
+        packet.setdefault("scoring_summary", {}).setdefault("latency_ms", {})
+        packet["scoring_summary"]["latency_ms"]["parse"] = float(parsed.get("parse_time_ms") or 0.0)
         packet["is_followup"] = self._is_followup(user_id, parsed)
         return packet
 

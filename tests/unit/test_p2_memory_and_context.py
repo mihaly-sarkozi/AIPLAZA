@@ -201,6 +201,7 @@ def test_context_builder_groups_by_time_slice():
         query_focus={"intent": "timeline", "retrieval_mode": "timeline_first"},
     )
     assert len(packet["time_slice_groups"]) >= 1
+    assert "time_semantics" in packet["scoring_summary"]
 
 
 def test_context_builder_groups_by_entity():

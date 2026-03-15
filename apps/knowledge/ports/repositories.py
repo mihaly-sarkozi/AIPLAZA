@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from datetime import datetime
-from typing import Any, List, Optional, Tuple  # noqa: F401
+from typing import Any, Dict, List, Optional, Tuple  # noqa: F401
 from apps.knowledge.domain.kb import KnowledgeBase
 
 # user_id -> permission: 'use' | 'train'
@@ -210,6 +210,16 @@ class KnowledgeBaseRepositoryPort(ABC):
         ...
 
     @abstractmethod
+    def search_place_candidates(self, kb_id: int, query: str, limit: int = 20) -> List[dict]:
+        """Helyjelölt keresés canonical/normalized kulcs alapján."""
+        ...
+
+    @abstractmethod
+    def get_place_hierarchy(self, kb_id: int, place_ids: List[int], max_depth: int = 3) -> dict[int, List[dict]]:
+        """Hely hierarchy lekérés (place_id -> parent lánc)."""
+        ...
+
+    @abstractmethod
     def upsert_assertion(self, kb_id: int, payload: dict) -> dict:
         """Assertion upsert fingerprint alapján."""
         ...
@@ -266,6 +276,11 @@ class KnowledgeBaseRepositoryPort(ABC):
     @abstractmethod
     def list_mentions_for_assertion(self, assertion_id: int) -> List[dict]:
         """Assertionhöz tartozó mondat mention listája."""
+        ...
+
+    @abstractmethod
+    def list_mentions_for_assertions(self, assertion_ids: List[int]) -> Dict[int, List[dict]]:
+        """Assertionök mention listája assertion_id szerint csoportosítva."""
         ...
 
     @abstractmethod

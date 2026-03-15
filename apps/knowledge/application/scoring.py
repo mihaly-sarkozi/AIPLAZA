@@ -67,14 +67,65 @@ def compute_confidence_components(
 
 def compute_relation_confidence(
     relation_weight: float,
+    relation_type: str | None = None,
+    entity_overlap_strength: float | None = None,
+    time_overlap_strength: float | None = None,
+    place_overlap_strength: float | None = None,
+    evidence_proximity: float | None = None,
     evidence_overlap_count: int = 0,
+    assertion_confidence_from: float | None = None,
+    assertion_confidence_to: float | None = None,
     contradiction_signals: int = 0,
 ) -> float:
-    """Relation confidence külön becslése zajos relationök szűréséhez."""
+    """Relation confidence becslés relation típus + egyezési jelek alapján."""
     base = max(0.0, min(1.0, float(relation_weight)))
-    ev_boost = min(0.2, 0.04 * max(0, int(evidence_overlap_count)))
-    contradiction_penalty = min(0.35, 0.08 * max(0, int(contradiction_signals)))
-    return max(0.0, min(1.0, base + ev_boost - contradiction_penalty))
+    rel_type = str(relation_type or "").strip().upper()
+    type_prior = {
+        "SUPPORTS": 0.80,
+        "REFINES": 0.78,
+        "GENERALIZES": 0.66,
+        "CONTRADICTS": 0.72,
+        "TEMPORALLY_SPLITS": 0.70,
+        "TEMPORALLY_OVERLAPS": 0.68,
+        "SAME_SUBJECT": 0.62,
+        "SAME_OBJECT": 0.60,
+        "SAME_PREDICATE": 0.56,
+        "SAME_PLACE": 0.58,
+        "SAME_SOURCE_POINT": 0.48,
+    }.get(rel_type, 0.56)
+    overlap_parts = [
+        max(0.0, min(1.0, float(x)))
+        for x in [entity_overlap_strength, time_overlap_strength, place_overlap_strength]
+        if x is not None
+    ]
+    overlap_score = sum(overlap_parts) / len(overlap_parts) if overlap_parts else base
+    if evidence_proximity is None:
+        evidence_score = max(0.0, min(1.0, 0.25 + (0.15 * max(0, int(evidence_overlap_count)))))
+    else:
+        evidence_score = max(0.0, min(1.0, float(evidence_proximity)))
+    conf_parts = [
+        max(0.0, min(1.0, float(x)))
+        for x in [assertion_confidence_from, assertion_confidence_to]
+        if x is not None
+    ]
+    assertion_conf_score = sum(conf_parts) / len(conf_parts) if conf_parts else 0.5
+    contradiction = max(0, int(contradiction_signals))
+    if rel_type == "CONTRADICTS":
+        contradiction_term = min(1.0, 0.45 + 0.22 * contradiction)
+        penalty = 0.0
+    else:
+        contradiction_term = 0.0
+        penalty = min(0.40, 0.10 * contradiction)
+    final = (
+        (0.34 * base)
+        + (0.18 * type_prior)
+        + (0.18 * overlap_score)
+        + (0.16 * evidence_score)
+        + (0.14 * assertion_conf_score)
+        + (0.08 * contradiction_term)
+        - penalty
+    )
+    return max(0.0, min(1.0, final))
 
 
 def compute_confidence(

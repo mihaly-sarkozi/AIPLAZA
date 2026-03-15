@@ -5,6 +5,15 @@ from pydantic import BaseModel, Field
 
 
 class Assertion(BaseModel):
+    """Assertion domain modell.
+
+    Az elsődleges időfogalom a valid_time:
+    - `valid_time_from` / `valid_time_to` = mikor igaz az assertion a világban
+    - `source_time` = a forrás dokumentum ideje
+    - `ingest_time` = a tudástárba kerülés ideje
+
+    A `time_from` / `time_to` mezők backward-compatible aliasok a valid_time-ra.
+    """
     id: int | None = None
     kb_id: int
     source_point_id: str
@@ -18,8 +27,8 @@ class Assertion(BaseModel):
     object_value: str | None = None
     time_interval_id: int | None = None
     place_id: int | None = None
-    time_from: datetime | None = None  # valid_time start
-    time_to: datetime | None = None  # valid_time end
+    time_from: datetime | None = None  # backward-compatible alias: valid_time start
+    time_to: datetime | None = None  # backward-compatible alias: valid_time end
     place_key: str | None = None
     attributes: list[str] = Field(default_factory=list)
     modality: str = "asserted"
@@ -38,3 +47,11 @@ class Assertion(BaseModel):
     source_time: datetime | None = None  # forrás szerinti időbélyeg (nem valid_time)
     ingest_time: datetime | None = None  # rendszerbe érkezés ideje (nem valid_time)
     status: str = "active"  # active | uncertain | conflicted | superseded | partially_superseded | generalized | refined
+
+    @property
+    def valid_time_from(self) -> datetime | None:
+        return self.time_from
+
+    @property
+    def valid_time_to(self) -> datetime | None:
+        return self.time_to

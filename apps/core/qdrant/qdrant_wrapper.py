@@ -23,6 +23,57 @@ class QdrantClientWrapper:
         self._embedding_cache_order: list[str] = []
         self._embedding_cache_max = 64
 
+    @staticmethod
+    def _normalize_lexical_text(text: str) -> str:
+        lowered = str(text or "").lower()
+        # Egyszerű punctuation cleanup + whitespace normalizálás.
+        cleaned = re.sub(r"[^\wáéíóöőúüű\s-]", " ", lowered, flags=re.IGNORECASE)
+        cleaned = re.sub(r"\s+", " ", cleaned).strip()
+        return cleaned
+
+    @classmethod
+    def _lexical_tokens(cls, text: str) -> list[str]:
+        normalized = cls._normalize_lexical_text(text)
+        if not normalized:
+            return []
+        tokens = [
+            t for t in re.findall(r"[a-z0-9áéíóöőúüű_-]+", normalized)
+            if len(t) >= 2
+        ]
+        # Duplikált tokenek kezelése: query oldalon egyedi készletet használunk.
+        unique_tokens: list[str] = []
+        seen: set[str] = set()
+        for token in tokens:
+            if token in seen:
+                continue
+            seen.add(token)
+            unique_tokens.append(token)
+        return unique_tokens
+
+    @staticmethod
+    def _token_shape_boost(token: str) -> float:
+        if any(ch.isdigit() for ch in token) or "-" in token or "_" in token:
+            return 1.0
+        if len(token) >= 10:
+            return 0.92
+        if len(token) >= 8:
+            return 0.78
+        return 0.45
+
+    @classmethod
+    def _payload_lexical_text(cls, payload: dict[str, Any]) -> str:
+        parts: list[str] = []
+        for key in ("text", "canonical_text", "canonical_name", "predicate"):
+            value = str(payload.get(key) or "").strip()
+            if value:
+                parts.append(value)
+        for key in ("aliases", "place_keys", "place_hierarchy_keys"):
+            for value in (payload.get(key) or []):
+                item = str(value or "").strip()
+                if item:
+                    parts.append(item)
+        return cls._normalize_lexical_text(" ".join(parts))
+
     async def embed_text(self, text: str) -> list[float]:
         """Szöveg embedding generálása OpenAI API-val."""
         normalized = " ".join(str(text or "").split())
@@ -220,13 +271,27 @@ class QdrantClientWrapper:
     async def search_points(
         self,
         collection: str,
-        query: str,
+        query: str | None = None,
         limit: int = 10,
         point_types: list[str] | None = None,
         payload_filter: dict[str, Any] | None = None,
+        query_vector: list[float] | None = None,
+        lexical_query: str | None = None,
+        fusion_semantic_weight: float | None = None,
+        fusion_lexical_weight: float | None = None,
+        lexical_focus_terms: list[str] | None = None,
+        exact_phrases: list[str] | None = None,
+        rare_terms: list[str] | None = None,
     ) -> list[dict[str, Any]]:
         """Dense similarity keresés payload filterrel + lexical/fusion score előkészítés."""
-        vector = await self.embed_text(query)
+        if query_vector is None:
+            query_text = str(query or "").strip()
+            if not query_text:
+                return []
+            vector = await self.embed_text(query_text)
+        else:
+            vector = list(query_vector)
+        used_precomputed_vector = query_vector is not None
         effective_filter = dict(payload_filter or {})
         if point_types:
             effective_filter["point_type"] = point_types
@@ -244,51 +309,149 @@ class QdrantClientWrapper:
             )
 
         raw = await asyncio.to_thread(_search)
-        q_tokens = {
-            t for t in re.findall(r"[a-z0-9áéíóöőúüű_-]+", (query or "").lower())
-            if len(t) >= 2
+        lexical_text = str(lexical_query or query or "")
+        lexical_query_norm = self._normalize_lexical_text(lexical_text)
+        q_tokens = self._lexical_tokens(lexical_text)
+        q_token_set = set(q_tokens)
+        focus_terms = {
+            self._normalize_lexical_text(str(x))
+            for x in (lexical_focus_terms or [])
+            if self._normalize_lexical_text(str(x))
         }
+        exact_phrase_terms = [
+            self._normalize_lexical_text(str(x))
+            for x in (exact_phrases or [])
+            if self._normalize_lexical_text(str(x))
+        ]
+        q_bigrams = {
+            f"{q_tokens[i]} {q_tokens[i + 1]}"
+            for i in range(max(0, len(q_tokens) - 1))
+        }
+        rare_query_tokens = self._lexical_tokens(" ".join(rare_terms or [])) or [t for t in q_tokens if self._token_shape_boost(t) >= 0.75]
+        semantic_raw_scores: list[float] = []
+        lexical_raw_scores: list[float] = []
         rows: list[dict[str, Any]] = []
         for hit in raw:
             payload = dict(hit.payload or {})
-            text = str(payload.get("text") or "").lower()
+            text_norm = self._payload_lexical_text(payload)
             lexical_score = 0.0
-            if q_tokens and text:
-                text_tokens = {
-                    t for t in re.findall(r"[a-z0-9áéíóöőúüű_-]+", text)
-                    if len(t) >= 2
+            lexical_features: dict[str, float] = {
+                "token_overlap": 0.0,
+                "jaccard": 0.0,
+                "substring_score": 0.0,
+                "bigram_overlap": 0.0,
+                "phrase_score": 0.0,
+                "rare_score": 0.0,
+                "focus_term_score": 0.0,
+                "exact_phrase_score": 0.0,
+            }
+            if q_token_set and text_norm:
+                text_tokens = self._lexical_tokens(text_norm)
+                text_token_set = set(text_tokens)
+                inter = q_token_set.intersection(text_token_set)
+                union = q_token_set.union(text_token_set)
+                token_overlap = len(inter) / max(1, len(q_token_set))
+                jaccard = len(inter) / max(1, len(union))
+                substring_hits = sum(1 for t in q_token_set if t in text_norm)
+                substring_score = substring_hits / max(1, len(q_token_set))
+                text_bigrams = {
+                    f"{text_tokens[i]} {text_tokens[i + 1]}"
+                    for i in range(max(0, len(text_tokens) - 1))
                 }
-                inter = len(q_tokens.intersection(text_tokens))
-                token_overlap = inter / max(1, len(q_tokens))
-                substring_hits = sum(1 for t in q_tokens if t in text)
-                substring_score = substring_hits / max(1, len(q_tokens))
+                bigram_overlap = (
+                    len(q_bigrams.intersection(text_bigrams)) / max(1, len(q_bigrams))
+                    if q_bigrams else 0.0
+                )
+                phrase_score = 1.0 if lexical_query_norm and lexical_query_norm in text_norm else 0.0
+                rare_hits = sum(1 for t in rare_query_tokens if t in text_norm)
+                rare_score = (
+                    rare_hits / max(1, len(rare_query_tokens))
+                    if rare_query_tokens else 0.0
+                )
+                focus_hits = sum(1 for term in focus_terms if term and term in text_norm)
+                focus_term_score = (
+                    focus_hits / max(1, len(focus_terms))
+                    if focus_terms else 0.0
+                )
+                exact_phrase_hits = sum(1 for phrase in exact_phrase_terms if phrase and phrase in text_norm)
+                exact_phrase_score = (
+                    exact_phrase_hits / max(1, len(exact_phrase_terms))
+                    if exact_phrase_terms else 0.0
+                )
                 overlap_w = float(getattr(settings, "qdrant_lexical_overlap_weight", 0.72))
                 substring_w = float(getattr(settings, "qdrant_lexical_substring_weight", 0.28))
-                lexical_score = (overlap_w * token_overlap) + (substring_w * substring_score)
+                # Robusztusabb lexical komponens: token + exact phrase + rare token + ngram.
+                lexical_score = (
+                    (0.42 * ((overlap_w * token_overlap) + (substring_w * substring_score)))
+                    + (0.14 * jaccard)
+                    + (0.16 * bigram_overlap)
+                    + (0.10 * phrase_score)
+                    + (0.08 * rare_score)
+                    + (0.05 * focus_term_score)
+                    + (0.05 * exact_phrase_score)
+                )
+                lexical_features = {
+                    "token_overlap": float(token_overlap),
+                    "jaccard": float(jaccard),
+                    "substring_score": float(substring_score),
+                    "bigram_overlap": float(bigram_overlap),
+                    "phrase_score": float(phrase_score),
+                    "rare_score": float(rare_score),
+                    "focus_term_score": float(focus_term_score),
+                    "exact_phrase_score": float(exact_phrase_score),
+                }
             semantic = float(hit.score)
-            semantic_w = float(getattr(settings, "qdrant_fusion_semantic_weight", 0.72))
-            lexical_w = float(getattr(settings, "qdrant_fusion_lexical_weight", 0.28))
-            fusion_score = (semantic_w * semantic) + (lexical_w * lexical_score)
+            semantic_raw_scores.append(semantic)
+            lexical_raw_scores.append(float(max(0.0, min(1.0, lexical_score))))
             rows.append(
                 {
                     "id": str(hit.id),
                     "score": semantic,
                     "semantic_score": semantic,
-                    "lexical_score": lexical_score,
-                    "fusion_score": fusion_score,
+                    "lexical_score": float(max(0.0, min(1.0, lexical_score))),
+                    "used_precomputed_query_vector": used_precomputed_vector,
+                    "lexical_features": lexical_features,
                     "payload": payload,
                 }
             )
+        if not rows:
+            return []
+        sem_min, sem_max = min(semantic_raw_scores), max(semantic_raw_scores)
+        lex_min, lex_max = min(lexical_raw_scores), max(lexical_raw_scores)
+        semantic_w = float(fusion_semantic_weight if fusion_semantic_weight is not None else getattr(settings, "qdrant_fusion_semantic_weight", 0.72))
+        lexical_w = float(fusion_lexical_weight if fusion_lexical_weight is not None else getattr(settings, "qdrant_fusion_lexical_weight", 0.28))
+        total_w = max(1e-9, semantic_w + lexical_w)
+        semantic_w = semantic_w / total_w
+        lexical_w = lexical_w / total_w
+        for row in rows:
+            sem_raw = float(row.get("semantic_score") or 0.0)
+            lex_raw = float(row.get("lexical_score") or 0.0)
+            sem_norm = ((sem_raw - sem_min) / (sem_max - sem_min)) if sem_max > sem_min else max(0.0, min(1.0, sem_raw))
+            lex_norm = ((lex_raw - lex_min) / (lex_max - lex_min)) if lex_max > lex_min else max(0.0, min(1.0, lex_raw))
+            row["semantic_score_norm"] = max(0.0, min(1.0, sem_norm))
+            row["lexical_score_norm"] = max(0.0, min(1.0, lex_norm))
+            row["fusion_score"] = (semantic_w * row["semantic_score_norm"]) + (lexical_w * row["lexical_score_norm"])
+            row["fusion_weights"] = {
+                "semantic_weight": semantic_w,
+                "lexical_weight": lexical_w,
+            }
         rows.sort(key=lambda x: float(x.get("fusion_score") or 0.0), reverse=True)
         return rows[: max(1, min(limit, 100))]
 
     async def search_points_with_filters(
         self,
         collection: str,
-        query: str,
+        query: str | None = None,
         limit: int = 10,
         point_types: list[str] | None = None,
         payload_filter: dict[str, Any] | None = None,
+        query_vector: list[float] | None = None,
+        lexical_query: str | None = None,
+        fusion_semantic_weight: float | None = None,
+        fusion_lexical_weight: float | None = None,
+        lexical_focus_terms: list[str] | None = None,
+        exact_phrases: list[str] | None = None,
+        rare_terms: list[str] | None = None,
     ) -> list[dict[str, Any]]:
         """Keresés expliciten filter-fókuszú API-val (alias)."""
         return await self.search_points(
@@ -297,6 +460,13 @@ class QdrantClientWrapper:
             limit=limit,
             point_types=point_types,
             payload_filter=payload_filter,
+            query_vector=query_vector,
+            lexical_query=lexical_query,
+            fusion_semantic_weight=fusion_semantic_weight,
+            fusion_lexical_weight=fusion_lexical_weight,
+            lexical_focus_terms=lexical_focus_terms,
+            exact_phrases=exact_phrases,
+            rare_terms=rare_terms,
         )
 
     async def search(self, query: str, collection: str, limit: int = 5) -> list[Any]:

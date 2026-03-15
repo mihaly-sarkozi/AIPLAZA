@@ -34,10 +34,17 @@ class VectorIndexPort(ABC):
     async def search_points(
         self,
         collection: str,
-        query: str,
+        query: str | None = None,
         limit: int = 10,
         point_types: list[str] | None = None,
         payload_filter: dict[str, Any] | None = None,
+        query_vector: list[float] | None = None,
+        lexical_query: str | None = None,
+        fusion_semantic_weight: float | None = None,
+        fusion_lexical_weight: float | None = None,
+        lexical_focus_terms: list[str] | None = None,
+        exact_phrases: list[str] | None = None,
+        rare_terms: list[str] | None = None,
     ) -> list[dict[str, Any]]:
         """Dense similarity keresés payload filterrel."""
         ...

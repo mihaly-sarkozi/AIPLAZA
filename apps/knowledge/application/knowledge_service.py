@@ -7,7 +7,7 @@ import logging
 from datetime import UTC, datetime
 from collections import Counter
 from time import perf_counter
-from typing import List, Optional, Any
+from typing import List, Optional, Any, TYPE_CHECKING
 from config.settings import settings
 from apps.knowledge.ports.repositories import KnowledgeBaseRepositoryPort, KbPermissionItem
 from apps.knowledge.domain.kb import KnowledgeBase
@@ -48,6 +48,9 @@ from apps.knowledge.application.scoring import (
 
 logger = logging.getLogger(__name__)
 
+if TYPE_CHECKING:
+    from apps.core.qdrant.qdrant_wrapper import QdrantClientWrapper
+
 
 def _metadata_for_response(meta: FileMetadata) -> dict[str, Any]:
     return {
@@ -70,6 +73,45 @@ def _norm(s: str) -> str:
 
 def _qhash(s: str) -> str:
     return hashlib.sha256((s or "").encode("utf-8")).hexdigest()[:16]
+
+
+def _normalize_place_key(value: str) -> str:
+    return str(value or "").strip().lower()
+
+
+def _relation_type_proximity_factor(relation_type: str | None) -> float:
+    rel = str(relation_type or "").strip().upper()
+    return {
+        "SUPPORTS": 1.0,
+        "REFINES": 0.95,
+        "GENERALIZES": 0.82,
+        "CONTRADICTS": 0.72,
+        "TEMPORALLY_SPLITS": 0.84,
+        "TEMPORALLY_OVERLAPS": 0.78,
+        "SAME_SUBJECT": 0.72,
+        "SAME_OBJECT": 0.68,
+        "SAME_PREDICATE": 0.62,
+        "SAME_PLACE": 0.60,
+        "SAME_SOURCE_POINT": 0.45,
+    }.get(rel, 0.62)
+
+
+def _valid_time_from_value(row: dict[str, Any]) -> Any:
+    return row.get("valid_time_from") or row.get("time_from")
+
+
+def _valid_time_to_value(row: dict[str, Any]) -> Any:
+    return row.get("valid_time_to") or row.get("time_to")
+
+
+def _clamp01(value: float) -> float:
+    return max(0.0, min(1.0, float(value)))
+
+
+def _normalize_score_range(value: float, min_value: float, max_value: float) -> float:
+    if max_value <= min_value:
+        return _clamp01(value)
+    return _clamp01((value - min_value) / (max_value - min_value))
 
 
 def _parse_assertion_id(value: Any) -> int | None:
@@ -1062,6 +1104,37 @@ class KnowledgeBaseService:
         parsed_query["entity_resolution_query"] = question
         return out
 
+    @staticmethod
+    def _compute_place_match(
+        query_terms: list[str],
+        resolved_keys: set[str],
+        hierarchy_keys: set[str],
+        item_place_keys: list[str],
+        item_place_hierarchy_keys: list[str] | None = None,
+    ) -> float:
+        if not query_terms and not resolved_keys and not hierarchy_keys:
+            return 0.0
+        item_keys = {_normalize_place_key(x) for x in item_place_keys if _normalize_place_key(x)}
+        item_hierarchy_keys = {
+            _normalize_place_key(x)
+            for x in (item_place_hierarchy_keys or [])
+            if _normalize_place_key(x)
+        }
+        all_item_keys = item_keys.union(item_hierarchy_keys)
+        if not all_item_keys:
+            return 0.0
+        if resolved_keys and all_item_keys.intersection(resolved_keys):
+            return 1.0
+        if hierarchy_keys and all_item_keys.intersection(hierarchy_keys):
+            return 0.84 if item_hierarchy_keys else 0.72
+        for q in query_terms:
+            qn = _normalize_place_key(q)
+            if not qn:
+                continue
+            if any(qn in ik or ik in qn for ik in all_item_keys):
+                return 0.5
+        return 0.0
+
     async def _resolve_query_places(
         self,
         scoped_kbs: list[KnowledgeBase],
@@ -1069,13 +1142,32 @@ class KnowledgeBaseService:
     ) -> dict[str, list[str]]:
         """Hely jelöltek feloldása Qdrant payload place kulcsok alapján."""
         place_terms = [str(x).strip().lower() for x in parsed_query.get("place_candidates", []) if str(x).strip()]
+        parser_resolved = parsed_query.get("resolved_place_candidates") or []
+        parser_place_terms = [
+            _normalize_place_key(x.get("normalized_key") if isinstance(x, dict) else x)
+            for x in parser_resolved
+        ]
         if not place_terms:
             parsed_query["resolved_place_candidates"] = {}
+            parsed_query["resolved_place_hierarchy_keys"] = {}
             return {}
         out: dict[str, list[str]] = {}
+        hierarchy_out: dict[str, list[str]] = {}
         for kb in scoped_kbs:
             resolved: set[str] = set()
-            for term in place_terms:
+            hierarchy_keys: set[str] = set()
+            db_place_ids: set[int] = set()
+            terms = sorted(set(place_terms + [x for x in parser_place_terms if x]))
+            for term in terms:
+                if kb.id is not None and hasattr(self.repo, "search_place_candidates"):
+                    for row in self.repo.search_place_candidates(kb.id, term, limit=12):
+                        p_key = _normalize_place_key(row.get("normalized_key") or row.get("canonical_name") or "")
+                        if p_key:
+                            resolved.add(p_key)
+                        try:
+                            db_place_ids.add(int(row.get("id")))
+                        except Exception:
+                            pass
                 try:
                     hits = await self.qdrant.search_points(
                         collection=kb.qdrant_collection_name,
@@ -1097,8 +1189,17 @@ class KnowledgeBaseService:
                     place_key = str(payload.get("place_key") or "").strip().lower()
                     if place_key and (term == place_key or term in place_key or place_key in term):
                         resolved.add(place_key)
+            if kb.id is not None and db_place_ids and hasattr(self.repo, "get_place_hierarchy"):
+                hierarchy_map = self.repo.get_place_hierarchy(kb.id, list(db_place_ids), max_depth=4)
+                for chain in hierarchy_map.values():
+                    for row in chain:
+                        h_key = _normalize_place_key(row.get("normalized_key") or row.get("canonical_name") or "")
+                        if h_key:
+                            hierarchy_keys.add(h_key)
             out[kb.uuid] = sorted(resolved)
+            hierarchy_out[kb.uuid] = sorted(hierarchy_keys)
         parsed_query["resolved_place_candidates"] = out
+        parsed_query["resolved_place_hierarchy_keys"] = hierarchy_out
         return out
 
     async def build_context_for_chat(
@@ -1127,20 +1228,41 @@ class KnowledgeBaseService:
 
         entity_terms = [str(x).strip().lower() for x in parsed_query.get("entity_candidates", []) if str(x).strip()]
         time_terms = [str(x).strip().lower() for x in parsed_query.get("time_candidates", []) if str(x).strip()]
-        query_time_from = parsed_query.get("query_time_from")
-        query_time_to = parsed_query.get("query_time_to")
+        query_valid_time_from = parsed_query.get("query_valid_time_from") or parsed_query.get("query_time_from")
+        query_valid_time_to = parsed_query.get("query_valid_time_to") or parsed_query.get("query_time_to")
         place_terms = [str(x).strip().lower() for x in parsed_query.get("place_candidates", []) if str(x).strip()]
         predicate_terms = [str(x).strip().lower() for x in parsed_query.get("predicate_candidates", []) if str(x).strip()]
         attribute_terms = [str(x).strip().lower() for x in parsed_query.get("attribute_candidates", []) if str(x).strip()]
         relation_terms = [str(x).strip().lower() for x in parsed_query.get("relation_candidates", []) if str(x).strip()]
+        lexical_focus_terms = [
+            str(x).strip().lower()
+            for x in (parsed_query.get("lexical_focus_terms") or [])
+            if str(x).strip()
+        ]
+        exact_phrase_candidates = [
+            str(x).strip().lower()
+            for x in (parsed_query.get("exact_phrase_candidates") or [])
+            if str(x).strip()
+        ]
+        hybrid_profile = dict(parsed_query.get("hybrid_profile") or {})
+        rare_entity_terms = [
+            str(x).strip().lower()
+            for x in (hybrid_profile.get("rare_entity_terms") or parsed_query.get("rare_entity_terms") or [])
+            if str(x).strip()
+        ]
         retrieval_mode = str(parsed_query.get("retrieval_mode") or "assertion_first")
         if bool(parsed_query.get("entity_heavy")) and retrieval_mode == "assertion_first":
             retrieval_mode = "entity_first"
         query_text = str(parsed_query.get("query_embedding_text") or question)
         normalized_query_text = str(parsed_query.get("normalized_query_text") or query_text or question)
+        lexical_query_text = str(parsed_query.get("lexical_query_text") or normalized_query_text or query_text)
+        request_query_vector = parsed_query.get("query_embedding_vector")
         t_total_start = perf_counter()
         qdrant_latency_ms = 0.0
         db_latency_ms = 0.0
+        context_build_ms = 0.0
+        qdrant_search_calls = 0
+        qdrant_precomputed_vector_calls = 0
 
         assertion_hits: list[dict] = []
         sentence_hits: list[dict] = []
@@ -1149,21 +1271,128 @@ class KnowledgeBaseService:
         qdrant_search_cache: dict[str, list[dict[str, Any]]] = {}
         resolved_entities_by_kb = await self._resolve_query_entities(scoped_kbs, parsed_query, question)
         resolved_places_by_kb = await self._resolve_query_places(scoped_kbs, parsed_query)
+        resolved_place_hierarchy_by_kb = parsed_query.get("resolved_place_hierarchy_keys") or {}
+
+        def _hybrid_weights_for(point_type: str) -> tuple[float, float]:
+            is_entity_heavy = bool(parsed_query.get("entity_heavy"))
+            is_predicate_heavy = bool(parsed_query.get("predicate_heavy"))
+            is_relation_heavy = bool(hybrid_profile.get("relation_heavy"))
+            has_rare_entities = bool(rare_entity_terms)
+            if point_type == "assertion":
+                semantic_w, lexical_w = 0.72, 0.28
+                if is_entity_heavy or has_rare_entities:
+                    semantic_w, lexical_w = 0.54, 0.46
+                elif is_predicate_heavy or is_relation_heavy:
+                    semantic_w, lexical_w = 0.60, 0.40
+            elif point_type == "sentence":
+                semantic_w, lexical_w = 0.62, 0.38
+                if retrieval_mode == "chunk_fallback":
+                    semantic_w, lexical_w = 0.46, 0.54
+                elif is_entity_heavy or has_rare_entities:
+                    semantic_w, lexical_w = 0.50, 0.50
+            else:
+                semantic_w, lexical_w = 0.56, 0.44
+                if retrieval_mode == "chunk_fallback":
+                    semantic_w, lexical_w = 0.36, 0.64
+                elif is_predicate_heavy or is_relation_heavy:
+                    semantic_w, lexical_w = 0.44, 0.56
+            return semantic_w, lexical_w
+
+        def _merge_hybrid_hits(
+            dense_hits: list[dict[str, Any]],
+            lexical_hits: list[dict[str, Any]],
+            *,
+            limit_for_type: int,
+            semantic_weight: float,
+            lexical_weight: float,
+        ) -> list[dict[str, Any]]:
+            merged_by_id: dict[str, dict[str, Any]] = {}
+            for source_name, hits in (("dense", dense_hits), ("lexical", lexical_hits)):
+                for hit in hits:
+                    hid = str(hit.get("id"))
+                    if not hid:
+                        continue
+                    row = merged_by_id.setdefault(
+                        hid,
+                        {
+                            "row": dict(hit),
+                            "semantic_raw": [],
+                            "lexical_raw": [],
+                            "sources": set(),
+                            "exact_phrase_score": 0.0,
+                            "rare_score": 0.0,
+                            "focus_term_score": 0.0,
+                        },
+                    )
+                    row["semantic_raw"].append(float(hit.get("semantic_score") or hit.get("semantic_score_norm") or hit.get("score") or 0.0))
+                    row["lexical_raw"].append(float(hit.get("lexical_score") or hit.get("lexical_score_norm") or 0.0))
+                    row["sources"].add(source_name)
+                    lexical_features = dict(hit.get("lexical_features") or {})
+                    row["exact_phrase_score"] = max(row["exact_phrase_score"], float(lexical_features.get("exact_phrase_score") or 0.0))
+                    row["rare_score"] = max(row["rare_score"], float(lexical_features.get("rare_score") or 0.0))
+                    row["focus_term_score"] = max(row["focus_term_score"], float(lexical_features.get("focus_term_score") or 0.0))
+                    if float(hit.get("fusion_score") or 0.0) >= float(row["row"].get("fusion_score") or 0.0):
+                        row["row"] = dict(hit)
+            if not merged_by_id:
+                return []
+            semantic_values = [max(entry["semantic_raw"]) if entry["semantic_raw"] else 0.0 for entry in merged_by_id.values()]
+            lexical_values = [max(entry["lexical_raw"]) if entry["lexical_raw"] else 0.0 for entry in merged_by_id.values()]
+            sem_min, sem_max = min(semantic_values), max(semantic_values)
+            lex_min, lex_max = min(lexical_values), max(lexical_values)
+            out: list[dict[str, Any]] = []
+            for entry in merged_by_id.values():
+                row = dict(entry["row"])
+                sem_best = max(entry["semantic_raw"]) if entry["semantic_raw"] else 0.0
+                lex_best = max(entry["lexical_raw"]) if entry["lexical_raw"] else 0.0
+                sem_norm = _normalize_score_range(sem_best, sem_min, sem_max)
+                lex_norm = _normalize_score_range(lex_best, lex_min, lex_max)
+                coverage_bonus = 0.06 if len(entry["sources"]) > 1 else 0.0
+                lexical_bonus = (
+                    (0.08 * float(entry["exact_phrase_score"]))
+                    + (0.06 * float(entry["rare_score"]))
+                    + (0.04 * float(entry["focus_term_score"]))
+                )
+                row["semantic_score_norm"] = sem_norm
+                row["lexical_score_norm"] = lex_norm
+                row["fusion_score"] = _clamp01((semantic_weight * sem_norm) + (lexical_weight * lex_norm) + coverage_bonus + lexical_bonus)
+                row["fusion_debug"] = {
+                    "source_count": len(entry["sources"]),
+                    "sources": sorted(entry["sources"]),
+                    "coverage_bonus": round(coverage_bonus, 4),
+                    "exact_phrase_score": round(float(entry["exact_phrase_score"]), 4),
+                    "rare_score": round(float(entry["rare_score"]), 4),
+                    "focus_term_score": round(float(entry["focus_term_score"]), 4),
+                }
+                out.append(row)
+            out.sort(key=lambda x: float(x.get("fusion_score") or x.get("score") or 0.0), reverse=True)
+            return out[:limit_for_type]
 
         async def _cached_search(
             kb: KnowledgeBase,
             query_value: str,
+            lexical_query_value: str,
             point_type: str,
             limit_value: int,
             payload_filter_value: dict[str, Any],
+            fusion_semantic_weight_value: float,
+            fusion_lexical_weight_value: float,
+            lexical_focus_terms_value: list[str],
+            exact_phrases_value: list[str],
+            rare_terms_value: list[str],
         ) -> list[dict[str, Any]]:
             cache_key = json.dumps(
                 {
                     "collection": kb.qdrant_collection_name,
                     "query": query_value,
+                    "lexical_query": lexical_query_value,
                     "point_type": point_type,
                     "limit": limit_value,
                     "filter": payload_filter_value,
+                    "fusion_semantic_weight": fusion_semantic_weight_value,
+                    "fusion_lexical_weight": fusion_lexical_weight_value,
+                    "lexical_focus_terms": lexical_focus_terms_value,
+                    "exact_phrases": exact_phrases_value,
+                    "rare_terms": rare_terms_value,
                 },
                 sort_keys=True,
                 default=str,
@@ -1171,20 +1400,48 @@ class KnowledgeBaseService:
             if cache_key in qdrant_search_cache:
                 return qdrant_search_cache[cache_key]
             t_q = perf_counter()
-            rows = await self.qdrant.search_points(
-                collection=kb.qdrant_collection_name,
-                query=query_value,
-                limit=limit_value,
-                point_types=[point_type],
-                payload_filter=payload_filter_value,
-            )
+            try:
+                rows = await self.qdrant.search_points(
+                    collection=kb.qdrant_collection_name,
+                    query=query_value,
+                    limit=limit_value,
+                    point_types=[point_type],
+                    payload_filter=payload_filter_value,
+                    query_vector=request_query_vector,
+                    lexical_query=lexical_query_value,
+                    fusion_semantic_weight=fusion_semantic_weight_value,
+                    fusion_lexical_weight=fusion_lexical_weight_value,
+                    lexical_focus_terms=lexical_focus_terms_value,
+                    exact_phrases=exact_phrases_value,
+                    rare_terms=rare_terms_value,
+                )
+            except TypeError as exc:
+                # Régi/mockolt qdrant adapterek csak az alap paramétereket ismerik.
+                if "unexpected keyword argument" not in str(exc):
+                    raise
+                rows = await self.qdrant.search_points(
+                    collection=kb.qdrant_collection_name,
+                    query=query_value,
+                    limit=limit_value,
+                    point_types=[point_type],
+                    payload_filter=payload_filter_value,
+                )
+            except StopAsyncIteration:
+                rows = []
             nonlocal qdrant_latency_ms
+            nonlocal qdrant_search_calls
+            nonlocal qdrant_precomputed_vector_calls
             qdrant_latency_ms += (perf_counter() - t_q) * 1000.0
+            qdrant_search_calls += 1
+            if request_query_vector is not None:
+                qdrant_precomputed_vector_calls += 1
             qdrant_search_cache[cache_key] = rows
             return rows
 
         for kb in scoped_kbs:
             place_filter = resolved_places_by_kb.get(kb.uuid) or place_terms or None
+            kb_place_resolved_keys = set(resolved_places_by_kb.get(kb.uuid) or [])
+            kb_place_hierarchy_keys = set(resolved_place_hierarchy_by_kb.get(kb.uuid) or [])
             kb_resolved_ids = [int(x["id"]) for x in (resolved_entities_by_kb.get(kb.uuid) or []) if x.get("id") is not None]
             assertion_limit = per_type_limit + (2 if bool(parsed_query.get("entity_heavy")) else 0)
             sentence_limit = max(3, per_type_limit // 2)
@@ -1233,48 +1490,83 @@ class KnowledgeBaseService:
                     "place_keys": place_filter,
                     "entity_ids": kb_resolved_ids if kb_resolved_ids else None,
                 }
-                hits_dense = await _cached_search(
-                    kb=kb,
-                    query_value=query_text,
-                    point_type=point_type,
-                    limit_value=max(limit_for_type, 1),
-                    payload_filter_value=base_filter,
-                )
-                hits_lexical = await _cached_search(
-                    kb=kb,
-                    query_value=normalized_query_text,
-                    point_type=point_type,
-                    limit_value=max(2, limit_for_type // 2),
-                    payload_filter_value=base_filter,
-                )
-                merged_hits_by_id: dict[str, dict[str, Any]] = {}
-                for hit in (hits_dense + hits_lexical):
-                    hid = str(hit.get("id"))
-                    existing = merged_hits_by_id.get(hid)
-                    if existing is None:
-                        merged_hits_by_id[hid] = hit
-                        continue
-                    if float(hit.get("fusion_score") or 0.0) > float(existing.get("fusion_score") or 0.0):
-                        merged_hits_by_id[hid] = hit
-                hits = sorted(
-                    merged_hits_by_id.values(),
-                    key=lambda x: float(x.get("fusion_score") or x.get("score") or 0.0),
-                    reverse=True,
-                )[:limit_for_type]
+                f_sem, f_lex = _hybrid_weights_for(point_type)
+                if point_type == "assertion":
+                    hits_dense = await _cached_search(
+                        kb=kb,
+                        query_value=query_text,
+                        lexical_query_value=lexical_query_text,
+                        point_type=point_type,
+                        limit_value=max(limit_for_type, 1),
+                        payload_filter_value=base_filter,
+                        fusion_semantic_weight_value=f_sem,
+                        fusion_lexical_weight_value=f_lex,
+                        lexical_focus_terms_value=lexical_focus_terms,
+                        exact_phrases_value=exact_phrase_candidates,
+                        rare_terms_value=rare_entity_terms,
+                    )
+                    hits_lexical = await _cached_search(
+                        kb=kb,
+                        query_value=lexical_query_text,
+                        lexical_query_value=lexical_query_text,
+                        point_type=point_type,
+                        limit_value=max(2, limit_for_type // 2),
+                        payload_filter_value=base_filter,
+                        fusion_semantic_weight_value=f_sem,
+                        fusion_lexical_weight_value=f_lex,
+                        lexical_focus_terms_value=lexical_focus_terms,
+                        exact_phrases_value=exact_phrase_candidates,
+                        rare_terms_value=rare_entity_terms,
+                    )
+                    hits = _merge_hybrid_hits(
+                        hits_dense,
+                        hits_lexical,
+                        limit_for_type=limit_for_type,
+                        semantic_weight=f_sem,
+                        lexical_weight=f_lex,
+                    )
+                else:
+                    hits = await _cached_search(
+                        kb=kb,
+                        query_value=lexical_query_text or query_text,
+                        lexical_query_value=lexical_query_text,
+                        point_type=point_type,
+                        limit_value=max(limit_for_type, 1),
+                        payload_filter_value=base_filter,
+                        fusion_semantic_weight_value=f_sem,
+                        fusion_lexical_weight_value=f_lex,
+                        lexical_focus_terms_value=lexical_focus_terms,
+                        exact_phrases_value=exact_phrase_candidates,
+                        rare_terms_value=rare_entity_terms,
+                    )
                 for hit in hits:
                     payload = dict(hit.get("payload") or {})
                     text = str(payload.get("text") or "").strip()
                     lowered = text.lower()
                     entity_match = 1.0 if entity_terms and any(t in lowered for t in entity_terms) else 0.0
                     time_match = compute_time_overlap_score(
-                        query_from=query_time_from,
-                        query_to=query_time_to,
-                        item_from=payload.get("time_from"),
-                        item_to=payload.get("time_to"),
+                        query_from=query_valid_time_from,
+                        query_to=query_valid_time_to,
+                        item_from=payload.get("valid_time_from") or payload.get("time_from"),
+                        item_to=payload.get("valid_time_to") or payload.get("time_to"),
                     )
                     if time_match <= 0.0 and time_terms and any(t in lowered for t in time_terms):
                         time_match = 0.4
-                    place_match = 1.0 if place_terms and any(t in lowered for t in place_terms) else 0.0
+                    payload_place_keys = [
+                        _normalize_place_key(x)
+                        for x in (payload.get("place_keys") or [])
+                        if _normalize_place_key(x)
+                    ]
+                    single_place = _normalize_place_key(payload.get("place_key") or "")
+                    if single_place:
+                        payload_place_keys.append(single_place)
+                    place_match = self._compute_place_match(
+                        query_terms=place_terms,
+                        resolved_keys=kb_place_resolved_keys,
+                        hierarchy_keys=kb_place_hierarchy_keys,
+                        item_place_keys=payload_place_keys,
+                        item_place_hierarchy_keys=payload.get("place_hierarchy_keys") or [],
+                    )
                     predicate_match = 1.0 if predicate_terms and any(t in lowered for t in predicate_terms) else 0.0
                     if attribute_terms and any(t in lowered for t in attribute_terms):
                         predicate_match = max(predicate_match, 0.8)
@@ -1293,9 +1585,10 @@ class KnowledgeBaseService:
                             "source_point_id": payload.get("source_point_id"),
                             "source_sentence_id": payload.get("source_sentence_id"),
                             "text": text,
-                            "semantic_match": float(hit.get("semantic_score") or hit.get("score") or 0.0),
-                            "lexical_match": float(hit.get("lexical_score") or 0.0),
+                            "semantic_match": float(hit.get("semantic_score_norm") or hit.get("semantic_score") or hit.get("score") or 0.0),
+                            "lexical_match": float(hit.get("lexical_score_norm") or hit.get("lexical_score") or 0.0),
                             "fusion_match": float(hit.get("fusion_score") or 0.0),
+                            "hybrid_debug": hit.get("fusion_debug") or {},
                             "entity_match": entity_match,
                             "time_match": time_match,
                             "place_match": place_match,
@@ -1306,12 +1599,18 @@ class KnowledgeBaseService:
                             "decay_rate": float(payload.get("decay_rate") or 0.015),
                             "last_reinforced_at": payload.get("last_reinforced_at"),
                             "confidence": float(payload.get("confidence") or 0.0),
-                            "recency": 0.5,
+                            "source_time": payload.get("source_time"),
+                            "ingest_time": payload.get("ingest_time"),
                             "status": status,
                             "predicate": payload.get("predicate"),
                             "entity_ids": payload_entities,
-                            "time_from": payload.get("time_from"),
-                            "time_to": payload.get("time_to"),
+                            "place_ids": payload.get("place_ids") or [],
+                            "place_keys": payload.get("place_keys") or ([payload.get("place_key")] if payload.get("place_key") else []),
+                            "place_hierarchy_keys": payload.get("place_hierarchy_keys") or [],
+                            "valid_time_from": payload.get("valid_time_from") or payload.get("time_from"),
+                            "valid_time_to": payload.get("valid_time_to") or payload.get("time_to"),
+                            "time_from": payload.get("valid_time_from") or payload.get("time_from"),
+                            "time_to": payload.get("valid_time_to") or payload.get("time_to"),
                             "relation_weight": 0.0,
                             "relation_confidence": 0.0,
                             "relation_depth": None,
@@ -1333,6 +1632,8 @@ class KnowledgeBaseService:
         for kb in scoped_kbs:
             if kb.id is None:
                 continue
+            kb_place_resolved_keys = set(resolved_places_by_kb.get(kb.uuid) or [])
+            kb_place_hierarchy_keys = set(resolved_place_hierarchy_by_kb.get(kb.uuid) or [])
             seed_ids = assertion_seeds_by_kb.get(kb.uuid) or []
             if not seed_ids:
                 continue
@@ -1371,29 +1672,47 @@ class KnowledgeBaseService:
                         "fusion_match": 0.45,
                         "entity_match": 0.0,
                         "time_match": compute_time_overlap_score(
-                            query_from=query_time_from,
-                            query_to=query_time_to,
-                            item_from=row.get("time_from"),
-                            item_to=row.get("time_to"),
+                            query_from=query_valid_time_from,
+                            query_to=query_valid_time_to,
+                            item_from=row.get("valid_time_from") or row.get("time_from"),
+                            item_to=row.get("valid_time_to") or row.get("time_to"),
                         ),
-                        "place_match": 1.0 if row.get("place_key") and row.get("place_key") in place_terms else 0.0,
+                        "place_match": self._compute_place_match(
+                            query_terms=place_terms,
+                            resolved_keys=kb_place_resolved_keys,
+                            hierarchy_keys=kb_place_hierarchy_keys,
+                            item_place_keys=[row.get("place_key")] if row.get("place_key") else [],
+                            item_place_hierarchy_keys=row.get("place_hierarchy_keys") or [],
+                        ),
                         "predicate_match": 1.0 if row.get("predicate") and row.get("predicate") in predicate_terms else 0.0,
                         "graph_proximity": min(
                             1.0,
-                            float(row.get("relation_current_weight") or row.get("relation_weight") or 0.0)
-                            * (0.85 if int(row.get("depth") or 1) > 1 else 1.0),
+                            float(row.get("relation_graph_score") or 0.0)
+                            if row.get("relation_graph_score") is not None
+                            else (
+                                float(row.get("relation_current_weight") or row.get("relation_weight") or 0.0)
+                                * (0.35 + (0.65 * float(row.get("relation_confidence") or 0.0)))
+                                * _relation_type_proximity_factor(row.get("relation_type"))
+                                * (0.85 if int(row.get("depth") or 1) > 1 else 1.0)
+                            ),
                         ),
                         "strength": float(row.get("strength") or 0.0),
                         "baseline_strength": float(row.get("baseline_strength") or 0.05),
                         "decay_rate": float(row.get("decay_rate") or 0.015),
                         "last_reinforced_at": row.get("last_reinforced_at"),
                         "confidence": float(row.get("confidence") or 0.0),
-                        "recency": 0.5,
+                        "source_time": row.get("source_time"),
+                        "ingest_time": row.get("ingest_time"),
                         "status": str(row.get("status") or "active").lower(),
                         "predicate": row.get("predicate"),
                         "entity_ids": [x for x in [row.get("subject_entity_id"), row.get("object_entity_id")] if x],
-                        "time_from": row.get("time_from"),
-                        "time_to": row.get("time_to"),
+                        "place_ids": [int(row.get("place_id"))] if row.get("place_id") is not None else [],
+                        "place_keys": [row.get("place_key")] if row.get("place_key") else [],
+                        "place_hierarchy_keys": row.get("place_hierarchy_keys") or [],
+                        "valid_time_from": row.get("valid_time_from") or row.get("time_from"),
+                        "valid_time_to": row.get("valid_time_to") or row.get("time_to"),
+                        "time_from": row.get("valid_time_from") or row.get("time_from"),
+                        "time_to": row.get("valid_time_to") or row.get("time_to"),
                         "relation_type": row.get("relation_type"),
                         "relation_weight": float(row.get("relation_current_weight") or row.get("relation_weight") or 0.0),
                         "relation_confidence": float(row.get("relation_confidence") or 0.0),
@@ -1411,20 +1730,25 @@ class KnowledgeBaseService:
         unique_seed_points = list(dict.fromkeys(seed_source_points))
         if unique_seed_points and retrieval_mode in {"assertion_first", "entity_first", "timeline_first", "comparison_first"}:
             for kb in scoped_kbs:
+                kb_place_resolved_keys = set(resolved_places_by_kb.get(kb.uuid) or [])
+                kb_place_hierarchy_keys = set(resolved_place_hierarchy_by_kb.get(kb.uuid) or [])
                 for source_point_id in unique_seed_points:
-                    for point_type, target in [
-                        ("sentence", sentence_hits),
-                        ("structural_chunk", chunk_hits),
-                    ]:
+                    for point_type, target in [("sentence", sentence_hits)]:
                         expanded = await _cached_search(
                             kb=kb,
-                            query_value=normalized_query_text,
+                            query_value=lexical_query_text,
+                            lexical_query_value=lexical_query_text,
                             point_type=point_type,
                             limit_value=3,
                             payload_filter_value={
                                 "kb_uuid": kb.uuid,
                                 "source_point_id": source_point_id,
                             },
+                            fusion_semantic_weight_value=(0.46 if point_type == "sentence" else 0.40),
+                            fusion_lexical_weight_value=(0.54 if point_type == "sentence" else 0.60),
+                            lexical_focus_terms_value=lexical_focus_terms,
+                            exact_phrases_value=exact_phrase_candidates,
+                            rare_terms_value=rare_entity_terms,
                         )
                         for hit in expanded:
                             payload = dict(hit.get("payload") or {})
@@ -1439,21 +1763,96 @@ class KnowledgeBaseService:
                                     "source_point_id": payload.get("source_point_id"),
                                     "source_sentence_id": payload.get("source_sentence_id"),
                                     "text": text,
-                                    "semantic_match": float(hit.get("semantic_score") or hit.get("score") or 0.0),
-                                    "lexical_match": float(hit.get("lexical_score") or 0.0),
+                                    "semantic_match": float(hit.get("semantic_score_norm") or hit.get("semantic_score") or hit.get("score") or 0.0),
+                                    "lexical_match": float(hit.get("lexical_score_norm") or hit.get("lexical_score") or 0.0),
                                     "fusion_match": float(hit.get("fusion_score") or 0.0),
+                                    "hybrid_debug": hit.get("fusion_debug") or {},
                                     "entity_match": 0.0,
                                     "time_match": 0.0,
-                                    "place_match": 0.0,
+                                    "place_match": self._compute_place_match(
+                                        query_terms=place_terms,
+                                        resolved_keys=kb_place_resolved_keys,
+                                        hierarchy_keys=kb_place_hierarchy_keys,
+                                        item_place_keys=payload.get("place_keys")
+                                        or ([payload.get("place_key")] if payload.get("place_key") else []),
+                                        item_place_hierarchy_keys=payload.get("place_hierarchy_keys") or [],
+                                    ),
                                     "predicate_match": 0.0,
                                     "graph_proximity": 0.5,
                                     "strength": float(payload.get("strength") or 0.0),
                                     "confidence": float(payload.get("confidence") or 0.0),
-                                    "recency": 0.5,
+                                    "source_time": payload.get("source_time"),
+                                    "ingest_time": payload.get("ingest_time"),
                                     "predicate": payload.get("predicate"),
                                     "entity_ids": payload.get("entity_ids") or [],
-                                    "time_from": payload.get("time_from"),
-                                    "time_to": payload.get("time_to"),
+                                    "place_ids": payload.get("place_ids") or [],
+                                    "place_keys": payload.get("place_keys") or ([payload.get("place_key")] if payload.get("place_key") else []),
+                                    "place_hierarchy_keys": payload.get("place_hierarchy_keys") or [],
+                                    "valid_time_from": payload.get("valid_time_from") or payload.get("time_from"),
+                                    "valid_time_to": payload.get("valid_time_to") or payload.get("time_to"),
+                                    "time_from": payload.get("valid_time_from") or payload.get("time_from"),
+                                    "time_to": payload.get("valid_time_to") or payload.get("time_to"),
+                                }
+                            )
+                    if retrieval_mode == "chunk_fallback":
+                        expanded_chunks = await _cached_search(
+                            kb=kb,
+                            query_value=lexical_query_text,
+                            lexical_query_value=lexical_query_text,
+                            point_type="structural_chunk",
+                            limit_value=2,
+                            payload_filter_value={
+                                "kb_uuid": kb.uuid,
+                                "source_point_id": source_point_id,
+                            },
+                            fusion_semantic_weight_value=0.40,
+                            fusion_lexical_weight_value=0.60,
+                            lexical_focus_terms_value=lexical_focus_terms,
+                            exact_phrases_value=exact_phrase_candidates,
+                            rare_terms_value=rare_entity_terms,
+                        )
+                        for hit in expanded_chunks:
+                            payload = dict(hit.get("payload") or {})
+                            text = str(payload.get("text") or "").strip()
+                            if not text:
+                                continue
+                            chunk_hits.append(
+                                {
+                                    "id": hit.get("id"),
+                                    "kb_uuid": kb.uuid,
+                                    "point_type": "structural_chunk",
+                                    "source_point_id": payload.get("source_point_id"),
+                                    "source_sentence_id": payload.get("source_sentence_id"),
+                                    "text": text,
+                                    "semantic_match": float(hit.get("semantic_score_norm") or hit.get("semantic_score") or hit.get("score") or 0.0),
+                                    "lexical_match": float(hit.get("lexical_score_norm") or hit.get("lexical_score") or 0.0),
+                                    "fusion_match": float(hit.get("fusion_score") or 0.0),
+                                    "hybrid_debug": hit.get("fusion_debug") or {},
+                                    "entity_match": 0.0,
+                                    "time_match": 0.0,
+                                    "place_match": self._compute_place_match(
+                                        query_terms=place_terms,
+                                        resolved_keys=kb_place_resolved_keys,
+                                        hierarchy_keys=kb_place_hierarchy_keys,
+                                        item_place_keys=payload.get("place_keys")
+                                        or ([payload.get("place_key")] if payload.get("place_key") else []),
+                                        item_place_hierarchy_keys=payload.get("place_hierarchy_keys") or [],
+                                    ),
+                                    "predicate_match": 0.0,
+                                    "graph_proximity": 0.5,
+                                    "strength": float(payload.get("strength") or 0.0),
+                                    "confidence": float(payload.get("confidence") or 0.0),
+                                    "source_time": payload.get("source_time"),
+                                    "ingest_time": payload.get("ingest_time"),
+                                    "predicate": payload.get("predicate"),
+                                    "entity_ids": payload.get("entity_ids") or [],
+                                    "place_ids": payload.get("place_ids") or [],
+                                    "place_keys": payload.get("place_keys") or ([payload.get("place_key")] if payload.get("place_key") else []),
+                                    "place_hierarchy_keys": payload.get("place_hierarchy_keys") or [],
+                                    "valid_time_from": payload.get("valid_time_from") or payload.get("time_from"),
+                                    "valid_time_to": payload.get("valid_time_to") or payload.get("time_to"),
+                                    "time_from": payload.get("valid_time_from") or payload.get("time_from"),
+                                    "time_to": payload.get("valid_time_to") or payload.get("time_to"),
                                 }
                             )
 
@@ -1497,38 +1896,55 @@ class KnowledgeBaseService:
         if filtered_assertion_hits:
             assertion_hits = filtered_assertion_hits
 
+        t_context = perf_counter()
         packet = self.context_builder.build_context_packet(
             assertion_hits=assertion_hits,
             sentence_hits=sentence_hits,
             chunk_hits=chunk_hits,
             related_entities=list({(x["kb_uuid"], x["entity_id"]): x for x in related_entities}.values()),
             query_focus={
+                "raw_query": parsed_query.get("raw_query", question),
                 "intent": parsed_query.get("intent"),
                 "entity_candidates": parsed_query.get("entity_candidates", []),
                 "resolved_entity_candidates": parsed_query.get("resolved_entity_candidates", {}),
+                "focus_axes": parsed_query.get("focus_axes") or {},
+                "parser_audit": parsed_query.get("parser_audit") or {},
+                "parse_time_ms": float(parsed_query.get("parse_time_ms") or 0.0),
+                "valid_time_window": parsed_query.get("valid_time_window") or {
+                    "from": query_valid_time_from.isoformat() if query_valid_time_from else None,
+                    "to": query_valid_time_to.isoformat() if query_valid_time_to else None,
+                },
                 "time_window": parsed_query.get("time_window") or {
-                    "from": query_time_from.isoformat() if query_time_from else None,
-                    "to": query_time_to.isoformat() if query_time_to else None,
+                    "from": query_valid_time_from.isoformat() if query_valid_time_from else None,
+                    "to": query_valid_time_to.isoformat() if query_valid_time_to else None,
                 },
                 "place_candidates": parsed_query.get("place_candidates", []),
+                "resolved_place_candidates": parsed_query.get("resolved_place_candidates", {}),
+                "resolved_place_hierarchy_keys": parsed_query.get("resolved_place_hierarchy_keys", {}),
                 "attribute_candidates": parsed_query.get("attribute_candidates", []),
                 "relation_candidates": parsed_query.get("relation_candidates", []),
+                "normalized_query_text": parsed_query.get("normalized_query_text", query_text),
+                "lexical_query_text": parsed_query.get("lexical_query_text", lexical_query_text),
+                "query_embedding_text": parsed_query.get("query_embedding_text", query_text),
                 "comparison_targets": parsed_query.get("comparison_targets", []),
                 "comparison_time_windows": parsed_query.get("comparison_time_windows", []),
                 "retrieval_mode": retrieval_mode,
             },
             top_n=10,
         )
+        context_build_ms = (perf_counter() - t_context) * 1000.0
         if retrieval_mode == "timeline_first":
             packet["expanded_assertions"] = sorted(
                 packet.get("expanded_assertions") or [],
-                key=lambda x: str(x.get("time_from") or x.get("time_to") or ""),
+                key=lambda x: str(_valid_time_from_value(x) or _valid_time_to_value(x) or ""),
             )
             packet["timeline_sequence"] = [
                 {
                     "assertion_id": x.get("id"),
-                    "time_from": x.get("time_from"),
-                    "time_to": x.get("time_to"),
+                    "valid_time_from": _valid_time_from_value(x),
+                    "valid_time_to": _valid_time_to_value(x),
+                    "time_from": _valid_time_from_value(x),
+                    "time_to": _valid_time_to_value(x),
                     "text": x.get("text"),
                 }
                 for x in packet.get("top_assertions") or []
@@ -1595,13 +2011,28 @@ class KnowledgeBaseService:
                     sp = str(row.get("source_point_id") or "")
                     if sp and sp not in source_points_by_assertion[aid]:
                         source_points_by_assertion[aid].append(sp)
+                mention_map = self.repo.list_mentions_for_assertions(top_assertion_ids)
+                if not isinstance(mention_map, dict):
+                    mention_map = {}
                 for row in packet.get("top_assertions") or []:
                     aid = _parse_assertion_id(row.get("id"))
                     if aid is None:
                         continue
                     row["evidence_sentence_ids"] = evidence_ids_by_assertion.get(aid, [])
                     row["evidence_source_point_ids"] = source_points_by_assertion.get(aid, [])
-                    row["mentions"] = self.repo.list_mentions_for_assertion(aid)
+                    row["mentions"] = mention_map.get(aid, [])
+                packet["assertion_mention_traces"] = [
+                    {
+                        "assertion_id": row.get("id"),
+                        "seed_role": "seed" if any(str(seed.get("id")) == str(row.get("id")) for seed in (packet.get("seed_assertions") or [])) else "expanded",
+                        "sentence_ids": row.get("evidence_sentence_ids") or [],
+                        "source_point_ids": row.get("evidence_source_point_ids") or [],
+                        "mention_ids": [m.get("id") for m in (row.get("mentions") or []) if m.get("id") is not None],
+                        "entity_ids": row.get("entity_ids") or [],
+                        "mentions": row.get("mentions") or [],
+                    }
+                    for row in (packet.get("top_assertions") or [])
+                ]
 
         packet["scoring_summary"] = {
             **(packet.get("scoring_summary") or {}),
@@ -1610,7 +2041,9 @@ class KnowledgeBaseService:
             "entity_candidates": parsed_query.get("entity_candidates", []),
             "place_candidates": parsed_query.get("place_candidates", []),
             "resolved_place_candidates": parsed_query.get("resolved_place_candidates", {}),
+            "resolved_place_hierarchy_keys": parsed_query.get("resolved_place_hierarchy_keys", {}),
             "time_candidates": parsed_query.get("time_candidates", []),
+            "valid_time_window": parsed_query.get("valid_time_window"),
             "time_window": parsed_query.get("time_window"),
             "predicate_candidates": parsed_query.get("predicate_candidates", []),
             "attribute_candidates": parsed_query.get("attribute_candidates", []),
@@ -1618,11 +2051,27 @@ class KnowledgeBaseService:
             "intent": parsed_query.get("intent"),
             "retrieval_mode": retrieval_mode,
             "hybrid_recall_enabled": True,
-            "query_embedding_reuse": True,
+            "query_embedding_reuse": bool(
+                int(parsed_query.get("query_embedding_generation_count") or 0) <= 1
+            ),
+            "query_embedding_vector_ready": request_query_vector is not None,
+            "query_embedding_time_ms": float(parsed_query.get("query_embedding_time_ms") or 0.0),
             "qdrant_request_cache_entries": len(qdrant_search_cache),
+            "qdrant_search_calls": qdrant_search_calls,
+            "qdrant_precomputed_vector_calls": qdrant_precomputed_vector_calls,
+            "query_embedding_reuse_verified": bool(
+                int(parsed_query.get("query_embedding_generation_count") or 0) <= 1
+                and (qdrant_search_calls == 0 or qdrant_search_calls == qdrant_precomputed_vector_calls)
+            ),
+            "query_embedding_generation_count": int(parsed_query.get("query_embedding_generation_count") or 0),
+            "query_embedding_prepare_calls": int(parsed_query.get("query_embedding_prepare_calls") or 0),
             "latency_ms": {
+                "parse": round(float(parsed_query.get("parse_time_ms") or 0.0), 2),
+                "query_embedding": round(float(parsed_query.get("query_embedding_time_ms") or 0.0), 2),
                 "qdrant_recall": round(qdrant_latency_ms, 2),
                 "db_expansion": round(db_latency_ms, 2),
+                "rerank": round(float(((packet.get("scoring_summary") or {}).get("timing_ms") or {}).get("rerank") or 0.0), 2),
+                "context_build": round(context_build_ms, 2),
             },
         }
         # Related entity summary: id helyett emberi olvasható összegzés.
@@ -1631,6 +2080,11 @@ class KnowledgeBaseService:
             for eid in row.get("entity_ids") or []:
                 if isinstance(eid, int):
                     related_entity_ids[eid] = related_entity_ids.get(eid, 0) + 1
+        existing_related_entities = {
+            (int(x.get("entity_id")), str(x.get("kb_uuid") or "")): x
+            for x in (packet.get("related_entities") or [])
+            if isinstance(x.get("entity_id"), int)
+        }
         resolved_related_entities: list[dict] = []
         for kb in scoped_kbs:
             if kb.id is None:
@@ -1638,6 +2092,7 @@ class KnowledgeBaseService:
             entity_rows = self.repo.get_entities_by_ids(kb.id, list(related_entity_ids.keys()))
             for e in entity_rows:
                 eid = int(e["id"])
+                existing = existing_related_entities.get((eid, kb.uuid), {})
                 resolved_related_entities.append(
                     {
                         "entity_id": eid,
@@ -1645,11 +2100,17 @@ class KnowledgeBaseService:
                         "canonical_name": e.get("canonical_name"),
                         "entity_type": e.get("entity_type"),
                         "aliases": e.get("aliases") or [],
-                        "mention_count_in_context": int(related_entity_ids.get(eid, 0)),
+                        "assertion_ids": existing.get("assertion_ids") or [],
+                        "seed_assertion_ids": existing.get("seed_assertion_ids") or [],
+                        "expanded_assertion_ids": existing.get("expanded_assertion_ids") or [],
+                        "source_point_ids": existing.get("source_point_ids") or [],
+                        "top_predicates": existing.get("top_predicates") or [],
+                        "mention_count_in_context": int(existing.get("mention_count_in_context") or related_entity_ids.get(eid, 0)),
                     }
                 )
         if resolved_related_entities:
             packet["related_entities"] = resolved_related_entities
+            packet["primary_entities"] = resolved_related_entities[:5]
         # Top assertionök enyhe retrieval-hit megerősítést kapnak (best effort).
         for row in packet.get("top_assertions") or []:
             assertion_id = _parse_assertion_id(row.get("id"))

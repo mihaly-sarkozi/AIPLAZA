@@ -9,6 +9,7 @@ from apps.chat.application.services.chat_service import ChatService
 from apps.knowledge.application.context_builder import KnowledgeContextBuilder
 from apps.knowledge.application.evaluation import RetrievalEvaluationService
 from apps.knowledge.application.retrieval_service import KnowledgeRetrievalService
+from apps.knowledge.application.reranker import compute_recency_score
 
 pytestmark = pytest.mark.unit
 
@@ -146,6 +147,12 @@ def test_fallback_hierarchy_uses_chunk_only_as_last_resort():
     order = KnowledgeRetrievalService.resolve_fallback_hierarchy(assertion_hits=0, entity_hits=1, sentence_hits=0)
     assert order[-1] == "chunk_fallback"
     assert order[0] != "chunk_fallback"
+
+
+def test_recency_uses_source_or_ingest_time_not_valid_time():
+    recent = compute_recency_score(source_time="2026-03-14T00:00:00", ingest_time=None)
+    old = compute_recency_score(source_time="2020-01-01T00:00:00", ingest_time=None)
+    assert recent > old
 
 
 def test_assertion_first_guard_prevents_chunk_only_prompt():

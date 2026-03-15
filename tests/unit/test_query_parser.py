@@ -37,3 +37,24 @@ def test_query_parser_handles_hungarian_month_word():
     assert parsed["query_time_from"] is not None
     assert parsed["query_time_from"].year == 2024
     assert parsed["query_time_from"].month == 2
+
+
+def test_query_parser_builds_rich_structured_output():
+    parser = QueryParser()
+    parsed = parser.parse("Mutasd meg Anna és Béla kapcsolatát 2024 február és 2024 március között Budapesten")
+    assert parsed["raw_query"]
+    assert parsed["normalized_query_text"]
+    assert parsed["lexical_query_text"]
+    assert parsed["query_embedding_text"]
+    assert parsed["relation_candidates"]
+    assert parsed["valid_time_window"]["from"] is not None
+    assert parsed["valid_time_window"]["to"] is not None
+    assert parsed["parser_audit"]["focus_axes"]["entity"] > 0.0
+    assert parsed["parser_audit"]["has_valid_time_window"] is True
+
+
+def test_query_parser_entity_heavy_changes_retrieval_mode():
+    parser = QueryParser()
+    parsed = parser.parse("Mi a kapcsolat Anna és Béla között Budapesten?")
+    assert parsed["entity_heavy"] is True
+    assert parsed["retrieval_mode"] == "entity_first"

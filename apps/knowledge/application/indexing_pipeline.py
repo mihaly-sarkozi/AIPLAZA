@@ -225,13 +225,18 @@ class KnowledgeIndexingPipeline:
                 return f"{ref.year:04d}-{ref.month:02d}"
             return ref.strftime("%Y-%m-%d")
 
-        def _canonical_text_with_meta(base_text: str, time_from: datetime | None, time_to: datetime | None, place_key: str | None) -> str:
+        def _canonical_text_with_meta(
+            base_text: str,
+            valid_time_from: datetime | None,
+            valid_time_to: datetime | None,
+            place_key: str | None,
+        ) -> str:
             base = (base_text or "").strip()
             extras: list[str] = []
-            if time_from or time_to:
-                from_s = time_from.date().isoformat() if time_from else "?"
-                to_s = time_to.date().isoformat() if time_to else "?"
-                extras.append(f"time={from_s}..{to_s}")
+            if valid_time_from or valid_time_to:
+                from_s = valid_time_from.date().isoformat() if valid_time_from else "?"
+                to_s = valid_time_to.date().isoformat() if valid_time_to else "?"
+                extras.append(f"valid_time={from_s}..{to_s}")
             if place_key:
                 extras.append(f"place={place_key}")
             if not extras:
@@ -280,20 +285,21 @@ class KnowledgeIndexingPipeline:
                 "entity_ids": [],
                 "assertion_ids": [],
                 "predicate_hints": [],
-                "time_from": None,
-                "time_to": None,
+                "valid_time_from": None,
+                "valid_time_to": None,
+                "place_ids": [],
                 "place_keys": [],
             }
             for row in sentence_rows
         }
 
-        def _merge_interval(meta: dict[str, Any], start: datetime | None, end: datetime | None) -> None:
+        def _merge_valid_time(meta: dict[str, Any], start: datetime | None, end: datetime | None) -> None:
             if start is not None:
-                current_start = meta.get("time_from")
-                meta["time_from"] = start if current_start is None else min(current_start, start)
+                current_start = meta.get("valid_time_from")
+                meta["valid_time_from"] = start if current_start is None else min(current_start, start)
             if end is not None:
-                current_end = meta.get("time_to")
-                meta["time_to"] = end if current_end is None else max(current_end, end)
+                current_end = meta.get("valid_time_to")
+                meta["valid_time_to"] = end if current_end is None else max(current_end, end)
 
         def _intervals_overlap(a_from: datetime | None, a_to: datetime | None, b_from: datetime | None, b_to: datetime | None) -> bool:
             if a_from is None and a_to is None:
@@ -319,6 +325,7 @@ class KnowledgeIndexingPipeline:
             try:
                 extracted = await self.extractor.extract(sanitized_text=sanitized_text, title=title)
                 extraction_conf = float(extracted.get("extraction_confidence") or 0.0)
+                default_source_time = _parse_time_value(extracted.get("source_time"))[0]
                 by_name: dict[str, dict] = {}
                 entity_points: list[dict[str, Any]] = []
                 for e in extracted.get("entities", []):
@@ -363,6 +370,84 @@ class KnowledgeIndexingPipeline:
 
                 place_candidates_by_sentence: dict[int, list[dict[str, Any]]] = {}
                 place_candidates_by_key: dict[str, dict[str, Any]] = {}
+                place_records_by_key: dict[str, dict[str, Any]] = {}
+
+                def _upsert_place_record(place_key: str, place_candidate: dict[str, Any], canonical_name: str | None = None) -> dict[str, Any] | None:
+                    if not place_key:
+                        return None
+                    existing = place_records_by_key.get(place_key)
+                    if existing is not None:
+                        return existing
+                    parent_place_id = None
+                    parent_name_raw = str(
+                        place_candidate.get("parent_place")
+                        or place_candidate.get("parent_name")
+                        or place_candidate.get("parent_key")
+                        or ""
+                    ).strip()
+                    if parent_name_raw:
+                        parent_key = _normalize_key(parent_name_raw)
+                        if parent_key and parent_key != place_key:
+                            parent_record = _upsert_place_record(
+                                place_key=parent_key,
+                                place_candidate={
+                                    "canonical_name": parent_name_raw,
+                                    "place_type": place_candidate.get("parent_place_type"),
+                                    "country_code": place_candidate.get("country_code"),
+                                    "confidence": float(place_candidate.get("confidence") or extraction_conf or 0.0),
+                                },
+                                canonical_name=parent_name_raw,
+                            )
+                            if parent_record is not None:
+                                parent_place_id = int(parent_record["id"])
+                    record = self.repo.upsert_place(
+                        kb_id=kb_id,
+                        payload={
+                            "canonical_name": str(
+                                canonical_name
+                                or place_candidate.get("canonical_name")
+                                or place_candidate.get("place_key")
+                                or place_candidate.get("text")
+                                or place_key
+                            ).strip() or place_key,
+                            "normalized_key": place_key,
+                            "place_type": place_candidate.get("place_type"),
+                            "country_code": place_candidate.get("country_code"),
+                            "parent_place_id": parent_place_id,
+                            "confidence": float(place_candidate.get("confidence") or extraction_conf or 0.0),
+                        },
+                    )
+                    place_records_by_key[place_key] = record
+                    return record
+
+                def _place_hierarchy_keys_for_records(place_ids: list[int], place_keys: list[str]) -> list[str]:
+                    by_id = {
+                        int(v["id"]): v
+                        for v in place_records_by_key.values()
+                        if v.get("id") is not None
+                    }
+                    ordered: list[str] = []
+                    seen: set[str] = set()
+                    for place_id in place_ids:
+                        current_id = int(place_id)
+                        visited: set[int] = set()
+                        while current_id > 0 and current_id not in visited:
+                            visited.add(current_id)
+                            row = by_id.get(current_id)
+                            if row is None:
+                                break
+                            key = str(row.get("normalized_key") or "").strip()
+                            if key and key not in seen:
+                                seen.add(key)
+                                ordered.append(key)
+                            parent_id = row.get("parent_place_id")
+                            current_id = int(parent_id) if parent_id is not None else 0
+                    for place_key in place_keys:
+                        normalized = _normalize_key(place_key)
+                        if normalized and normalized not in seen:
+                            seen.add(normalized)
+                            ordered.append(normalized)
+                    return ordered
                 for candidate in extracted.get("place_candidates", []) or []:
                     sent_idx = candidate.get("source_sentence_index")
                     if isinstance(sent_idx, int):
@@ -379,6 +464,35 @@ class KnowledgeIndexingPipeline:
                     )
                     if candidate_key:
                         place_candidates_by_key[candidate_key] = candidate
+
+                # Place dimenzió explicit persist már a jelöltekből is (akkor is, ha nincs assertion).
+                for place_key, place_candidate in place_candidates_by_key.items():
+                    _upsert_place_record(place_key=place_key, place_candidate=place_candidate)
+
+                # Sentence place enrichment place_candidates alapján assertion nélkül is.
+                for sent_idx, candidates in place_candidates_by_sentence.items():
+                    source_sentence = sentence_by_index.get(int(sent_idx))
+                    if source_sentence is None:
+                        continue
+                    meta = sentence_meta.get(int(source_sentence["id"]))
+                    if meta is None:
+                        continue
+                    for candidate in candidates:
+                        p_key = _normalize_key(
+                            str(
+                                candidate.get("normalized_key")
+                                or candidate.get("canonical_name")
+                                or candidate.get("place_key")
+                                or candidate.get("text")
+                                or candidate.get("value")
+                                or ""
+                            )
+                        )
+                        if p_key:
+                            meta["place_keys"].append(p_key)
+                            place_record = _upsert_place_record(place_key=p_key, place_candidate=candidate)
+                            if place_record is not None:
+                                meta["place_ids"].append(int(place_record["id"]))
                 time_candidates_by_sentence: dict[int, list[dict[str, Any]]] = {}
                 for candidate in extracted.get("time_candidates", []) or []:
                     sent_idx = candidate.get("source_sentence_index")
@@ -429,7 +543,8 @@ class KnowledgeIndexingPipeline:
                 assertion_points: list[dict[str, Any]] = []
                 for a in extracted.get("assertions", []):
                     subject_key = _normalize_key(a.get("subject") or "")
-                    object_key = _normalize_key(a.get("object_entity") or a.get("object") or "")
+                    object_value = a.get("object_value", a.get("object"))
+                    object_key = _normalize_key(a.get("object_entity") or object_value or "")
                     subject_entity = by_name.get(subject_key)
                     object_entity = by_name.get(_normalize_key(a.get("object_entity") or ""))
                     source_sentence_id = None
@@ -474,25 +589,25 @@ class KnowledgeIndexingPipeline:
                             if created:
                                 primary_subject_mention_id = int(created[0]["id"])
 
-                    time_from, time_to, granularity = _parse_time_interval(
+                    valid_time_from, valid_time_to, granularity = _parse_time_interval(
                         a.get("time_from"),
                         a.get("time_to"),
                     )
-                    if time_from is None and time_to is None and isinstance(source_sentence_idx, int):
+                    if valid_time_from is None and valid_time_to is None and isinstance(source_sentence_idx, int):
                         for tc in time_candidates_by_sentence.get(int(source_sentence_idx), []):
                             c_from, c_to, c_granularity = _parse_candidate_time(tc)
                             if c_from is not None or c_to is not None:
-                                time_from, time_to, granularity = c_from, c_to, c_granularity
+                                valid_time_from, valid_time_to, granularity = c_from, c_to, c_granularity
                                 break
                     time_interval_id = None
-                    if time_from is not None or time_to is not None:
+                    if valid_time_from is not None or valid_time_to is not None:
                         time_record = self.repo.upsert_time_interval(
                             kb_id=kb_id,
                             payload={
                                 "source_point_id": source_point_id,
                                 "normalized_text": str(a.get("time_from") or a.get("time_to") or ""),
-                                "valid_from": time_from,
-                                "valid_to": time_to,
+                                "valid_from": valid_time_from,
+                                "valid_to": valid_time_to,
                                 "granularity": granularity,
                                 "confidence": float(a.get("confidence") or extraction_conf or 0.0),
                             },
@@ -516,44 +631,21 @@ class KnowledgeIndexingPipeline:
                     place_id = None
                     if place_key:
                         place_candidate = place_candidates_by_key.get(place_key) or {}
-                        parent_place_id = None
-                        parent_name_raw = str(
-                            place_candidate.get("parent_place")
-                            or place_candidate.get("parent_name")
-                            or place_candidate.get("parent_key")
-                            or ""
-                        ).strip()
-                        if parent_name_raw:
-                            parent_key = _normalize_key(parent_name_raw)
-                            if parent_key and parent_key != place_key:
-                                parent_record = self.repo.upsert_place(
-                                    kb_id=kb_id,
-                                    payload={
-                                        "canonical_name": parent_name_raw,
-                                        "normalized_key": parent_key,
-                                        "place_type": place_candidate.get("parent_place_type"),
-                                        "country_code": place_candidate.get("country_code"),
-                                        "confidence": float(place_candidate.get("confidence") or extraction_conf or 0.0),
-                                    },
-                                )
-                                parent_place_id = int(parent_record["id"])
-                        place_record = self.repo.upsert_place(
-                            kb_id=kb_id,
-                            payload={
-                                "canonical_name": place_key_raw or place_key,
-                                "normalized_key": place_key,
-                                "place_type": place_candidate.get("place_type"),
-                                "country_code": place_candidate.get("country_code"),
-                                "parent_place_id": parent_place_id,
+                        place_record = _upsert_place_record(
+                            place_key=place_key,
+                            place_candidate={
+                                **place_candidate,
                                 "confidence": float(a.get("confidence") or extraction_conf or 0.0),
                             },
+                            canonical_name=place_key_raw or place_key,
                         )
-                        place_id = int(place_record["id"])
+                        if place_record is not None:
+                            place_id = int(place_record["id"])
 
                     canonical_text = _canonical_text_with_meta(
                         base_text=a.get("canonical_text") or "",
-                        time_from=time_from,
-                        time_to=time_to,
+                        valid_time_from=valid_time_from,
+                        valid_time_to=valid_time_to,
                         place_key=place_key or None,
                     )
                     fingerprint = _build_assertion_fingerprint(
@@ -561,7 +653,7 @@ class KnowledgeIndexingPipeline:
                         subject_key=subject_key,
                         predicate=a.get("predicate") or "",
                         object_key=object_key,
-                        time_bucket=_time_bucket(time_from, time_to, granularity),
+                        time_bucket=_time_bucket(valid_time_from, valid_time_to, granularity),
                         place_key=place_key,
                         modality=str(a.get("modality") or "asserted"),
                         polarity=str(a.get("polarity") or "positive"),
@@ -583,17 +675,19 @@ class KnowledgeIndexingPipeline:
                             "subject_entity_id": (subject_entity or {}).get("id"),
                             "predicate": a.get("predicate") or "",
                             "object_entity_id": (object_entity or {}).get("id"),
-                            "object_value": a.get("object"),
+                            "object_value": object_value,
                             "time_interval_id": time_interval_id,
                             "place_id": place_id,
-                            "time_from": time_from,
-                            "time_to": time_to,
+                            "valid_time_from": valid_time_from,
+                            "valid_time_to": valid_time_to,
+                            "time_from": valid_time_from,
+                            "time_to": valid_time_to,
                             "place_key": place_key,
                             "attributes": a.get("attributes", []),
                             "canonical_text": canonical_text,
                             "modality": str(a.get("modality") or "asserted"),
                             "polarity": str(a.get("polarity") or "positive"),
-                            "source_time": _parse_time_value(a.get("source_time"))[0],
+                            "source_time": _parse_time_value(a.get("source_time"))[0] or default_source_time,
                             "ingest_time": ingest_time,
                             "confidence": confidence,
                             "strength": 0.05,
@@ -627,9 +721,11 @@ class KnowledgeIndexingPipeline:
                             predicate_hint = str(assertion.get("predicate") or "").strip()
                             if predicate_hint:
                                 meta["predicate_hints"].append(predicate_hint)
-                            _merge_interval(meta, time_from, time_to)
+                            _merge_valid_time(meta, valid_time_from, valid_time_to)
                             if place_key:
                                 meta["place_keys"].append(place_key)
+                            if place_id is not None:
+                                meta["place_ids"].append(int(place_id))
                             evidence_assertion_ids = meta.setdefault("evidence_assertion_ids", [])
                             evidence_assertion_ids.append(assertion_id)
 
@@ -657,9 +753,16 @@ class KnowledgeIndexingPipeline:
                                 "assertion_fingerprint": assertion.get("assertion_fingerprint"),
                                 "entity_ids": [x for x in [assertion.get("subject_entity_id"), assertion.get("object_entity_id")] if x],
                                 "predicate": assertion.get("predicate"),
-                                "time_from": assertion.get("time_from").isoformat() if assertion.get("time_from") else None,
-                                "time_to": assertion.get("time_to").isoformat() if assertion.get("time_to") else None,
+                                "place_id": assertion.get("place_id"),
+                                "time_from": assertion.get("valid_time_from").isoformat() if assertion.get("valid_time_from") else None,
+                                "time_to": assertion.get("valid_time_to").isoformat() if assertion.get("valid_time_to") else None,
+                                "valid_time_from": assertion.get("valid_time_from").isoformat() if assertion.get("valid_time_from") else None,
+                                "valid_time_to": assertion.get("valid_time_to").isoformat() if assertion.get("valid_time_to") else None,
                                 "place_keys": [assertion.get("place_key")] if assertion.get("place_key") else [],
+                                "place_hierarchy_keys": _place_hierarchy_keys_for_records(
+                                    place_ids=[int(assertion.get("place_id"))] if assertion.get("place_id") is not None else [],
+                                    place_keys=[assertion.get("place_key")] if assertion.get("place_key") else [],
+                                ),
                                 "source_time": assertion.get("source_time").isoformat() if assertion.get("source_time") else None,
                                 "ingest_time": assertion.get("ingest_time").isoformat() if assertion.get("ingest_time") else None,
                                 "confidence": assertion.get("confidence"),
@@ -696,7 +799,7 @@ class KnowledgeIndexingPipeline:
                             rels.append(("SAME_PLACE", 0.5))
                         if (a1.get("source_point_id") or "").strip() and a1.get("source_point_id") == a2.get("source_point_id"):
                             rels.append(("SAME_SOURCE_POINT", 0.45))
-                        if _intervals_overlap(a1.get("time_from"), a1.get("time_to"), a2.get("time_from"), a2.get("time_to")):
+                        if _intervals_overlap(a1.get("valid_time_from"), a1.get("valid_time_to"), a2.get("valid_time_from"), a2.get("valid_time_to")):
                             rels.append(("TEMPORALLY_OVERLAPS", 0.7))
                         if _same_core_fact(a1, a2):
                             rels.append(("SUPPORTS", 0.72))
@@ -719,10 +822,29 @@ class KnowledgeIndexingPipeline:
                             elif rel_type == "GENERALIZES" and _is_narrower_time(a1, a2):
                                 from_id, to_id = int(a2["id"]), int(a1["id"])
                             contradiction_signals = 1 if rel_type == "CONTRADICTS" else 0
-                            evidence_overlap_count = 1 if rel_type in {"SUPPORTS", "SAME_SOURCE_POINT"} else 0
+                            same_subject = bool(a1.get("subject_entity_id") and a1.get("subject_entity_id") == a2.get("subject_entity_id"))
+                            same_object = bool(a1.get("object_entity_id") and a1.get("object_entity_id") == a2.get("object_entity_id"))
+                            entity_overlap_strength = 1.0 if (same_subject and same_object) else (0.78 if (same_subject or same_object) else 0.0)
+                            same_time = _intervals_overlap(a1.get("valid_time_from"), a1.get("valid_time_to"), a2.get("valid_time_from"), a2.get("valid_time_to"))
+                            time_overlap_strength = 1.0 if same_time else 0.0
+                            same_place = bool((a1.get("place_key") or "").strip() and a1.get("place_key") == a2.get("place_key"))
+                            place_overlap_strength = 1.0 if same_place else 0.0
+                            evidence_overlap_count = 0
+                            if rel_type in {"SUPPORTS", "SAME_SOURCE_POINT"}:
+                                evidence_overlap_count += 1
+                            if a1.get("source_sentence_id") and a1.get("source_sentence_id") == a2.get("source_sentence_id"):
+                                evidence_overlap_count += 1
+                            evidence_proximity = min(1.0, 0.35 + 0.30 * evidence_overlap_count)
                             relation_confidence = compute_relation_confidence(
                                 relation_weight=rel_weight,
+                                relation_type=rel_type,
+                                entity_overlap_strength=entity_overlap_strength,
+                                time_overlap_strength=time_overlap_strength,
+                                place_overlap_strength=place_overlap_strength,
+                                evidence_proximity=evidence_proximity,
                                 evidence_overlap_count=evidence_overlap_count,
+                                assertion_confidence_from=float(a1.get("confidence") or 0.0),
+                                assertion_confidence_to=float(a2.get("confidence") or 0.0),
                                 contradiction_signals=contradiction_signals,
                             )
                             relation_rows.append(
@@ -732,6 +854,14 @@ class KnowledgeIndexingPipeline:
                                     "relation_type": rel_type,
                                     "weight": rel_weight,
                                     "relation_confidence": relation_confidence,
+                                    "entity_overlap_strength": entity_overlap_strength,
+                                    "time_overlap_strength": time_overlap_strength,
+                                    "place_overlap_strength": place_overlap_strength,
+                                    "evidence_overlap_count": evidence_overlap_count,
+                                    "evidence_proximity": evidence_proximity,
+                                    "assertion_confidence_from": float(a1.get("confidence") or 0.0),
+                                    "assertion_confidence_to": float(a2.get("confidence") or 0.0),
+                                    "contradiction_signals": contradiction_signals,
                                 }
                             )
                             if rel_type not in {"REFINES", "GENERALIZES"}:
@@ -742,6 +872,14 @@ class KnowledgeIndexingPipeline:
                                         "relation_type": rel_type,
                                         "weight": rel_weight,
                                         "relation_confidence": relation_confidence,
+                                        "entity_overlap_strength": entity_overlap_strength,
+                                        "time_overlap_strength": time_overlap_strength,
+                                        "place_overlap_strength": place_overlap_strength,
+                                        "evidence_overlap_count": evidence_overlap_count,
+                                        "evidence_proximity": evidence_proximity,
+                                        "assertion_confidence_from": float(a2.get("confidence") or 0.0),
+                                        "assertion_confidence_to": float(a1.get("confidence") or 0.0),
+                                        "contradiction_signals": contradiction_signals,
                                     }
                                 )
                 relation_count = self.repo.create_assertion_relations_batch(kb_id=kb_id, rows=relation_rows)
@@ -770,8 +908,9 @@ class KnowledgeIndexingPipeline:
                     "mention_ids": sorted(set(int(x) for x in meta.get("mention_ids") or [])),
                     "evidence_assertion_ids": sorted(set(int(x) for x in meta.get("evidence_assertion_ids") or [])),
                     "predicate_hints": sorted(set(str(x) for x in meta.get("predicate_hints") or [] if str(x).strip())),
-                    "time_from": meta.get("time_from"),
-                    "time_to": meta.get("time_to"),
+                    "place_ids": sorted(set(int(x) for x in meta.get("place_ids") or [] if int(x) > 0)),
+                    "valid_time_from": meta.get("valid_time_from"),
+                    "valid_time_to": meta.get("valid_time_to"),
                     "place_keys": sorted(set(str(x) for x in meta.get("place_keys") or [] if str(x).strip())),
                 }
             )
@@ -795,9 +934,16 @@ class KnowledgeIndexingPipeline:
                         "mention_ids": meta.get("mention_ids") or [],
                         "evidence_assertion_ids": meta.get("evidence_assertion_ids") or [],
                         "predicate_hints": meta.get("predicate_hints") or [],
-                        "time_from": meta.get("time_from").isoformat() if meta.get("time_from") else None,
-                        "time_to": meta.get("time_to").isoformat() if meta.get("time_to") else None,
+                        "place_ids": meta.get("place_ids") or [],
+                        "time_from": meta.get("valid_time_from").isoformat() if meta.get("valid_time_from") else None,
+                        "time_to": meta.get("valid_time_to").isoformat() if meta.get("valid_time_to") else None,
+                        "valid_time_from": meta.get("valid_time_from").isoformat() if meta.get("valid_time_from") else None,
+                        "valid_time_to": meta.get("valid_time_to").isoformat() if meta.get("valid_time_to") else None,
                         "place_keys": meta.get("place_keys") or [],
+                        "place_hierarchy_keys": _place_hierarchy_keys_for_records(
+                            place_ids=[int(x) for x in (meta.get("place_ids") or []) if int(x) > 0],
+                            place_keys=[str(x) for x in (meta.get("place_keys") or []) if str(x).strip()],
+                        ),
                         "confidence": None,
                         "strength": None,
                     },
@@ -815,10 +961,11 @@ class KnowledgeIndexingPipeline:
             chunk_assertion_ids: set[int] = set()
             chunk_predicates: set[str] = set()
             chunk_places: set[str] = set()
+            chunk_place_ids: set[int] = set()
             chunk_mention_ids: set[int] = set()
             chunk_evidence_assertion_ids: set[int] = set()
-            chunk_time_from = None
-            chunk_time_to = None
+            chunk_valid_time_from = None
+            chunk_valid_time_to = None
             for sid in sentence_ids:
                 meta = sentence_by_id.get(sid) or {}
                 if not meta:
@@ -833,20 +980,22 @@ class KnowledgeIndexingPipeline:
                 chunk_evidence_assertion_ids.update(int(x) for x in (meta.get("evidence_assertion_ids") or []) if int(x) > 0)
                 chunk_predicates.update(str(x) for x in (meta.get("predicate_hints") or []) if str(x).strip())
                 chunk_places.update(str(x) for x in (meta.get("place_keys") or []) if str(x).strip())
-                s_from = meta.get("time_from")
-                s_to = meta.get("time_to")
+                chunk_place_ids.update(int(x) for x in (meta.get("place_ids") or []) if int(x) > 0)
+                s_from = meta.get("valid_time_from") or meta.get("time_from")
+                s_to = meta.get("valid_time_to") or meta.get("time_to")
                 if s_from is not None:
-                    chunk_time_from = s_from if chunk_time_from is None else min(chunk_time_from, s_from)
+                    chunk_valid_time_from = s_from if chunk_valid_time_from is None else min(chunk_valid_time_from, s_from)
                 if s_to is not None:
-                    chunk_time_to = s_to if chunk_time_to is None else max(chunk_time_to, s_to)
+                    chunk_valid_time_to = s_to if chunk_valid_time_to is None else max(chunk_valid_time_to, s_to)
             chunk_updates.append(
                 {
                     "id": int(row["id"]),
                     "assertion_ids": sorted(chunk_assertion_ids),
                     "entity_ids": sorted(chunk_entity_ids),
                     "predicate_hints": sorted(chunk_predicates),
-                    "time_from": chunk_time_from,
-                    "time_to": chunk_time_to,
+                    "place_ids": sorted(chunk_place_ids),
+                    "valid_time_from": chunk_valid_time_from,
+                    "valid_time_to": chunk_valid_time_to,
                     "place_keys": sorted(chunk_places),
                 }
             )
@@ -866,9 +1015,16 @@ class KnowledgeIndexingPipeline:
                         "evidence_assertion_ids": sorted(chunk_evidence_assertion_ids),
                         "entity_ids": sorted(chunk_entity_ids),
                         "predicate_hints": sorted(chunk_predicates),
-                        "time_from": chunk_time_from.isoformat() if chunk_time_from else None,
-                        "time_to": chunk_time_to.isoformat() if chunk_time_to else None,
+                        "place_ids": sorted(chunk_place_ids),
+                        "time_from": chunk_valid_time_from.isoformat() if chunk_valid_time_from else None,
+                        "time_to": chunk_valid_time_to.isoformat() if chunk_valid_time_to else None,
+                        "valid_time_from": chunk_valid_time_from.isoformat() if chunk_valid_time_from else None,
+                        "valid_time_to": chunk_valid_time_to.isoformat() if chunk_valid_time_to else None,
                         "place_keys": sorted(chunk_places),
+                        "place_hierarchy_keys": _place_hierarchy_keys_for_records(
+                            place_ids=sorted(chunk_place_ids),
+                            place_keys=sorted(chunk_places),
+                        ),
                         "token_count": int(row.get("token_count") or 0),
                         "confidence": None,
                         "strength": None,

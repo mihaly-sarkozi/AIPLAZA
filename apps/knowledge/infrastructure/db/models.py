@@ -103,6 +103,8 @@ class KbSentenceORM(TenantSchemaBase):
     entity_ids = Column(JSON, nullable=False, default=list)
     assertion_ids = Column(JSON, nullable=False, default=list)
     predicate_hints = Column(JSON, nullable=False, default=list)
+    place_ids = Column(JSON, nullable=False, default=list)
+    # valid_time vetület a mondathoz kötött assertionökből
     time_from = Column(DateTime, nullable=True, index=True)
     time_to = Column(DateTime, nullable=True, index=True)
     place_keys = Column(JSON, nullable=False, default=list)
@@ -183,6 +185,7 @@ class KbPlaceORM(TenantSchemaBase):
     __table_args__ = (
         Index("ix_kb_places_kb_name", "kb_id", "canonical_name"),
         Index("ix_kb_places_kb_key", "kb_id", "normalized_key"),
+        Index("ix_kb_places_kb_parent", "kb_id", "parent_place_id"),
     )
 
     id = Column(Integer, primary_key=True)
@@ -222,6 +225,7 @@ class KbAssertionORM(TenantSchemaBase):
     object_value = Column(Text, nullable=True)
     time_interval_id = Column(Integer, ForeignKey("kb_time_intervals.id", ondelete="SET NULL"), nullable=True, index=True)
     place_id = Column(Integer, ForeignKey("kb_places.id", ondelete="SET NULL"), nullable=True, index=True)
+    # valid_time: mikor igaz az assertion a világban
     time_from = Column(DateTime, nullable=True, index=True)
     time_to = Column(DateTime, nullable=True, index=True)
     place_key = Column(String(256), nullable=True, index=True)
@@ -238,8 +242,10 @@ class KbAssertionORM(TenantSchemaBase):
     source_diversity = Column(Integer, nullable=False, default=1)
     first_seen_at = Column(DateTime, default=_utcnow_naive, nullable=False)
     last_reinforced_at = Column(DateTime, default=_utcnow_naive, nullable=False)
-    source_time = Column(DateTime, nullable=True)
-    ingest_time = Column(DateTime, default=_utcnow_naive, nullable=False)
+    # source_time: a dokumentum/forrás időbélyege (nem valid_time)
+    source_time = Column(DateTime, nullable=True, index=True)
+    # ingest_time: mikor került be a tudástárba (nem valid_time)
+    ingest_time = Column(DateTime, default=_utcnow_naive, nullable=False, index=True)
     status = Column(String(32), nullable=False, default="active")
     assertion_fingerprint = Column(String(128), nullable=False, index=True)
     qdrant_point_id = Column(String(64), nullable=True, index=True)
@@ -261,7 +267,9 @@ class KbStructuralChunkORM(TenantSchemaBase):
     assertion_ids = Column(JSON, nullable=False, default=list)
     entity_ids = Column(JSON, nullable=False, default=list)
     predicate_hints = Column(JSON, nullable=False, default=list)
+    place_ids = Column(JSON, nullable=False, default=list)
     token_count = Column(Integer, nullable=False, default=0)
+    # valid_time vetület a chunk által lefedett assertion/sentence halmazból
     time_from = Column(DateTime, nullable=True, index=True)
     time_to = Column(DateTime, nullable=True, index=True)
     place_keys = Column(JSON, nullable=False, default=list)
@@ -293,6 +301,7 @@ class KbAssertionRelationORM(TenantSchemaBase):
     __table_args__ = (
         Index("ix_kb_assertion_rel_kb_from", "kb_id", "from_assertion_id"),
         Index("ix_kb_assertion_rel_kb_to", "kb_id", "to_assertion_id"),
+        Index("ix_kb_assertion_rel_kb_type_conf", "kb_id", "relation_type", "relation_confidence"),
     )
 
     id = Column(Integer, primary_key=True)

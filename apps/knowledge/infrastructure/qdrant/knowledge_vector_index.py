@@ -35,10 +35,17 @@ class KnowledgeVectorIndex(VectorIndexPort):
     async def search_points(
         self,
         collection: str,
-        query: str,
+        query: str | None = None,
         limit: int = 10,
         point_types: list[str] | None = None,
         payload_filter: dict[str, Any] | None = None,
+        query_vector: list[float] | None = None,
+        lexical_query: str | None = None,
+        fusion_semantic_weight: float | None = None,
+        fusion_lexical_weight: float | None = None,
+        lexical_focus_terms: list[str] | None = None,
+        exact_phrases: list[str] | None = None,
+        rare_terms: list[str] | None = None,
     ) -> list[dict[str, Any]]:
         """Keresés payload filterrel."""
         return await self.qdrant.search_points_with_filters(
@@ -47,6 +54,13 @@ class KnowledgeVectorIndex(VectorIndexPort):
             limit=limit,
             point_types=point_types,
             payload_filter=payload_filter,
+            query_vector=query_vector,
+            lexical_query=lexical_query,
+            fusion_semantic_weight=fusion_semantic_weight,
+            fusion_lexical_weight=fusion_lexical_weight,
+            lexical_focus_terms=lexical_focus_terms,
+            exact_phrases=exact_phrases,
+            rare_terms=rare_terms,
         )
 
     async def delete_points_by_ids(self, collection: str, point_ids: list[str]) -> None:
