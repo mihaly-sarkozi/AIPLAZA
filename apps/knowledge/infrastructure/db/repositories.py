@@ -1,7 +1,7 @@
 from datetime import UTC, datetime, timedelta
 from math import exp
 from typing import Dict, List, Optional, Tuple
-from sqlalchemy import select, delete, or_, func, and_
+from sqlalchemy import select, delete, or_, func, and_, case
 from config.settings import settings
 from apps.knowledge.domain.kb import KnowledgeBase
 from apps.knowledge.infrastructure.db.models import (
@@ -36,6 +36,37 @@ def _normalize_entity_key(name: str, entity_type: str) -> str:
     return f"{(entity_type or 'UNKNOWN').strip().lower()}::{(name or '').strip().lower()}"
 
 
+def _normalize_place_key(value: str) -> str:
+    return " ".join((value or "").strip().lower().split())
+
+
+def _normalize_place_keys(values: List[str] | None) -> List[str]:
+    out: List[str] = []
+    seen: set[str] = set()
+    for value in values or []:
+        key = _normalize_place_key(str(value or ""))
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        out.append(key)
+    return out
+
+
+def _normalize_place_ids(values: List[int] | None) -> List[int]:
+    out: List[int] = []
+    seen: set[int] = set()
+    for value in values or []:
+        try:
+            place_id = int(value)
+        except Exception:
+            continue
+        if place_id <= 0 or place_id in seen:
+            continue
+        seen.add(place_id)
+        out.append(place_id)
+    return out
+
+
 def _payload_valid_time_from(payload: dict) -> datetime | None:
     return payload.get("valid_time_from", payload.get("time_from"))
 
@@ -44,13 +75,85 @@ def _payload_valid_time_to(payload: dict) -> datetime | None:
     return payload.get("valid_time_to", payload.get("time_to"))
 
 
-def _with_valid_time_aliases(valid_time_from: datetime | None, valid_time_to: datetime | None) -> dict:
+def _iso_or_none(value: datetime | None) -> str | None:
+    return value.isoformat() if isinstance(value, datetime) else None
+
+
+def _with_valid_time_aliases(
+    valid_time_from: datetime | None,
+    valid_time_to: datetime | None,
+    *,
+    source_time: datetime | None = None,
+    ingest_time: datetime | None = None,
+) -> dict:
     return {
         "valid_time_from": valid_time_from,
         "valid_time_to": valid_time_to,
         "time_from": valid_time_from,
         "time_to": valid_time_to,
+        "time_semantics": {
+            "valid_time": {
+                "from": _iso_or_none(valid_time_from),
+                "to": _iso_or_none(valid_time_to),
+            },
+            "source_time": _iso_or_none(source_time),
+            "ingest_time": _iso_or_none(ingest_time),
+        },
     }
+
+
+def _collect_time_semantics_summary(rows: List[dict]) -> List[dict]:
+    summary: List[dict] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        summary.append(
+            {
+                "id": row.get("id") or row.get("assertion_id") or row.get("sentence_id") or row.get("chunk_id"),
+                "time_semantics": row.get("time_semantics")
+                or {
+                    "valid_time": {
+                        "from": _iso_or_none(row.get("valid_time_from") or row.get("time_from")),
+                        "to": _iso_or_none(row.get("valid_time_to") or row.get("time_to")),
+                    },
+                    "source_time": _iso_or_none(row.get("source_time")),
+                    "ingest_time": _iso_or_none(row.get("ingest_time")),
+                },
+            }
+        )
+    return summary
+
+
+def _collect_assertion_place_metadata(session, assertion_ids: List[int]) -> dict[int, dict]:
+    assertion_ids = [int(x) for x in (assertion_ids or []) if int(x) > 0]
+    if not assertion_ids:
+        return {}
+    rows = session.execute(
+        select(KbAssertionORM.id, KbAssertionORM.place_id, KbAssertionORM.place_key).where(
+            KbAssertionORM.id.in_(assertion_ids)
+        )
+    ).all()
+    out: dict[int, dict] = {}
+    for assertion_id, place_id, place_key in rows:
+        out[int(assertion_id)] = {
+            "place_ids": _normalize_place_ids([place_id] if place_id is not None else []),
+            "place_keys": _normalize_place_keys([str(place_key)] if place_key else []),
+        }
+    return out
+
+
+def _merge_place_metadata(
+    *,
+    direct_place_ids: List[int] | None = None,
+    direct_place_keys: List[str] | None = None,
+    assertion_place_rows: List[dict] | None = None,
+) -> tuple[List[int], List[str]]:
+    merged_place_ids = _normalize_place_ids(direct_place_ids)
+    merged_place_keys = _normalize_place_keys(direct_place_keys)
+    for row in assertion_place_rows or []:
+        merged_place_ids = _normalize_place_ids(merged_place_ids + list(row.get("place_ids") or []))
+        merged_place_keys = _normalize_place_keys(merged_place_keys + list(row.get("place_keys") or []))
+    return merged_place_ids, merged_place_keys
 
 
 def _current_relation_weight(weight: float, relation_type: str, created_at: datetime | None) -> float:
@@ -631,10 +734,10 @@ class MySQLKnowledgeBaseRepository(KnowledgeBaseRepositoryPort):
                     entity_ids=row.get("entity_ids") or [],
                     assertion_ids=row.get("assertion_ids") or [],
                     predicate_hints=row.get("predicate_hints") or [],
-                    place_ids=row.get("place_ids") or [],
+                    place_ids=_normalize_place_ids(row.get("place_ids") or []),
                     time_from=_payload_valid_time_from(row),
                     time_to=_payload_valid_time_to(row),
-                    place_keys=row.get("place_keys") or [],
+                    place_keys=_normalize_place_keys(row.get("place_keys") or []),
                     qdrant_point_id=row.get("qdrant_point_id"),
                 )
                 session.add(orm)
@@ -654,9 +757,9 @@ class MySQLKnowledgeBaseRepository(KnowledgeBaseRepositoryPort):
                     "entity_ids": row.entity_ids or [],
                     "assertion_ids": row.assertion_ids or [],
                     "predicate_hints": row.predicate_hints or [],
-                    "place_ids": row.place_ids or [],
+                    "place_ids": _normalize_place_ids(row.place_ids or []),
                     **_with_valid_time_aliases(row.time_from, row.time_to),
-                    "place_keys": row.place_keys or [],
+                    "place_keys": _normalize_place_keys(row.place_keys or []),
                     "qdrant_point_id": row.qdrant_point_id,
                 }
                 for row in inserted
@@ -679,11 +782,11 @@ class MySQLKnowledgeBaseRepository(KnowledgeBaseRepositoryPort):
                     assertion_ids=row.get("assertion_ids") or [],
                     entity_ids=row.get("entity_ids") or [],
                     predicate_hints=row.get("predicate_hints") or [],
-                    place_ids=row.get("place_ids") or [],
+                    place_ids=_normalize_place_ids(row.get("place_ids") or []),
                     token_count=int(row.get("token_count") or self._estimate_token_count(text_value)),
                     time_from=_payload_valid_time_from(row),
                     time_to=_payload_valid_time_to(row),
-                    place_keys=row.get("place_keys") or [],
+                    place_keys=_normalize_place_keys(row.get("place_keys") or []),
                     qdrant_point_id=row.get("qdrant_point_id"),
                 )
                 session.add(orm)
@@ -702,10 +805,10 @@ class MySQLKnowledgeBaseRepository(KnowledgeBaseRepositoryPort):
                     "assertion_ids": row.assertion_ids or [],
                     "entity_ids": row.entity_ids or [],
                     "predicate_hints": row.predicate_hints or [],
-                    "place_ids": row.place_ids or [],
+                    "place_ids": _normalize_place_ids(row.place_ids or []),
                     "token_count": row.token_count,
                     **_with_valid_time_aliases(row.time_from, row.time_to),
-                    "place_keys": row.place_keys or [],
+                    "place_keys": _normalize_place_keys(row.place_keys or []),
                     "qdrant_point_id": row.qdrant_point_id,
                 }
                 for row in inserted
@@ -728,13 +831,22 @@ class MySQLKnowledgeBaseRepository(KnowledgeBaseRepositoryPort):
                 ).scalar_one_or_none()
                 if entity is None:
                     continue
+                assertion_place_map = _collect_assertion_place_metadata(
+                    session,
+                    [int(x) for x in (row.get("assertion_ids") or []) if isinstance(x, int)],
+                )
+                merged_place_ids, merged_place_keys = _merge_place_metadata(
+                    direct_place_ids=row.get("place_ids") or [],
+                    direct_place_keys=row.get("place_keys") or [],
+                    assertion_place_rows=list(assertion_place_map.values()),
+                )
                 entity.entity_ids = row.get("entity_ids") or []
                 entity.assertion_ids = row.get("assertion_ids") or []
                 entity.predicate_hints = row.get("predicate_hints") or []
-                entity.place_ids = row.get("place_ids") or []
+                entity.place_ids = merged_place_ids
                 entity.time_from = _payload_valid_time_from(row)
                 entity.time_to = _payload_valid_time_to(row)
-                entity.place_keys = row.get("place_keys") or []
+                entity.place_keys = merged_place_keys
                 updated += 1
             session.commit()
         return updated
@@ -756,13 +868,22 @@ class MySQLKnowledgeBaseRepository(KnowledgeBaseRepositoryPort):
                 ).scalar_one_or_none()
                 if entity is None:
                     continue
+                assertion_place_map = _collect_assertion_place_metadata(
+                    session,
+                    [int(x) for x in (row.get("assertion_ids") or []) if isinstance(x, int)],
+                )
+                merged_place_ids, merged_place_keys = _merge_place_metadata(
+                    direct_place_ids=row.get("place_ids") or [],
+                    direct_place_keys=row.get("place_keys") or [],
+                    assertion_place_rows=list(assertion_place_map.values()),
+                )
                 entity.assertion_ids = row.get("assertion_ids") or []
                 entity.entity_ids = row.get("entity_ids") or []
                 entity.predicate_hints = row.get("predicate_hints") or []
-                entity.place_ids = row.get("place_ids") or []
+                entity.place_ids = merged_place_ids
                 entity.time_from = _payload_valid_time_from(row)
                 entity.time_to = _payload_valid_time_to(row)
-                entity.place_keys = row.get("place_keys") or []
+                entity.place_keys = merged_place_keys
                 updated += 1
             session.commit()
         return updated
@@ -1019,7 +1140,7 @@ class MySQLKnowledgeBaseRepository(KnowledgeBaseRepositoryPort):
             }
 
     def upsert_place(self, kb_id: int, payload: dict) -> dict:
-        normalized_key = (payload.get("normalized_key") or "").strip().lower()
+        normalized_key = _normalize_place_key(str(payload.get("normalized_key") or ""))
         canonical_name = (payload.get("canonical_name") or normalized_key).strip()
         with self.session_factory() as session:
             row = session.execute(
@@ -1059,7 +1180,7 @@ class MySQLKnowledgeBaseRepository(KnowledgeBaseRepositoryPort):
             }
 
     def search_place_candidates(self, kb_id: int, query: str, limit: int = 20) -> List[dict]:
-        normalized = (query or "").strip().lower()
+        normalized = _normalize_place_key(query or "")
         if not normalized:
             return []
         needle = f"%{normalized}%"
@@ -1228,7 +1349,12 @@ class MySQLKnowledgeBaseRepository(KnowledgeBaseRepositoryPort):
                 "object_value": row.object_value,
                 "time_interval_id": row.time_interval_id,
                 "place_id": row.place_id,
-                **_with_valid_time_aliases(row.time_from, row.time_to),
+                **_with_valid_time_aliases(
+                    row.time_from,
+                    row.time_to,
+                    source_time=row.source_time,
+                    ingest_time=row.ingest_time,
+                ),
                 "place_key": row.place_key,
                 "attributes": row.attributes or [],
                 "modality": row.modality,
@@ -1486,25 +1612,40 @@ class MySQLKnowledgeBaseRepository(KnowledgeBaseRepositoryPort):
                     KbSentenceORM.source_point_id == source_point_id,
                 ).order_by(KbSentenceORM.sentence_order.asc())
             ).scalars().all()
-            return [
-                {
-                    "id": row.id,
-                    "kb_id": row.kb_id,
-                    "source_point_id": row.source_point_id,
-                    "sentence_order": row.sentence_order,
-                    "text": row.text,
-                    "sanitized_text": row.sanitized_text,
-                    "token_count": row.token_count,
-                    "entity_ids": row.entity_ids or [],
-                    "assertion_ids": row.assertion_ids or [],
-                    "predicate_hints": row.predicate_hints or [],
-                    "place_ids": row.place_ids or [],
-                    **_with_valid_time_aliases(row.time_from, row.time_to),
-                    "place_keys": row.place_keys or [],
-                    "qdrant_point_id": row.qdrant_point_id,
-                }
-                for row in rows
-            ]
+            assertion_place_map = _collect_assertion_place_metadata(
+                session,
+                [int(aid) for row in rows for aid in (row.assertion_ids or []) if isinstance(aid, int)],
+            )
+            out: List[dict] = []
+            for row in rows:
+                merged_place_ids, merged_place_keys = _merge_place_metadata(
+                    direct_place_ids=row.place_ids or [],
+                    direct_place_keys=row.place_keys or [],
+                    assertion_place_rows=[
+                        assertion_place_map.get(int(aid), {})
+                        for aid in (row.assertion_ids or [])
+                        if isinstance(aid, int)
+                    ],
+                )
+                out.append(
+                    {
+                        "id": row.id,
+                        "kb_id": row.kb_id,
+                        "source_point_id": row.source_point_id,
+                        "sentence_order": row.sentence_order,
+                        "text": row.text,
+                        "sanitized_text": row.sanitized_text,
+                        "token_count": row.token_count,
+                        "entity_ids": row.entity_ids or [],
+                        "assertion_ids": row.assertion_ids or [],
+                        "predicate_hints": row.predicate_hints or [],
+                        "place_ids": merged_place_ids,
+                        **_with_valid_time_aliases(row.time_from, row.time_to),
+                        "place_keys": merged_place_keys,
+                        "qdrant_point_id": row.qdrant_point_id,
+                    }
+                )
+            return out
 
     def list_chunks_by_source_point_id(self, kb_id: int, source_point_id: str) -> List[dict]:
         with self.session_factory() as session:
@@ -1514,25 +1655,40 @@ class MySQLKnowledgeBaseRepository(KnowledgeBaseRepositoryPort):
                     KbStructuralChunkORM.source_point_id == source_point_id,
                 ).order_by(KbStructuralChunkORM.chunk_order.asc())
             ).scalars().all()
-            return [
-                {
-                    "id": row.id,
-                    "kb_id": row.kb_id,
-                    "source_point_id": row.source_point_id,
-                    "chunk_order": row.chunk_order,
-                    "text": row.text,
-                    "sentence_ids": row.sentence_ids or [],
-                    "assertion_ids": row.assertion_ids or [],
-                    "entity_ids": row.entity_ids or [],
-                    "predicate_hints": row.predicate_hints or [],
-                    "place_ids": row.place_ids or [],
-                    "token_count": row.token_count,
-                    **_with_valid_time_aliases(row.time_from, row.time_to),
-                    "place_keys": row.place_keys or [],
-                    "qdrant_point_id": row.qdrant_point_id,
-                }
-                for row in rows
-            ]
+            assertion_place_map = _collect_assertion_place_metadata(
+                session,
+                [int(aid) for row in rows for aid in (row.assertion_ids or []) if isinstance(aid, int)],
+            )
+            out: List[dict] = []
+            for row in rows:
+                merged_place_ids, merged_place_keys = _merge_place_metadata(
+                    direct_place_ids=row.place_ids or [],
+                    direct_place_keys=row.place_keys or [],
+                    assertion_place_rows=[
+                        assertion_place_map.get(int(aid), {})
+                        for aid in (row.assertion_ids or [])
+                        if isinstance(aid, int)
+                    ],
+                )
+                out.append(
+                    {
+                        "id": row.id,
+                        "kb_id": row.kb_id,
+                        "source_point_id": row.source_point_id,
+                        "chunk_order": row.chunk_order,
+                        "text": row.text,
+                        "sentence_ids": row.sentence_ids or [],
+                        "assertion_ids": row.assertion_ids or [],
+                        "entity_ids": row.entity_ids or [],
+                        "predicate_hints": row.predicate_hints or [],
+                        "place_ids": merged_place_ids,
+                        "token_count": row.token_count,
+                        **_with_valid_time_aliases(row.time_from, row.time_to),
+                        "place_keys": merged_place_keys,
+                        "qdrant_point_id": row.qdrant_point_id,
+                    }
+                )
+            return out
 
     def list_assertion_evidence(self, assertion_id: int) -> List[dict]:
         with self.session_factory() as session:
@@ -1592,8 +1748,14 @@ class MySQLKnowledgeBaseRepository(KnowledgeBaseRepositoryPort):
                 .order_by(KbAssertionEvidenceORM.weight.desc(), KbAssertionEvidenceORM.id.desc())
                 .limit(max(1, min(limit, 300)))
             ).all()
+            assertion_place_map = _collect_assertion_place_metadata(session, assertion_ids)
             out: List[dict] = []
             for ev, sent in rows:
+                merged_place_ids, merged_place_keys = _merge_place_metadata(
+                    direct_place_ids=sent.place_ids or [],
+                    direct_place_keys=sent.place_keys or [],
+                    assertion_place_rows=[assertion_place_map.get(int(ev.assertion_id), {})],
+                )
                 out.append(
                     {
                         "assertion_id": ev.assertion_id,
@@ -1603,9 +1765,9 @@ class MySQLKnowledgeBaseRepository(KnowledgeBaseRepositoryPort):
                         "entity_ids": sent.entity_ids or [],
                         "assertion_ids": sent.assertion_ids or [],
                         "predicate_hints": sent.predicate_hints or [],
-                        "place_ids": sent.place_ids or [],
+                        "place_ids": merged_place_ids,
                         **_with_valid_time_aliases(sent.time_from, sent.time_to),
-                        "place_keys": sent.place_keys or [],
+                        "place_keys": merged_place_keys,
                         "evidence_type": ev.evidence_type,
                         "evidence_confidence": ev.confidence,
                         "evidence_weight": ev.weight,
@@ -1618,16 +1780,42 @@ class MySQLKnowledgeBaseRepository(KnowledgeBaseRepositoryPort):
             return []
         sentence_set = {int(x) for x in sentence_ids}
         with self.session_factory() as session:
+            sentence_rows = session.execute(
+                select(KbSentenceORM.id, KbSentenceORM.source_point_id).where(
+                    KbSentenceORM.id.in_(list(sentence_set))
+                )
+            ).all()
+            source_point_ids = [
+                str(source_point_id)
+                for _, source_point_id in sentence_rows
+                if str(source_point_id or "").strip()
+            ]
+            if not source_point_ids:
+                return []
             rows = session.execute(
                 select(KbStructuralChunkORM)
+                .where(KbStructuralChunkORM.source_point_id.in_(source_point_ids))
                 .order_by(KbStructuralChunkORM.id.desc())
-                .limit(500)
+                .limit(max(100, min(limit * 20, 500)))
             ).scalars().all()
+            assertion_place_map = _collect_assertion_place_metadata(
+                session,
+                [int(aid) for row in rows for aid in (row.assertion_ids or []) if isinstance(aid, int)],
+            )
             out: List[dict] = []
             for row in rows:
                 row_sentence_ids = {int(x) for x in (row.sentence_ids or []) if isinstance(x, int)}
                 if not row_sentence_ids.intersection(sentence_set):
                     continue
+                merged_place_ids, merged_place_keys = _merge_place_metadata(
+                    direct_place_ids=row.place_ids or [],
+                    direct_place_keys=row.place_keys or [],
+                    assertion_place_rows=[
+                        assertion_place_map.get(int(aid), {})
+                        for aid in (row.assertion_ids or [])
+                        if isinstance(aid, int)
+                    ],
+                )
                 out.append(
                     {
                         "chunk_id": row.id,
@@ -1637,9 +1825,9 @@ class MySQLKnowledgeBaseRepository(KnowledgeBaseRepositoryPort):
                         "assertion_ids": row.assertion_ids or [],
                         "entity_ids": row.entity_ids or [],
                         "predicate_hints": row.predicate_hints or [],
-                        "place_ids": row.place_ids or [],
+                        "place_ids": merged_place_ids,
                         **_with_valid_time_aliases(row.time_from, row.time_to),
-                        "place_keys": row.place_keys or [],
+                        "place_keys": merged_place_keys,
                         "token_count": row.token_count,
                     }
                 )
@@ -1801,20 +1989,30 @@ class MySQLKnowledgeBaseRepository(KnowledgeBaseRepositoryPort):
             return []
         with self.session_factory() as session:
             conditions = [KbAssertionORM.kb_id.in_(kb_ids)]
+            predicate_match_expr = case((KbAssertionORM.id.is_not(None), 0), else_=0)
+            entity_match_expr = case((KbAssertionORM.id.is_not(None), 0), else_=0)
             if predicates:
                 conditions.append(KbAssertionORM.predicate.in_(predicates))
+                predicate_match_expr = case((KbAssertionORM.predicate.in_(predicates), 1), else_=0)
             if entity_ids:
-                conditions.append(
-                    or_(
-                        KbAssertionORM.subject_entity_id.in_(entity_ids),
-                        KbAssertionORM.object_entity_id.in_(entity_ids),
-                    )
+                entity_condition = or_(
+                    KbAssertionORM.subject_entity_id.in_(entity_ids),
+                    KbAssertionORM.object_entity_id.in_(entity_ids),
                 )
+                conditions.append(entity_condition)
+                entity_match_expr = case((entity_condition, 1), else_=0)
 
             stmt = (
                 select(KbAssertionORM)
                 .where(and_(*conditions))
-                .order_by(KbAssertionORM.strength.desc(), KbAssertionORM.confidence.desc(), KbAssertionORM.id.desc())
+                .order_by(
+                    (predicate_match_expr + entity_match_expr).desc(),
+                    predicate_match_expr.desc(),
+                    entity_match_expr.desc(),
+                    KbAssertionORM.strength.desc(),
+                    KbAssertionORM.confidence.desc(),
+                    KbAssertionORM.id.desc(),
+                )
                 .limit(max(1, min(limit, 500)))
             )
             rows = session.execute(stmt).scalars().all()
@@ -2003,7 +2201,12 @@ class MySQLKnowledgeBaseRepository(KnowledgeBaseRepositoryPort):
                         "canonical_text": row.canonical_text,
                         "predicate": row.predicate,
                         "source_point_id": row.source_point_id,
-                        **_with_valid_time_aliases(row.time_from, row.time_to),
+                        **_with_valid_time_aliases(
+                            row.time_from,
+                            row.time_to,
+                            source_time=row.source_time,
+                            ingest_time=row.ingest_time,
+                        ),
                         "place_key": row.place_key,
                         "place_id": row.place_id,
                         "place_hierarchy_keys": place_hierarchy_keys,
@@ -2052,7 +2255,12 @@ class MySQLKnowledgeBaseRepository(KnowledgeBaseRepositoryPort):
                 "subject_resolution_type": row.subject_resolution_type,
                 "subject_entity_id": row.subject_entity_id,
                 "object_entity_id": row.object_entity_id,
-                **_with_valid_time_aliases(row.time_from, row.time_to),
+                **_with_valid_time_aliases(
+                    row.time_from,
+                    row.time_to,
+                    source_time=row.source_time,
+                    ingest_time=row.ingest_time,
+                ),
                 "place_key": row.place_key,
                 "place_id": row.place_id,
                 "source_time": row.source_time,
@@ -2134,7 +2342,12 @@ class MySQLKnowledgeBaseRepository(KnowledgeBaseRepositoryPort):
                     "baseline_strength": row.baseline_strength,
                     "decay_rate": row.decay_rate,
                     "last_reinforced_at": row.last_reinforced_at,
-                    **_with_valid_time_aliases(row.time_from, row.time_to),
+                    **_with_valid_time_aliases(
+                        row.time_from,
+                        row.time_to,
+                        source_time=row.source_time,
+                        ingest_time=row.ingest_time,
+                    ),
                     "place_id": row.place_id,
                     "source_time": row.source_time,
                     "ingest_time": row.ingest_time,
@@ -2146,11 +2359,18 @@ class MySQLKnowledgeBaseRepository(KnowledgeBaseRepositoryPort):
         assertion = self.get_assertion_by_id(kb_id, assertion_id)
         if not assertion:
             return {}
+        relations = self.list_assertion_relations([assertion_id], limit=200)
+        evidence = self.list_assertion_evidence(assertion_id)
+        mentions = self.list_mentions_for_assertion(assertion_id)
         return {
             "assertion": assertion,
-            "relations": self.list_assertion_relations([assertion_id], limit=200),
-            "evidence": self.list_assertion_evidence(assertion_id),
-            "mentions": self.list_mentions_for_assertion(assertion_id),
+            "relations": relations,
+            "evidence": evidence,
+            "mentions": mentions,
+            "time_semantics": {
+                "assertion": assertion.get("time_semantics"),
+                "evidence": _collect_time_semantics_summary(evidence),
+            },
         }
 
     def get_entity_debug(self, kb_id: int, entity_id: int) -> dict:
@@ -2201,6 +2421,11 @@ class MySQLKnowledgeBaseRepository(KnowledgeBaseRepositoryPort):
                 "assertions": len(assertions),
                 "sentences": len(sentences),
                 "chunks": len(chunks),
+            },
+            "time_semantics": {
+                "assertions": _collect_time_semantics_summary(assertions),
+                "sentences": _collect_time_semantics_summary(sentences),
+                "chunks": _collect_time_semantics_summary(chunks),
             },
         }
 

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 from apps.knowledge.ports.query_parser_port import QueryParserPort
 
@@ -202,7 +202,7 @@ class QueryParser(QueryParserPort):
     @staticmethod
     def _build_time_window(q: str, years: list[str]) -> tuple[datetime | None, datetime | None]:
         q_low = (q or "").lower()
-        now = datetime.utcnow()
+        now = datetime.now(UTC).replace(tzinfo=None)
         date_range_match = QueryParser._DATE_RANGE.findall(q)
         if date_range_match:
             y1, m1, d1, y2, m2, d2 = date_range_match[0]

@@ -32,23 +32,29 @@ class QdrantClientWrapper:
         return cleaned
 
     @classmethod
-    def _lexical_tokens(cls, text: str) -> list[str]:
+    def _expanded_lexical_tokens(cls, text: str) -> list[str]:
         normalized = cls._normalize_lexical_text(text)
         if not normalized:
             return []
-        tokens = [
-            t for t in re.findall(r"[a-z0-9áéíóöőúüű_-]+", normalized)
-            if len(t) >= 2
-        ]
-        # Duplikált tokenek kezelése: query oldalon egyedi készletet használunk.
-        unique_tokens: list[str] = []
+        base_tokens = re.findall(r"[a-z0-9áéíóöőúüű_-]+", normalized)
+        expanded: list[str] = []
         seen: set[str] = set()
-        for token in tokens:
-            if token in seen:
-                continue
-            seen.add(token)
-            unique_tokens.append(token)
-        return unique_tokens
+        for token in base_tokens:
+            candidates = [token]
+            if "-" in token or "_" in token:
+                candidates.extend(part for part in re.split(r"[-_]+", token) if part)
+            for candidate in candidates:
+                item = str(candidate or "").strip()
+                if len(item) < 2 or item in seen:
+                    continue
+                seen.add(item)
+                expanded.append(item)
+        return expanded
+
+    @classmethod
+    def _lexical_tokens(cls, text: str) -> list[str]:
+        # Duplikált tokenek kezelése: query oldalon egyedi készletet használunk.
+        return cls._expanded_lexical_tokens(text)
 
     @staticmethod
     def _token_shape_boost(token: str) -> float:
@@ -73,6 +79,62 @@ class QdrantClientWrapper:
                 if item:
                     parts.append(item)
         return cls._normalize_lexical_text(" ".join(parts))
+
+    @classmethod
+    def _near_exact_phrase_score(cls, query_text: str, payload_text: str) -> float:
+        q = cls._normalize_lexical_text(query_text)
+        p = cls._normalize_lexical_text(payload_text)
+        if not q or not p:
+            return 0.0
+        if q == p:
+            return 1.0
+        if q in p or p in q:
+            shorter = min(len(q), len(p))
+            longer = max(len(q), len(p))
+            return max(0.0, min(0.96, shorter / max(1, longer)))
+        q_compact = q.replace(" ", "")
+        p_compact = p.replace(" ", "")
+        if q_compact and p_compact and (q_compact in p_compact or p_compact in q_compact):
+            shorter = min(len(q_compact), len(p_compact))
+            longer = max(len(q_compact), len(p_compact))
+            return max(0.0, min(0.92, shorter / max(1, longer)))
+        return 0.0
+
+    @classmethod
+    def _weighted_overlap_score(cls, query_tokens: list[str], text_tokens: list[str]) -> float:
+        if not query_tokens or not text_tokens:
+            return 0.0
+        text_token_set = set(text_tokens)
+        total_weight = 0.0
+        matched_weight = 0.0
+        for token in query_tokens:
+            weight = cls._token_shape_boost(token)
+            total_weight += weight
+            if token in text_token_set:
+                matched_weight += weight
+        if total_weight <= 0.0:
+            return 0.0
+        return max(0.0, min(1.0, matched_weight / total_weight))
+
+    @classmethod
+    def _rare_term_score(cls, rare_terms: list[str], payload_text: str, payload_tokens: list[str]) -> float:
+        rare_tokens = cls._lexical_tokens(" ".join(rare_terms or []))
+        if not rare_tokens:
+            return 0.0
+        text_norm = cls._normalize_lexical_text(payload_text)
+        payload_token_set = set(payload_tokens)
+        total = 0.0
+        matched = 0.0
+        for token in rare_tokens:
+            weight = 0.7 + (0.3 * cls._token_shape_boost(token))
+            total += weight
+            if token in payload_token_set:
+                matched += weight
+            elif token in text_norm:
+                matched += weight * 0.82
+        if total <= 0.0:
+            return 0.0
+        return max(0.0, min(1.0, matched / total))
 
     async def embed_text(self, text: str) -> list[float]:
         """Szöveg embedding generálása OpenAI API-val."""
@@ -122,6 +184,9 @@ class QdrantClientWrapper:
             ("source_point_id", qm.PayloadSchemaType.KEYWORD),
             ("source_sentence_id", qm.PayloadSchemaType.INTEGER),
             ("subject_entity_id", qm.PayloadSchemaType.INTEGER),
+            ("place_key", qm.PayloadSchemaType.KEYWORD),
+            ("place_keys", qm.PayloadSchemaType.KEYWORD),
+            ("place_hierarchy_keys", qm.PayloadSchemaType.KEYWORD),
             ("time_from", qm.PayloadSchemaType.DATETIME),
             ("time_to", qm.PayloadSchemaType.DATETIME),
         ]:
@@ -337,10 +402,12 @@ class QdrantClientWrapper:
             lexical_score = 0.0
             lexical_features: dict[str, float] = {
                 "token_overlap": 0.0,
+                "weighted_token_overlap": 0.0,
                 "jaccard": 0.0,
                 "substring_score": 0.0,
                 "bigram_overlap": 0.0,
                 "phrase_score": 0.0,
+                "near_exact_score": 0.0,
                 "rare_score": 0.0,
                 "focus_term_score": 0.0,
                 "exact_phrase_score": 0.0,
@@ -351,6 +418,7 @@ class QdrantClientWrapper:
                 inter = q_token_set.intersection(text_token_set)
                 union = q_token_set.union(text_token_set)
                 token_overlap = len(inter) / max(1, len(q_token_set))
+                weighted_token_overlap = self._weighted_overlap_score(q_tokens, text_tokens)
                 jaccard = len(inter) / max(1, len(union))
                 substring_hits = sum(1 for t in q_token_set if t in text_norm)
                 substring_score = substring_hits / max(1, len(q_token_set))
@@ -363,11 +431,8 @@ class QdrantClientWrapper:
                     if q_bigrams else 0.0
                 )
                 phrase_score = 1.0 if lexical_query_norm and lexical_query_norm in text_norm else 0.0
-                rare_hits = sum(1 for t in rare_query_tokens if t in text_norm)
-                rare_score = (
-                    rare_hits / max(1, len(rare_query_tokens))
-                    if rare_query_tokens else 0.0
-                )
+                near_exact_score = self._near_exact_phrase_score(lexical_query_norm, text_norm)
+                rare_score = self._rare_term_score(rare_query_tokens, text_norm, text_tokens)
                 focus_hits = sum(1 for term in focus_terms if term and term in text_norm)
                 focus_term_score = (
                     focus_hits / max(1, len(focus_terms))
@@ -382,20 +447,25 @@ class QdrantClientWrapper:
                 substring_w = float(getattr(settings, "qdrant_lexical_substring_weight", 0.28))
                 # Robusztusabb lexical komponens: token + exact phrase + rare token + ngram.
                 lexical_score = (
-                    (0.42 * ((overlap_w * token_overlap) + (substring_w * substring_score)))
-                    + (0.14 * jaccard)
-                    + (0.16 * bigram_overlap)
+                    (0.24 * token_overlap)
+                    + (0.18 * weighted_token_overlap)
+                    + (0.10 * ((overlap_w * token_overlap) + (substring_w * substring_score)))
+                    + (0.10 * jaccard)
+                    + (0.12 * bigram_overlap)
                     + (0.10 * phrase_score)
-                    + (0.08 * rare_score)
-                    + (0.05 * focus_term_score)
-                    + (0.05 * exact_phrase_score)
+                    + (0.07 * near_exact_score)
+                    + (0.05 * rare_score)
+                    + (0.02 * focus_term_score)
+                    + (0.02 * exact_phrase_score)
                 )
                 lexical_features = {
                     "token_overlap": float(token_overlap),
+                    "weighted_token_overlap": float(weighted_token_overlap),
                     "jaccard": float(jaccard),
                     "substring_score": float(substring_score),
                     "bigram_overlap": float(bigram_overlap),
                     "phrase_score": float(phrase_score),
+                    "near_exact_score": float(near_exact_score),
                     "rare_score": float(rare_score),
                     "focus_term_score": float(focus_term_score),
                     "exact_phrase_score": float(exact_phrase_score),
@@ -430,10 +500,25 @@ class QdrantClientWrapper:
             lex_norm = ((lex_raw - lex_min) / (lex_max - lex_min)) if lex_max > lex_min else max(0.0, min(1.0, lex_raw))
             row["semantic_score_norm"] = max(0.0, min(1.0, sem_norm))
             row["lexical_score_norm"] = max(0.0, min(1.0, lex_norm))
-            row["fusion_score"] = (semantic_w * row["semantic_score_norm"]) + (lexical_w * row["lexical_score_norm"])
+            lexical_features = dict(row.get("lexical_features") or {})
+            fusion_bonus = (
+                (0.06 * float(lexical_features.get("near_exact_score") or 0.0))
+                + (0.04 * float(lexical_features.get("exact_phrase_score") or 0.0))
+                + (0.03 * float(lexical_features.get("rare_score") or 0.0))
+            )
+            row["fusion_score"] = max(
+                0.0,
+                min(
+                    1.0,
+                    (semantic_w * row["semantic_score_norm"])
+                    + (lexical_w * row["lexical_score_norm"])
+                    + fusion_bonus,
+                ),
+            )
             row["fusion_weights"] = {
                 "semantic_weight": semantic_w,
                 "lexical_weight": lexical_w,
+                "fusion_bonus": round(float(fusion_bonus), 4),
             }
         rows.sort(key=lambda x: float(x.get("fusion_score") or 0.0), reverse=True)
         return rows[: max(1, min(limit, 100))]

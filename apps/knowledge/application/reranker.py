@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 
 from apps.knowledge.application.scoring import compute_current_strength
 from config.settings import settings
@@ -53,7 +53,7 @@ def compute_recency_score(source_time, ingest_time, now: datetime | None = None)
     reference = _to_datetime(source_time) or _to_datetime(ingest_time)
     if reference is None:
         return 0.0
-    current = now or datetime.utcnow()
+    current = now or datetime.now(UTC).replace(tzinfo=None)
     delta_days = max(0.0, (current - reference).total_seconds() / 86400.0)
     # ~6 hónapos felezési jellegű lecsengés.
     return max(0.0, min(1.0, 1.0 / (1.0 + (delta_days / 180.0))))

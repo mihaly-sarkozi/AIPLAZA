@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import pytest
-from datetime import datetime
+from datetime import UTC, datetime
 
 from apps.knowledge.application.query_parser import QueryParser
 
@@ -26,7 +26,7 @@ def test_query_parser_detects_predicate_candidate():
 def test_query_parser_handles_relative_time_keywords():
     parser = QueryParser()
     parsed = parser.parse("Mi történt tavaly Budapesten?")
-    now = datetime.utcnow()
+    now = datetime.now(UTC).replace(tzinfo=None)
     assert parsed["query_time_from"] is not None
     assert parsed["query_time_from"].year == now.year - 1
 

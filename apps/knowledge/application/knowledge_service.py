@@ -4,6 +4,7 @@ import json
 import uuid as uuid_lib
 import hashlib
 import logging
+import re
 from datetime import UTC, datetime
 from collections import Counter
 from time import perf_counter
@@ -76,7 +77,7 @@ def _qhash(s: str) -> str:
 
 
 def _normalize_place_key(value: str) -> str:
-    return str(value or "").strip().lower()
+    return " ".join(str(value or "").strip().lower().split())
 
 
 def _relation_type_proximity_factor(relation_type: str | None) -> float:
@@ -102,6 +103,150 @@ def _valid_time_from_value(row: dict[str, Any]) -> Any:
 
 def _valid_time_to_value(row: dict[str, Any]) -> Any:
     return row.get("valid_time_to") or row.get("time_to")
+
+
+def _iso_or_none(value: Any) -> str | None:
+    if value is None:
+        return None
+    if hasattr(value, "isoformat"):
+        return value.isoformat()
+    text = str(value).strip()
+    return text or None
+
+
+def _dedupe_keep_order(values: list[str]) -> list[str]:
+    out: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        key = str(value or "").strip()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        out.append(key)
+    return out
+
+
+def _time_semantics_debug(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "valid_time": {
+            "from": _iso_or_none(_valid_time_from_value(row)),
+            "to": _iso_or_none(_valid_time_to_value(row)),
+        },
+        "source_time": _iso_or_none(row.get("source_time")),
+        "ingest_time": _iso_or_none(row.get("ingest_time")),
+    }
+
+
+def _row_place_keys(row: dict[str, Any]) -> list[str]:
+    keys = [
+        _normalize_place_key(x)
+        for x in (row.get("place_keys") or [])
+        if _normalize_place_key(x)
+    ]
+    single_key = _normalize_place_key(str(row.get("place_key") or ""))
+    if single_key:
+        keys.append(single_key)
+    return _dedupe_keep_order(keys)
+
+
+def _safe_float(value: Any, default: float = 0.0) -> float:
+    try:
+        return float(value)
+    except Exception:
+        return default
+
+
+def _sanitize_debug_text(value: Any) -> str:
+    text = str(value or "")
+    if not text:
+        return ""
+    text = re.sub(r"(?i)\b[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}\b", "[redacted_email]", text)
+    text = re.sub(r"\b(?:\+?\d[\d\s().-]{6,}\d)\b", "[redacted_phone]", text)
+    text = re.sub(r"\b\d{6,}\b", "[redacted_number]", text)
+    return text[:400] + ("..." if len(text) > 400 else "")
+
+
+def _sanitize_debug_value(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {str(k): _sanitize_debug_value(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_sanitize_debug_value(v) for v in value]
+    if isinstance(value, tuple):
+        return [_sanitize_debug_value(v) for v in value]
+    if isinstance(value, str):
+        return _sanitize_debug_text(value)
+    return value
+
+
+def _assertion_context_rank(row: dict[str, Any]) -> tuple:
+    return (
+        -_safe_float(row.get("entity_match")),
+        -_safe_float(row.get("time_match")),
+        -_safe_float(row.get("place_match")),
+        -_safe_float(row.get("relation_confidence")),
+        -_safe_float(row.get("graph_proximity")),
+        -_safe_float(row.get("strength")),
+        -_safe_float(row.get("confidence")),
+        str(_valid_time_from_value(row) or _valid_time_to_value(row) or ""),
+        str(row.get("id") or ""),
+    )
+
+
+def _evidence_context_rank(row: dict[str, Any], primary_assertion_ids: set[int], supporting_assertion_ids: set[int]) -> tuple:
+    assertion_id = int(row.get("assertion_id") or 0)
+    layer_boost = 2 if assertion_id in primary_assertion_ids else (1 if assertion_id in supporting_assertion_ids else 0)
+    return (
+        -layer_boost,
+        -_safe_float(row.get("evidence_weight")),
+        -_safe_float(row.get("evidence_confidence")),
+        -len(row.get("entity_ids") or []),
+        -len(row.get("place_keys") or []),
+        str(_valid_time_from_value(row) or _valid_time_to_value(row) or ""),
+        str(row.get("sentence_id") or ""),
+    )
+
+
+def _chunk_context_rank(row: dict[str, Any], primary_assertion_ids: set[int], supporting_assertion_ids: set[int]) -> tuple:
+    linked_ids = {int(x) for x in (row.get("assertion_ids") or []) if isinstance(x, int)}
+    primary_links = len(linked_ids.intersection(primary_assertion_ids))
+    supporting_links = len(linked_ids.intersection(supporting_assertion_ids))
+    return (
+        -primary_links,
+        -supporting_links,
+        -len(linked_ids),
+        -len(row.get("entity_ids") or []),
+        -len(row.get("place_keys") or []),
+        str(_valid_time_from_value(row) or _valid_time_to_value(row) or ""),
+        str(row.get("chunk_id") or row.get("id") or ""),
+    )
+
+
+def _compose_query_representation(question: str, parsed_query: dict[str, Any]) -> dict[str, str]:
+    entity_terms = _dedupe_keep_order([str(x).strip() for x in (parsed_query.get("entity_candidates") or []) if str(x).strip()])
+    place_terms = _dedupe_keep_order([_normalize_place_key(str(x)) for x in (parsed_query.get("place_candidates") or []) if _normalize_place_key(str(x))])
+    time_terms = _dedupe_keep_order([str(x).strip() for x in (parsed_query.get("time_candidates") or []) if str(x).strip()])
+    predicate_terms = _dedupe_keep_order([str(x).strip().lower() for x in (parsed_query.get("predicate_candidates") or []) if str(x).strip()])
+    attribute_terms = _dedupe_keep_order([str(x).strip().lower() for x in (parsed_query.get("attribute_candidates") or []) if str(x).strip()])
+    relation_terms = _dedupe_keep_order([str(x).strip().lower() for x in (parsed_query.get("relation_candidates") or []) if str(x).strip()])
+    focus_terms = _dedupe_keep_order([str(x).strip().lower() for x in (parsed_query.get("lexical_focus_terms") or []) if str(x).strip()])
+    raw_query = str(parsed_query.get("raw_query") or question or "").strip()
+    normalized_parts = [
+        raw_query,
+        " ".join(entity_terms),
+        " ".join(place_terms),
+        " ".join(time_terms),
+        " ".join(predicate_terms),
+        " ".join(attribute_terms),
+        " ".join(relation_terms),
+    ]
+    lexical_parts = normalized_parts + [" ".join(focus_terms)]
+    normalized_query_text = " ".join(part for part in normalized_parts if part).strip()
+    lexical_query_text = " ".join(part for part in lexical_parts if part).strip()
+    return {
+        "normalized_query_text": normalized_query_text or raw_query,
+        "lexical_query_text": lexical_query_text or normalized_query_text or raw_query,
+        "query_embedding_text": lexical_query_text or normalized_query_text or raw_query,
+    }
 
 
 def _clamp01(value: float) -> float:
@@ -907,21 +1052,21 @@ class KnowledgeBaseService:
         kb = self.repo.get_by_uuid(kb_uuid)
         if not kb or kb.id is None:
             raise ValueError("KB not found")
-        return self.repo.get_assertion_debug(kb.id, assertion_id)
+        return _sanitize_debug_value(self.repo.get_assertion_debug(kb.id, assertion_id))
 
     def get_entity_debug(self, kb_uuid: str, entity_id: int) -> dict:
         """Entity debug nézet aliasokkal és kapcsolatokkal."""
         kb = self.repo.get_by_uuid(kb_uuid)
         if not kb or kb.id is None:
             raise ValueError("KB not found")
-        return self.repo.get_entity_debug(kb.id, entity_id)
+        return _sanitize_debug_value(self.repo.get_entity_debug(kb.id, entity_id))
 
     def get_source_point_debug(self, kb_uuid: str, point_id: str) -> dict:
         """Source point debug nézet (assertion/sentence/chunk)."""
         kb = self.repo.get_by_uuid(kb_uuid)
         if not kb or kb.id is None:
             raise ValueError("KB not found")
-        return self.repo.get_source_point_debug(kb.id, point_id)
+        return _sanitize_debug_value(self.repo.get_source_point_debug(kb.id, point_id))
 
     def get_relation_bundle(self, kb_uuid: str, assertion_id: int) -> dict:
         """Assertion relation bundle lekérés."""
@@ -1135,14 +1280,84 @@ class KnowledgeBaseService:
                 return 0.5
         return 0.0
 
+    @staticmethod
+    def _build_related_places(packet: dict[str, Any], query_place_keys: list[str]) -> list[dict[str, Any]]:
+        place_map: dict[str, dict[str, Any]] = {}
+        for bucket_name in ("top_assertions", "expanded_assertions", "evidence_sentences", "source_chunks"):
+            for row in (packet.get(bucket_name) or []):
+                if not isinstance(row, dict):
+                    continue
+                for place_key in _row_place_keys(row):
+                    item = place_map.setdefault(
+                        place_key,
+                        {
+                            "place_key": place_key,
+                            "kb_uuids": [],
+                            "assertion_ids": [],
+                            "seed_assertion_ids": [],
+                            "expanded_assertion_ids": [],
+                            "evidence_sentence_ids": [],
+                            "source_point_ids": [],
+                            "query_match": 0.0,
+                        },
+                    )
+                    kb_uuid = str(row.get("kb_uuid") or "").strip()
+                    if kb_uuid and kb_uuid not in item["kb_uuids"]:
+                        item["kb_uuids"].append(kb_uuid)
+                    source_point_id = str(row.get("source_point_id") or "").strip()
+                    if source_point_id and source_point_id not in item["source_point_ids"]:
+                        item["source_point_ids"].append(source_point_id)
+                    place_match = float(row.get("place_match") or 0.0)
+                    if query_place_keys and place_key in query_place_keys:
+                        place_match = max(place_match, 1.0)
+                    item["query_match"] = max(float(item.get("query_match") or 0.0), place_match)
+                    if bucket_name in {"top_assertions", "expanded_assertions"}:
+                        assertion_id = _parse_assertion_id(row.get("id"))
+                        if assertion_id is not None and assertion_id not in item["assertion_ids"]:
+                            item["assertion_ids"].append(assertion_id)
+                        if bucket_name == "top_assertions" and assertion_id is not None and assertion_id not in item["seed_assertion_ids"]:
+                            item["seed_assertion_ids"].append(assertion_id)
+                        if bucket_name == "expanded_assertions" and assertion_id is not None and assertion_id not in item["expanded_assertion_ids"]:
+                            item["expanded_assertion_ids"].append(assertion_id)
+                    elif bucket_name == "evidence_sentences":
+                        sentence_id = row.get("sentence_id")
+                        if sentence_id is not None and sentence_id not in item["evidence_sentence_ids"]:
+                            item["evidence_sentence_ids"].append(sentence_id)
+        places = list(place_map.values())
+        places.sort(
+            key=lambda x: (
+                -len(x.get("seed_assertion_ids") or []),
+                -float(x.get("query_match") or 0.0),
+                -len(x.get("assertion_ids") or []),
+                x.get("place_key") or "",
+            )
+        )
+        return places[:12]
+
     async def _resolve_query_places(
         self,
         scoped_kbs: list[KnowledgeBase],
         parsed_query: dict,
     ) -> dict[str, list[str]]:
         """Hely jelöltek feloldása Qdrant payload place kulcsok alapján."""
-        place_terms = [str(x).strip().lower() for x in parsed_query.get("place_candidates", []) if str(x).strip()]
-        parser_resolved = parsed_query.get("resolved_place_candidates") or []
+        place_terms = _dedupe_keep_order(
+            [
+                _normalize_place_key(str(x))
+                for x in (parsed_query.get("place_candidates") or [])
+                if _normalize_place_key(str(x))
+            ]
+        )
+        parser_resolved_raw = parsed_query.get("resolved_place_candidates") or []
+        parser_resolved: list[Any]
+        if isinstance(parser_resolved_raw, dict):
+            parser_resolved = []
+            for values in parser_resolved_raw.values():
+                if isinstance(values, list):
+                    parser_resolved.extend(values)
+        elif isinstance(parser_resolved_raw, list):
+            parser_resolved = parser_resolved_raw
+        else:
+            parser_resolved = [parser_resolved_raw]
         parser_place_terms = [
             _normalize_place_key(x.get("normalized_key") if isinstance(x, dict) else x)
             for x in parser_resolved
@@ -1226,11 +1441,59 @@ class KnowledgeBaseService:
                 "scoring_summary": {"kb_count": 0, "query": question},
             }
 
+        parsed_query = dict(parsed_query or {})
+        query_representation = _compose_query_representation(question=question, parsed_query=parsed_query)
+        parsed_query.setdefault("raw_query", question)
+        normalized_query_text_value = str(
+            parsed_query.get("normalized_query_text")
+            or parsed_query.get("lexical_query_text")
+            or parsed_query.get("query_embedding_text")
+            or query_representation["normalized_query_text"]
+        )
+        lexical_query_text_value = str(
+            parsed_query.get("lexical_query_text")
+            or parsed_query.get("normalized_query_text")
+            or parsed_query.get("query_embedding_text")
+            or query_representation["lexical_query_text"]
+        )
+        query_embedding_text_value = str(
+            parsed_query.get("query_embedding_text")
+            or parsed_query.get("normalized_query_text")
+            or parsed_query.get("lexical_query_text")
+            or query_representation["query_embedding_text"]
+        )
+        parsed_query["normalized_query_text"] = normalized_query_text_value
+        parsed_query["lexical_query_text"] = lexical_query_text_value
+        parsed_query["query_embedding_text"] = query_embedding_text_value
+        parsed_query.setdefault("parser_audit", {})
+        parsed_query["parser_audit"]["knowledge_query_representation"] = {
+            "normalized_query_text": parsed_query.get("normalized_query_text"),
+            "lexical_query_text": parsed_query.get("lexical_query_text"),
+            "query_embedding_text": parsed_query.get("query_embedding_text"),
+            "entity_candidates": parsed_query.get("entity_candidates") or [],
+            "time_candidates": parsed_query.get("time_candidates") or [],
+            "place_candidates": parsed_query.get("place_candidates") or [],
+            "predicate_candidates": parsed_query.get("predicate_candidates") or [],
+            "attribute_candidates": parsed_query.get("attribute_candidates") or [],
+            "relation_candidates": parsed_query.get("relation_candidates") or [],
+            "intent": parsed_query.get("intent"),
+            "retrieval_mode": parsed_query.get("retrieval_mode"),
+        }
+
         entity_terms = [str(x).strip().lower() for x in parsed_query.get("entity_candidates", []) if str(x).strip()]
-        time_terms = [str(x).strip().lower() for x in parsed_query.get("time_candidates", []) if str(x).strip()]
         query_valid_time_from = parsed_query.get("query_valid_time_from") or parsed_query.get("query_time_from")
         query_valid_time_to = parsed_query.get("query_valid_time_to") or parsed_query.get("query_time_to")
-        place_terms = [str(x).strip().lower() for x in parsed_query.get("place_candidates", []) if str(x).strip()]
+        query_valid_time_window = {
+            "from": _iso_or_none(query_valid_time_from),
+            "to": _iso_or_none(query_valid_time_to),
+        }
+        place_terms = _dedupe_keep_order(
+            [
+                _normalize_place_key(str(x))
+                for x in (parsed_query.get("place_candidates") or [])
+                if _normalize_place_key(str(x))
+            ]
+        )
         predicate_terms = [str(x).strip().lower() for x in parsed_query.get("predicate_candidates", []) if str(x).strip()]
         attribute_terms = [str(x).strip().lower() for x in parsed_query.get("attribute_candidates", []) if str(x).strip()]
         relation_terms = [str(x).strip().lower() for x in parsed_query.get("relation_candidates", []) if str(x).strip()]
@@ -1257,6 +1520,21 @@ class KnowledgeBaseService:
         normalized_query_text = str(parsed_query.get("normalized_query_text") or query_text or question)
         lexical_query_text = str(parsed_query.get("lexical_query_text") or normalized_query_text or query_text)
         request_query_vector = parsed_query.get("query_embedding_vector")
+        if isinstance(request_query_vector, (list, tuple)) and len(request_query_vector) == 0:
+            request_query_vector = None
+        parsed_query["query_embedding_prepare_calls"] = int(parsed_query.get("query_embedding_prepare_calls") or 0) + 1
+        if request_query_vector is None and hasattr(self.qdrant, "embed_text"):
+            t_embed = perf_counter()
+            try:
+                request_query_vector = await self.qdrant.embed_text(query_text)
+                parsed_query["query_embedding_vector"] = list(request_query_vector or [])
+                parsed_query["query_embedding_generation_count"] = int(parsed_query.get("query_embedding_generation_count") or 0) + 1
+                parsed_query["query_embedding_time_ms"] = round(
+                    float(parsed_query.get("query_embedding_time_ms") or 0.0) + ((perf_counter() - t_embed) * 1000.0),
+                    2,
+                )
+            except Exception:
+                request_query_vector = None
         t_total_start = perf_counter()
         qdrant_latency_ms = 0.0
         db_latency_ms = 0.0
@@ -1278,24 +1556,25 @@ class KnowledgeBaseService:
             is_predicate_heavy = bool(parsed_query.get("predicate_heavy"))
             is_relation_heavy = bool(hybrid_profile.get("relation_heavy"))
             has_rare_entities = bool(rare_entity_terms)
+            has_exact_phrases = bool(exact_phrase_candidates)
             if point_type == "assertion":
                 semantic_w, lexical_w = 0.72, 0.28
-                if is_entity_heavy or has_rare_entities:
-                    semantic_w, lexical_w = 0.54, 0.46
+                if has_exact_phrases or is_entity_heavy or has_rare_entities:
+                    semantic_w, lexical_w = 0.50, 0.50
                 elif is_predicate_heavy or is_relation_heavy:
-                    semantic_w, lexical_w = 0.60, 0.40
+                    semantic_w, lexical_w = 0.58, 0.42
             elif point_type == "sentence":
                 semantic_w, lexical_w = 0.62, 0.38
                 if retrieval_mode == "chunk_fallback":
                     semantic_w, lexical_w = 0.46, 0.54
-                elif is_entity_heavy or has_rare_entities:
-                    semantic_w, lexical_w = 0.50, 0.50
+                elif has_exact_phrases or is_entity_heavy or has_rare_entities:
+                    semantic_w, lexical_w = 0.48, 0.52
             else:
-                semantic_w, lexical_w = 0.56, 0.44
+                semantic_w, lexical_w = 0.64, 0.36
                 if retrieval_mode == "chunk_fallback":
-                    semantic_w, lexical_w = 0.36, 0.64
+                    semantic_w, lexical_w = 0.42, 0.58
                 elif is_predicate_heavy or is_relation_heavy:
-                    semantic_w, lexical_w = 0.44, 0.56
+                    semantic_w, lexical_w = 0.58, 0.42
             return semantic_w, lexical_w
 
         def _merge_hybrid_hits(
@@ -1550,8 +1829,6 @@ class KnowledgeBaseService:
                         item_from=payload.get("valid_time_from") or payload.get("time_from"),
                         item_to=payload.get("valid_time_to") or payload.get("time_to"),
                     )
-                    if time_match <= 0.0 and time_terms and any(t in lowered for t in time_terms):
-                        time_match = 0.4
                     payload_place_keys = [
                         _normalize_place_key(x)
                         for x in (payload.get("place_keys") or [])
@@ -1601,6 +1878,14 @@ class KnowledgeBaseService:
                             "confidence": float(payload.get("confidence") or 0.0),
                             "source_time": payload.get("source_time"),
                             "ingest_time": payload.get("ingest_time"),
+                            "time_semantics": {
+                                "valid_time": {
+                                    "from": _iso_or_none(payload.get("valid_time_from") or payload.get("time_from")),
+                                    "to": _iso_or_none(payload.get("valid_time_to") or payload.get("time_to")),
+                                },
+                                "source_time": _iso_or_none(payload.get("source_time")),
+                                "ingest_time": _iso_or_none(payload.get("ingest_time")),
+                            },
                             "status": status,
                             "predicate": payload.get("predicate"),
                             "entity_ids": payload_entities,
@@ -1615,6 +1900,120 @@ class KnowledgeBaseService:
                             "relation_confidence": 0.0,
                             "relation_depth": None,
                             "is_seed": point_type == "assertion",
+                        }
+                    )
+
+            if kb.id is not None and (kb_resolved_ids or predicate_terms):
+                candidate_rows = self.repo.search_candidate_assertions(
+                    kb_ids=[kb.id],
+                    predicates=predicate_terms or None,
+                    entity_ids=kb_resolved_ids or None,
+                    limit=max(6, per_type_limit + 4),
+                )
+                candidate_place_hierarchy_map = self.repo.get_place_hierarchy(
+                    kb.id,
+                    [int(row.get("place_id")) for row in candidate_rows if row.get("place_id") is not None],
+                    max_depth=4,
+                ) if candidate_rows and hasattr(self.repo, "get_place_hierarchy") else {}
+                existing_by_id = {str(row.get("id")): row for row in assertion_hits if str(row.get("kb_uuid") or "") == kb.uuid}
+                for row in candidate_rows:
+                    row_id = f"assertion-{int(row['id'])}"
+                    place_hierarchy_keys = [
+                        _normalize_place_key(x.get("normalized_key") or x.get("canonical_name") or "")
+                        for x in (candidate_place_hierarchy_map.get(int(row.get("place_id"))) or [])
+                        if _normalize_place_key(x.get("normalized_key") or x.get("canonical_name") or "")
+                    ] if row.get("place_id") is not None else []
+                    candidate_entity_ids = [
+                        x for x in [row.get("subject_entity_id"), row.get("object_entity_id")]
+                        if isinstance(x, int)
+                    ]
+                    entity_match = 1.0 if kb_resolved_ids and any(int(x) in kb_resolved_ids for x in candidate_entity_ids) else 0.0
+                    predicate_match = 1.0 if predicate_terms and str(row.get("predicate") or "").strip().lower() in predicate_terms else 0.0
+                    time_match = compute_time_overlap_score(
+                        query_from=query_valid_time_from,
+                        query_to=query_valid_time_to,
+                        item_from=row.get("valid_time_from") or row.get("time_from"),
+                        item_to=row.get("valid_time_to") or row.get("time_to"),
+                    )
+                    place_match = self._compute_place_match(
+                        query_terms=place_terms,
+                        resolved_keys=kb_place_resolved_keys,
+                        hierarchy_keys=kb_place_hierarchy_keys,
+                        item_place_keys=_row_place_keys(row),
+                        item_place_hierarchy_keys=place_hierarchy_keys,
+                    )
+                    hint_score = _clamp01(
+                        0.18
+                        + (0.28 * entity_match)
+                        + (0.20 * predicate_match)
+                        + (0.16 * time_match)
+                        + (0.14 * place_match)
+                        + (0.02 * float(row.get("confidence") or 0.0))
+                        + (0.02 * float(row.get("strength") or 0.0))
+                    )
+                    existing = existing_by_id.get(row_id)
+                    if existing is not None:
+                        existing["entity_match"] = max(float(existing.get("entity_match") or 0.0), entity_match)
+                        existing["predicate_match"] = max(float(existing.get("predicate_match") or 0.0), predicate_match)
+                        existing["time_match"] = max(float(existing.get("time_match") or 0.0), time_match)
+                        existing["place_match"] = max(float(existing.get("place_match") or 0.0), place_match)
+                        existing["fusion_match"] = max(float(existing.get("fusion_match") or 0.0), hint_score)
+                        hybrid_debug = dict(existing.get("hybrid_debug") or {})
+                        hybrid_debug["repo_hint_match"] = {
+                            "entity_match": round(entity_match, 4),
+                            "predicate_match": round(predicate_match, 4),
+                            "time_match": round(time_match, 4),
+                            "place_match": round(place_match, 4),
+                            "hint_score": round(hint_score, 4),
+                        }
+                        existing["hybrid_debug"] = hybrid_debug
+                        continue
+                    assertion_hits.append(
+                        {
+                            "id": row_id,
+                            "kb_uuid": kb.uuid,
+                            "point_type": "assertion",
+                            "source_point_id": row.get("source_point_id"),
+                            "source_sentence_id": row.get("source_sentence_id"),
+                            "text": row.get("canonical_text") or "",
+                            "semantic_match": 0.0,
+                            "lexical_match": 0.0,
+                            "fusion_match": hint_score,
+                            "hybrid_debug": {
+                                "repo_hint_match": {
+                                    "entity_match": round(entity_match, 4),
+                                    "predicate_match": round(predicate_match, 4),
+                                    "time_match": round(time_match, 4),
+                                    "place_match": round(place_match, 4),
+                                    "hint_score": round(hint_score, 4),
+                                }
+                            },
+                            "entity_match": entity_match,
+                            "time_match": time_match,
+                            "place_match": place_match,
+                            "predicate_match": predicate_match,
+                            "graph_proximity": 0.0,
+                            "strength": float(row.get("strength") or 0.0),
+                            "baseline_strength": float(row.get("baseline_strength") or 0.05),
+                            "decay_rate": float(row.get("decay_rate") or 0.015),
+                            "last_reinforced_at": row.get("last_reinforced_at"),
+                            "confidence": float(row.get("confidence") or 0.0),
+                            "source_time": row.get("source_time"),
+                            "ingest_time": row.get("ingest_time"),
+                            "status": str(row.get("status") or "active").lower(),
+                            "predicate": row.get("predicate"),
+                            "entity_ids": candidate_entity_ids,
+                            "place_ids": [int(row.get("place_id"))] if row.get("place_id") is not None else [],
+                            "place_keys": _row_place_keys(row),
+                            "place_hierarchy_keys": place_hierarchy_keys,
+                            "valid_time_from": row.get("valid_time_from") or row.get("time_from"),
+                            "valid_time_to": row.get("valid_time_to") or row.get("time_to"),
+                            "time_from": row.get("valid_time_from") or row.get("time_from"),
+                            "time_to": row.get("valid_time_to") or row.get("time_to"),
+                            "relation_weight": 0.0,
+                            "relation_confidence": 0.0,
+                            "relation_depth": None,
+                            "is_seed": True,
                         }
                     )
 
@@ -1703,6 +2102,14 @@ class KnowledgeBaseService:
                         "confidence": float(row.get("confidence") or 0.0),
                         "source_time": row.get("source_time"),
                         "ingest_time": row.get("ingest_time"),
+                        "time_semantics": {
+                            "valid_time": {
+                                "from": _iso_or_none(row.get("valid_time_from") or row.get("time_from")),
+                                "to": _iso_or_none(row.get("valid_time_to") or row.get("time_to")),
+                            },
+                            "source_time": _iso_or_none(row.get("source_time")),
+                            "ingest_time": _iso_or_none(row.get("ingest_time")),
+                        },
                         "status": str(row.get("status") or "active").lower(),
                         "predicate": row.get("predicate"),
                         "entity_ids": [x for x in [row.get("subject_entity_id"), row.get("object_entity_id")] if x],
@@ -1783,6 +2190,14 @@ class KnowledgeBaseService:
                                     "confidence": float(payload.get("confidence") or 0.0),
                                     "source_time": payload.get("source_time"),
                                     "ingest_time": payload.get("ingest_time"),
+                                    "time_semantics": {
+                                        "valid_time": {
+                                            "from": _iso_or_none(payload.get("valid_time_from") or payload.get("time_from")),
+                                            "to": _iso_or_none(payload.get("valid_time_to") or payload.get("time_to")),
+                                        },
+                                        "source_time": _iso_or_none(payload.get("source_time")),
+                                        "ingest_time": _iso_or_none(payload.get("ingest_time")),
+                                    },
                                     "predicate": payload.get("predicate"),
                                     "entity_ids": payload.get("entity_ids") or [],
                                     "place_ids": payload.get("place_ids") or [],
@@ -1844,6 +2259,14 @@ class KnowledgeBaseService:
                                     "confidence": float(payload.get("confidence") or 0.0),
                                     "source_time": payload.get("source_time"),
                                     "ingest_time": payload.get("ingest_time"),
+                                    "time_semantics": {
+                                        "valid_time": {
+                                            "from": _iso_or_none(payload.get("valid_time_from") or payload.get("time_from")),
+                                            "to": _iso_or_none(payload.get("valid_time_to") or payload.get("time_to")),
+                                        },
+                                        "source_time": _iso_or_none(payload.get("source_time")),
+                                        "ingest_time": _iso_or_none(payload.get("ingest_time")),
+                                    },
                                     "predicate": payload.get("predicate"),
                                     "entity_ids": payload.get("entity_ids") or [],
                                     "place_ids": payload.get("place_ids") or [],
@@ -1910,14 +2333,8 @@ class KnowledgeBaseService:
                 "focus_axes": parsed_query.get("focus_axes") or {},
                 "parser_audit": parsed_query.get("parser_audit") or {},
                 "parse_time_ms": float(parsed_query.get("parse_time_ms") or 0.0),
-                "valid_time_window": parsed_query.get("valid_time_window") or {
-                    "from": query_valid_time_from.isoformat() if query_valid_time_from else None,
-                    "to": query_valid_time_to.isoformat() if query_valid_time_to else None,
-                },
-                "time_window": parsed_query.get("time_window") or {
-                    "from": query_valid_time_from.isoformat() if query_valid_time_from else None,
-                    "to": query_valid_time_to.isoformat() if query_valid_time_to else None,
-                },
+                "valid_time_window": parsed_query.get("valid_time_window") or query_valid_time_window,
+                "time_window": parsed_query.get("time_window") or query_valid_time_window,
                 "place_candidates": parsed_query.get("place_candidates", []),
                 "resolved_place_candidates": parsed_query.get("resolved_place_candidates", {}),
                 "resolved_place_hierarchy_keys": parsed_query.get("resolved_place_hierarchy_keys", {}),
@@ -1970,6 +2387,51 @@ class KnowledgeBaseService:
                 "left_target": targets[0] if len(targets) > 0 else None,
                 "right_target": targets[1] if len(targets) > 1 else None,
             }
+
+        primary_assertions = list(packet.get("seed_assertions") or packet.get("top_assertions") or [])
+        primary_assertions.sort(key=_assertion_context_rank)
+        primary_assertions = primary_assertions[:6]
+        primary_ids = {
+            aid for aid in (_parse_assertion_id(row.get("id")) for row in primary_assertions)
+            if isinstance(aid, int)
+        }
+        supporting_assertions = [
+            row
+            for row in (packet.get("expanded_assertions") or packet.get("top_assertions") or [])
+            if (_parse_assertion_id(row.get("id")) not in primary_ids)
+        ]
+        supporting_assertions.sort(key=_assertion_context_rank)
+        supporting_assertions = supporting_assertions[:8]
+        supporting_ids = {
+            aid for aid in (_parse_assertion_id(row.get("id")) for row in supporting_assertions)
+            if isinstance(aid, int)
+        }
+        packet["primary_assertions"] = primary_assertions
+        packet["supporting_assertions"] = supporting_assertions
+        packet["top_assertions"] = primary_assertions + [
+            row for row in (packet.get("top_assertions") or [])
+            if _parse_assertion_id(row.get("id")) not in primary_ids
+        ]
+
+        resolved_query_place_keys = _dedupe_keep_order(
+            list(place_terms)
+            + [
+                _normalize_place_key(str(value))
+                for values in (parsed_query.get("resolved_place_candidates", {}) or {}).values()
+                for value in (values or [])
+                if _normalize_place_key(str(value))
+            ]
+        )
+        packet["related_places"] = self._build_related_places(
+            packet=packet,
+            query_place_keys=resolved_query_place_keys,
+        )
+        packet["place_context"] = {
+            "query_place_candidates": place_terms,
+            "resolved_place_candidates": parsed_query.get("resolved_place_candidates", {}),
+            "resolved_place_hierarchy_keys": parsed_query.get("resolved_place_hierarchy_keys", {}),
+            "related_places": packet.get("related_places") or [],
+        }
         top_assertion_ids = [
             _parse_assertion_id(x.get("id"))
             for x in (packet.get("top_assertions") or [])
@@ -1999,6 +2461,18 @@ class KnowledgeBaseService:
                 if not isinstance(source_chunks, list):
                     source_chunks = []
                 # Assertion-first packet: evidence és chunkok ezekből épülnek.
+                for row in evidence_rows:
+                    aid = int(row.get("assertion_id") or 0)
+                    row["context_role"] = "primary_evidence" if aid in primary_ids else (
+                        "supporting_evidence" if aid in supporting_ids else "evidence"
+                    )
+                evidence_rows.sort(key=lambda row: _evidence_context_rank(row, primary_ids, supporting_ids))
+                for row in source_chunks:
+                    linked_ids = {int(x) for x in (row.get("assertion_ids") or []) if isinstance(x, int)}
+                    row["context_role"] = "primary_chunk" if linked_ids.intersection(primary_ids) else (
+                        "supporting_chunk" if linked_ids.intersection(supporting_ids) else "context_chunk"
+                    )
+                source_chunks.sort(key=lambda row: _chunk_context_rank(row, primary_ids, supporting_ids))
                 packet["evidence_sentences"] = evidence_rows
                 packet["source_chunks"] = source_chunks
                 evidence_ids_by_assertion: dict[int, list[int]] = {}
@@ -2033,6 +2507,16 @@ class KnowledgeBaseService:
                     }
                     for row in (packet.get("top_assertions") or [])
                 ]
+        packet["related_places"] = self._build_related_places(
+            packet=packet,
+            query_place_keys=resolved_query_place_keys,
+        )
+        packet["place_context"] = {
+            "query_place_candidates": place_terms,
+            "resolved_place_candidates": parsed_query.get("resolved_place_candidates", {}),
+            "resolved_place_hierarchy_keys": parsed_query.get("resolved_place_hierarchy_keys", {}),
+            "related_places": packet.get("related_places") or [],
+        }
 
         packet["scoring_summary"] = {
             **(packet.get("scoring_summary") or {}),
@@ -2042,9 +2526,10 @@ class KnowledgeBaseService:
             "place_candidates": parsed_query.get("place_candidates", []),
             "resolved_place_candidates": parsed_query.get("resolved_place_candidates", {}),
             "resolved_place_hierarchy_keys": parsed_query.get("resolved_place_hierarchy_keys", {}),
+            "related_places": packet.get("related_places") or [],
             "time_candidates": parsed_query.get("time_candidates", []),
-            "valid_time_window": parsed_query.get("valid_time_window"),
-            "time_window": parsed_query.get("time_window"),
+            "valid_time_window": parsed_query.get("valid_time_window") or query_valid_time_window,
+            "time_window": parsed_query.get("time_window") or query_valid_time_window,
             "predicate_candidates": parsed_query.get("predicate_candidates", []),
             "attribute_candidates": parsed_query.get("attribute_candidates", []),
             "relation_candidates": parsed_query.get("relation_candidates", []),
@@ -2073,6 +2558,83 @@ class KnowledgeBaseService:
                 "rerank": round(float(((packet.get("scoring_summary") or {}).get("timing_ms") or {}).get("rerank") or 0.0), 2),
                 "context_build": round(context_build_ms, 2),
             },
+            "time_semantics": {
+                "query_valid_time_window": query_valid_time_window,
+                "time_slice_grouping_axis": "valid_time",
+                "top_assertion_times": [
+                    {
+                        "assertion_id": row.get("id"),
+                        **_time_semantics_debug(row),
+                    }
+                    for row in (packet.get("top_assertions") or [])[:8]
+                ],
+            },
+            "place_semantics": {
+                "query_place_candidates": place_terms,
+                "resolved_place_candidates": parsed_query.get("resolved_place_candidates", {}),
+                "resolved_place_hierarchy_keys": parsed_query.get("resolved_place_hierarchy_keys", {}),
+                "top_place_context": (packet.get("related_places") or [])[:8],
+            },
+            "context_layers": {
+                "primary_assertion_ids": [row.get("id") for row in (packet.get("primary_assertions") or [])],
+                "supporting_assertion_ids": [row.get("id") for row in (packet.get("supporting_assertions") or [])],
+                "evidence_sentence_ids": [
+                    row.get("sentence_id")
+                    for row in (packet.get("evidence_sentences") or [])
+                ],
+                "chunk_ids": [
+                    row.get("chunk_id") or row.get("id")
+                    for row in (packet.get("source_chunks") or [])
+                ],
+                "assertion_first": True,
+                "chunk_role": "evidence_fallback_context",
+            },
+        }
+        packet["context_layers"] = {
+            "primary_assertions": [
+                {
+                    "id": row.get("id"),
+                    "text": row.get("text") or row.get("canonical_text"),
+                    "entity_match": row.get("entity_match"),
+                    "time_match": row.get("time_match"),
+                    "place_match": row.get("place_match"),
+                    "relation_confidence": row.get("relation_confidence"),
+                    "strength": row.get("strength"),
+                    "confidence": row.get("confidence"),
+                }
+                for row in (packet.get("primary_assertions") or [])
+            ],
+            "supporting_assertions": [
+                {
+                    "id": row.get("id"),
+                    "text": row.get("text") or row.get("canonical_text"),
+                    "entity_match": row.get("entity_match"),
+                    "time_match": row.get("time_match"),
+                    "place_match": row.get("place_match"),
+                    "relation_confidence": row.get("relation_confidence"),
+                    "strength": row.get("strength"),
+                    "confidence": row.get("confidence"),
+                }
+                for row in (packet.get("supporting_assertions") or [])
+            ],
+            "evidence_sentences": [
+                {
+                    "sentence_id": row.get("sentence_id"),
+                    "assertion_id": row.get("assertion_id"),
+                    "context_role": row.get("context_role") or "evidence",
+                    "text": row.get("text"),
+                }
+                for row in (packet.get("evidence_sentences") or [])
+            ],
+            "context_chunks": [
+                {
+                    "chunk_id": row.get("chunk_id") or row.get("id"),
+                    "context_role": row.get("context_role") or "context_chunk",
+                    "assertion_ids": row.get("assertion_ids") or [],
+                    "text": row.get("text"),
+                }
+                for row in (packet.get("source_chunks") or [])
+            ],
         }
         # Related entity summary: id helyett emberi olvasható összegzés.
         related_entity_ids: dict[int, int] = {}

@@ -104,7 +104,8 @@ class KbSentenceORM(TenantSchemaBase):
     assertion_ids = Column(JSON, nullable=False, default=list)
     predicate_hints = Column(JSON, nullable=False, default=list)
     place_ids = Column(JSON, nullable=False, default=list)
-    # valid_time vetület a mondathoz kötött assertionökből
+    # Legacy oszlopnevek, de kizárólag valid_time_from / valid_time_to jelentéssel.
+    # A mondat valid_time vetületét hordozzák a kapcsolt assertionökből.
     time_from = Column(DateTime, nullable=True, index=True)
     time_to = Column(DateTime, nullable=True, index=True)
     place_keys = Column(JSON, nullable=False, default=list)
@@ -225,6 +226,7 @@ class KbAssertionORM(TenantSchemaBase):
     object_value = Column(Text, nullable=True)
     time_interval_id = Column(Integer, ForeignKey("kb_time_intervals.id", ondelete="SET NULL"), nullable=True, index=True)
     place_id = Column(Integer, ForeignKey("kb_places.id", ondelete="SET NULL"), nullable=True, index=True)
+    # Legacy oszlopnevek, de kizárólag valid_time_from / valid_time_to jelentéssel.
     # valid_time: mikor igaz az assertion a világban
     time_from = Column(DateTime, nullable=True, index=True)
     time_to = Column(DateTime, nullable=True, index=True)
@@ -269,7 +271,8 @@ class KbStructuralChunkORM(TenantSchemaBase):
     predicate_hints = Column(JSON, nullable=False, default=list)
     place_ids = Column(JSON, nullable=False, default=list)
     token_count = Column(Integer, nullable=False, default=0)
-    # valid_time vetület a chunk által lefedett assertion/sentence halmazból
+    # Legacy oszlopnevek, de kizárólag valid_time_from / valid_time_to jelentéssel.
+    # A chunk valid_time vetületét hordozzák a lefedett assertion/sentence halmazból.
     time_from = Column(DateTime, nullable=True, index=True)
     time_to = Column(DateTime, nullable=True, index=True)
     place_keys = Column(JSON, nullable=False, default=list)
