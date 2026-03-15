@@ -68,9 +68,6 @@ jobs:
       QDRANT_URL: "http://localhost:6333"
       QDRANT_API_KEY: ""
       OPENAI_API_KEY: "test-openai-api-key"
-      DATABASE_URL: "postgresql+psycopg2://postgres:postgres@localhost:5432/aiplaza"
-      ADMIN_EMAIL: "admin@example.com"
-      ADMIN_PASSWORD: "admin123"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -85,11 +82,11 @@ jobs:
       - name: Install package (editable)
         run: python -m pip install -e .
       - name: Initialize test database
-        run: python scripts/init_db.py
+        run: DATABASE_URL="postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/aiplaza" database_url="postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/aiplaza" python scripts/init_db.py
       - name: Seed demo owner
-        run: python scripts/seed_user.py
+        run: DATABASE_URL="postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/aiplaza" database_url="postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/aiplaza" ADMIN_EMAIL="admin@example.com" ADMIN_PASSWORD="admin123" python scripts/seed_user.py
       - name: Integration tests
-        run: pytest tests/integration -v --tb=short
+        run: DATABASE_URL="postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/aiplaza" database_url="postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/aiplaza" pytest tests/integration -v --tb=short
         env:
           DISABLE_CSRF: "1"
           RATE_LIMIT_LOGIN_PER_MINUTE: "100"
