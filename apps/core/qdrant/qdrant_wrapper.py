@@ -15,7 +15,13 @@ class QdrantUnavailableError(Exception):
 
 class QdrantClientWrapper:
     def __init__(self, url: str, api_key: str, openai_key: str, embedding_model: str = "text-embedding-3-large"):
-        self.client = QdrantClient(url=url, api_key=api_key, check_compatibility=False)
+        client_kwargs: dict[str, Any] = {
+            "url": url,
+            "check_compatibility": False,
+        }
+        if str(api_key or "").strip():
+            client_kwargs["api_key"] = api_key
+        self.client = QdrantClient(**client_kwargs)
         self.openai = AsyncOpenAI(api_key=openai_key)
         self.embedding_model = embedding_model
         self.vector_size = 3072  # text-embedding-3-large
