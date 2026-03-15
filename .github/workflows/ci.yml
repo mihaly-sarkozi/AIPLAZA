@@ -69,7 +69,6 @@ jobs:
       QDRANT_API_KEY: ""
       OPENAI_API_KEY: "test-openai-api-key"
       DATABASE_URL: "postgresql+psycopg2://postgres:postgres@localhost:5432/aiplaza"
-      database_url: "postgresql+psycopg2://postgres:postgres@localhost:5432/aiplaza"
       ADMIN_EMAIL: "admin@example.com"
       ADMIN_PASSWORD: "admin123"
     steps:
