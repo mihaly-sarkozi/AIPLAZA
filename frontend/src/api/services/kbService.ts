@@ -4,14 +4,12 @@
 import api from "../axiosClient";
 
 export type PersonalDataMode = "no_personal_data" | "with_confirmation" | "allowed_not_to_ai" | "no_pii_filter";
-export type PersonalDataSensitivity = "weak" | "medium" | "strong";
 
 export type KbItem = {
   uuid: string;
   name: string;
   description?: string;
   personal_data_mode: PersonalDataMode;
-  personal_data_sensitivity: PersonalDataSensitivity;
   /** Aktuális user taníthatja-e (backend listánál kitölti) */
   can_train?: boolean;
   [key: string]: unknown;
@@ -36,7 +34,6 @@ export type UpdateKbPayload = {
   name: string;
   description?: string;
   personal_data_mode: PersonalDataMode;
-  personal_data_sensitivity: PersonalDataSensitivity;
 };
 
 export type DeleteKbPayload = { uuid: string; confirm_name: string };
@@ -78,13 +75,11 @@ export async function updateKb({
   name,
   description,
   personal_data_mode,
-  personal_data_sensitivity,
 }: UpdateKbPayload): Promise<KbItem> {
   const res = await api.put(`/kb/${uuid}`, {
     name,
     description,
     personal_data_mode,
-    personal_data_sensitivity,
   });
   return res.data as KbItem;
 }
@@ -103,9 +98,22 @@ export type KbTrainingLogEntry = {
   created_at: string | null;
 };
 
+export type KbPointPersonalDataItem = {
+  reference_id: string;
+  value: string;
+};
+
 export async function getKbTrainingLog(kbUuid: string): Promise<KbTrainingLogEntry[]> {
   const res = await api.get(`/kb/${kbUuid}/train/log`);
   return res.data as KbTrainingLogEntry[];
+}
+
+export async function getKbPointPersonalData(
+  kbUuid: string,
+  pointId: string
+): Promise<KbPointPersonalDataItem[]> {
+  const res = await api.get(`/kb/${kbUuid}/train/points/${pointId}/pii`);
+  return (res.data || []) as KbPointPersonalDataItem[];
 }
 
 export async function deleteKbTrainingPoint(kbUuid: string, pointId: string): Promise<void> {

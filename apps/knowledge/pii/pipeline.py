@@ -42,9 +42,12 @@ def apply_pii_replacements(
     matches: List[PiiMatch],
     ref_id_by_index: List[str],
     mode: str = "mask",
+    language: str | None = None,
 ) -> str:
     """
     Replace PII spans with standardized placeholders [EMAIL_ADDRESS], [PERSON_NAME], etc.
     (mode="mask") or generalization text (mode="generalize"). Replaces from end to start.
     """
-    return _apply_pii_replacements(text, matches, ref_id_by_index, mode=mode)
+    return _apply_pii_replacements(
+        text, matches, ref_id_by_index, mode=mode, language=language
+    )

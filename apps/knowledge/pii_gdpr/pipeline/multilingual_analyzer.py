@@ -152,6 +152,18 @@ class MultilingualAnalyzer:
                         )
                     )
 
+        # NER zajszűrés: kisbetűs, több szavas "név" találatok gyakran kérdőmondat-részletek.
+        all_results = [
+            d
+            for d in all_results
+            if not (
+                d.entity_type == EntityType.PERSON_NAME
+                and d.source_detector == "ner"
+                and (" " in d.matched_text.strip())
+                and (d.matched_text == d.matched_text.lower())
+            )
+        ]
+
         # Context-based rescoring for ambiguous types (VIN, engine, plate, customer ID, technical)
         for d in all_results:
             if d.entity_type in CONTEXT_SENSITIVE_ENTITY_TYPES:

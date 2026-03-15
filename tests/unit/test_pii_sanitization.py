@@ -61,6 +61,32 @@ def test_generalization_person_date_address():
     assert "123 Main St." not in out
 
 
+def test_auto_delete_hungarian_person_and_field_names():
+    text = "Kovács Anna címe 1123 Budapest."
+    matches = [
+        (0, 11, "név", "Kovács Anna"),
+        (18, 31, "cím", "1123 Budapest"),
+    ]
+    out = apply_pii_replacements(text, matches, ["r1", "r2"], mode="auto_delete", language="hu")
+    assert "<valaki>" in out
+    assert "<valami cím>" in out
+    assert "Kovács Anna" not in out
+    assert "1123 Budapest" not in out
+
+
+def test_auto_delete_english_localized_words():
+    text = "John date is 2025-03-15 and code TKT-1234."
+    matches = [
+        (0, 4, "név", "John"),
+        (13, 23, "dátum", "2025-03-15"),
+        (33, 41, "ticket_id", "TKT-1234"),
+    ]
+    out = apply_pii_replacements(text, matches, ["a", "b", "c"], mode="auto_delete", language="en")
+    assert "<someone>" in out
+    assert "<some date>" in out
+    assert "<some code>" in out
+
+
 # ---- Deduplicate: longer wins ----
 def test_deduplicate_longer_match_wins():
     """When two spans overlap, the longer span is kept (e.g. full email contains a name)."""

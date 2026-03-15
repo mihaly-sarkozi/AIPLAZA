@@ -249,26 +249,26 @@ class MySQLKnowledgeBaseRepository(KnowledgeBaseRepositoryPort):
     def add_personal_data(
         self, kb_id: int, point_id: str, data_type: str, extracted_value: str
     ) -> str:
-        import uuid as uuid_mod
-        ref_id = str(uuid_mod.uuid4())
         retention_days = int(getattr(settings, "pii_retention_days", 90) or 90)
         now = datetime.utcnow()
         expires_at = now + timedelta(days=retention_days) if retention_days > 0 else None
         encrypted = self._pii_encryptor.encrypt(extracted_value)
         with self.session_factory() as session:
-            session.add(
-                KbPersonalDataORM(
-                    kb_id=kb_id,
-                    point_id=point_id,
-                    data_type=data_type,
-                    extracted_value=encrypted,
-                    reference_id=ref_id,
-                    created_at=now,
-                    expires_at=expires_at,
-                )
+            row = KbPersonalDataORM(
+                kb_id=kb_id,
+                point_id=point_id,
+                data_type=data_type,
+                extracted_value=encrypted,
+                # Flush után a tényleges integer PK-ból képezzük a reference_id-t.
+                reference_id="0",
+                created_at=now,
+                expires_at=expires_at,
             )
+            session.add(row)
+            session.flush()
+            row.reference_id = str(row.id)
             session.commit()
-        return ref_id
+        return str(row.reference_id)
 
     def purge_expired_personal_data(self) -> int:
         with self.session_factory() as session:

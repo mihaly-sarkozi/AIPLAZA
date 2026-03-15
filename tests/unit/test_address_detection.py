@@ -189,3 +189,41 @@ def test_regression_hungarian_iranyitoszam_varos():
     text = "1024 Budapest, Szabadság út 22."
     addrs = _get_address_detections(text, "hu")
     assert len(addrs) >= 1
+
+
+def test_uppercase_locality_between_address_parts_is_merged():
+    """Két címrész között NAGYBETŰS helységszó legyen egy címblokk."""
+    text = "Fő utca 12 BUDAPEST 3/2 ajtó"
+    addrs = _get_address_detections(text, "hu")
+    assert len(addrs) >= 1
+    matched = addrs[0].matched_text
+    assert "12" in matched
+    assert "BUDAPEST" in matched
+    assert "3/2" in matched
+
+
+def test_month_name_context_is_date():
+    """Hónapnév a kontextusban -> DATE (ha nem cím)."""
+    text = "Találkozó ideje: 2025 február 18."
+    analyzer = MultilingualAnalyzer()
+    results = analyzer.analyze(text, "hu")
+    types = {r.entity_type for r in results}
+    assert EntityType.DATE in types
+
+
+def test_ymd_range_1900_2900_is_date():
+    """1900..2900 közötti YYYY-MM-DD mintát dátumként kezeljük."""
+    text = "Rögzítve: 2899-12-31, ellenőrzés kész."
+    analyzer = MultilingualAnalyzer()
+    results = analyzer.analyze(text, "hu")
+    types = {r.entity_type for r in results}
+    assert EntityType.DATE in types or EntityType.DATE_OF_BIRTH in types
+
+
+def test_previous_words_priority_for_identifier():
+    """Előtte lévő 2-3 szó alapján azonosító felismerése."""
+    text = "A belső ügyfél azonosító 778899."
+    analyzer = MultilingualAnalyzer()
+    results = analyzer.analyze(text, "hu")
+    types = {r.entity_type for r in results}
+    assert EntityType.CUSTOMER_ID in types

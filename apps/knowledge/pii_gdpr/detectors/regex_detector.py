@@ -68,6 +68,8 @@ _REGEX_RULES: List[Tuple] = [
     (EntityType.CUSTOMER_ID, r"\b(?:UGY|UGYFEL|CLIENT|cliente|cust)[\- ]?\d{4,10}\b", 0.82, RiskClass.INDIRECT_IDENTIFIER),
     (EntityType.CUSTOMER_ID, r"\b(?:HU|HU-)[\- ]?\d{4,10}\b", 0.88, RiskClass.INDIRECT_IDENTIFIER),
     (EntityType.CUSTOMER_ID, r"#\d{4,12}\b", 0.60, RiskClass.INDIRECT_IDENTIFIER),
+    # Több egymást követő nagybetűvel kezdődő szó = valószínű név (pl. Varga Dániel, Emma Brown)
+    (EntityType.PERSON_NAME, r"\b[A-ZÁÉÍÓÖŐÚÜŰÑ][a-záéíóöőúüűñ]+(?:\s+[A-ZÁÉÍÓÖŐÚÜŰÑ][a-záéíóöőúüűñ]+){1,3}\b", 0.86, RiskClass.DIRECT_PII),
     # CONTRACT-2025-00481: több szegmens is (a sor végéig), ne csak CONTRACT-2025
     (EntityType.CONTRACT_NUMBER, r"\b(?:SZ|Szerz\.?|Szerződés|CONTRACT|contrato)[\- ]?(?:\d+[\-])*\d{4,12}\b", 0.80, RiskClass.INDIRECT_IDENTIFIER),
     (EntityType.TICKET_ID, r"\b(?:TKT|TICKET|JIRA)[\- ]?\d{4,10}\b", 0.82, RiskClass.INDIRECT_IDENTIFIER),
@@ -130,6 +132,8 @@ _REGEX_RULES: List[Tuple] = [
     # NIE (Número de Identidad de Extranjero): X/Y/Z + 7 számjegy + ellenőrző betű (pl. X1234567Y)
     (EntityType.PERSONAL_ID, r"(?i)(?:(?<=NIE: )|(?<=NIE ))\b[XYZ]\d{7}[A-Z]\b", 0.90, RiskClass.DIRECT_PII),
     (EntityType.PERSONAL_ID, r"\b[XYZ]\d{7}[A-Z]\b", 0.70, RiskClass.DIRECT_PII),
+    # Név közvetlenül dokumentum címke előtt: "Misi NIE száma ..."
+    (EntityType.PERSON_NAME, r"\b([A-ZÁÉÍÓÖŐÚÜŰ][a-záéíóöőúüű]{2,})\s+(?=(?:NIE|DNI|NIF)\b)", 0.86, RiskClass.DIRECT_PII, 1),
     # identificador de dispositivo DEV-ES-2025-44
     (EntityType.DEVICE_ID, r"(?i)\b(?:identificador\s+de\s+dispositivo|id\s+de\s+dispositivo)\s*[:\-]?\s*[\w\-]{8,40}\b", 0.82, RiskClass.INDIRECT_IDENTIFIER),
     (EntityType.DEVICE_ID, r"\bDEV[\- ]?(?:ES[\- ]?)?(?:\d+[\-])*\d{4,10}\b", 0.68, RiskClass.INDIRECT_IDENTIFIER),
@@ -178,6 +182,24 @@ class RegexDetector(BaseDetector):
 
     name = "regex"
 
+    _DOC_ID_NEAR_PHONE = re.compile(
+        r"(?i)\b(?:nie|dni|nif|személyi\s+igazolvány|személyi\s+azonosító|passport|útlevél)\b"
+    )
+    _NON_ADDRESS_METADATA_CONTEXT = re.compile(
+        r"(?i)\b(?:metaadat|metadata|szerzője|author|modified\s+by|reviewer|creator)\b"
+    )
+    _ADDRESS_HINT = re.compile(
+        r"(?i)\b(?:utca|út|útja|tér|körút|cím|address|calle|avenida|street|road|"
+        r"building|floor|apt|edificio|piso|puerta|district|város|city)\b"
+    )
+    _ADDRESS_WORD_IN_PERSON = re.compile(
+        r"(?i)\b(?:utca|út|útja|tér|körút|calle|avenida|street|road|boulevard|"
+        r"drive|lane|avenue|ave\.?|building|floor|apt|edificio|piso|puerta|district|city)\b"
+    )
+    _PERSON_LABEL_CONTEXT = re.compile(
+        r"(?i)\b(?:szerző|author|modified\s+by|reviewer|name|név)\b"
+    )
+
     def detect(self, text: str, language: str = "en") -> List[DetectionResult]:
         results: List[DetectionResult] = []
         for rule in _REGEX_RULES:
@@ -193,6 +215,24 @@ class RegexDetector(BaseDetector):
                         matched = m.group(0).strip()
                     if not matched:
                         continue
+                    if entity_type == EntityType.PHONE_NUMBER:
+                        ctx = text[max(0, start - 40):min(len(text), end + 40)]
+                        if self._DOC_ID_NEAR_PHONE.search(ctx):
+                            # Dokumentum-azonosító kontextusban a nyers számsor ne telefonszám legyen.
+                            continue
+                    if entity_type == EntityType.PERSON_NAME:
+                        if self._ADDRESS_WORD_IN_PERSON.search(matched):
+                            # Címrészek (pl. Calle Mayor, King Street) ne legyenek PERSON_NAME.
+                            continue
+                        ctx = text[max(0, start - 30):min(len(text), end + 30)]
+                        if self._ADDRESS_HINT.search(ctx) and not self._PERSON_LABEL_CONTEXT.search(ctx):
+                            # Ha cím-környezetben van és nincs személy-címke, ne vegyük névnek.
+                            continue
+                    if entity_type == EntityType.POSTAL_ADDRESS:
+                        ctx = text[max(0, start - 80):min(len(text), end + 80)]
+                        if self._NON_ADDRESS_METADATA_CONTEXT.search(ctx) and not self._ADDRESS_HINT.search(matched):
+                            # Metaadat felsorolásban (author/reviewer/modified by) ne keverjük címmel.
+                            continue
                     action = RecommendedAction.MASK if confidence >= 0.85 else RecommendedAction.REVIEW_REQUIRED
                     results.append(
                         DetectionResult(

@@ -82,7 +82,8 @@ def test_confirmation_continues_processing(service_with_mock_repo, mock_repo):
     call_kw = mock_repo.add_training_log.call_args
     # ref_id-val: [EMAIL_ADDRESS_ref-1]; ref nélkül: [EMAIL_ADDRESS]
     assert "EMAIL_ADDRESS" in call_kw[1]["content"]
-    assert call_kw[1]["raw_content"] == "Contact: test@example.com for info."
+    # Security default: raw_content tárolás alapból tiltott (kb_store_raw_content=False).
+    assert call_kw[1]["raw_content"] is None
     assert call_kw[1]["review_decision"] == "continue_sanitized"
 
 

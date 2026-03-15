@@ -128,3 +128,50 @@ def test_english_keywords_license_plate_engine():
     out = pipeline.run(text)
     types = {d.entity_type for d in out["raw_detections"]}
     assert EntityType.VEHICLE_REGISTRATION in types or EntityType.ENGINE_IDENTIFIER in types
+
+
+def test_nie_full_token_detected_with_prefix_letter():
+    """NIE token (Y7264459S) legyen teljes PERSONAL_ID, Y betűvel együtt."""
+    text = "NIE száma: Y7264459S"
+    pipeline = IngestionPipeline()
+    out = pipeline.run(text)
+    detections = [d for d in out["raw_detections"] if d.entity_type == EntityType.PERSONAL_ID]
+    assert detections, f"NIE személyi_azonosító hiányzik: {out['raw_detections']}"
+    assert any(d.matched_text == "Y7264459S" for d in detections)
+
+
+def test_nie_with_trailing_punctuation_keeps_full_core_token():
+    """NIE után vessző/pont esetén is a teljes core token menjen maszkolásra."""
+    text = "Azonosító: NIE Y7264459S, kérem ellenőrizni."
+    pipeline = IngestionPipeline()
+    out = pipeline.run(text)
+    detections = [d for d in out["raw_detections"] if d.entity_type == EntityType.PERSONAL_ID]
+    assert detections
+    assert any(d.matched_text == "Y7264459S" for d in detections)
+
+
+def test_name_and_nie_numeric_id_not_phone():
+    """Misi NIE száma 26654987 -> Misi név + PERSONAL_ID, ne PHONE_NUMBER."""
+    text = "Misi NIE száma 26654987"
+    pipeline = IngestionPipeline()
+    out = pipeline.run(text, "hu")
+    detections = out["raw_detections"]
+    types = {d.entity_type for d in detections}
+    assert EntityType.PERSON_NAME in types
+    assert EntityType.PERSONAL_ID in types
+    assert EntityType.PHONE_NUMBER not in types
+
+
+def test_consecutive_capitalized_words_are_person_names():
+    """Egymást követő nagybetűs szavak legyenek egyben PERSON_NAME."""
+    text = (
+        "A dokumentum metaadatai szerint a fájl szerzője Varga Dániel, "
+        "modified by María López, reviewer: Emma Brown."
+    )
+    pipeline = IngestionPipeline()
+    out = pipeline.run(text, "hu")
+    detections = [d for d in out["raw_detections"] if d.entity_type == EntityType.PERSON_NAME]
+    values = {d.matched_text for d in detections}
+    assert "Varga Dániel" in values
+    assert "María López" in values
+    assert "Emma Brown" in values

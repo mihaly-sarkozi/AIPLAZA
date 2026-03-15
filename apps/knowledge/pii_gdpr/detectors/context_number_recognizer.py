@@ -122,14 +122,41 @@ _DATE_NEGATIVE_CONTEXT = re.compile(
 )
 
 _DATE_SHAPE_PATTERN = re.compile(
-    r"^(?:19|20)\d{2}[.\-/](?:0[1-9]|1[0-2])[.\-/](?:0[1-9]|[12]\d|3[01])$|"
-    r"^(?:0[1-9]|[12]\d|3[01])[.\-/](?:0[1-9]|1[0-2])[.\-/](?:19|20)\d{2}$"
+    r"^(?:19\d{2}|2[0-8]\d{2}|2900)[.\-/](?:0?[1-9]|1[0-2])[.\-/](?:0?[1-9]|[12]\d|3[01])$|"
+    r"^(?:0?[1-9]|[12]\d|3[01])[.\-/](?:0?[1-9]|1[0-2])[.\-/](?:19\d{2}|2[0-8]\d{2}|2900)$"
+)
+
+_MONTH_WORDS = re.compile(
+    r"(?i)\b(?:"
+    r"január|február|március|április|május|június|július|augusztus|"
+    r"szeptember|október|november|december|"
+    r"january|february|march|april|may|june|july|august|"
+    r"september|october|november|december|"
+    r"enero|febrero|marzo|abril|mayo|junio|julio|agosto|"
+    r"septiembre|octubre|noviembre|diciembre"
+    r")\b"
+)
+
+_YMD_STRICT = re.compile(
+    r"\b(19\d{2}|2[0-8]\d{2}|2900)[.\-/\s](0?[1-9]|1[0-2])[.\-/\s](0?[1-9]|[12]\d|3[01])\b"
+)
+
+_DMY_STRICT = re.compile(
+    r"\b(0?[1-9]|[12]\d|3[01])[.\-/\s](0?[1-9]|1[0-2])[.\-/\s](19\d{2}|2[0-8]\d{2}|2900)\b"
+)
+
+_DOB_HINTS = re.compile(
+    r"(?i)(?:\bszül\.?:?|\bszületett\b|\bdob\b|date\s+of\s+birth|fecha\s+de\s+nacimiento|\bborn\b)"
 )
 
 
 def _is_date_shaped(matched: str) -> bool:
     clean = re.sub(r"\s+", "", matched)
     return bool(_DATE_SHAPE_PATTERN.match(clean))
+
+
+def _has_year_month_day_triplet(text: str) -> bool:
+    return bool(_YMD_STRICT.search(text) or _DMY_STRICT.search(text))
 
 
 def _infer_entity_type(context: str) -> EntityType:
@@ -199,15 +226,33 @@ class ContextNumberRecognizer(BaseDetector):
                 # 4 jegyű: évszámot ne (19xx, 20xx)
                 if len(matched) == 4 and matched.isdigit() and _is_likely_year(matched):
                     continue
+                conf = base_conf
                 entity_type = _infer_with_priority(text, start, end, matched)
                 if entity_type is None:
                     continue  # Nem sikerült azonosítani → hagyja
                 # Dátum kontextus + dátum alakú szám → NE legyen POSTAL_ADDRESS
                 context = _get_context(text, start, end)
-                if _DATE_NEGATIVE_CONTEXT.search(context) and _is_date_shaped(matched):
+                near = text[max(0, start - 30) : min(len(text), end + 30)]
+                has_month_near = bool(_MONTH_WORDS.search(near))
+                looks_date_like = (
+                    _is_date_shaped(matched)
+                    or _has_year_month_day_triplet(near)
+                    or (
+                        has_month_near
+                        and bool(
+                            re.search(
+                                r"\b(?:19\d{2}|2[0-8]\d{2}|2900|\d{1,2})\b",
+                                matched,
+                            )
+                        )
+                    )
+                )
+                if looks_date_like:
+                    entity_type = EntityType.DATE_OF_BIRTH if _DOB_HINTS.search(context) else EntityType.DATE
+                    conf = max(conf, 0.90)
+                elif _DATE_NEGATIVE_CONTEXT.search(context) and _is_date_shaped(matched):
                     if entity_type == EntityType.POSTAL_ADDRESS:
                         entity_type = EntityType.DATE_OF_BIRTH
-                conf = base_conf
                 # Cím/address kontextus: 4 jegyű házszám – emeljük a konfidenciát
                 if len(matched) == 4 and re.search(r"(?i)lives\s+at|address|c[íi]m|direcci", context):
                     conf = max(conf, 0.65)

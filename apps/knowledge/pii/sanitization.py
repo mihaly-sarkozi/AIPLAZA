@@ -85,6 +85,33 @@ LEGACY_TO_GENERALIZATION: dict[str, str] = {
 DEFAULT_PLACEHOLDER = "[PII]"
 DEFAULT_GENERALIZATION = "[redacted]"
 
+AUTO_DELETE_LABELS_BY_LANG: dict[str, dict[str, str]] = {
+    "hu": {
+        "person": "valaki",
+        "address": "valami cím",
+        "date": "valami dátum",
+        "code": "valami kód",
+        "identifier": "valami azonosító",
+        "property": "valami tulajdonság",
+    },
+    "en": {
+        "person": "someone",
+        "address": "some address",
+        "date": "some date",
+        "code": "some code",
+        "identifier": "some identifier",
+        "property": "some property",
+    },
+    "es": {
+        "person": "alguien",
+        "address": "alguna dirección",
+        "date": "alguna fecha",
+        "code": "algún código",
+        "identifier": "algún identificador",
+        "property": "alguna propiedad",
+    },
+}
+
 
 def _standard_placeholder(legacy_type: str) -> str:
     return LEGACY_TO_STANDARD_PLACEHOLDER.get(
@@ -96,6 +123,34 @@ def _generalization_text(legacy_type: str) -> str:
     return LEGACY_TO_GENERALIZATION.get(
         (legacy_type or "").strip().lower(), DEFAULT_GENERALIZATION
     )
+
+
+def _norm_lang(language: str | None) -> str:
+    lang = (language or "hu").lower()
+    return lang if lang in AUTO_DELETE_LABELS_BY_LANG else "hu"
+
+
+def _auto_delete_text(legacy_type: str, language: str | None = None) -> str:
+    labels = AUTO_DELETE_LABELS_BY_LANG[_norm_lang(language)]
+    t = (legacy_type or "").strip().lower()
+    if t == "név":
+        return f"<{labels['person']}>"
+    if t == "cím":
+        return f"<{labels['address']}>"
+    if t in {"dátum", "születési_dátum"}:
+        return f"<{labels['date']}>"
+    if t in {"ticket_id", "session_id", "cookie_id", "user_id"}:
+        return f"<{labels['code']}>"
+    if t in {
+        "health_hint",
+        "biometric_hint",
+        "political_hint",
+        "religion_hint",
+        "union_hint",
+        "sexual_orientation_hint",
+    }:
+        return f"<{labels['property']}>"
+    return f"<{labels['identifier']}>"
 
 
 def deduplicate_matches_longer_wins(
@@ -136,6 +191,7 @@ def apply_pii_replacements(
     matches: List[Tuple[int, int, str, str]],
     ref_id_by_index: List[str],
     mode: str = "mask",
+    language: str | None = None,
 ) -> str:
     """
     Replace PII spans with standardized placeholders (mask) or generalization text.
@@ -154,6 +210,8 @@ def apply_pii_replacements(
         start, end, dtype, _ = matches[i]
         if mode == "generalize":
             return _generalization_text(dtype)
+        if mode == "auto_delete":
+            return _auto_delete_text(dtype, language=language)
         if mode == "remove" or mode == "dots":
             return "..."
         ref_id = ref_id_by_index[i] if i < len(ref_id_by_index) else ""

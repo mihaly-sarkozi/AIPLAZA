@@ -99,6 +99,7 @@ def create_kb(
 @router.get("/kb/{uuid}/permissions", response_model=list[KBPermissionOut])
 @limiter.limit("30/minute")
 def get_kb_permissions(
+    request: Request,
     uuid: str,
     svc: KnowledgeBaseService = Depends(get_kb_service),
     user: User = Depends(get_current_user),
@@ -113,6 +114,7 @@ def get_kb_permissions(
 @router.post("/kb/permissions/batch")
 @limiter.limit("20/minute")
 def get_kb_permissions_batch(
+    request: Request,
     data: KBBatchPermissionsRequest,
     svc: KnowledgeBaseService = Depends(get_kb_service),
     user: User = Depends(get_current_user),
@@ -149,6 +151,7 @@ def get_kb_permissions_batch(
 @router.put("/kb/{uuid}/permissions")
 @limiter.limit("20/minute")
 def set_kb_permissions(
+    request: Request,
     uuid: str,
     data: KBPermissionsUpdate,
     svc: KnowledgeBaseService = Depends(get_kb_service),
@@ -182,7 +185,6 @@ def update_kb(
             data.name,
             data.description,
             personal_data_mode=data.personal_data_mode,
-            personal_data_sensitivity=data.personal_data_sensitivity,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -261,6 +263,7 @@ def _validate_upload_type(file: UploadFile) -> None:
 @router.post("/kb/{uuid}/train")
 @limiter.limit("15/minute")
 async def train_raw_text(
+    request: Request,
     uuid: str,
     data: KBTrainRequest,
     svc: KnowledgeBaseService = Depends(get_kb_service),
@@ -310,6 +313,7 @@ def _raise_pii_review_409(e: PiiConfirmationRequiredError) -> None:
 @router.post("/kb/{uuid}/train/text")
 @limiter.limit("15/minute")
 async def train_text(
+    request: Request,
     uuid: str,
     data: KBTrainRequest,
     svc: KnowledgeBaseService = Depends(get_kb_service),
@@ -341,6 +345,7 @@ async def train_text(
 @router.post("/kb/{uuid}/train/file")
 @limiter.limit("10/minute")
 async def train_file(
+    request: Request,
     uuid: str,
     file: UploadFile = File(...),
     confirm_pii: bool = Form(False),
@@ -382,6 +387,7 @@ async def train_file(
 @router.get("/kb/{uuid}/train/log")
 @limiter.limit("30/minute")
 def get_training_log(
+    request: Request,
     uuid: str,
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0, le=10000),
@@ -584,6 +590,7 @@ def dsar_delete(
 @router.get("/kb/{uuid}/pii/metrics")
 @limiter.limit("20/minute")
 def get_pii_metrics(
+    request: Request,
     uuid: str,
     svc: KnowledgeBaseService = Depends(get_kb_service),
     user: User = Depends(get_current_user),

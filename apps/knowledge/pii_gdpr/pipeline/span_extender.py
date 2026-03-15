@@ -62,6 +62,9 @@ _ADDRESS_BLOCK_WORDS = re.compile(
     r")"
 )
 
+# Teljes nagybetűs szó a címrészek között: helységként kezeljük (pl. BUDAPEST, MADRID).
+_UPPERCASE_LOCALITY_WORD = re.compile(r"\b[A-ZÁÉÍÓÖŐÚÜŰÑ]{2,}\b")
+
 # Összekötő szavak számok között: épület, út, emelet, ajtó, kötőjel, :, / stb.
 # Betű + épület (A épület, B lépcsőház) – extend_adjacent_spans számára
 _CONNECTOR_WORDS = re.compile(
@@ -105,7 +108,8 @@ _WORD_RE = re.compile(r"\S+")
 
 # Rövidített cím kontextus: "Város, Név " (pl. Budapest, Keleti Károly )
 _SHORT_ADDRESS_CONTEXT = re.compile(
-    r"(?i)\b[A-ZÁÉÍÓÖÜŐÚa-záéíóöüőú]+\s*,\s*[A-ZÁÉÍÓÖÜŐÚa-záéíóöüőú\s]{3,}"
+    r"\b[A-ZÁÉÍÓÖÜŐÚ][a-záéíóöüőú]+(?:\s+[A-ZÁÉÍÓÖÜŐÚ][a-záéíóöüőú]+){0,3}\s*,\s*"
+    r"[A-ZÁÉÍÓÖÜŐÚ][a-záéíóöüőú]+(?:\s+[A-ZÁÉÍÓÖÜŐÚ][a-záéíóöüőú]+){0,3}\s*$"
 )
 
 
@@ -274,6 +278,11 @@ def _extend_right_address_block(text: str, end: int, max_chars: int = 120) -> in
             pos += m.end()
             continue
         m = _ADDRESS_BLOCK_WORDS.match(rest[pos:])
+        if m:
+            pos += m.end()
+            continue
+        # Két címadat között álló NAGYBETŰS szó (helység) is része lehet az egy címblokknak.
+        m = _UPPERCASE_LOCALITY_WORD.match(rest[pos:])
         if m:
             pos += m.end()
             continue

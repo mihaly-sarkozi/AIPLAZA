@@ -7,16 +7,7 @@ import {
   useKbList,
   useUpdateKbMutation,
   type PersonalDataMode,
-  type PersonalDataSensitivity,
 } from "../hooks/useKb";
-
-const PERSONAL_DATA_MODES: PersonalDataMode[] = [
-  "no_personal_data",
-  "allowed_not_to_ai",
-  "with_confirmation",
-  "no_pii_filter",
-];
-const PERSONAL_DATA_SENSITIVITIES: PersonalDataSensitivity[] = ["weak", "medium", "strong"];
 
 export default function KBEdit() {
   const { t } = useTranslation();
@@ -28,8 +19,6 @@ export default function KBEdit() {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [personalDataMode, setPersonalDataMode] = useState<PersonalDataMode>("no_personal_data");
-  const [personalDataSensitivity, setPersonalDataSensitivity] =
-    useState<PersonalDataSensitivity>("medium");
   const [error, setError] = useState("");
   const [savedModalOpen, setSavedModalOpen] = useState(false);
 
@@ -47,9 +36,6 @@ export default function KBEdit() {
       setPersonalDataMode(
         (kb.personal_data_mode as PersonalDataMode) ?? "no_personal_data"
       );
-      setPersonalDataSensitivity(
-        (kb.personal_data_sensitivity as PersonalDataSensitivity) ?? "medium"
-      );
     }
   }, [kb, kbListLoading, uuid, navigate]);
 
@@ -63,7 +49,6 @@ export default function KBEdit() {
         name: name.trim(),
         description: description.trim() || undefined,
         personal_data_mode: personalDataMode,
-        personal_data_sensitivity: personalDataSensitivity,
       },
       {
         onSuccess: () => {
@@ -137,27 +122,6 @@ export default function KBEdit() {
             <option value="with_confirmation">{t("kb.personalDataModeConfirm")}</option>
             <option value="no_pii_filter">{t("kb.personalDataModeDisabled")}</option>
           </select>
-        </div>
-
-        <div>
-          <label className="block mb-1 text-[var(--color-label)]">
-            {t("kb.personalDataSensitivityLabel")}{t("common.required")}
-          </label>
-          <select
-            required
-            value={personalDataSensitivity}
-            onChange={(e) =>
-              setPersonalDataSensitivity(e.target.value as PersonalDataSensitivity)
-            }
-            className="w-full p-3 rounded bg-[var(--color-input-bg)] border border-[var(--color-border)] text-[var(--color-foreground)]"
-          >
-            <option value="weak">{t("kb.personalDataSensitivityWeak")}</option>
-            <option value="medium">{t("kb.personalDataSensitivityMedium")}</option>
-            <option value="strong">{t("kb.personalDataSensitivityStrong")}</option>
-          </select>
-          <p className="mt-1 text-xs text-[var(--color-muted)]">
-            {t("kb.personalDataSensitivityHelp")}
-          </p>
         </div>
 
         <div className="flex gap-2">

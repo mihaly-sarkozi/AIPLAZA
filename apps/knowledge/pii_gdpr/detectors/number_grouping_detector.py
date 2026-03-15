@@ -46,6 +46,7 @@ _IDENTIFIER_HINTS = re.compile(
     r"(?:motorsz[áa]m|alv[áa]zsz[áa]m|rendsz[áa]m|azonos[íi]t[oó]|sz[áa]m(?:a|á)?|"
     r"c[íi]m|koordin[áa]ta|identifier|device\s+id|user\s+id|cookie\s+id|"
     r"tag|address|ticket|coordinate|gps|lives\s+at|direcci[oó]n|dispositivo|"
+    r"nie|dni|nif|n[uú]mero\s+de\s+identidad(?:\s+de\s+extranjero)?|"
     r"asset\s+tag|hostname|número\s+de\s+cliente|número\s+de\s+contrato|"
     r"épület|epulet|út|ut|emelet|köz|kerület|ajtó|város|tér|utca|"
     r"street|avenue|road|building|floor|calle|plaza|edificio|piso|planta|puerta|unit|"
@@ -55,6 +56,40 @@ _IDENTIFIER_HINTS = re.compile(
     r"orvosi|vizsgálat|január|február|március|április|május|június|július|"
     r"augusztus|szeptember|október|november|december|january|february|march)"
 )
+
+_MONTH_WORDS = re.compile(
+    r"(?i)\b(?:"
+    r"január|február|március|április|május|június|július|augusztus|"
+    r"szeptember|október|november|december|"
+    r"january|february|march|april|may|june|july|august|"
+    r"september|october|november|december|"
+    r"enero|febrero|marzo|abril|mayo|junio|julio|agosto|"
+    r"septiembre|octubre|noviembre|diciembre"
+    r")\b"
+)
+
+_DOB_HINTS = re.compile(
+    r"(?i)(?:\bszül\.?:?|\bszületett\b|\bdob\b|date\s+of\s+birth|fecha\s+de\s+nacimiento|\bborn\b)"
+)
+
+# Erős személyazonosító kontextus: ha ilyen kulcsszó van, a közeli számot ne telefonnak vegyük.
+_STRONG_PERSONAL_ID_CONTEXT = re.compile(
+    r"(?i)\b(?:nie|dni|nif|személyi\s+igazolvány|személyi\s+azonosító|"
+    r"n[uú]mero\s+de\s+identidad(?:\s+de\s+extranjero)?)\b"
+)
+
+# YYYY-MM-DD / YYYY.MM.DD / YYYY MM DD ahol YYYY 1900..2900
+_YMD_STRICT = re.compile(
+    r"\b(19\d{2}|2[0-8]\d{2}|2900)[.\-/\s](0?[1-9]|1[0-2])[.\-/\s](0?[1-9]|[12]\d|3[01])\b"
+)
+
+# DD-MM-YYYY / DD.MM.YYYY / DD MM YYYY ahol YYYY 1900..2900
+_DMY_STRICT = re.compile(
+    r"\b(0?[1-9]|[12]\d|3[01])[.\-/\s](0?[1-9]|1[0-2])[.\-/\s](19\d{2}|2[0-8]\d{2}|2900)\b"
+)
+
+# NIE: X/Y/Z + 7 szám + ellenőrző betű (pl. Y7264459S)
+_NIE_TOKEN = re.compile(r"(?i)^[XYZ]\d{7}[A-Z]$")
 
 
 @dataclass
@@ -186,6 +221,18 @@ def _infer_entity_type_with_priority(
     chunk = matched + " " + (ctx_after[:80] if len(ctx_after) > 80 else ctx_after)
     if _IDENTIFIER_HINTS.search(chunk):
         return _infer_entity_type_from_context(ctx_before[-40:] + " " + chunk)
+    # 2/b Utána lévő első 2-3 szó (explicit prioritás)
+    after_words = re.findall(r"\S+", ctx_after)
+    if after_words:
+        chunk = matched + " " + " ".join(after_words[:3])
+        if _IDENTIFIER_HINTS.search(chunk):
+            return _infer_entity_type_from_context(ctx_before[-40:] + " " + chunk)
+    # 3. Közvetlenül előtte lévő 2-3 szó (explicit prioritás)
+    before_words = re.findall(r"\S+", ctx_before)
+    if before_words:
+        chunk = " ".join(before_words[-3:]) + " " + matched
+        if _IDENTIFIER_HINTS.search(chunk):
+            return _infer_entity_type_from_context(chunk + " " + ctx_after[:40])
     # 3. Teljes mondatrész előtte (mondat elejéig)
     chunk = ctx_before + " " + matched
     if _IDENTIFIER_HINTS.search(chunk):
@@ -221,6 +268,11 @@ def _is_date_shaped(matched: str) -> bool:
     return bool(_DATE_SHAPE_PATTERN.match(clean))
 
 
+def _has_year_month_day_triplet(text: str) -> bool:
+    """1900..2900 év + 1..12 hónap + 1..31 nap minták."""
+    return bool(_YMD_STRICT.search(text) or _DMY_STRICT.search(text))
+
+
 class NumberGroupingDetector(BaseDetector):
     """
     Első fázis: számot tartalmazó szavak csoportosítása.
@@ -234,7 +286,6 @@ class NumberGroupingDetector(BaseDetector):
         results: List[DetectionResult] = []
         tokens = _tokenize(text)
         groups = _group_number_tokens(tokens)
-        sentence_bounds = _get_sentence_boundaries(text)
 
         for group in groups:
             if not group:
@@ -242,6 +293,26 @@ class NumberGroupingDetector(BaseDetector):
             start = group[0].start
             end = group[-1].end
             matched = text[start:end]
+            # Leválasztjuk a környező írásjeleket az ellenőrzéshez,
+            # de a span marad a teljes tokenre mutatva.
+            matched_core = matched.strip(".,;:()[]{}<>\"'")
+
+            # NIE mintát mindig egy egységként kezeljük (vezető betű + számok + záró betű).
+            if _NIE_TOKEN.match(matched_core):
+                results.append(
+                    DetectionResult(
+                        entity_type=EntityType.PERSONAL_ID,
+                        matched_text=matched_core,
+                        start=start + (len(matched) - len(matched.lstrip(".,;:()[]{}<>\"'"))),
+                        end=end - (len(matched) - len(matched.rstrip(".,;:()[]{}<>\"'"))),
+                        language=language,
+                        source_detector=self.name,
+                        confidence_score=0.93,
+                        risk_level=RiskClass.DIRECT_PII,
+                        recommended_action=RecommendedAction.MASK,
+                    )
+                )
+                continue
 
             # 4 jegyű évszám kizárása (19xx, 20xx) ha nincs dátum kontextus
             if len(matched) <= 6 and matched.replace(" ", "").replace(".", "").isdigit():
@@ -249,26 +320,46 @@ class NumberGroupingDetector(BaseDetector):
                 if len(parts) == 1 and _is_likely_year(parts[0]):
                     continue
 
-            # Mondatrész: melyik mondatba esik
-            sentence_start, sentence_end = start, end
-            for s_start, s_end in sentence_bounds:
-                if s_start <= start < s_end:
-                    sentence_start, sentence_end = s_start, s_end
-                    break
+            # Kontextus: lokális ablak, hogy rövidítéses előtagok (pl. "szül.:") se vesszenek el
+            ctx_before = text[max(0, start - 140) : start]
+            ctx_after = text[end : min(len(text), end + 140)]
 
-            # Kontextus: mondatrész szavai – prioritás: előtte → utána → mondat eleje → mondat vége
-            ctx_before = text[max(0, sentence_start) : start]
-            ctx_after = text[end : min(len(text), sentence_end)]
-
-            entity_type = _infer_entity_type_with_priority(ctx_before, ctx_after, matched)
-            if entity_type is None:
-                continue  # Nem sikerült azonosítani → hagyja
-            # Dátum kontextus + dátum alakú szám → NE legyen POSTAL_ADDRESS
             context_words = ctx_before + " " + matched + " " + ctx_after
+            near_context = ctx_before[-30:] + " " + matched + " " + ctx_after[:30]
+            has_month_near = bool(_MONTH_WORDS.search(near_context))
+            looks_date_like = (
+                _is_date_shaped(matched)
+                or _has_year_month_day_triplet(near_context)
+                or (
+                    has_month_near
+                    and bool(
+                        re.search(
+                            r"\b(?:19\d{2}|2[0-8]\d{2}|2900|\d{1,2})\b",
+                            matched,
+                        )
+                    )
+                )
+            )
+            if looks_date_like:
+                entity_type = EntityType.DATE_OF_BIRTH if _DOB_HINTS.search(context_words) else EntityType.DATE
+                confidence = 0.90
+            else:
+                entity_type = _infer_entity_type_with_priority(ctx_before, ctx_after, matched)
+                if entity_type is None:
+                    continue  # Nem sikerült azonosítani → hagyja
+                confidence = 0.78
+
+            # Dátum kontextus + dátum alakú szám → NE legyen POSTAL_ADDRESS
             if _DATE_NEGATIVE_CONTEXT.search(context_words) and _is_date_shaped(matched):
                 if entity_type == EntityType.POSTAL_ADDRESS:
                     entity_type = EntityType.DATE_OF_BIRTH
-            confidence = 0.78
+            if entity_type == EntityType.PERSONAL_ID and _STRONG_PERSONAL_ID_CONTEXT.search(context_words):
+                confidence = max(confidence, 0.93)
+                risk_level = RiskClass.DIRECT_PII
+                action = RecommendedAction.MASK
+            else:
+                risk_level = RiskClass.INDIRECT_IDENTIFIER
+                action = RecommendedAction.REVIEW_REQUIRED
 
             results.append(
                 DetectionResult(
@@ -279,8 +370,8 @@ class NumberGroupingDetector(BaseDetector):
                     language=language,
                     source_detector=self.name,
                     confidence_score=confidence,
-                    risk_level=RiskClass.INDIRECT_IDENTIFIER,
-                    recommended_action=RecommendedAction.REVIEW_REQUIRED,
+                    risk_level=risk_level,
+                    recommended_action=action,
                 )
             )
         return results

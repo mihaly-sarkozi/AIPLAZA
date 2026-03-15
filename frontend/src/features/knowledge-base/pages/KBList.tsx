@@ -174,7 +174,6 @@ export default function KBList() {
         name: nameTrim,
         description: formData.description?.trim() || undefined,
         personal_data_mode: editingPersonalDataMode,
-        personal_data_sensitivity: "medium",
       },
       {
         onSuccess: () => {

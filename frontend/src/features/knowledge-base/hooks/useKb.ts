@@ -14,19 +14,20 @@ import {
   getKbPermissions,
   setKbPermissions,
   getKbTrainingLog,
+  getKbPointPersonalData,
   deleteKbTrainingPoint,
   type KbItem,
   type KbPermissionItem,
   type KbTrainingLogEntry,
+  type KbPointPersonalDataItem,
   type CreateKbPayload,
   type UpdateKbPayload,
   type DeleteKbPayload,
   type PersonalDataMode,
-  type PersonalDataSensitivity,
 } from "../services";
 import { queryKeys } from "../../../queryKeys";
 
-export type { KbItem, KbPermissionItem, KbTrainingLogEntry, CreateKbPayload, UpdateKbPayload, DeleteKbPayload, PersonalDataMode, PersonalDataSensitivity };
+export type { KbItem, KbPermissionItem, KbTrainingLogEntry, KbPointPersonalDataItem, CreateKbPayload, UpdateKbPayload, DeleteKbPayload, PersonalDataMode };
 
 export function useKbPermissions(
   kbUuid: string | undefined,
@@ -107,6 +108,19 @@ export function useKbTrainingLog(
     queryKey: [...queryKeys.kb, kbUuid ?? "", "train", "log"],
     queryFn: () => getKbTrainingLog(kbUuid!),
     enabled: !!kbUuid,
+    ...options,
+  });
+}
+
+export function useKbPointPersonalData(
+  kbUuid: string | undefined,
+  pointId: string | undefined,
+  options?: Omit<UseQueryOptions<KbPointPersonalDataItem[]>, "queryKey" | "queryFn">
+) {
+  return useQuery({
+    queryKey: [...queryKeys.kb, kbUuid ?? "", "train", "point", pointId ?? "", "pii"],
+    queryFn: () => getKbPointPersonalData(kbUuid!, pointId!),
+    enabled: !!kbUuid && !!pointId,
     ...options,
   });
 }

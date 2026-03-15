@@ -31,6 +31,7 @@ from apps.knowledge.domain.pii_review import (
     build_pii_review_matches,
     PiiReviewDecision,
 )
+from apps.knowledge.pii_gdpr.pipeline.language_utils import detect_language
 
 
 def _metadata_for_response(meta: FileMetadata) -> dict[str, Any]:
@@ -136,7 +137,6 @@ class KnowledgeBaseService:
         name: str,
         description: str,
         personal_data_mode: Optional[str] = None,
-        personal_data_sensitivity: Optional[str] = None,
     ) -> KnowledgeBase:
         """Knowledge base frissítése (név, leírás, személyes adatok beállításai)."""
         kb = self.repo.get_by_uuid(uuid)
@@ -147,8 +147,6 @@ class KnowledgeBaseService:
         kb.description = description
         if personal_data_mode is not None:
             kb.personal_data_mode = personal_data_mode
-        if personal_data_sensitivity is not None:
-            kb.personal_data_sensitivity = personal_data_sensitivity
         return self.repo.update(kb)
 
     def delete(self, uuid: str, confirm_name: str | None = None) -> None:
@@ -323,13 +321,15 @@ class KnowledgeBaseService:
         masked = False
         if matches:
             if mode == PERSONAL_DATA_MODE_NO:
-                # Automatikus törlés: tároljuk personal_data-ban, placeholder ref_id-val
-                ref_ids = [
+                # Automatikus törlés: tároljuk personal_data-ban, de a szövegben
+                # természetes általánosítás legyen (pl. valaki, valami cím).
+                _ = [
                     self.repo.add_personal_data(kb.id, point_id, m[2], m[3])
                     for m in matches
                 ]
+                lang = detect_language(raw)
                 content_to_store = apply_pii_replacements(
-                    raw, matches, ref_ids, mode="mask"
+                    raw, matches, [], mode="auto_delete", language=lang
                 )
             elif decisions_list:
                 # with_confirmation + soronkénti döntések: mask és delete is tároljuk

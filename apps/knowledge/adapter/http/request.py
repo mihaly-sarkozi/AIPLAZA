@@ -11,7 +11,6 @@ class KBUpdate(BaseModel):
     name: str = Field(..., max_length=20)
     description: Optional[str] = None
     personal_data_mode: str = Field(..., description="no_personal_data | with_confirmation | allowed_not_to_ai | no_pii_filter")
-    personal_data_sensitivity: str = Field(..., description="weak | medium | strong")
 
 class KBDelete(BaseModel):
     confirm_name: str

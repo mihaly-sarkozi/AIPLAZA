@@ -1,14 +1,19 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect, useMemo, type ReactNode } from "react";
 import { useParams } from "react-router-dom";
 import { useTranslation } from "../../../i18n";
 import { ProcessProgressOverlay } from "../../../components/ProcessProgressOverlay";
+import { useAuthStore } from "../../../store/authStore";
 import {
   useKbList,
   useKbTrainingLog,
+  useKbPointPersonalData,
   useKbTrainTextMutation,
   useKbTrainFileMutation,
   useDeleteKbTrainingPointMutation,
+  useUpdateKbMutation,
+  type PersonalDataMode,
   type KbTrainingLogEntry,
+  type KbPointPersonalDataItem,
   type PiiDecisionItem,
 } from "../hooks/useKb";
 
@@ -21,6 +26,12 @@ type PiiMatchItem = {
 };
 
 const ACCEPT_TRAIN = ".txt,.pdf,.docx";
+const PERSONAL_DATA_MODES: PersonalDataMode[] = [
+  "no_personal_data",
+  "allowed_not_to_ai",
+  "with_confirmation",
+  "no_pii_filter",
+];
 
 function formatDateTime(iso: string | null): string {
   if (!iso) return "—";
@@ -64,6 +75,41 @@ function getApiErrorMessage(error: unknown, fallback: string): string {
   return fallback;
 }
 
+function renderMaskedContentWithHints(
+  content: string,
+  piiByRef: Map<string, string>
+): ReactNode[] {
+  const out: ReactNode[] = [];
+  const re = /\[([A-Z_]+)_([A-Za-z0-9-]+)\]/g;
+  let last = 0;
+  let match: RegExpExecArray | null = null;
+  let idx = 0;
+  while ((match = re.exec(content)) !== null) {
+    const start = match.index;
+    const end = re.lastIndex;
+    if (start > last) out.push(content.slice(last, start));
+    const full = match[0];
+    const refId = match[2];
+    const original = piiByRef.get(refId);
+    if (original) {
+      out.push(
+        <span
+          key={`pii-${idx++}`}
+          title={original}
+          className="underline decoration-dotted cursor-help"
+        >
+          {full}
+        </span>
+      );
+    } else {
+      out.push(full);
+    }
+    last = end;
+  }
+  if (last < content.length) out.push(content.slice(last));
+  return out.length ? out : [content];
+}
+
 export default function KBTrain() {
   const { t } = useTranslation();
   const { uuid } = useParams();
@@ -72,6 +118,11 @@ export default function KBTrain() {
   const [uploadDragOver, setUploadDragOver] = useState(false);
   const [contentDragOver, setContentDragOver] = useState(false);
   const [logModalOpen, setLogModalOpen] = useState(false);
+  const [settingsModalOpen, setSettingsModalOpen] = useState(false);
+  const [settingsName, setSettingsName] = useState("");
+  const [settingsDescription, setSettingsDescription] = useState("");
+  const [settingsPersonalDataMode, setSettingsPersonalDataMode] =
+    useState<PersonalDataMode>("no_personal_data");
   const [viewEntry, setViewEntry] = useState<KbTrainingLogEntry | null>(null);
   const [deleteConfirmEntry, setDeleteConfirmEntry] = useState<KbTrainingLogEntry | null>(null);
   const [piiResultModal, setPiiResultModal] = useState<"masked" | "deleted" | null>(null);
@@ -89,12 +140,38 @@ export default function KBTrain() {
   const [processingTotalSentences, setProcessingTotalSentences] = useState<number | null>(null);
 
   const { data: kbList = [] } = useKbList();
+  const canManage = useAuthStore((s) => s.user?.role === "admin" || s.user?.role === "owner");
+  const isOwner = useAuthStore((s) => s.user?.role === "owner");
   const currentKb = uuid ? kbList.find((k) => k.uuid === uuid) : null;
   const kbName = currentKb?.name ?? "";
   const { data: logEntries = [], isLoading: logLoading } = useKbTrainingLog(uuid);
   const trainTextMutation = useKbTrainTextMutation();
   const trainFileMutation = useKbTrainFileMutation();
   const deletePointMutation = useDeleteKbTrainingPointMutation();
+  const updateKbMutation = useUpdateKbMutation();
+  const { data: pointPii = [], isLoading: pointPiiLoading } = useKbPointPersonalData(
+    uuid,
+    viewEntry?.point_id,
+    { enabled: !!uuid && !!viewEntry?.point_id && isOwner }
+  );
+  const piiByRef = useMemo(() => {
+    const m = new Map<string, string>();
+    (pointPii as KbPointPersonalDataItem[]).forEach((x) => {
+      if (x?.reference_id != null && x?.value != null) {
+        m.set(String(x.reference_id), String(x.value));
+      }
+    });
+    return m;
+  }, [pointPii]);
+
+  useEffect(() => {
+    if (!settingsModalOpen || !currentKb) return;
+    setSettingsName(currentKb.name ?? "");
+    setSettingsDescription((currentKb.description as string) ?? "");
+    setSettingsPersonalDataMode(
+      (currentKb.personal_data_mode as PersonalDataMode) ?? "no_personal_data"
+    );
+  }, [settingsModalOpen, currentKb]);
 
   const trainWithFile = useCallback(
     async (file: File, confirmPii = false, piiDecisionsList?: PiiDecisionItem[]) => {
@@ -268,6 +345,30 @@ export default function KBTrain() {
   const isProcessing =
     trainTextMutation.isPending || trainFileMutation.isPending;
 
+  const saveKbSettings = () => {
+    if (!uuid || !currentKb) return;
+    if (!settingsName.trim()) {
+      setErrorMessage(t("common.fieldRequired"));
+      return;
+    }
+    updateKbMutation.mutate(
+      {
+        uuid,
+        name: settingsName.trim(),
+        description: settingsDescription.trim() || undefined,
+        personal_data_mode: settingsPersonalDataMode,
+      },
+      {
+        onSuccess: () => {
+          setSettingsModalOpen(false);
+        },
+        onError: (err: unknown) => {
+          setErrorMessage(getApiErrorMessage(err, t("kb.errorUpdate")));
+        },
+      }
+    );
+  };
+
   return (
     <div className="p-6 min-h-full bg-[var(--color-background)]">
       <ProcessProgressOverlay
@@ -287,6 +388,15 @@ export default function KBTrain() {
         >
           {t("kb.trainLogTitle")}
         </button>
+        {canManage && (
+          <button
+            type="button"
+            onClick={() => setSettingsModalOpen(true)}
+            className="bg-[var(--color-card)] border border-[var(--color-border)] text-[var(--color-foreground)] px-4 py-2 rounded text-sm hover:bg-[var(--color-button-hover)]"
+          >
+            {t("nav.settings")}
+          </button>
+        )}
       </div>
 
       <section>
@@ -414,6 +524,102 @@ export default function KBTrain() {
                   </table>
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Tudástár beállítások modal */}
+      {settingsModalOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50"
+          onClick={() => setSettingsModalOpen(false)}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="kb-settings-modal-title"
+        >
+          <div
+            className="bg-[var(--color-card)] border border-[var(--color-border)] rounded-lg shadow-xl max-w-xl w-full max-h-[90vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="p-4 border-b border-[var(--color-border)] flex justify-between items-center">
+              <h2 id="kb-settings-modal-title" className="text-lg font-bold text-[var(--color-foreground)]">
+                {t("nav.settings")}
+              </h2>
+              <button
+                type="button"
+                onClick={() => setSettingsModalOpen(false)}
+                className="p-1 rounded hover:bg-[var(--color-button-hover)] text-[var(--color-foreground)]"
+                aria-label={t("common.close")}
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <div className="p-4 space-y-4">
+              <div>
+                <label className="block mb-1 text-[var(--color-label)]">
+                  {t("kb.labelName")}{t("common.required")}
+                </label>
+                <input
+                  type="text"
+                  maxLength={200}
+                  required
+                  value={settingsName}
+                  onChange={(e) => setSettingsName(e.target.value)}
+                  className="w-full p-3 rounded bg-[var(--color-input-bg)] border border-[var(--color-border)] text-[var(--color-foreground)]"
+                />
+              </div>
+              <div>
+                <label className="block mb-1 text-[var(--color-label)]">{t("kb.labelDescription")}</label>
+                <textarea
+                  value={settingsDescription}
+                  onChange={(e) => setSettingsDescription(e.target.value)}
+                  className="w-full p-3 rounded bg-[var(--color-input-bg)] border border-[var(--color-border)] text-[var(--color-foreground)] h-28 resize-y"
+                />
+              </div>
+              <div>
+                <label className="block mb-1 text-[var(--color-label)]">
+                  {t("kb.personalDataModeLabel")}{t("common.required")}
+                </label>
+                <select
+                  required
+                  value={settingsPersonalDataMode}
+                  onChange={(e) => setSettingsPersonalDataMode(e.target.value as PersonalDataMode)}
+                  className="w-full p-3 rounded bg-[var(--color-input-bg)] border border-[var(--color-border)] text-[var(--color-foreground)]"
+                >
+                  {PERSONAL_DATA_MODES.includes("no_personal_data") && (
+                    <option value="no_personal_data">{t("kb.personalDataModeNo")}</option>
+                  )}
+                  {PERSONAL_DATA_MODES.includes("allowed_not_to_ai") && (
+                    <option value="allowed_not_to_ai">{t("kb.personalDataModeAllowed")}</option>
+                  )}
+                  {PERSONAL_DATA_MODES.includes("with_confirmation") && (
+                    <option value="with_confirmation">{t("kb.personalDataModeConfirm")}</option>
+                  )}
+                  {PERSONAL_DATA_MODES.includes("no_pii_filter") && (
+                    <option value="no_pii_filter">{t("kb.personalDataModeDisabled")}</option>
+                  )}
+                </select>
+              </div>
+            </div>
+            <div className="p-4 border-t border-[var(--color-border)] flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setSettingsModalOpen(false)}
+                className="px-4 py-2 rounded text-[var(--color-foreground)] hover:bg-[var(--color-button-hover)] bg-[var(--color-card)] border border-[var(--color-border)]"
+              >
+                {t("common.cancel")}
+              </button>
+              <button
+                type="button"
+                onClick={saveKbSettings}
+                disabled={updateKbMutation.isPending}
+                className="bg-[var(--color-primary)] text-[var(--color-on-primary)] px-4 py-2 rounded hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {updateKbMutation.isPending ? t("common.loading") : t("common.save")}
+              </button>
             </div>
           </div>
         </div>
@@ -774,8 +980,11 @@ export default function KBTrain() {
               </button>
             </div>
             <div className="p-4 overflow-y-auto flex-1">
+              {isOwner && pointPiiLoading && (
+                <p className="text-xs text-[var(--color-muted)] mb-2">{t("common.loading")}</p>
+              )}
               <pre className="whitespace-pre-wrap text-sm text-[var(--color-foreground)] font-sans">
-                {viewEntry.content || "—"}
+                {viewEntry.content ? renderMaskedContentWithHints(viewEntry.content, piiByRef) : "—"}
               </pre>
             </div>
           </div>
