@@ -71,7 +71,7 @@ class BaseConfig(BaseSettings):
     # Teljes user csak write/admin/settings/permission végpontokra. Tudatosan szűk: docs/Auth_light_paths.md
     # Vesszővel elválasztott; üres = minden route full auth. Alap: csak /api/chat.
     auth_light_paths: str = "/api/chat"
-    kb_upload_max_mb: int = 10
+    kb_upload_max_mb: int = 40
     kb_store_raw_content: bool = False
     pii_encryption_key: str = ""  # Fernet kulcs (urlsafe base64, 32 bytes)
     pii_retention_days: int = 90

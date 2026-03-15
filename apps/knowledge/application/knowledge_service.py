@@ -178,6 +178,11 @@ def _sanitize_debug_value(value: Any) -> Any:
     return value
 
 
+def _is_missing_vector_outbox_table_error(exc: Exception) -> bool:
+    text = str(exc or "").lower()
+    return "kb_vector_outbox" in text and ("does not exist" in text or "undefinedtable" in text)
+
+
 def _assertion_context_rank(row: dict[str, Any]) -> tuple:
     return (
         -_safe_float(row.get("entity_match")),
@@ -289,6 +294,7 @@ class KnowledgeBaseService:
         self.user_repo = user_repo
         self.indexing_pipeline = indexing_pipeline
         self.context_builder = KnowledgeContextBuilder()
+        self._vector_outbox_table_missing_logged = False
 
     def _enqueue_vector_outbox(
         self,
@@ -768,7 +774,23 @@ class KnowledgeBaseService:
 
     async def process_vector_outbox(self, limit: int = 50) -> dict:
         """Vector outbox elemek feldolgozása (retry worker/manual run)."""
-        jobs = self.repo.list_due_vector_outbox(limit=limit)
+        try:
+            jobs = self.repo.list_due_vector_outbox(limit=limit)
+        except Exception as exc:
+            if not _is_missing_vector_outbox_table_error(exc):
+                raise
+            if not self._vector_outbox_table_missing_logged:
+                logger.warning(
+                    "Vector outbox kihagyva: hiányzik a kb_vector_outbox tábla az aktuális sémában."
+                )
+                self._vector_outbox_table_missing_logged = True
+            return {
+                "processed": 0,
+                "done": 0,
+                "failed": 0,
+                "failed_items": [],
+                "skipped": "missing_kb_vector_outbox_table",
+            }
         done = 0
         failed = 0
         failed_items: list[dict[str, Any]] = []

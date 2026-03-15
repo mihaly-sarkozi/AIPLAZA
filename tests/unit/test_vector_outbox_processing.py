@@ -50,3 +50,21 @@ def test_process_vector_outbox_marks_retry_on_failure():
     assert len(out["failed_items"]) == 1
     assert out["failed_items"][0]["outbox_id"] == 2
     repo.mark_vector_outbox_retry.assert_called_once()
+
+
+def test_process_vector_outbox_skips_when_table_missing():
+    repo = MagicMock()
+    repo.list_due_vector_outbox.side_effect = RuntimeError(
+        'relation "kb_vector_outbox" does not exist'
+    )
+    qdrant = MagicMock()
+    svc = KnowledgeBaseService(repo=repo, qdrant_service=qdrant, user_repo=None, indexing_pipeline=None)
+
+    out = asyncio.run(svc.process_vector_outbox(limit=20))
+
+    assert out["processed"] == 0
+    assert out["done"] == 0
+    assert out["failed"] == 0
+    assert out["skipped"] == "missing_kb_vector_outbox_table"
+    repo.mark_vector_outbox_done.assert_not_called()
+    repo.mark_vector_outbox_retry.assert_not_called()

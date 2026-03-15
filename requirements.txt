@@ -6,9 +6,8 @@ pydantic>=2
 pydantic-settings~=2.11.0
 passlib~=1.7.4
 bcrypt==3.2.2
-pyjwt~=2.10.1
+PyJWT~=2.10.1
 requests~=2.32.4
-jwt~=1.4.0
 openai~=1.86.0
 dotenv~=0.9.9
 python-dotenv~=1.1.0
