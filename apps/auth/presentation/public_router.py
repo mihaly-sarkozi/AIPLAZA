@@ -41,7 +41,7 @@ def _tenant_set_password_base_url(request: Request, slug: str) -> str:
 
 @router.get("/public/check-slug")
 @limiter.limit("30/minute")
-def check_slug(slug: str = ""):
+def check_slug(request: Request, slug: str = ""):
     """
     Tudástár slug foglaltság ellenőrzés. Nyilvános.
     Válasz: { "available": true|false, "slug": "..." }. Ha invalid a slug, available: false.
