@@ -7,6 +7,7 @@ Use the app fixture (from tests.app_factory) for tests that need the API; avoid
 importing main.app directly in tests.
 """
 import os
+from contextlib import ExitStack
 
 os.environ.setdefault("RATE_LIMIT_LOGIN_PER_MINUTE", "100")
 os.environ.setdefault("DISABLE_CSRF", "1")
@@ -59,12 +60,26 @@ def client(app, mock_login_service, mock_user_repo):
     from apps.core.di import get_login_service, get_user_repository
     from apps.core.container.app_container import container
     from apps.auth.domain.tenant import Tenant
+    from apps.auth.domain.tenant_status import TenantStatus
+    from apps.auth.domain.tenant_config import TenantConfig
 
     demo_tenant = Tenant(id=1, slug="demo", name="Demo", created_at=datetime.now(timezone.utc))
+    demo_tenant_status = TenantStatus(tenant_id=1, slug="demo", is_active=True)
+    demo_tenant_config = TenantConfig(
+        tenant_id=1,
+        slug="demo",
+        package="test",
+        feature_flags={},
+        limits={},
+    )
     app.dependency_overrides[get_login_service] = lambda: mock_login_service
     app.dependency_overrides[get_user_repository] = lambda: mock_user_repo
     base_url = f"http://demo.{settings.tenant_base_domain}"
-    with patch.object(container.tenant_repo, "get_by_slug", return_value=demo_tenant):
+    with ExitStack() as stack:
+        stack.enter_context(patch.object(container.tenant_repo, "get_by_slug", return_value=demo_tenant))
+        stack.enter_context(patch.object(container.tenant_repo, "get_by_domain", return_value=demo_tenant))
+        stack.enter_context(patch.object(container.tenant_repo, "get_tenant_status", return_value=demo_tenant_status))
+        stack.enter_context(patch.object(container.tenant_repo, "get_tenant_config", return_value=demo_tenant_config))
         with TestClient(app, base_url=base_url) as c:
             yield c
     app.dependency_overrides.pop(get_login_service, None)

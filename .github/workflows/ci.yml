@@ -50,10 +50,28 @@ jobs:
 
   integration:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: aiplaza
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d aiplaza"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
     env:
       QDRANT_URL: "http://localhost:6333"
       QDRANT_API_KEY: ""
       OPENAI_API_KEY: "test-openai-api-key"
+      DATABASE_URL: "postgresql+psycopg2://postgres:postgres@localhost:5432/aiplaza"
+      database_url: "postgresql+psycopg2://postgres:postgres@localhost:5432/aiplaza"
+      ADMIN_EMAIL: "admin@example.com"
+      ADMIN_PASSWORD: "admin123"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -67,6 +85,10 @@ jobs:
         run: python -m pip install --upgrade pip setuptools wheel
       - name: Install package (editable)
         run: python -m pip install -e .
+      - name: Initialize test database
+        run: python scripts/init_db.py
+      - name: Seed demo owner
+        run: python scripts/seed_user.py
       - name: Integration tests
         run: pytest tests/integration -v --tb=short
         env:
