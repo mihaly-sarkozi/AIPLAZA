@@ -10,6 +10,9 @@ import os
 
 os.environ.setdefault("RATE_LIMIT_LOGIN_PER_MINUTE", "100")
 os.environ.setdefault("DISABLE_CSRF", "1")
+os.environ.setdefault("QDRANT_URL", "http://localhost:6333")
+os.environ.setdefault("QDRANT_API_KEY", "test-qdrant-api-key")
+os.environ.setdefault("OPENAI_API_KEY", "test-openai-api-key")
 
 from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
