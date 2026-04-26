@@ -1,0 +1,49 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>
+endobj
+4 0 obj
+<< /Length 619 >>
+stream
+BT
+/F1 16 Tf
+72 730 Td
+(BrainBankCenter Privacy Policy) Tj
+0 -28 Td
+/F1 11 Tf
+(We process your name and email address to create and operate your demo workspace.) Tj
+0 -18 Td
+(Your data is used only for demo onboarding, login delivery and workspace access.) Tj
+0 -18 Td
+(The demo link contains a signed token and expires exactly after seven days.) Tj
+0 -18 Td
+(We do not require a bank card to start the demo.) Tj
+0 -18 Td
+(The final flow for continuation or deletion of demo data will be defined later.) Tj
+0 -18 Td
+(For questions please contact the operator of the BrainBankCenter service.) Tj
+ET
+endstream
+endobj
+5 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+xref
+0 6
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000115 00000 n 
+0000000241 00000 n 
+0000000911 00000 n 
+trailer
+<< /Size 6 /Root 1 0 R >>
+startxref
+981
+%%EOF

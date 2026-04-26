@@ -1,0 +1,52 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Literal
+
+DateFormat = Literal["YYYY-MM-DD", "DD.MM.YYYY", "DD/MM/YYYY", "MM/DD/YYYY"]
+TimeFormat = Literal["HH:mm", "HH:mm:ss", "hh:mm A"]
+Timezone = Literal[
+    "UTC",
+    "Europe/London",
+    "Europe/Paris",
+    "Europe/Berlin",
+    "Europe/Madrid",
+    "Europe/Rome",
+    "Europe/Amsterdam",
+    "Europe/Zurich",
+    "Europe/Vienna",
+    "Europe/Prague",
+    "Europe/Warsaw",
+    "Europe/Budapest",
+    "Europe/Athens",
+    "Europe/Bucharest",
+    "Europe/Istanbul",
+    "Asia/Dubai",
+    "Asia/Kolkata",
+    "Asia/Singapore",
+    "Asia/Hong_Kong",
+    "Asia/Shanghai",
+    "Asia/Seoul",
+    "Asia/Tokyo",
+    "Australia/Sydney",
+    "America/Toronto",
+    "America/New_York",
+    "America/Chicago",
+    "America/Denver",
+    "America/Los_Angeles",
+    "America/Mexico_City",
+    "America/Sao_Paulo",
+    "Africa/Cairo",
+    "Africa/Johannesburg",
+]
+
+
+@dataclass(frozen=True)
+class SettingsState:
+    two_factor_enabled: bool = False
+    timezone: Timezone = "UTC"
+    date_format: DateFormat = "YYYY-MM-DD"
+    time_format: TimeFormat = "HH:mm"
+
+
+__all__ = ["DateFormat", "SettingsState", "TimeFormat", "Timezone"]

@@ -1,0 +1,43 @@
+# Ez a fájl az adott modul HTTP útvonalait és kérés-válasz illesztését tartalmazza.
+from typing import List, Optional
+
+from pydantic import BaseModel, Field
+
+
+class KBCreate(BaseModel):
+    name: str = Field(..., max_length=20)
+    description: Optional[str] = None
+    permissions: Optional[List[dict]] = None  # [ {"user_id": int, "permission": "use"|"train"|"none"} ]
+
+class KBUpdate(BaseModel):
+    name: str = Field(..., max_length=20)
+    description: Optional[str] = None
+    personal_data_mode: Optional[str] = Field(
+        default=None,
+        description="no_personal_data | with_confirmation | allowed_not_to_ai | no_pii_filter",
+    )
+
+class KBDelete(BaseModel):
+    confirm_name: str
+
+
+class KBClear(BaseModel):
+    confirm_name: str
+
+
+class KBPermissionItem(BaseModel):
+    user_id: int
+    permission: str
+
+
+class KBPermissionsUpdate(BaseModel):
+    permissions: List[KBPermissionItem]
+
+
+class KBBatchPermissionsRequest(BaseModel):
+    uuids: List[str] = Field(default_factory=list, max_length=100)
+
+
+class IngestTrainingTextRequest(BaseModel):
+    text: str = Field(..., min_length=1, description="Tanítandó szöveg")
+    title: Optional[str] = Field(default=None, max_length=200)

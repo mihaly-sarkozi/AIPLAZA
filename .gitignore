@@ -1,0 +1,83 @@
+# Environment variables
+.env
+
+# Python cache files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+.pnpm-store
+.hypothesis/
+*.sqlite3
+*.db-journal
+.poetry/
+pnpm-debug.log*
+playwright-report/
+test-results/
+.turbo/
+.next/
+.nuxt/
+out/
+.parcel-cache/
+.wdm/
+celerybeat-schedule
+
+# macOS
+.DS_Store
+**/.DS_Store
+
+# IDE / eszközök
+.vscode/
+.idea/
+.cursor/
+*.swp
+*.swo
+*~
+
+# Virtual environments
+venv/
+env/
+ENV/
+.venv
+.env.example
+
+# Archive / project noise
+__MACOSX/
+*.zip
+node_modules/
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+frontend/build/
+dist/
+build/
+*.egg-info/
+.env.backup.*
+logs/*.jsonl
+logs/*.log
+
+# Lokális / véletlenül commitolt zaj (projektfüggő)
+Ingyenes próba.ini
+
+.stanza_models/
+**/.stanza_models/
+.pytest_cache/
+**/.pytest_cache/
+__pycache__/
+**/__pycache__/
+*.pyc
+.DS_Store
+node_modules/
+dist/
+build/
+.next/
+.env

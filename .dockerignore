@@ -1,0 +1,53 @@
+# VCS / meta
+.git
+.github
+.gitignore
+.cursor
+.idea
+.vscode
+
+# Python / cache
+__pycache__
+**/__pycache__
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache
+.ruff_cache
+.mypy_cache
+.hypothesis
+.coverage
+coverage.xml
+htmlcov
+*.egg-info
+.eggs
+dist
+build
+
+# JS / frontend zaj (backend image)
+node_modules
+**/node_modules
+frontend/node_modules
+.pnpm-store
+**/.pnpm-store
+frontend/.vite
+pnpm-debug.log*
+.next
+.nuxt
+out
+.turbo
+.parcel-cache
+
+# Virtuális környezetek
+.venv
+venv
+env
+ENV
+
+# OS
+.DS_Store
+**/.DS_Store
+
+__MACOSX/
+frontend/dist/
+frontend/.vite/
