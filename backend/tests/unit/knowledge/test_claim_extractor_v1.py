@@ -593,6 +593,47 @@ def test_claim_extractor_drops_uncertainty_noise_sentence() -> None:
     assert claims == []
 
 
+@pytest.mark.parametrize(
+    ("text", "language"),
+    [
+        ("TODO: ellenőrizni majd később, ez csak note-only content.", "hu"),
+        ("Ignore this note-only content.", "en"),
+        ("TODO ignorar esto, solo nota.", "es"),
+    ],
+)
+def test_claim_extractor_skips_meta_noise_sentences(text: str, language: str) -> None:
+    sentence = Sentence(text_content=text, metadata={"language": language})
+    should_process, reason = ClaimQualityGate().should_process_sentence(text, language)
+    mentions = MentionExtractor().extract(sentence, language=language)
+    claims = ClaimExtractorV1().extract(sentence, mentions, language=language)
+
+    assert should_process is False
+    assert reason == "sentence_is_explicit_noise"
+    assert claims == []
+
+
+def test_claim_extractor_hu_temporal_fragment_never_becomes_subject() -> None:
+    _sentence, _mentions, claims, _language = _extract_claims("2024- még inaktív volt.", language="hu")
+
+    assert claims == []
+
+
+@pytest.mark.parametrize(
+    ("text", "language", "expected_subject"),
+    [
+        ("The admin user must enable two-factor authentication.", "en", "admin user"),
+        ("Az admin felhasználó kötelező kétfaktoros azonosítást használ.", "hu", "admin felhasználó"),
+        ("El usuario administrador debe activar autenticación de dos factores.", "es", "usuario administrador"),
+    ],
+)
+def test_claim_extractor_keeps_admin_user_subjects(text: str, language: str, expected_subject: str) -> None:
+    _sentence, _mentions, claims, _language = _extract_claims(text, language=language)
+
+    assert len(claims) == 1
+    assert claims[0].subject_text == expected_subject
+    assert claims[0].claim_type == "rule_procedure"
+
+
 def test_claim_extractor_spanish_rule_keeps_sentence_level_language() -> None:
     _sentence, _mentions, claims, language = _extract_claims(
         "El usuario debe aceptar la política de privacidad antes de usar el panel."

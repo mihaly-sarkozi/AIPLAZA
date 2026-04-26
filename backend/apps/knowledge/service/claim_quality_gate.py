@@ -31,6 +31,12 @@ FRAGMENT_MARKERS: dict[str, tuple[str, ...]] = {
 # növekszik. A szigorú minták biztosítják, hogy a hasznos szövegekben ne triggereljen.
 EXPLICIT_NOISE_PATTERNS: dict[str, tuple[str, ...]] = {
     "hu": (
+        r"\btodo\b",
+        r"\bmajd\s+kesobb\b",
+        r"\bellenorizni\b",
+        r"\bzaj\b",
+        r"\bnote[-\s]?only\b",
+        r"\bmegjegyzes(?:\s+csak)?\b",
         r"\bez\s+csak\s+zaj\b",
         r"\bnem\s+kell\s+belole\b",
         r"\bnincs\s+benne\s+(?:fontos|hasznos)\s+(?:claim|informacio)\b",
@@ -40,6 +46,10 @@ EXPLICIT_NOISE_PATTERNS: dict[str, tuple[str, ...]] = {
         r"\btesztelj(?:u|ü)k,\s+hogy\s+m(?:u|ű)k(?:o|ö)dik-e\b",
     ),
     "en": (
+        r"\btodo\b",
+        r"\bignore\b",
+        r"\bnote[-\s]?only\b",
+        r"\bnotes?\s+only\b",
         r"\bthis\s+is\s+just\s+noise\b",
         r"\bjust\s+ignore\s+this\b",
         r"\bplease\s+ignore\s+this\b",
@@ -48,6 +58,11 @@ EXPLICIT_NOISE_PATTERNS: dict[str, tuple[str, ...]] = {
         r"\bignore\s+this\s+line\b",
     ),
     "es": (
+        r"\btodo\b",
+        r"\bignorar\b",
+        r"\bignore\b",
+        r"\bsolo\s+nota\b",
+        r"\bnota[-\s]?only\b",
         r"\besto\s+es\s+solo\s+ruido\b",
         r"\bignor(?:a|e)\s+esto\b",
         r"\bno\s+es\s+(?:un|una)\s+(?:claim|afirmacion)\s+(?:real|valida)\b",

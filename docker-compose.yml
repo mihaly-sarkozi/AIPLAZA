@@ -74,7 +74,7 @@ services:
       test:
         [
           "CMD-SHELL",
-          "python3 -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/api/health/ready', timeout=5).read()\"",
+          "python3 -c \"import urllib.request; req=urllib.request.Request('http://127.0.0.1:8001/api/health/ready', headers={'Host':'lvh.me'}); urllib.request.urlopen(req, timeout=5).read()\"",
         ]
       interval: 5s
       timeout: 5s

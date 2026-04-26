@@ -196,12 +196,6 @@ _PREDICATE_DISPLAY_LOWER_FOLD = frozenset(
     }
 )
 
-_ES_ROLE_AT_ORG_RE = re.compile(
-    r"^\s*(?P<role>responsable(?:\s+de\s+.+?)?)\s+en\s+(?P<org>.+?)\s*$",
-    flags=re.IGNORECASE | re.UNICODE,
-)
-
-
 def _lower_initial(value: str) -> str:
     return value[:1].lower() + value[1:] if value else value
 
@@ -221,31 +215,6 @@ def _normalize_predicate_display_after_context(claim: Claim | Mapping[str, Any])
         out["predicate_text"] = updated_pred
     else:
         out["predicate"] = updated_pred
-    return out
-
-
-def _normalize_es_role_claim(claim: Claim | Mapping[str, Any], *, language: str) -> Claim | dict[str, Any]:
-    if language != "es":
-        return claim
-    predicate = _get_predicate(claim)
-    object_text = _get_object(claim)
-    if fold_text(predicate) != "es" or not object_text:
-        return claim
-    match = _ES_ROLE_AT_ORG_RE.match(object_text)
-    if match is None:
-        return claim
-    role = _norm_ws(match.group("role"))
-    org = _norm_ws(match.group("org"))
-    if not role or not org:
-        return claim
-    if isinstance(claim, Claim):
-        return replace(claim, predicate_text=f"{role} en", object_text=org)
-    out = dict(claim)
-    if "predicate_text" in out:
-        out["predicate_text"] = f"{role} en"
-    else:
-        out["predicate"] = f"{role} en"
-    out["object_text"] = org
     return out
 
 
@@ -608,7 +577,6 @@ class SubjectContextResolverV1:
                     anchor=anchor,
                     sentence_id=sentence_id,
                 )
-                updated = _normalize_es_role_claim(updated, language=language)
                 updated_claims.append(updated)
 
             row["claims"] = updated_claims

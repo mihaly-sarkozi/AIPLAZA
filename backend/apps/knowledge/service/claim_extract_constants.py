@@ -18,7 +18,7 @@ SUBJECT_TIME_PATTERNS = {
     "es": ("actualmente",),
 }
 TEMPORAL_TAIL_KEYWORDS = {
-    "hu": ("jelenleg", "most", "korabban", "korábban", "elotte", "előtte", "utana", "utána"),
+    "hu": ("jelenleg", "most", "még", "meg", "korabban", "korábban", "elotte", "előtte", "utana", "utána"),
     "en": ("currently", "now", "before", "earlier", "previously"),
     "es": ("actualmente", "ahora", "antes", "anteriormente"),
 }

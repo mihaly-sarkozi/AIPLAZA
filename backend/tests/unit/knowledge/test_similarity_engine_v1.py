@@ -140,8 +140,35 @@ def test_similarity_admin_user_vs_admin_felhasznalo_is_medium_or_high() -> None:
 
     assert analysis.similarity_band in {"medium", "high"}
     assert analysis.component_scores["type_similarity"] == 1.0
+    assert analysis.component_scores["name_similarity"] == 1.0
     assert analysis.component_scores["keyword_similarity"] > 0
     assert analysis.component_scores["object_similarity"] > 0
+    assert "name:canonical_exact" in analysis.similarity_reasons
+
+
+def test_similarity_admin_user_vs_usuario_administrador_is_medium_or_high() -> None:
+    new = _profile(
+        "admin user",
+        "user",
+        keywords=["admin", "user"],
+        relation_predicates=["must"],
+        relation_objects=["enable two-factor authentication"],
+    )
+    existing = _profile(
+        "usuario administrador",
+        "user",
+        keywords=["usuario", "administrador"],
+        relation_predicates=["debe"],
+        relation_objects=["activar autenticación de dos factores"],
+    )
+
+    analysis = _analyze(new, existing)
+
+    assert analysis.similarity_band in {"medium", "high"}
+    assert analysis.component_scores["type_similarity"] == 1.0
+    assert analysis.component_scores["name_similarity"] == 1.0
+    assert "name:canonical_exact" in analysis.similarity_reasons
+    assert analysis.evidence["claim_ids"]
 
 
 def test_similarity_rule_objects_use_semantic_normalized_overlap() -> None:
@@ -176,6 +203,17 @@ def test_similarity_different_type_and_keywords_is_low() -> None:
         return
     analysis = SimilarityEngineV1().analyze_for_profile(new, candidates, [existing])[0]
     assert analysis.similarity_band == "low"
+
+
+def test_similarity_random_unrelated_same_type_entities_remain_low() -> None:
+    new = _profile("Sarah Miller", "person", keywords=["sarah", "miller", "compliance"])
+    existing = _profile("Carlos García", "person", keywords=["carlos", "garcia", "audit"])
+
+    analysis = _analyze(new, existing)
+
+    assert analysis.similarity_band == "low"
+    assert analysis.total_similarity_score < 0.4
+    assert "structural_only_similarity_cap" in analysis.similarity_reasons
 
 
 def test_similarity_analysis_contains_component_scores_and_evidence() -> None:
@@ -250,3 +288,31 @@ def test_similarity_candidate_selection_reinput_sarah_miller_high_analysis() -> 
     assert analyses[0].evidence["claim_ids"]
     assert analyses[0].evidence["sentence_ids"]
     assert "evidence:missing_high_cap" not in analyses[0].similarity_reasons
+
+
+def test_similarity_legacy_helpdesk_import_vs_regi_helpdesk_import_is_strong_medium_or_high() -> None:
+    new = _profile(
+        "legacy helpdesk import",
+        "module",
+        keywords=["legacy", "helpdesk", "import", "deprecated"],
+        relation_predicates=["deprecated"],
+        relation_objects=["2024"],
+        time_values=["2024"],
+    )
+    existing = _profile(
+        "régi Helpdesk import",
+        "module",
+        keywords=["régi", "helpdesk", "import", "megszűnt"],
+        relation_predicates=["megszűnt"],
+        relation_objects=["2024"],
+        time_values=["2024"],
+    )
+
+    analysis = _analyze(new, existing)
+
+    assert analysis.similarity_band == "high"
+    assert analysis.total_similarity_score >= 0.75
+    assert analysis.component_scores["name_similarity"] == 1.0
+    assert "name:canonical_exact" in analysis.similarity_reasons
+    assert "same_type_strong_lexical_overlap_boost" in analysis.similarity_reasons
+    assert analysis.evidence["claim_ids"]

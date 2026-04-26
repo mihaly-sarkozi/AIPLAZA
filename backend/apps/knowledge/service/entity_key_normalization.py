@@ -31,6 +31,31 @@ _HU_SUFFIXES: tuple[str, ...] = (
 )
 
 _YEAR_TOKEN = re.compile(r"^[12]\d{3}$")
+_CANONICAL_TOKEN_ALIASES: dict[str, str] = {
+    "admin": "admin",
+    "administrator": "admin",
+    "administrador": "admin",
+    "user": "user",
+    "felhasznalo": "user",
+    "felhasználó": "user",
+    "usuario": "user",
+    "legacy": "legacy",
+    "regi": "legacy",
+    "régi": "legacy",
+    "helpdesk": "helpdesk",
+    "import": "import",
+    "deprecated": "deprecated",
+    "megszunt": "deprecated",
+    "megszűnt": "deprecated",
+}
+_CANONICAL_TOKEN_ORDER: dict[str, int] = {
+    "admin": 10,
+    "user": 20,
+    "legacy": 30,
+    "helpdesk": 40,
+    "import": 50,
+    "deprecated": 60,
+}
 
 
 def _lang_prefix(language: str | None) -> str | None:
@@ -116,6 +141,12 @@ def _filter_year_tokens(tokens: list[str]) -> list[str]:
     return [t for t in tokens if not _is_year_token(t)]
 
 
+def _canonicalize_tokens(tokens: list[str]) -> list[str]:
+    canonical = [_CANONICAL_TOKEN_ALIASES.get(token, token) for token in tokens]
+    deduped = list(dict.fromkeys(canonical))
+    return sorted(deduped, key=lambda item: (_CANONICAL_TOKEN_ORDER.get(item, 1000), item))
+
+
 def normalize_entity_key(
     text: str,
     language: str | None = None,
@@ -155,4 +186,17 @@ def normalize_entity_key(
     return " ".join(tokens)
 
 
-__all__ = ["normalize_entity_key"]
+def canonicalize_entity_key(
+    text: str,
+    language: str | None = None,
+    *,
+    strip_accents: bool = True,
+) -> str:
+    """Lightweight cross-language entity canonical form for deterministic matching."""
+    normalized = normalize_entity_key(text, language=language, strip_accents=strip_accents)
+    if not normalized:
+        return ""
+    return " ".join(_canonicalize_tokens(_tokens(normalized)))
+
+
+__all__ = ["canonicalize_entity_key", "normalize_entity_key"]

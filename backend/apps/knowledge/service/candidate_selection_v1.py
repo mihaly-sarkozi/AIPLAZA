@@ -10,7 +10,7 @@ from typing import Any
 
 from apps.knowledge.domain.candidate_selection import CANDIDATE_SELECTION_BUILDER_VERSION, EntityCandidate
 from apps.knowledge.domain.search_profile import SearchProfile
-from apps.knowledge.service.entity_key_normalization import normalize_entity_key
+from apps.knowledge.service.entity_key_normalization import canonicalize_entity_key, normalize_entity_key
 from apps.knowledge.service.language_rules import fold_text
 
 
@@ -39,6 +39,18 @@ _SEMANTIC_TOKEN_ALIASES = {
     "user": "user",
     "felhasznalo": "user",
     "felhasználó": "user",
+    "usuario": "user",
+    "admin": "admin",
+    "administrator": "admin",
+    "administrador": "admin",
+    "legacy": "legacy",
+    "regi": "legacy",
+    "régi": "legacy",
+    "helpdesk": "helpdesk",
+    "import": "import",
+    "deprecated": "deprecated",
+    "megszunt": "deprecated",
+    "megszűnt": "deprecated",
     "payment": "payment",
     "payments": "payment",
     "card": "payment",
@@ -125,7 +137,17 @@ def _name_score(new: SearchProfile, candidate: SearchProfile) -> tuple[float, st
     right_key = normalize_entity_key(candidate.normalized_key or candidate.entity_name, strip_accents=True)
     if left_key and right_key and left_key == right_key:
         return 0.4, "normalized_name_match"
+    left_canonical = canonicalize_entity_key(new.normalized_key or new.entity_name)
+    right_canonical = canonicalize_entity_key(candidate.normalized_key or candidate.entity_name)
+    if left_canonical and right_canonical and left_canonical == right_canonical:
+        return 0.42, "canonical_name_match"
     overlap = _jaccard(_tokens(left_key or new.entity_name), _tokens(right_key or candidate.entity_name))
+    semantic_overlap = max(
+        _jaccard(_semantic_tokens(left_key or new.entity_name), _semantic_tokens(right_key or candidate.entity_name)),
+        _jaccard(_tokens(left_canonical), _tokens(right_canonical)),
+    )
+    if semantic_overlap > overlap:
+        return min(0.38, semantic_overlap * 0.38), "canonical_name_overlap"
     if overlap <= 0:
         return 0.0, "normalized_name_no_overlap"
     return min(0.3, overlap * 0.3), "normalized_name_token_overlap"

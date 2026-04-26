@@ -11,7 +11,7 @@ from typing import Any
 from apps.knowledge.domain.candidate_selection import EntityCandidate
 from apps.knowledge.domain.search_profile import SearchProfile
 from apps.knowledge.domain.similarity_analysis import SIMILARITY_ENGINE_VERSION, SimilarityAnalysis
-from apps.knowledge.service.entity_key_normalization import normalize_entity_key
+from apps.knowledge.service.entity_key_normalization import canonicalize_entity_key, normalize_entity_key
 from apps.knowledge.service.language_rules import fold_text
 
 
@@ -50,6 +50,18 @@ _SEMANTIC_TOKEN_ALIASES = {
     "user": "user",
     "felhasznalo": "user",
     "felhasználó": "user",
+    "usuario": "user",
+    "admin": "admin",
+    "administrator": "admin",
+    "administrador": "admin",
+    "legacy": "legacy",
+    "regi": "legacy",
+    "régi": "legacy",
+    "helpdesk": "helpdesk",
+    "import": "import",
+    "deprecated": "deprecated",
+    "megszunt": "deprecated",
+    "megszűnt": "deprecated",
     "payment": "payment",
     "payments": "payment",
     "card": "payment",
@@ -126,8 +138,18 @@ def _name_similarity(left: SearchProfile, right: SearchProfile) -> tuple[float, 
     right_key = normalize_entity_key(right.normalized_key or right.entity_name, strip_accents=True)
     if left_key and right_key and left_key == right_key:
         return 1.0, "name:normalized_exact"
-    score = _jaccard(_tokens(left_key or left.entity_name), _tokens(right_key or right.entity_name))
-    return score, f"name:token_overlap:{score:.2f}"
+    left_canonical = canonicalize_entity_key(left.normalized_key or left.entity_name)
+    right_canonical = canonicalize_entity_key(right.normalized_key or right.entity_name)
+    if left_canonical and right_canonical and left_canonical == right_canonical:
+        return 1.0, "name:canonical_exact"
+    token_score = _jaccard(_tokens(left_key or left.entity_name), _tokens(right_key or right.entity_name))
+    semantic_score = max(
+        _jaccard(_semantic_tokens(left_key or left.entity_name), _semantic_tokens(right_key or right.entity_name)),
+        _jaccard(_tokens(left_canonical), _tokens(right_canonical)),
+    )
+    if semantic_score > token_score:
+        return semantic_score, f"name:canonical_overlap:{semantic_score:.2f}"
+    return token_score, f"name:token_overlap:{token_score:.2f}"
 
 
 def _type_similarity(left: SearchProfile, right: SearchProfile) -> tuple[float, str]:
@@ -328,12 +350,21 @@ class SimilarityEngineV1:
         # detektálható legyen a high band-ben. Kis boost (+0.05), 1.0-ra cap-elve. Ezzel a
         # konzisztens evidence-szel rendelkező duplikátumok stabilan high similarity-t kapnak.
         if (
-            "name:normalized_exact" in reasons
+            ("name:normalized_exact" in reasons or "name:canonical_exact" in reasons)
             and "type:match" in reasons
             and not _location_name_conflict(new_profile, candidate_profile, component_scores["name_similarity"])
         ):
             total = min(1.0, total + 0.05)
             reasons.append("same_entity_name_boost")
+
+        if (
+            component_scores["type_similarity"] == 1.0
+            and component_scores["name_similarity"] >= 0.75
+            and component_scores["keyword_similarity"] >= 0.5
+            and not _location_name_conflict(new_profile, candidate_profile, component_scores["name_similarity"])
+        ):
+            total = min(1.0, total + 0.08)
+            reasons.append("same_type_strong_lexical_overlap_boost")
 
         evidence = {
             "claim_ids": candidate_evidence.get("claim_ids") or [],

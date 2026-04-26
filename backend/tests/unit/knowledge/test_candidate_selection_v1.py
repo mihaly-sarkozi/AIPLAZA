@@ -137,6 +137,30 @@ def test_candidate_selection_admin_user_rule_uses_semantic_object_overlap() -> N
     assert any(reason.startswith("relation_object_semantic_overlap") for reason in candidates[0].reasons)
 
 
+def test_candidate_selection_admin_user_cross_language_names_are_not_weak_random_candidates() -> None:
+    new = _profile(
+        "admin user",
+        "user",
+        keywords=["admin", "user"],
+        relation_predicates=["must"],
+        relation_objects=["enable two-factor authentication"],
+    )
+    existing = _profile(
+        "usuario administrador",
+        "user",
+        keywords=["usuario", "administrador"],
+        relation_predicates=["debe"],
+        relation_objects=["activar autenticación de dos factores"],
+    )
+
+    candidates = CandidateSelectionV1().select_for_profile(new, [existing])
+
+    assert candidates
+    assert candidates[0].score >= 0.45
+    assert any(reason.startswith("canonical_name_match") for reason in candidates[0].reasons)
+    assert candidates[0].evidence["claim_ids"]
+
+
 def test_candidate_selection_batch_fallback_marks_candidate_source() -> None:
     profiles = [
         _profile("Sarah Miller", "person", keywords=["sarah", "miller"]),
@@ -200,3 +224,27 @@ def test_candidate_selection_deduplicates_same_candidate_entity_id_and_keeps_str
     assert str(candidates[0].candidate_entity_id) == str(shared_entity_id)
     assert candidates[0].candidate_name == "legacy helpdesk import"
     assert any(reason.startswith("normalized_name_match") for reason in candidates[0].reasons)
+
+
+def test_candidate_selection_legacy_helpdesk_import_matches_regi_helpdesk_import_strongly() -> None:
+    new = _profile(
+        "legacy helpdesk import",
+        "module",
+        keywords=["legacy", "helpdesk", "import", "deprecated"],
+        relation_predicates=["deprecated"],
+        relation_objects=["2024"],
+    )
+    existing = _profile(
+        "régi Helpdesk import",
+        "module",
+        keywords=["régi", "helpdesk", "import", "megszűnt"],
+        relation_predicates=["megszűnt"],
+        relation_objects=["2024"],
+    )
+
+    candidates = CandidateSelectionV1().select_for_profile(new, [existing])
+
+    assert candidates
+    assert candidates[0].score >= 0.65
+    assert any(reason.startswith("canonical_name_match") for reason in candidates[0].reasons)
+    assert candidates[0].evidence["claim_ids"]

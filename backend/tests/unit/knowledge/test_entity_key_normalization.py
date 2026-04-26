@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from apps.knowledge.service.entity_key_normalization import normalize_entity_key
+from apps.knowledge.service.entity_key_normalization import canonicalize_entity_key, normalize_entity_key
 
 pytestmark = [pytest.mark.unit, pytest.mark.must_pass]
 
@@ -32,3 +32,14 @@ def test_normalize_entity_key_examples(
 def test_removes_time_words() -> None:
     assert normalize_entity_key("Currently the London office", "en") == "london office"
     assert normalize_entity_key("Jelenleg a login rendszer", "hu") == "login rendszer"
+
+
+def test_canonicalize_entity_key_maps_admin_user_cross_language() -> None:
+    assert canonicalize_entity_key("admin user", "en") == "admin user"
+    assert canonicalize_entity_key("admin felhasználó", "hu") == "admin user"
+    assert canonicalize_entity_key("usuario administrador", "es") == "admin user"
+
+
+def test_canonicalize_entity_key_maps_legacy_helpdesk_import() -> None:
+    assert canonicalize_entity_key("legacy helpdesk import", "en") == "legacy helpdesk import"
+    assert canonicalize_entity_key("régi Helpdesk import", "hu") == "legacy helpdesk import"
