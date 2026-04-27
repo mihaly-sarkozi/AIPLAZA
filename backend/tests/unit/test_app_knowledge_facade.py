@@ -11,8 +11,11 @@ from apps.knowledge.domain.document import Document
 from apps.knowledge.domain.ingest_event import IngestEvent
 from apps.knowledge.domain.ingest_item import IngestItem
 from apps.knowledge.domain.ingest_run import IngestRun
+from apps.knowledge.domain.index_build import IndexBuild
+from apps.knowledge.domain.interpretation_run import InterpretationRun
 from apps.knowledge.domain.parser_run import ParserRun
 from apps.knowledge.domain.sentence import Sentence
+from apps.knowledge.domain.retrieval_profile import DEFAULT_RETRIEVAL_PROFILE
 from apps.knowledge.service.knowledge_facade import KnowledgeFacade
 from apps.knowledge.service.runtime_store import (
     InMemoryIndexBuildStore,
@@ -27,6 +30,15 @@ from apps.knowledge.service.runtime_store import (
 from shared.object_storage.models import StoredObjectData, StoredObjectRef
 
 pytestmark = [pytest.mark.unit, pytest.mark.must_pass]
+
+
+class _FailingRetrievalEngine:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def retrieve(self, **_kwargs):
+        self.calls += 1
+        raise RuntimeError("vector backend unavailable")
 
 
 @pytest.fixture
@@ -257,12 +269,28 @@ class _VectorIndex:
         for idx, row in enumerate(rows):
             payload = dict(row.get("payload") or {})
             payload["text"] = row.get("text")
+            payload.setdefault("point_type", "sentence")
             self.collections[collection].append(
                 {
                     "id": f"{collection}-{idx}",
                     "payload": payload,
                     "fusion_score": 0.9,
                     "score": 0.9,
+                }
+            )
+
+    async def upsert_retrieval_chunk_points(self, collection: str, rows: list[dict[str, object]]) -> None:
+        self.collections.setdefault(collection, [])
+        for row in rows:
+            payload = dict(row.get("payload") or {})
+            payload["text"] = row.get("text")
+            payload.setdefault("point_type", "retrieval_chunk")
+            self.collections[collection].append(
+                {
+                    "id": str(row.get("id")),
+                    "payload": payload,
+                    "fusion_score": 0.95,
+                    "score": 0.95,
                 }
             )
 
@@ -281,7 +309,15 @@ class _VectorIndex:
         exact_phrases: list[str] | None = None,
         rare_terms: list[str] | None = None,
     ) -> list[dict[str, object]]:
-        return list(self.collections.get(collection, []))[:limit]
+        rows = list(self.collections.get(collection, []))
+        if point_types:
+            rows = [row for row in rows if (row.get("payload") or {}).get("point_type") in set(point_types)]
+        for key, value in (payload_filter or {}).items():
+            if isinstance(value, list):
+                rows = [row for row in rows if set(value).intersection(set((row.get("payload") or {}).get(key) or []))]
+            else:
+                rows = [row for row in rows if (row.get("payload") or {}).get(key) == value]
+        return rows[:limit]
 
 
 def _build_facade(vector_index: _VectorIndex | None = None) -> KnowledgeFacade:
@@ -320,6 +356,34 @@ def test_split_sentences_keeps_numbered_list_item_together() -> None:
         "1. Első pont részletes leírása.",
         "2. Második pont külön mondat.",
     ]
+
+
+@pytest.mark.anyio
+async def test_retrieval_resilience_falls_back_when_vector_backend_fails() -> None:
+    facade = _build_facade()
+    failing = _FailingRetrievalEngine()
+    facade._retrieval_engine = failing
+
+    hits = await facade._retrieve_hits_with_resilience(
+        tenant="demo",
+        corpus_uuid="kb-1",
+        query="What is the status of London office?",
+        builds=[
+            IndexBuild(
+                tenant="demo",
+                corpus_uuid="kb-1",
+                index_profile_key="basic_chunk_v1",
+                collection_name="kb_1__basic_chunk_v1",
+            )
+        ],
+        retrieval_profile=DEFAULT_RETRIEVAL_PROFILE,
+        query_profile={"intent": "state"},
+    )
+
+    assert hits == []
+    assert failing.calls == 2
+    assert facade._metrics_store.snapshot()["counters"]["query_retrieval_error_count"] == 2
+    assert facade._metrics_store.snapshot()["counters"]["query_retrieval_fallback_count"] == 1
 
 
 def test_split_sentences_does_not_break_on_common_abbreviation() -> None:
@@ -1320,6 +1384,26 @@ def test_get_sentence_interpretation_falls_back_to_on_the_fly_payload_without_st
     assert detail["claims"]
 
 
+def test_source_download_returns_typed_training_text_as_attachment_payload() -> None:
+    facade = _build_facade()
+    source = facade.create_source(
+        tenant="demo",
+        corpus_uuid="kb-1",
+        title="Chatbol tanitott szoveg",
+        source_type="text",
+        raw_content="The London office is currently inactive.",
+        file_ref=None,
+        created_by=11,
+    )
+
+    download = facade.get_source_download(source.id)
+
+    assert download is not None
+    assert download["filename"] == "Chatbol tanitott szoveg.txt"
+    assert download["content_type"] == "text/plain; charset=utf-8"
+    assert download["body"].decode("utf-8") == "The London office is currently inactive."
+
+
 @pytest.mark.anyio
 async def test_schedule_and_run_index_build_ingests_sources_into_build_collection() -> None:
     vector_index = _VectorIndex()
@@ -1379,3 +1463,651 @@ async def test_retrieve_creates_query_run_with_context_and_citations() -> None:
     assert query_run.result_count >= 1
     assert query_run.context_text
     assert len(query_run.citations) >= 1
+    assert query_run.metadata["query_profile"]["intent"] == "unknown"
+    assert "query_resolution_confidence" in query_run.metadata
+
+
+@pytest.mark.anyio
+async def test_retrieve_stores_query_resolver_trace_metadata() -> None:
+    facade = _build_facade()
+    facade.create_source(
+        tenant="demo",
+        corpus_uuid="kb-1",
+        title="London source",
+        source_type="text",
+        raw_content="The London office is currently active.",
+        file_ref=None,
+        created_by=11,
+    )
+    build = facade.schedule_index_build(
+        tenant="demo",
+        corpus_uuid="kb-1",
+        index_profile_key="basic_chunk_v1",
+        created_by=11,
+    )
+    await facade.run_index_build(build.id)
+
+    query_run = await facade.retrieve(
+        tenant="demo",
+        corpus_uuid="kb-1",
+        query="Was the London office inactive?",
+    )
+
+    assert query_run.metadata["query_intent"] == "state"
+    assert query_run.metadata["query_detected_entities"] == [
+        {"text": "London office", "entity_type": "location", "source": "query_pattern"}
+    ]
+    assert query_run.metadata["query_filters"] == {
+        "entity_type": "location",
+        "entity": "London office",
+        "state": "inactive",
+        "time_filter": "historical",
+        "space_filter": "London office",
+        "keywords": ["london", "office", "inactive", "state"],
+    }
+    assert query_run.metadata["query_resolution_confidence"] >= 0.85
+
+
+@pytest.mark.anyio
+async def test_retrieve_stores_query_aware_retrieval_matches() -> None:
+    facade = _build_facade()
+    facade.create_source(
+        tenant="demo",
+        corpus_uuid="kb-1",
+        title="London source",
+        source_type="text",
+        raw_content="The London office is currently active.",
+        file_ref=None,
+        created_by=11,
+    )
+    build = facade.schedule_index_build(
+        tenant="demo",
+        corpus_uuid="kb-1",
+        index_profile_key="basic_chunk_v1",
+        created_by=11,
+    )
+    await facade.run_index_build(build.id)
+    facade._load_existing_global_profiles = lambda **_kwargs: [
+        {
+            "profile_id": "global-profile:london-office",
+            "entity_name": "London office",
+            "entity_type": "location",
+            "canonical_key": "london office",
+            "claims": [
+                {"claim_id": "c-active", "subject": "London office", "predicate": "active", "object": "true", "status": "active"},
+                {"claim_id": "c-inactive", "subject": "London office", "predicate": "active", "object": "false", "status": "active"},
+            ],
+        },
+        {
+            "profile_id": "global-profile:billing-service",
+            "entity_name": "billing service",
+            "entity_type": "system_component",
+            "canonical_key": "billing service",
+            "claims": [],
+        },
+    ]
+    facade._load_existing_retrieval_chunks = lambda **_kwargs: [
+        {
+            "profile_id": "global-profile:london-office",
+            "entity_name": "London office",
+            "canonical_key": "london office",
+            "retrieval_chunk_text": "London office (location)\nConflicting current facts: London office active = true; London office active = false",
+            "structured_facts": {
+                "active": [
+                    {
+                        "claim_id": "c-active",
+                        "subject": "London office",
+                        "predicate": "active",
+                        "object": "true",
+                        "status": "active",
+                        "sentence_ids": ["s-active"],
+                        "source_ids": ["src-london"],
+                    },
+                    {
+                        "claim_id": "c-inactive",
+                        "subject": "London office",
+                        "predicate": "active",
+                        "object": "false",
+                        "status": "active",
+                        "sentence_ids": ["s-inactive"],
+                        "source_ids": ["src-london"],
+                    },
+                ],
+                "conflicts": [
+                    {
+                        "claim_id": "c-active",
+                        "subject": "London office",
+                        "predicate": "active",
+                        "object": "true",
+                        "status": "active",
+                        "sentence_ids": ["s-active"],
+                        "source_ids": ["src-london"],
+                    },
+                    {
+                        "claim_id": "c-inactive",
+                        "subject": "London office",
+                        "predicate": "active",
+                        "object": "false",
+                        "status": "active",
+                        "sentence_ids": ["s-inactive"],
+                        "source_ids": ["src-london"],
+                    },
+                ],
+            },
+            "evidence_ids": ["c-active", "s-active", "c-inactive", "s-inactive"],
+            "source_ids": ["src-london"],
+            "conflicting": True,
+        },
+        {
+            "profile_id": "global-profile:billing-service",
+            "entity_name": "billing service",
+            "retrieval_chunk_text": "billing service (system_component)",
+            "structured_facts": {"active": []},
+        },
+    ]
+
+    query_run = await facade.retrieve(
+        tenant="demo",
+        corpus_uuid="kb-1",
+        query="Which offices are active?",
+    )
+
+    assert query_run.metadata["query_retrieval_match_count"] == 1
+    assert query_run.metadata["query_retrieval_filtered_count"] == 1
+    assert query_run.metadata["conflict_marker_included"] is True
+    assert query_run.metadata["matched_chunks"][0]["entity_name"] == "London office"
+    assert {item["claim_id"] for item in query_run.metadata["matched_claims"]} == {"c-active", "c-inactive"}
+    assert query_run.metadata["answer_mode"] == "conflict"
+    assert "conflicting current status information" in query_run.metadata["answer_text"]
+    assert set(query_run.metadata["cited_claim_ids"]) == {"c-active", "c-inactive"}
+    assert query_run.metadata["synthesis_confidence"] > 0.0
+
+
+def test_get_quality_report_uses_latest_global_profiles() -> None:
+    facade = _build_facade()
+    store = _InMemoryIngestRunStore()
+    facade._interpretation_run_store = store
+    store.create(
+        InterpretationRun(
+            id="run-quality",
+            corpus_uuid="kb-1",
+            status="completed",
+            metadata={
+                "global_profiles": [
+                    {
+                        "profile_id": "global-profile:london-office",
+                        "entity_name": "London office",
+                        "entity_type": "location",
+                        "claims": [
+                            {
+                                "claim_id": "claim-london",
+                                "sentence_ids": ["sentence-london"],
+                                "source_ids": ["source-london"],
+                                "status": "active",
+                            }
+                        ],
+                    },
+                    {
+                        "profile_id": "global-profile:unknown",
+                        "entity_name": "Unknown service",
+                        "entity_type": "unknown",
+                        "claims": [{"claim_id": "claim-unknown", "status": "active"}],
+                    },
+                ]
+            },
+        )
+    )
+
+    report = facade.get_quality_report(corpus_uuid="kb-1")
+
+    assert report["total_profiles"] == 2
+    assert report["profiles_without_evidence"] == 1
+    assert report["metrics"]["coverage"] == 0.5
+    assert report["metrics"]["unknown_entity_type_ratio"] == 0.5
+
+
+@pytest.mark.anyio
+async def test_retrieve_can_answer_from_indexed_retrieval_chunk_vector_hit() -> None:
+    vector = _VectorIndex()
+    facade = _build_facade(vector)
+    store = _InMemoryIngestRunStore()
+    facade._interpretation_run_store = store
+    structured_facts = {
+        "current": [
+            {
+                "claim_id": "claim-london",
+                "subject": "London office",
+                "predicate": "active",
+                "object": "false",
+                "status": "active",
+                "sentence_ids": ["sentence-london"],
+                "source_ids": ["source-london"],
+            }
+        ],
+        "active": [
+            {
+                "claim_id": "claim-london",
+                "subject": "London office",
+                "predicate": "active",
+                "object": "false",
+                "status": "active",
+                "sentence_ids": ["sentence-london"],
+                "source_ids": ["source-london"],
+            }
+        ],
+    }
+    store.create(
+        InterpretationRun(
+            id="run-vector-chunk",
+            corpus_uuid="kb-1",
+            status="completed",
+            metadata={
+                "global_profiles": [
+                    {
+                        "profile_id": "global-profile:london-office",
+                        "entity_name": "London office",
+                        "entity_type": "location",
+                        "canonical_key": "london office",
+                        "claims": structured_facts["current"],
+                    }
+                ],
+                "retrieval_chunks": [
+                    {
+                        "profile_id": "global-profile:london-office",
+                        "entity_name": "London office",
+                        "entity_type": "location",
+                        "canonical_key": "london office",
+                        "retrieval_chunk_text": "London office (location)\nCurrent facts:\n- currently inactive",
+                        "structured_facts": structured_facts,
+                        "evidence_ids": ["claim-london", "sentence-london"],
+                        "source_ids": ["source-london"],
+                    }
+                ],
+            },
+        )
+    )
+    build = facade.schedule_index_build(
+        tenant="demo",
+        corpus_uuid="kb-1",
+        index_profile_key="hybrid_v1",
+        created_by=11,
+    )
+    await facade.run_index_build(build.id)
+
+    query_run = await facade.retrieve(
+        tenant="demo",
+        corpus_uuid="kb-1",
+        query="What is the status of London office?",
+    )
+
+    assert query_run.metadata["answer_text"] == "The London office is currently inactive."
+    assert query_run.metadata["answer_mode"] == "direct"
+    assert query_run.metadata["matched_chunks"][0]["profile_id"] == "global-profile:london-office"
+    assert any((row["payload"] or {}).get("point_type") == "retrieval_chunk" for row in vector.collections[build.collection_name])
+
+
+@pytest.mark.anyio
+async def test_retrieve_synthesizes_status_answer_with_historical_context() -> None:
+    facade = _build_facade()
+    facade.create_source(
+        tenant="demo",
+        corpus_uuid="kb-1",
+        title="London source",
+        source_type="text",
+        raw_content="The London office is currently inactive.",
+        file_ref=None,
+        created_by=11,
+    )
+    build = facade.schedule_index_build(
+        tenant="demo",
+        corpus_uuid="kb-1",
+        index_profile_key="basic_chunk_v1",
+        created_by=11,
+    )
+    await facade.run_index_build(build.id)
+    facade._load_existing_global_profiles = lambda **_kwargs: [
+        {
+            "profile_id": "global-profile:london-office",
+            "entity_name": "London office",
+            "entity_type": "location",
+            "canonical_key": "london office",
+            "claims": [],
+        }
+    ]
+    facade._load_existing_retrieval_chunks = lambda **_kwargs: [
+        {
+            "profile_id": "global-profile:london-office",
+            "entity_name": "London office",
+            "canonical_key": "london office",
+            "retrieval_chunk_text": "London office (location)\nCurrent facts:\n- currently inactive\nHistorical facts:\n- inactive in 2024",
+            "structured_facts": {
+                "current": [
+                    {
+                        "claim_id": "c-current",
+                        "subject": "London office",
+                        "predicate": "active",
+                        "object": "false",
+                        "status": "active",
+                        "time_mode": "current",
+                        "sentence_ids": ["s-current"],
+                        "source_ids": ["src-london"],
+                    }
+                ],
+                "historical": [
+                    {
+                        "claim_id": "c-2024",
+                        "subject": "London office",
+                        "predicate": "active",
+                        "object": "false",
+                        "status": "historical",
+                        "time_mode": "bounded",
+                        "time_values": ["2024"],
+                        "sentence_ids": ["s-2024"],
+                        "source_ids": ["src-london"],
+                    }
+                ],
+            },
+            "evidence_ids": ["e-current", "s-current", "e-2024", "s-2024"],
+            "source_ids": ["src-london"],
+            "conflicting": False,
+            "temporal_context_included": True,
+        }
+    ]
+
+    query_run = await facade.retrieve(
+        tenant="demo",
+        corpus_uuid="kb-1",
+        query="What is the status of London office?",
+    )
+
+    assert query_run.metadata["answer_text"] == "The London office is currently inactive. Historically, it was inactive in 2024."
+    assert query_run.metadata["answer_mode"] == "state_with_history"
+    assert query_run.metadata["cited_claim_ids"] == ["c-current", "c-2024"]
+    assert query_run.metadata["cited_evidence_ids"] == ["c-current", "c-2024", "s-current", "s-2024", "e-current", "e-2024"]
+    assert query_run.metadata["query_debug"]["matched_chunks_count"] == 1
+    assert query_run.metadata["query_debug"]["matched_claims_count"] == 2
+    assert query_run.metadata["query_debug"]["synthesis_called"] is True
+    assert query_run.metadata["query_debug"]["answer_text"] == query_run.metadata["answer_text"]
+
+
+@pytest.mark.anyio
+async def test_retrieve_without_ready_index_build_still_runs_query_aware_synthesis() -> None:
+    facade = _build_facade()
+    facade.create_source(
+        tenant="demo",
+        corpus_uuid="kb-1",
+        title="London source",
+        source_type="text",
+        raw_content="The London office is currently inactive.",
+        file_ref=None,
+        created_by=11,
+    )
+    facade._load_existing_global_profiles = lambda **_kwargs: [
+        {
+            "profile_id": "global-profile:london-office",
+            "entity_name": "London office",
+            "entity_type": "location",
+            "canonical_key": "london office",
+            "claims": [],
+        }
+    ]
+    facade._load_existing_retrieval_chunks = lambda **_kwargs: [
+        {
+            "profile_id": "global-profile:london-office",
+            "entity_name": "London office",
+            "canonical_key": "london office",
+            "retrieval_chunk_text": "London office (location)\nCurrent facts:\n- currently inactive",
+            "structured_facts": {
+                "current": [
+                    {
+                        "claim_id": "c-current",
+                        "subject": "London office",
+                        "predicate": "active",
+                        "object": "false",
+                        "status": "active",
+                        "time_mode": "current",
+                        "sentence_ids": ["s-current"],
+                        "source_ids": ["src-london"],
+                    }
+                ],
+            },
+            "evidence_ids": ["c-current", "s-current"],
+            "source_ids": ["src-london"],
+            "conflicting": False,
+        }
+    ]
+
+    query_run = await facade.retrieve(
+        tenant="demo",
+        corpus_uuid="kb-1",
+        query="What is the status of London office?",
+    )
+
+    assert query_run.build_ids == []
+    assert query_run.metadata["no_ready_index_build"] is True
+    assert query_run.metadata["query_debug"]["no_ready_index_build"] is True
+    assert query_run.metadata["answer_text"] == "The London office is currently inactive."
+
+
+@pytest.mark.anyio
+async def test_feedback_replace_updates_next_query_answer() -> None:
+    facade = _build_facade()
+    facade._load_existing_global_profiles = lambda **_kwargs: [
+        {
+            "profile_id": "global-profile:london-office",
+            "entity_name": "London office",
+            "entity_type": "location",
+            "canonical_key": "london office",
+            "claims": [
+                {
+                    "claim_id": "c-inactive",
+                    "subject": "London office",
+                    "predicate": "active",
+                    "object": "false",
+                    "status": "active",
+                    "time_mode": "current",
+                    "sentence_ids": ["s-inactive"],
+                    "source_ids": ["src-london"],
+                }
+            ],
+        }
+    ]
+    facade._load_existing_retrieval_chunks = lambda **_kwargs: []
+
+    feedback = facade.apply_knowledge_feedback(
+        tenant="demo",
+        corpus_uuid="kb-1",
+        target_entity="London office",
+        claim_text="London office is currently inactive",
+        feedback_type="replace",
+        optional_new_claim="London office is currently active",
+        user_input="This is wrong -> London office is active",
+        user_id=11,
+    )
+    query_run = await facade.retrieve(
+        tenant="demo",
+        corpus_uuid="kb-1",
+        query="What is the status of London office?",
+    )
+
+    event = feedback["feedback_event"]
+    assert event["affected_claim_ids"] == ["c-inactive"]
+    assert event["new_claim_ids"]
+    assert query_run.metadata["answer_text"] == "The London office is currently active."
+    assert query_run.metadata["answer_mode"] == "direct"
+    assert query_run.metadata["feedback_events"][0]["user_input"] == "This is wrong -> London office is active"
+    assert query_run.metadata["cited_claim_ids"] == event["new_claim_ids"]
+
+
+@pytest.mark.anyio
+async def test_feedback_incorrect_weakened_claim_is_not_primary_fact() -> None:
+    facade = _build_facade()
+    facade._load_existing_global_profiles = lambda **_kwargs: [
+        {
+            "profile_id": "global-profile:london-office",
+            "entity_name": "London office",
+            "entity_type": "location",
+            "canonical_key": "london office",
+            "claims": [
+                {
+                    "claim_id": "c-active",
+                    "subject": "London office",
+                    "predicate": "active",
+                    "object": "true",
+                    "status": "active",
+                    "time_mode": "current",
+                    "sentence_ids": ["s-active"],
+                    "source_ids": ["src-london"],
+                }
+            ],
+        }
+    ]
+    facade._load_existing_retrieval_chunks = lambda **_kwargs: []
+
+    facade.apply_knowledge_feedback(
+        tenant="demo",
+        corpus_uuid="kb-1",
+        target_entity="London office",
+        claim_text="London office is currently active",
+        feedback_type="incorrect",
+        user_input="This is wrong",
+        user_id=11,
+    )
+    query_run = await facade.retrieve(
+        tenant="demo",
+        corpus_uuid="kb-1",
+        query="What is the status of London office?",
+    )
+
+    assert query_run.metadata["answer_mode"] == "no_answer"
+    assert query_run.metadata["matched_claims"] == []
+
+
+@pytest.mark.anyio
+async def test_withdraw_source_removes_claim_from_next_query() -> None:
+    facade = _build_facade()
+    source = facade.create_source(
+        tenant="demo",
+        corpus_uuid="kb-1",
+        title="London source",
+        source_type="text",
+        raw_content="The London office is currently inactive.",
+        file_ref=None,
+        created_by=11,
+    )
+    facade._load_existing_global_profiles = lambda **_kwargs: [
+        {
+            "profile_id": "global-profile:london-office",
+            "entity_name": "London office",
+            "entity_type": "location",
+            "canonical_key": "london office",
+            "claims": [
+                {
+                    "claim_id": "c-inactive",
+                    "subject": "London office",
+                    "predicate": "active",
+                    "object": "false",
+                    "status": "active",
+                    "time_mode": "current",
+                    "sentence_ids": ["s-inactive"],
+                    "source_ids": [source.id],
+                    "evidence": {"source_id": source.id, "source_ids": [source.id], "sentence_ids": ["s-inactive"]},
+                }
+            ],
+        }
+    ]
+    facade._load_existing_retrieval_chunks = lambda **_kwargs: []
+
+    withdrawal = facade.withdraw_source(
+        tenant="demo",
+        corpus_uuid="kb-1",
+        source_id=source.id,
+        user_input="withdraw_source",
+        user_id=11,
+    )
+    query_run = await facade.retrieve(
+        tenant="demo",
+        corpus_uuid="kb-1",
+        query="What is the status of London office?",
+    )
+
+    event = withdrawal["source_withdrawal_event"]
+    assert event["affected_claim_ids"] == ["c-inactive"]
+    assert query_run.metadata["answer_mode"] == "no_answer"
+    assert query_run.metadata["matched_claims"] == []
+    assert query_run.metadata["source_withdrawal_events"][0]["source_id"] == source.id
+    assert facade.list_sources("kb-1")[0].metadata["withdrawn"] is True
+
+
+@pytest.mark.anyio
+async def test_withdraw_source_keeps_other_source_evidence_active() -> None:
+    facade = _build_facade()
+    withdrawn_source = facade.create_source(
+        tenant="demo",
+        corpus_uuid="kb-1",
+        title="Withdrawn London source",
+        source_type="text",
+        raw_content="The London office is currently inactive.",
+        file_ref=None,
+        created_by=11,
+    )
+    active_source = facade.create_source(
+        tenant="demo",
+        corpus_uuid="kb-1",
+        title="Active London source",
+        source_type="text",
+        raw_content="The London office is currently active.",
+        file_ref=None,
+        created_by=11,
+    )
+    facade._load_existing_global_profiles = lambda **_kwargs: [
+        {
+            "profile_id": "global-profile:london-office",
+            "entity_name": "London office",
+            "entity_type": "location",
+            "canonical_key": "london office",
+            "claims": [
+                {
+                    "claim_id": "c-inactive",
+                    "subject": "London office",
+                    "predicate": "active",
+                    "object": "false",
+                    "status": "active",
+                    "time_mode": "current",
+                    "sentence_ids": ["s-inactive"],
+                    "source_ids": [withdrawn_source.id],
+                    "evidence": {"source_id": withdrawn_source.id, "source_ids": [withdrawn_source.id], "sentence_ids": ["s-inactive"]},
+                },
+                {
+                    "claim_id": "c-active",
+                    "subject": "London office",
+                    "predicate": "active",
+                    "object": "true",
+                    "status": "active",
+                    "time_mode": "current",
+                    "sentence_ids": ["s-active"],
+                    "source_ids": [active_source.id],
+                    "evidence": {"source_id": active_source.id, "source_ids": [active_source.id], "sentence_ids": ["s-active"]},
+                },
+            ],
+        }
+    ]
+    facade._load_existing_retrieval_chunks = lambda **_kwargs: []
+
+    facade.withdraw_source(
+        tenant="demo",
+        corpus_uuid="kb-1",
+        source_id=withdrawn_source.id,
+        user_input="withdraw old London source",
+        user_id=11,
+    )
+    query_run = await facade.retrieve(
+        tenant="demo",
+        corpus_uuid="kb-1",
+        query="What is the status of London office?",
+    )
+
+    assert query_run.metadata["answer_text"] == "The London office is currently active."
+    assert query_run.metadata["answer_mode"] == "direct"
+    assert query_run.metadata["cited_claim_ids"] == ["c-active"]
+    assert [item["claim_id"] for item in query_run.metadata["matched_claims"]] == ["c-active"]

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import logging
+from typing import Any
 from urllib.parse import quote
 
-from fastapi import APIRouter, BackgroundTasks, File, HTTPException, Response, UploadFile
+from fastapi import APIRouter, BackgroundTasks, File, HTTPException, Query, Response, UploadFile
 from fastapi.responses import RedirectResponse
 
 from apps.knowledge.api.schemas import (
@@ -15,6 +17,10 @@ from apps.knowledge.api.schemas import (
     IngestRunResponse,
     IndexBuildCreateRequest,
     IndexBuildResponse,
+    KnowledgeFeedbackRequest,
+    KnowledgeFeedbackResponse,
+    KnowledgeQualityReportResponse,
+    LineageResponse,
     MentionResponse,
     MetricsResponse,
     ParagraphResponse,
@@ -23,8 +29,11 @@ from apps.knowledge.api.schemas import (
     RetrievalRequest,
     SentenceInterpretationDetailResponse,
     SentenceResponse,
+    SourceContentResponse,
     SourceCreateTextRequest,
     SourceResponse,
+    SourceWithdrawalRequest,
+    SourceWithdrawalResponse,
 )
 from apps.knowledge.dependencies import CurrentKnowledgeUserDep, KnowledgeFacadeDep, KnowledgeTenantDep
 from apps.knowledge.domain.context_profile import ContextProfile
@@ -41,11 +50,78 @@ from apps.knowledge.mappers.knowledge_mapper import (
     build_source_response,
 )
 from apps.knowledge.router.knowledge_router import router as legacy_router
-from core.di import run_with_tenant_schema
+from core.di import run_async_with_tenant_schema, run_with_tenant_schema
 from shared.documents.text_extraction import extract_text_from_upload
 
 router = APIRouter()
 router.include_router(legacy_router)
+logger = logging.getLogger(__name__)
+
+
+async def process_ingest_run_and_start_index(
+    tenant_slug: str | None,
+    facade: Any,
+    run_id: str,
+    created_by: int | None,
+) -> None:
+    try:
+        completed = run_with_tenant_schema(tenant_slug, facade.process_ingest_run, run_id)
+        if completed.status not in {"completed", "partial_success"} or completed.completed_count <= 0:
+            return
+        build = facade.schedule_index_build(
+            tenant=completed.tenant,
+            corpus_uuid=completed.corpus_uuid,
+            index_profile_key="basic_chunk_v1",
+            created_by=created_by,
+        )
+        await run_async_with_tenant_schema(tenant_slug, facade.run_index_build, build.id)
+    except Exception:
+        logger.exception("Automatic index build after ingest failed", extra={"run_id": run_id})
+
+
+def _query_debug_payload(*, endpoint_called: str, query_text: str, response: dict[str, Any]) -> dict[str, Any]:
+    metadata = response.get("metadata") if isinstance(response.get("metadata"), dict) else {}
+    matched_chunks = response.get("matched_chunks") or []
+    matched_claims = response.get("matched_claims") or []
+    answer_text = str(response.get("answer_text") or "")
+    answer_mode = response.get("answer_mode") or "no_answer"
+    conflict_marker_included = (
+        bool(response.get("conflict_marker_included") or metadata.get("conflict_marker_included"))
+        or answer_mode == "conflict"
+        or any(bool(item.get("conflict_marker")) for item in matched_claims)
+    )
+    evidence = (
+        response.get("evidence_summary")
+        or metadata.get("evidence_summary")
+        or (metadata.get("query_debug") or {}).get("evidence")
+        or ((metadata.get("synthesis") or {}).get("synthesis_debug") or {}).get("evidence")
+        or []
+    )
+    explanation = response.get("explanation") or metadata.get("explanation") or (metadata.get("query_debug") or {}).get("explanation") or {}
+    payload = {
+        "endpoint_called": endpoint_called,
+        "query_text": query_text,
+        "query_profile": response.get("query_profile") or metadata.get("query_profile") or {},
+        "matched_chunks_count": len(matched_chunks),
+        "matched_claims_count": len(matched_claims),
+        "conflict_marker_included": conflict_marker_included,
+        "temporal_context_used": bool(response.get("temporal_context_used") or metadata.get("temporal_context_used")),
+        "synthesis_called": bool(metadata.get("synthesis_called") or response.get("answer_mode") is not None),
+        "answer_text": answer_text,
+        "answer_mode": answer_mode,
+        "cited_claim_ids": response.get("cited_claim_ids") or metadata.get("cited_claim_ids") or [],
+        "cited_sentence_ids": response.get("cited_sentence_ids") or metadata.get("cited_sentence_ids") or [],
+        "cited_source_ids": response.get("cited_source_ids") or metadata.get("cited_source_ids") or response.get("source_ids") or metadata.get("source_ids") or [],
+        "evidence": evidence,
+        "explanation": explanation,
+        "response_contains_answer_text": bool(answer_text),
+    }
+    if isinstance(metadata, dict):
+        metadata["query_debug"] = payload
+        response["metadata"] = metadata
+    response["query_debug"] = payload
+    logger.info("knowledge.query.debug", extra={"knowledge_query_debug": payload})
+    return payload
 
 
 def _retrieval_profile_from_payload(payload: RetrievalProfilePayload | None) -> RetrievalProfile | None:
@@ -84,6 +160,47 @@ def list_sources(
     if not facade.user_can_use(corpus_uuid, current_user.id, current_user):
         raise HTTPException(status_code=403, detail="No permission to access this corpus")
     return [build_source_response(item) for item in facade.list_sources(corpus_uuid)]
+
+
+@router.get("/knowledge/sources/{source_id}/content", response_model=SourceContentResponse)
+def get_source_content(
+    source_id: str,
+    tenant: KnowledgeTenantDep,
+    facade: KnowledgeFacadeDep,
+    current_user: CurrentKnowledgeUserDep,
+):
+    source = facade.get_source(source_id)
+    if source is None:
+        raise HTTPException(status_code=404, detail="Source not found")
+    if not facade.user_can_use(source.corpus_uuid, current_user.id, current_user):
+        raise HTTPException(status_code=403, detail="No permission to access this source")
+    content = facade.get_source_content(source_id)
+    if content is None:
+        raise HTTPException(status_code=404, detail="Source not found")
+    return content
+
+
+@router.get("/knowledge/sources/{source_id}/download")
+def download_source_content(
+    source_id: str,
+    tenant: KnowledgeTenantDep,
+    facade: KnowledgeFacadeDep,
+    current_user: CurrentKnowledgeUserDep,
+):
+    source = facade.get_source(source_id)
+    if source is None:
+        raise HTTPException(status_code=404, detail="Source not found")
+    if not facade.user_can_use(source.corpus_uuid, current_user.id, current_user):
+        raise HTTPException(status_code=403, detail="No permission to access this source")
+    download = facade.get_source_download(source_id)
+    if download is None:
+        raise HTTPException(status_code=404, detail="Source content not found")
+    filename = str(download.get("filename") or source.title or source.id)
+    return Response(
+        content=download.get("body") or b"",
+        media_type=str(download.get("content_type") or "application/octet-stream"),
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(filename)}"},
+    )
 
 
 @router.post("/knowledge/corpora/{corpus_uuid}/sources/text", response_model=SourceResponse)
@@ -153,7 +270,7 @@ def create_text_ingest_run(
         text=body.text,
         created_by=current_user.id,
     )
-    background_tasks.add_task(run_with_tenant_schema, tenant.slug or None, facade.process_ingest_run, run.id)
+    background_tasks.add_task(process_ingest_run_and_start_index, tenant.slug or None, facade, run.id, current_user.id)
     return build_ingest_run_response(run, items=facade.list_ingest_items(run.id), events=facade.list_ingest_events(run.id))
 
 
@@ -184,7 +301,7 @@ async def create_file_ingest_run(
         files=file_payloads,
         created_by=current_user.id,
     )
-    background_tasks.add_task(run_with_tenant_schema, tenant.slug or None, facade.process_ingest_run, run.id)
+    background_tasks.add_task(process_ingest_run_and_start_index, tenant.slug or None, facade, run.id, current_user.id)
     return build_ingest_run_response(run, items=facade.list_ingest_items(run.id), events=facade.list_ingest_events(run.id))
 
 
@@ -205,7 +322,7 @@ def create_url_ingest_run(
         urls=[item.model_dump() for item in body.items],
         created_by=current_user.id,
     )
-    background_tasks.add_task(run_with_tenant_schema, tenant.slug or None, facade.process_ingest_run, run.id)
+    background_tasks.add_task(process_ingest_run_and_start_index, tenant.slug or None, facade, run.id, current_user.id)
     return build_ingest_run_response(run, items=facade.list_ingest_items(run.id), events=facade.list_ingest_events(run.id))
 
 
@@ -243,13 +360,15 @@ def get_ingest_run_trace(
     tenant: KnowledgeTenantDep,
     facade: KnowledgeFacadeDep,
     current_user: CurrentKnowledgeUserDep,
+    log_level: str = Query(default="SUMMARY", pattern="^(SUMMARY|INSPECT|FULL_TRACE|summary|inspect|full_trace)$"),
+    debug: bool = Query(default=False),
 ):
     run = facade.get_ingest_run(run_id)
     if run is None:
         raise HTTPException(status_code=404, detail="Ingest run not found")
     if not facade.user_can_train(run.corpus_uuid, current_user.id, current_user):
         raise HTTPException(status_code=403, detail="No permission to view this ingest run")
-    trace = facade.get_ingest_run_trace(run_id)
+    trace = facade.get_ingest_run_trace(run_id, log_level=log_level, debug=debug)
     if trace is None:
         raise HTTPException(status_code=404, detail="Ingest run trace not found")
     return trace
@@ -260,8 +379,10 @@ def get_latest_ingest_run_trace(
     tenant: KnowledgeTenantDep,
     facade: KnowledgeFacadeDep,
     current_user: CurrentKnowledgeUserDep,
+    log_level: str = Query(default="SUMMARY", pattern="^(SUMMARY|INSPECT|FULL_TRACE|summary|inspect|full_trace)$"),
+    debug: bool = Query(default=False),
 ):
-    trace = facade.get_latest_ingest_run_trace()
+    trace = facade.get_latest_ingest_run_trace(log_level=log_level, debug=debug)
     if trace is None:
         raise HTTPException(status_code=404, detail="No ingest run trace found")
     run = facade.get_ingest_run(trace["run_id"])
@@ -443,7 +564,9 @@ async def retrieve(
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return build_query_run_response(run)
+    response = build_query_run_response(run)
+    _query_debug_payload(endpoint_called="/knowledge/retrieve", query_text=body.query, response=response)
+    return response
 
 
 @router.post("/knowledge/chat-context", response_model=ChatContextResponse)
@@ -466,7 +589,91 @@ async def build_chat_context(
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    _query_debug_payload(endpoint_called="/knowledge/chat-context", query_text=body.query, response=packet)
     return packet
+
+
+@router.post("/knowledge/corpora/{corpus_uuid}/feedback", response_model=KnowledgeFeedbackResponse)
+def apply_knowledge_feedback(
+    corpus_uuid: str,
+    body: KnowledgeFeedbackRequest,
+    tenant: KnowledgeTenantDep,
+    facade: KnowledgeFacadeDep,
+    current_user: CurrentKnowledgeUserDep,
+):
+    if not facade.user_can_train(corpus_uuid, current_user.id, current_user):
+        raise HTTPException(status_code=403, detail="No permission to correct this corpus")
+    try:
+        return facade.apply_knowledge_feedback(
+            tenant=tenant.slug or "",
+            corpus_uuid=corpus_uuid,
+            target_entity=body.target_entity,
+            claim_text=body.claim_text,
+            feedback_type=body.feedback_type,
+            optional_new_claim=body.optional_new_claim,
+            user_input=body.user_input,
+            user_id=current_user.id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/knowledge/corpora/{corpus_uuid}/sources/{source_id}/withdraw", response_model=SourceWithdrawalResponse)
+def withdraw_source(
+    corpus_uuid: str,
+    source_id: str,
+    body: SourceWithdrawalRequest,
+    tenant: KnowledgeTenantDep,
+    facade: KnowledgeFacadeDep,
+    current_user: CurrentKnowledgeUserDep,
+):
+    if not facade.user_can_train(corpus_uuid, current_user.id, current_user):
+        raise HTTPException(status_code=403, detail="No permission to withdraw sources from this corpus")
+    try:
+        return facade.withdraw_source(
+            tenant=tenant.slug or "",
+            corpus_uuid=corpus_uuid,
+            source_id=source_id,
+            user_input=body.user_input,
+            user_id=current_user.id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/knowledge/corpora/{corpus_uuid}/lineage/claims/{claim_id}", response_model=LineageResponse)
+def get_claim_lineage(
+    corpus_uuid: str,
+    claim_id: str,
+    facade: KnowledgeFacadeDep,
+    current_user: CurrentKnowledgeUserDep,
+):
+    if not facade.user_can_use(corpus_uuid, current_user.id, current_user):
+        raise HTTPException(status_code=403, detail="No permission to access this corpus")
+    return facade.get_lineage(corpus_uuid=corpus_uuid, claim_id=claim_id)
+
+
+@router.get("/knowledge/corpora/{corpus_uuid}/lineage/profiles/{profile_id}", response_model=LineageResponse)
+def get_profile_lineage(
+    corpus_uuid: str,
+    profile_id: str,
+    facade: KnowledgeFacadeDep,
+    current_user: CurrentKnowledgeUserDep,
+):
+    if not facade.user_can_use(corpus_uuid, current_user.id, current_user):
+        raise HTTPException(status_code=403, detail="No permission to access this corpus")
+    return facade.get_lineage(corpus_uuid=corpus_uuid, profile_id=profile_id)
+
+
+@router.get("/knowledge/corpora/{corpus_uuid}/quality-report", response_model=KnowledgeQualityReportResponse)
+def get_quality_report(
+    corpus_uuid: str,
+    facade: KnowledgeFacadeDep,
+    current_user: CurrentKnowledgeUserDep,
+):
+    if not facade.user_can_use(corpus_uuid, current_user.id, current_user):
+        raise HTTPException(status_code=403, detail="No permission to access this corpus")
+    return facade.get_quality_report(corpus_uuid=corpus_uuid)
 
 
 @router.get("/knowledge/metrics", response_model=MetricsResponse)

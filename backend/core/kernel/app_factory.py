@@ -15,6 +15,7 @@ from fastapi.responses import JSONResponse
 from slowapi.errors import RateLimitExceeded
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.requests import Request
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from core.di import get_login_service, get_service, get_tenant_repository, get_token_service
 from core.capabilities.auth.router.auth_router import router as auth_api_router
@@ -89,6 +90,38 @@ def _register_exception_handlers(app: FastAPI) -> None:
         if isinstance(exc.detail, dict):
             return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
         return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+
+    @app.exception_handler(StarletteHTTPException)
+    async def starlette_http_exception_handler(request: Request, exc: StarletteHTTPException):
+        if exc.status_code >= 500:
+            log_exception_event(
+                "core.http",
+                "request.starlette_http_exception",
+                exc,
+                path=str(request.url.path),
+                method=request.method,
+                status_code=exc.status_code,
+                tenant_slug=getattr(request.state, "tenant_slug", None),
+                tenant_id=getattr(request.state, "tenant_id", None),
+                user_id=getattr(getattr(request.state, "user", None), "id", None),
+            )
+        return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+
+    @app.exception_handler(Exception)
+    async def unhandled_exception_handler(request: Request, exc: Exception):
+        increment_metric("platform.request.unhandled_error.count", 1.0)
+        log_exception_event(
+            "core.http",
+            "request.unhandled_exception",
+            exc,
+            path=str(request.url.path),
+            method=request.method,
+            status_code=500,
+            tenant_slug=getattr(request.state, "tenant_slug", None),
+            tenant_id=getattr(request.state, "tenant_id", None),
+            user_id=getattr(getattr(request.state, "user", None), "id", None),
+        )
+        return JSONResponse(status_code=500, content={"detail": "Internal server error"})
 
 
 # Ez a függvény regisztrálja a(z) middlewares logikáját.

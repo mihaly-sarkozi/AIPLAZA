@@ -34,7 +34,7 @@ class LifecyclePlatformModule(AppModule):
         return (RouteRegistration(router=lifecycle_router, prefix="/api", tags=("platform-lifecycle",)),)
 
     def light_paths(self) -> tuple[str, ...]:
-        return ("/api/health", "/api/health/live", "/api/health/ready")
+        return ("/api/health", "/api/health/live", "/api/health/ready", "/api/metrics")
 
     def startup_hooks(self) -> tuple:
         async def _startup(app):

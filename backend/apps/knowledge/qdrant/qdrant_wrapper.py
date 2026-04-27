@@ -225,6 +225,12 @@ class QdrantClientWrapper:
             ("point_type", qm.PayloadSchemaType.KEYWORD),
             ("kb_uuid", qm.PayloadSchemaType.KEYWORD),
             ("kb_id", qm.PayloadSchemaType.INTEGER),
+            ("profile_id", qm.PayloadSchemaType.KEYWORD),
+            ("entity_name", qm.PayloadSchemaType.KEYWORD),
+            ("entity_type", qm.PayloadSchemaType.KEYWORD),
+            ("claim_types", qm.PayloadSchemaType.KEYWORD),
+            ("states", qm.PayloadSchemaType.KEYWORD),
+            ("time_modes", qm.PayloadSchemaType.KEYWORD),
             ("source_point_id", qm.PayloadSchemaType.KEYWORD),
             ("source_sentence_id", qm.PayloadSchemaType.INTEGER),
             ("subject_entity_id", qm.PayloadSchemaType.INTEGER),
@@ -370,6 +376,10 @@ class QdrantClientWrapper:
     async def upsert_structural_chunk_points(self, collection: str, rows: list[dict[str, Any]]) -> None:
         """Structural chunk pointok upsertje."""
         await self._upsert_typed_points(collection, "structural_chunk", rows)
+
+    async def upsert_retrieval_chunk_points(self, collection: str, rows: list[dict[str, Any]]) -> None:
+        """RetrievalChunk pointok upsertje."""
+        await self._upsert_typed_points(collection, "retrieval_chunk", rows)
 
     # Ez a metódus felépíti a(z) filter logikáját.
     def _build_filter(self, payload_filter: dict[str, Any] | None = None) -> qm.Filter | None:

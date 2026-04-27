@@ -1,0 +1,3354 @@
+=== TEST CASE: state basic ===
+
+--- TRAIN ---
+The London office is currently inactive.
+The London office was inactive in 2024.
+
+--- QUERY ---
+What is the status of London office?
+
+--- EXPECT ---
+{
+  "answer_contains": [
+    "The London office is currently inactive. Historically, it was inactive in 2024."
+  ],
+  "answer_mode": "state_with_history",
+  "answer_not_contains": [],
+  "evidence_required": true,
+  "matched_chunks_min": 1,
+  "matched_claims_min": 2,
+  "retrieval_chunk_contains": [
+    "Current facts:",
+    "Historical facts:"
+  ]
+}
+
+RESULT: PASS
+Checks:
+[PASS] answer contains "The London office is currently inactive. Historically, it was inactive in 2024."
+[PASS] answer_mode is state_with_history
+[PASS] matched_chunks_count >= 1
+[PASS] matched_claims_count >= 2
+[PASS] retrieval chunk contains "Current facts:"
+[PASS] retrieval chunk contains "Historical facts:"
+[PASS] cited_claim_ids not empty
+[PASS] cited_sentence_ids not empty
+[PASS] cited_source_ids not empty
+[PASS] explanation claims not empty
+[PASS] explanation sentences not empty
+[PASS] explanation sources not empty
+
+--- TRAIN RESPONSE SUMMARY ---
+{
+  "claim_count": 2,
+  "global_profile_count": 1,
+  "retrieval_chunk_count": 1,
+  "run_id": "8eabfd5a-e204-4d8d-bb7e-c9a4206eb6bb",
+  "sentence_count": 2,
+  "source_id": "9914a939-a673-42a7-b945-658e8ee4e8f1"
+}
+
+--- ACTIONS ---
+{}
+
+--- ANSWER ---
+The London office is currently inactive. Historically, it was inactive in 2024.
+
+--- DEBUG ---
+matched_chunks_count: 1
+matched_claims_count: 2
+conflict_marker_included: false
+temporal_context_used: true
+answer_mode: state_with_history
+synthesis_confidence: 0.8
+
+--- QUERY PROFILE ---
+{
+  "builder_version": "query_resolver_v0",
+  "confidence": 0.85,
+  "detected_entities": [
+    {
+      "entity_type": "location",
+      "source": "query_pattern",
+      "text": "London office"
+    }
+  ],
+  "entity": "London office",
+  "entity_type": "location",
+  "expected_answer_type": null,
+  "intent": "state",
+  "keywords": [
+    "status",
+    "london",
+    "office",
+    "state"
+  ],
+  "reasons": [
+    "intent:state_marker",
+    "time:no_forced_filter_status_question",
+    "entity_type:location_qualifier",
+    "entity:explicit_query_entity"
+  ],
+  "relation_object": null,
+  "relation_predicate": null,
+  "rule_action": null,
+  "space_filter": "London office",
+  "state": null,
+  "time_filter": null
+}
+
+--- MATCHED CHUNKS ---
+[
+  {
+    "conflict_marker": false,
+    "entity_name": "London office",
+    "entity_type": "location",
+    "evidence_ids": [
+      "fc027278-b01d-4594-aa7a-92c461dd4e4a",
+      "67c95352-02d2-498b-a0e4-f1cc3a9f7cdd",
+      "d69ec626-fcd6-404a-8da7-190ab94eb448",
+      "c47cda5f-dec1-4b1f-9f6f-ba5feb54bbca"
+    ],
+    "matched_claim_ids": [
+      "fc027278-b01d-4594-aa7a-92c461dd4e4a",
+      "d69ec626-fcd6-404a-8da7-190ab94eb448"
+    ],
+    "profile_id": "global-profile:989c1a7e-3bd9-412e-92b4-c85824049af1",
+    "retrieval_chunk_text": "London office (location)\n\nCurrent facts:\n- currently inactive\n\nHistorical facts:\n- inactive in 2024",
+    "retrieval_confidence": 0.775,
+    "source_ids": [
+      "9914a939-a673-42a7-b945-658e8ee4e8f1"
+    ],
+    "temporal_context_used": true
+  }
+]
+
+--- MATCHED CLAIMS ---
+[
+  {
+    "canonical_claim_text": "currently inactive",
+    "claim_group": "",
+    "claim_id": "fc027278-b01d-4594-aa7a-92c461dd4e4a",
+    "claim_semantic_type": "state",
+    "claim_text": "currently inactive",
+    "conflict_marker": false,
+    "display_claim_text": "currently inactive",
+    "entity_name": "London office",
+    "fact_bucket": "current",
+    "language": "",
+    "object": "false",
+    "predicate": "active",
+    "profile_id": "global-profile:989c1a7e-3bd9-412e-92b4-c85824049af1",
+    "raw_claim_text": "London office active false",
+    "sentence_ids": [
+      "67c95352-02d2-498b-a0e4-f1cc3a9f7cdd"
+    ],
+    "sentence_text": "The London office was inactive in 2024.",
+    "sentence_texts": [
+      "The London office was inactive in 2024."
+    ],
+    "source_ids": [
+      "9914a939-a673-42a7-b945-658e8ee4e8f1"
+    ],
+    "state": "inactive",
+    "time_filter": "current",
+    "time_values": [
+      "currently"
+    ]
+  },
+  {
+    "canonical_claim_text": "inactive in 2024",
+    "claim_group": "",
+    "claim_id": "d69ec626-fcd6-404a-8da7-190ab94eb448",
+    "claim_semantic_type": "state",
+    "claim_text": "inactive in 2024",
+    "conflict_marker": false,
+    "display_claim_text": "inactive in 2024",
+    "entity_name": "London office",
+    "fact_bucket": "historical",
+    "language": "",
+    "object": "false",
+    "predicate": "active",
+    "profile_id": "global-profile:989c1a7e-3bd9-412e-92b4-c85824049af1",
+    "raw_claim_text": "London office active false",
+    "sentence_ids": [
+      "c47cda5f-dec1-4b1f-9f6f-ba5feb54bbca"
+    ],
+    "sentence_text": "The London office is currently inactive.",
+    "sentence_texts": [
+      "The London office is currently inactive."
+    ],
+    "source_ids": [
+      "9914a939-a673-42a7-b945-658e8ee4e8f1"
+    ],
+    "state": "inactive",
+    "time_filter": "historical",
+    "time_values": [
+      "2024"
+    ]
+  }
+]
+
+--- EVIDENCE ---
+[
+  {
+    "claim_id": "fc027278-b01d-4594-aa7a-92c461dd4e4a",
+    "sentence_id": "67c95352-02d2-498b-a0e4-f1cc3a9f7cdd",
+    "source_id": "9914a939-a673-42a7-b945-658e8ee4e8f1"
+  },
+  {
+    "claim_id": "d69ec626-fcd6-404a-8da7-190ab94eb448",
+    "sentence_id": "c47cda5f-dec1-4b1f-9f6f-ba5feb54bbca",
+    "source_id": "9914a939-a673-42a7-b945-658e8ee4e8f1"
+  }
+]
+
+--- EXPLANATION ---
+{
+  "builder_version": "explanation_builder_v0",
+  "claims": [
+    {
+      "claim_id": "fc027278-b01d-4594-aa7a-92c461dd4e4a",
+      "claim_text": "currently inactive",
+      "sentence_ids": [
+        "67c95352-02d2-498b-a0e4-f1cc3a9f7cdd"
+      ],
+      "source_ids": [
+        "9914a939-a673-42a7-b945-658e8ee4e8f1"
+      ]
+    },
+    {
+      "claim_id": "d69ec626-fcd6-404a-8da7-190ab94eb448",
+      "claim_text": "inactive in 2024",
+      "sentence_ids": [
+        "c47cda5f-dec1-4b1f-9f6f-ba5feb54bbca"
+      ],
+      "source_ids": [
+        "9914a939-a673-42a7-b945-658e8ee4e8f1"
+      ]
+    }
+  ],
+  "sentences": [
+    {
+      "claim_ids": [
+        "fc027278-b01d-4594-aa7a-92c461dd4e4a"
+      ],
+      "sentence_id": "67c95352-02d2-498b-a0e4-f1cc3a9f7cdd",
+      "sentence_text": "The London office was inactive in 2024.",
+      "source_ids": [
+        "9914a939-a673-42a7-b945-658e8ee4e8f1"
+      ]
+    },
+    {
+      "claim_ids": [
+        "d69ec626-fcd6-404a-8da7-190ab94eb448"
+      ],
+      "sentence_id": "c47cda5f-dec1-4b1f-9f6f-ba5feb54bbca",
+      "sentence_text": "The London office is currently inactive.",
+      "source_ids": [
+        "9914a939-a673-42a7-b945-658e8ee4e8f1"
+      ]
+    }
+  ],
+  "sources": [
+    {
+      "claim_ids": [
+        "fc027278-b01d-4594-aa7a-92c461dd4e4a",
+        "d69ec626-fcd6-404a-8da7-190ab94eb448"
+      ],
+      "sentence_ids": [
+        "67c95352-02d2-498b-a0e4-f1cc3a9f7cdd",
+        "c47cda5f-dec1-4b1f-9f6f-ba5feb54bbca"
+      ],
+      "source_id": "9914a939-a673-42a7-b945-658e8ee4e8f1"
+    }
+  ]
+}
+
+--- EVIDENCE DISPLAY ---
+- Claim: currently inactive
+- Claim: inactive in 2024
+- Sentence: "The London office was inactive in 2024."
+- Sentence: "The London office is currently inactive."
+- Source: 9914a939-a673-42a7-b945-658e8ee4e8f1
+
+--- RETRIEVAL CHUNK ---
+London office (location)
+
+Current facts:
+- currently inactive
+
+Historical facts:
+- inactive in 2024
+
+=== TEST CASE: state conflict ===
+
+--- TRAIN ---
+The London office is currently active.
+The London office is currently inactive.
+The London office was inactive in 2024.
+
+--- QUERY ---
+What is the status of London office?
+
+--- EXPECT ---
+{
+  "answer_contains": [
+    "conflicting current status"
+  ],
+  "answer_mode": "conflict",
+  "answer_not_contains": [],
+  "evidence_required": true,
+  "matched_chunks_min": 1,
+  "matched_claims_min": 3,
+  "retrieval_chunk_contains": [
+    "Conflicts:"
+  ]
+}
+
+RESULT: PASS
+Checks:
+[PASS] answer contains "conflicting current status"
+[PASS] answer_mode is conflict
+[PASS] matched_chunks_count >= 1
+[PASS] matched_claims_count >= 3
+[PASS] retrieval chunk contains "Conflicts:"
+[PASS] cited_claim_ids not empty
+[PASS] cited_sentence_ids not empty
+[PASS] cited_source_ids not empty
+[PASS] explanation claims not empty
+[PASS] explanation sentences not empty
+[PASS] explanation sources not empty
+
+--- TRAIN RESPONSE SUMMARY ---
+{
+  "claim_count": 3,
+  "global_profile_count": 1,
+  "retrieval_chunk_count": 1,
+  "run_id": "7e52ec28-4a52-4531-a558-974e753d990f",
+  "sentence_count": 3,
+  "source_id": "8de6eccf-0077-4e86-8e5f-51b58efbe12f"
+}
+
+--- ACTIONS ---
+{}
+
+--- ANSWER ---
+The London office has conflicting current status information: one source says it is active, another says it is inactive. Historically, it was inactive in 2024.
+
+--- DEBUG ---
+matched_chunks_count: 1
+matched_claims_count: 3
+conflict_marker_included: true
+temporal_context_used: true
+answer_mode: conflict
+synthesis_confidence: 0.77
+
+--- QUERY PROFILE ---
+{
+  "builder_version": "query_resolver_v0",
+  "confidence": 0.85,
+  "detected_entities": [
+    {
+      "entity_type": "location",
+      "source": "query_pattern",
+      "text": "London office"
+    }
+  ],
+  "entity": "London office",
+  "entity_type": "location",
+  "expected_answer_type": null,
+  "intent": "state",
+  "keywords": [
+    "status",
+    "london",
+    "office",
+    "state"
+  ],
+  "reasons": [
+    "intent:state_marker",
+    "time:no_forced_filter_status_question",
+    "entity_type:location_qualifier",
+    "entity:explicit_query_entity"
+  ],
+  "relation_object": null,
+  "relation_predicate": null,
+  "rule_action": null,
+  "space_filter": "London office",
+  "state": null,
+  "time_filter": null
+}
+
+--- MATCHED CHUNKS ---
+[
+  {
+    "conflict_marker": true,
+    "entity_name": "London office",
+    "entity_type": "location",
+    "evidence_ids": [
+      "1ad3ea77-c674-471e-b972-b1d124762e69",
+      "314ebe46-630e-4c98-ab77-0ab666145971",
+      "ba468f3c-f4e7-4dfa-b50d-af3716d7a56f",
+      "76b032ff-886a-462d-a1e7-e4c71d596088",
+      "82a77e7e-3a22-4b31-b3e3-23b0cec5dc00",
+      "8409bbe6-92ce-4761-9afc-aca20870f0b6"
+    ],
+    "matched_claim_ids": [
+      "1ad3ea77-c674-471e-b972-b1d124762e69",
+      "ba468f3c-f4e7-4dfa-b50d-af3716d7a56f",
+      "82a77e7e-3a22-4b31-b3e3-23b0cec5dc00"
+    ],
+    "profile_id": "global-profile:bf02c099-4034-4429-af6f-df58a09dcd94",
+    "retrieval_chunk_text": "London office (location)\n\nCurrent facts:\n- currently active\n- currently inactive\n\nHistorical facts:\n- inactive in 2024\n\nConflicts:\n- currently active\n- currently inactive",
+    "retrieval_confidence": 0.825,
+    "source_ids": [
+      "8de6eccf-0077-4e86-8e5f-51b58efbe12f"
+    ],
+    "temporal_context_used": true
+  }
+]
+
+--- MATCHED CLAIMS ---
+[
+  {
+    "canonical_claim_text": "currently active",
+    "claim_group": "",
+    "claim_id": "1ad3ea77-c674-471e-b972-b1d124762e69",
+    "claim_semantic_type": "state",
+    "claim_text": "currently active",
+    "conflict_marker": false,
+    "display_claim_text": "currently active",
+    "entity_name": "London office",
+    "fact_bucket": "current",
+    "language": "",
+    "object": "true",
+    "predicate": "active",
+    "profile_id": "global-profile:bf02c099-4034-4429-af6f-df58a09dcd94",
+    "raw_claim_text": "London office active true",
+    "sentence_ids": [
+      "314ebe46-630e-4c98-ab77-0ab666145971"
+    ],
+    "sentence_text": "The London office is currently active.",
+    "sentence_texts": [
+      "The London office is currently active."
+    ],
+    "source_ids": [
+      "8de6eccf-0077-4e86-8e5f-51b58efbe12f"
+    ],
+    "state": "active",
+    "time_filter": "current",
+    "time_values": [
+      "currently"
+    ]
+  },
+  {
+    "canonical_claim_text": "currently inactive",
+    "claim_group": "",
+    "claim_id": "ba468f3c-f4e7-4dfa-b50d-af3716d7a56f",
+    "claim_semantic_type": "state",
+    "claim_text": "currently inactive",
+    "conflict_marker": false,
+    "display_claim_text": "currently inactive",
+    "entity_name": "London office",
+    "fact_bucket": "current",
+    "language": "",
+    "object": "false",
+    "predicate": "active",
+    "profile_id": "global-profile:bf02c099-4034-4429-af6f-df58a09dcd94",
+    "raw_claim_text": "London office active false",
+    "sentence_ids": [
+      "76b032ff-886a-462d-a1e7-e4c71d596088"
+    ],
+    "sentence_text": "The London office was inactive in 2024.",
+    "sentence_texts": [
+      "The London office was inactive in 2024."
+    ],
+    "source_ids": [
+      "8de6eccf-0077-4e86-8e5f-51b58efbe12f"
+    ],
+    "state": "inactive",
+    "time_filter": "current",
+    "time_values": [
+      "currently"
+    ]
+  },
+  {
+    "canonical_claim_text": "inactive in 2024",
+    "claim_group": "",
+    "claim_id": "82a77e7e-3a22-4b31-b3e3-23b0cec5dc00",
+    "claim_semantic_type": "state",
+    "claim_text": "inactive in 2024",
+    "conflict_marker": false,
+    "display_claim_text": "inactive in 2024",
+    "entity_name": "London office",
+    "fact_bucket": "historical",
+    "language": "",
+    "object": "false",
+    "predicate": "active",
+    "profile_id": "global-profile:bf02c099-4034-4429-af6f-df58a09dcd94",
+    "raw_claim_text": "London office active false",
+    "sentence_ids": [
+      "8409bbe6-92ce-4761-9afc-aca20870f0b6"
+    ],
+    "sentence_text": "The London office is currently inactive.",
+    "sentence_texts": [
+      "The London office is currently inactive."
+    ],
+    "source_ids": [
+      "8de6eccf-0077-4e86-8e5f-51b58efbe12f"
+    ],
+    "state": "inactive",
+    "time_filter": "historical",
+    "time_values": [
+      "2024"
+    ]
+  }
+]
+
+--- EVIDENCE ---
+[
+  {
+    "claim_id": "1ad3ea77-c674-471e-b972-b1d124762e69",
+    "sentence_id": "314ebe46-630e-4c98-ab77-0ab666145971",
+    "source_id": "8de6eccf-0077-4e86-8e5f-51b58efbe12f"
+  },
+  {
+    "claim_id": "ba468f3c-f4e7-4dfa-b50d-af3716d7a56f",
+    "sentence_id": "76b032ff-886a-462d-a1e7-e4c71d596088",
+    "source_id": "8de6eccf-0077-4e86-8e5f-51b58efbe12f"
+  },
+  {
+    "claim_id": "82a77e7e-3a22-4b31-b3e3-23b0cec5dc00",
+    "sentence_id": "8409bbe6-92ce-4761-9afc-aca20870f0b6",
+    "source_id": "8de6eccf-0077-4e86-8e5f-51b58efbe12f"
+  }
+]
+
+--- EXPLANATION ---
+{
+  "builder_version": "explanation_builder_v0",
+  "claims": [
+    {
+      "claim_id": "1ad3ea77-c674-471e-b972-b1d124762e69",
+      "claim_text": "currently active",
+      "sentence_ids": [
+        "314ebe46-630e-4c98-ab77-0ab666145971"
+      ],
+      "source_ids": [
+        "8de6eccf-0077-4e86-8e5f-51b58efbe12f"
+      ]
+    },
+    {
+      "claim_id": "ba468f3c-f4e7-4dfa-b50d-af3716d7a56f",
+      "claim_text": "currently inactive",
+      "sentence_ids": [
+        "76b032ff-886a-462d-a1e7-e4c71d596088"
+      ],
+      "source_ids": [
+        "8de6eccf-0077-4e86-8e5f-51b58efbe12f"
+      ]
+    },
+    {
+      "claim_id": "82a77e7e-3a22-4b31-b3e3-23b0cec5dc00",
+      "claim_text": "inactive in 2024",
+      "sentence_ids": [
+        "8409bbe6-92ce-4761-9afc-aca20870f0b6"
+      ],
+      "source_ids": [
+        "8de6eccf-0077-4e86-8e5f-51b58efbe12f"
+      ]
+    }
+  ],
+  "sentences": [
+    {
+      "claim_ids": [
+        "1ad3ea77-c674-471e-b972-b1d124762e69"
+      ],
+      "sentence_id": "314ebe46-630e-4c98-ab77-0ab666145971",
+      "sentence_text": "The London office is currently active.",
+      "source_ids": [
+        "8de6eccf-0077-4e86-8e5f-51b58efbe12f"
+      ]
+    },
+    {
+      "claim_ids": [
+        "ba468f3c-f4e7-4dfa-b50d-af3716d7a56f"
+      ],
+      "sentence_id": "76b032ff-886a-462d-a1e7-e4c71d596088",
+      "sentence_text": "The London office was inactive in 2024.",
+      "source_ids": [
+        "8de6eccf-0077-4e86-8e5f-51b58efbe12f"
+      ]
+    },
+    {
+      "claim_ids": [
+        "82a77e7e-3a22-4b31-b3e3-23b0cec5dc00"
+      ],
+      "sentence_id": "8409bbe6-92ce-4761-9afc-aca20870f0b6",
+      "sentence_text": "The London office is currently inactive.",
+      "source_ids": [
+        "8de6eccf-0077-4e86-8e5f-51b58efbe12f"
+      ]
+    }
+  ],
+  "sources": [
+    {
+      "claim_ids": [
+        "1ad3ea77-c674-471e-b972-b1d124762e69",
+        "ba468f3c-f4e7-4dfa-b50d-af3716d7a56f",
+        "82a77e7e-3a22-4b31-b3e3-23b0cec5dc00"
+      ],
+      "sentence_ids": [
+        "314ebe46-630e-4c98-ab77-0ab666145971",
+        "76b032ff-886a-462d-a1e7-e4c71d596088",
+        "8409bbe6-92ce-4761-9afc-aca20870f0b6"
+      ],
+      "source_id": "8de6eccf-0077-4e86-8e5f-51b58efbe12f"
+    }
+  ]
+}
+
+--- EVIDENCE DISPLAY ---
+- Claim: currently active
+- Claim: currently inactive
+- Claim: inactive in 2024
+- Sentence: "The London office is currently active."
+- Sentence: "The London office was inactive in 2024."
+- Sentence: "The London office is currently inactive."
+- Source: 8de6eccf-0077-4e86-8e5f-51b58efbe12f
+
+--- RETRIEVAL CHUNK ---
+London office (location)
+
+Current facts:
+- currently active
+- currently inactive
+
+Historical facts:
+- inactive in 2024
+
+Conflicts:
+- currently active
+- currently inactive
+
+=== TEST CASE: relation direct ===
+
+--- TRAIN ---
+The support service uses Freshdesk for customer tickets.
+
+--- QUERY ---
+What does the support service use?
+
+--- EXPECT ---
+{
+  "answer_contains": [
+    "The support service uses Freshdesk for customer tickets."
+  ],
+  "answer_mode": "direct",
+  "answer_not_contains": [],
+  "evidence_required": true,
+  "matched_chunks_min": 1,
+  "matched_claims_min": 1,
+  "retrieval_chunk_contains": [
+    "Relation facts:",
+    "uses Freshdesk for customer tickets"
+  ]
+}
+
+RESULT: PASS
+Checks:
+[PASS] answer contains "The support service uses Freshdesk for customer tickets."
+[PASS] answer_mode is direct
+[PASS] matched_chunks_count >= 1
+[PASS] matched_claims_count >= 1
+[PASS] retrieval chunk contains "Relation facts:"
+[PASS] retrieval chunk contains "uses Freshdesk for customer tickets"
+[PASS] cited_claim_ids not empty
+[PASS] cited_sentence_ids not empty
+[PASS] cited_source_ids not empty
+[PASS] explanation claims not empty
+[PASS] explanation sentences not empty
+[PASS] explanation sources not empty
+
+--- TRAIN RESPONSE SUMMARY ---
+{
+  "claim_count": 1,
+  "global_profile_count": 1,
+  "retrieval_chunk_count": 1,
+  "run_id": "d222835f-8e13-4255-bafc-ed501b5ff3f4",
+  "sentence_count": 1,
+  "source_id": "07f140f7-f08b-425f-924a-f81ef5a339f0"
+}
+
+--- ACTIONS ---
+{}
+
+--- ANSWER ---
+The support service uses Freshdesk for customer tickets.
+
+--- DEBUG ---
+matched_chunks_count: 1
+matched_claims_count: 1
+conflict_marker_included: false
+temporal_context_used: false
+answer_mode: direct
+synthesis_confidence: 0.8
+
+--- QUERY PROFILE ---
+{
+  "builder_version": "query_resolver_v0",
+  "confidence": 0.85,
+  "detected_entities": [
+    {
+      "entity_type": "system_component",
+      "source": "query_pattern",
+      "text": "support service"
+    }
+  ],
+  "entity": "support service",
+  "entity_type": "system_component",
+  "expected_answer_type": null,
+  "intent": "relation",
+  "keywords": [
+    "support",
+    "service",
+    "use",
+    "relation"
+  ],
+  "reasons": [
+    "intent:relation_marker",
+    "relation_predicate:uses",
+    "time:no_forced_filter",
+    "entity_type:technical_component_keyword",
+    "entity:explicit_query_entity"
+  ],
+  "relation_object": null,
+  "relation_predicate": "uses",
+  "rule_action": null,
+  "space_filter": null,
+  "state": null,
+  "time_filter": null
+}
+
+--- MATCHED CHUNKS ---
+[
+  {
+    "conflict_marker": false,
+    "entity_name": "support service",
+    "entity_type": "software",
+    "evidence_ids": [
+      "8c929f3e-06e0-4dbb-bda1-638e489af0dc",
+      "45c3964b-4797-4608-9c5c-d28380d97fb0"
+    ],
+    "matched_claim_ids": [
+      "8c929f3e-06e0-4dbb-bda1-638e489af0dc"
+    ],
+    "profile_id": "global-profile:d4e618a5-d2c0-4ee9-b07e-7495fa9aa43b",
+    "retrieval_chunk_text": "support service (software)\n\nRelation facts:\n- uses Freshdesk for customer tickets",
+    "retrieval_confidence": 0.85,
+    "source_ids": [
+      "07f140f7-f08b-425f-924a-f81ef5a339f0"
+    ],
+    "temporal_context_used": false
+  }
+]
+
+--- MATCHED CLAIMS ---
+[
+  {
+    "canonical_claim_text": "support service uses Freshdesk for customer tickets",
+    "claim_group": "descriptor",
+    "claim_id": "8c929f3e-06e0-4dbb-bda1-638e489af0dc",
+    "claim_semantic_type": "relation",
+    "claim_text": "support service uses Freshdesk for customer tickets",
+    "conflict_marker": false,
+    "display_claim_text": "support service uses Freshdesk for customer tickets",
+    "entity_name": "support service",
+    "fact_bucket": "relations",
+    "language": "",
+    "object": "Freshdesk for customer tickets",
+    "predicate": "uses",
+    "profile_id": "global-profile:d4e618a5-d2c0-4ee9-b07e-7495fa9aa43b",
+    "raw_claim_text": "support service uses Freshdesk for customer tickets",
+    "sentence_ids": [
+      "45c3964b-4797-4608-9c5c-d28380d97fb0"
+    ],
+    "sentence_text": "The support service uses Freshdesk for customer tickets.",
+    "sentence_texts": [
+      "The support service uses Freshdesk for customer tickets."
+    ],
+    "source_ids": [
+      "07f140f7-f08b-425f-924a-f81ef5a339f0"
+    ],
+    "state": null,
+    "time_filter": "current",
+    "time_values": []
+  }
+]
+
+--- EVIDENCE ---
+[
+  {
+    "claim_id": "8c929f3e-06e0-4dbb-bda1-638e489af0dc",
+    "sentence_id": "45c3964b-4797-4608-9c5c-d28380d97fb0",
+    "source_id": "07f140f7-f08b-425f-924a-f81ef5a339f0"
+  }
+]
+
+--- EXPLANATION ---
+{
+  "builder_version": "explanation_builder_v0",
+  "claims": [
+    {
+      "claim_id": "8c929f3e-06e0-4dbb-bda1-638e489af0dc",
+      "claim_text": "support service uses Freshdesk for customer tickets",
+      "sentence_ids": [
+        "45c3964b-4797-4608-9c5c-d28380d97fb0"
+      ],
+      "source_ids": [
+        "07f140f7-f08b-425f-924a-f81ef5a339f0"
+      ]
+    }
+  ],
+  "sentences": [
+    {
+      "claim_ids": [
+        "8c929f3e-06e0-4dbb-bda1-638e489af0dc"
+      ],
+      "sentence_id": "45c3964b-4797-4608-9c5c-d28380d97fb0",
+      "sentence_text": "The support service uses Freshdesk for customer tickets.",
+      "source_ids": [
+        "07f140f7-f08b-425f-924a-f81ef5a339f0"
+      ]
+    }
+  ],
+  "sources": [
+    {
+      "claim_ids": [
+        "8c929f3e-06e0-4dbb-bda1-638e489af0dc"
+      ],
+      "sentence_ids": [
+        "45c3964b-4797-4608-9c5c-d28380d97fb0"
+      ],
+      "source_id": "07f140f7-f08b-425f-924a-f81ef5a339f0"
+    }
+  ]
+}
+
+--- EVIDENCE DISPLAY ---
+- Claim: support service uses Freshdesk for customer tickets
+- Sentence: "The support service uses Freshdesk for customer tickets."
+- Source: 07f140f7-f08b-425f-924a-f81ef5a339f0
+
+--- RETRIEVAL CHUNK ---
+support service (software)
+
+Relation facts:
+- uses Freshdesk for customer tickets
+
+=== TEST CASE: relation reverse ===
+
+--- TRAIN ---
+The support service uses Freshdesk for customer tickets.
+
+--- QUERY ---
+Which systems use Freshdesk?
+
+--- EXPECT ---
+{
+  "answer_contains": [
+    "The support service uses Freshdesk for customer tickets."
+  ],
+  "answer_mode": "direct",
+  "answer_not_contains": [],
+  "evidence_required": true,
+  "matched_chunks_min": 1,
+  "matched_claims_min": 1,
+  "retrieval_chunk_contains": [
+    "Relation facts:",
+    "uses Freshdesk for customer tickets"
+  ]
+}
+
+RESULT: PASS
+Checks:
+[PASS] answer contains "The support service uses Freshdesk for customer tickets."
+[PASS] answer_mode is direct
+[PASS] matched_chunks_count >= 1
+[PASS] matched_claims_count >= 1
+[PASS] retrieval chunk contains "Relation facts:"
+[PASS] retrieval chunk contains "uses Freshdesk for customer tickets"
+[PASS] cited_claim_ids not empty
+[PASS] cited_sentence_ids not empty
+[PASS] cited_source_ids not empty
+[PASS] explanation claims not empty
+[PASS] explanation sentences not empty
+[PASS] explanation sources not empty
+
+--- TRAIN RESPONSE SUMMARY ---
+{
+  "claim_count": 1,
+  "global_profile_count": 1,
+  "retrieval_chunk_count": 1,
+  "run_id": "128c4393-70e0-4293-aeee-63edffd190fb",
+  "sentence_count": 1,
+  "source_id": "ebb2e068-04dd-45d8-8f87-61b8f4f2cdda"
+}
+
+--- ACTIONS ---
+{}
+
+--- ANSWER ---
+The support service uses Freshdesk for customer tickets.
+
+--- DEBUG ---
+matched_chunks_count: 1
+matched_claims_count: 1
+conflict_marker_included: false
+temporal_context_used: false
+answer_mode: direct
+synthesis_confidence: 0.8
+
+--- QUERY PROFILE ---
+{
+  "builder_version": "query_resolver_v0",
+  "confidence": 0.75,
+  "detected_entities": [
+    {
+      "entity_type": "relation_object",
+      "source": "query_relation_object_pattern",
+      "text": "Freshdesk"
+    }
+  ],
+  "entity": null,
+  "entity_type": "system_component",
+  "expected_answer_type": null,
+  "intent": "relation",
+  "keywords": [
+    "systems",
+    "use",
+    "freshdesk",
+    "relation"
+  ],
+  "reasons": [
+    "intent:relation_marker",
+    "relation_predicate:uses",
+    "relation_object:explicit_query_object",
+    "time:no_forced_filter",
+    "entity_type:technical_component_keyword"
+  ],
+  "relation_object": "Freshdesk",
+  "relation_predicate": "uses",
+  "rule_action": null,
+  "space_filter": null,
+  "state": null,
+  "time_filter": null
+}
+
+--- MATCHED CHUNKS ---
+[
+  {
+    "conflict_marker": false,
+    "entity_name": "support service",
+    "entity_type": "software",
+    "evidence_ids": [
+      "d5fcb256-36be-45e7-a626-29fd6de52792",
+      "4e551b25-cde3-4361-a280-2cd6ce8b5e1b"
+    ],
+    "matched_claim_ids": [
+      "d5fcb256-36be-45e7-a626-29fd6de52792"
+    ],
+    "profile_id": "global-profile:b1603d49-3d3a-486b-8ecc-d311e74f3cff",
+    "retrieval_chunk_text": "support service (software)\n\nRelation facts:\n- uses Freshdesk for customer tickets",
+    "retrieval_confidence": 0.7875,
+    "source_ids": [
+      "ebb2e068-04dd-45d8-8f87-61b8f4f2cdda"
+    ],
+    "temporal_context_used": false
+  }
+]
+
+--- MATCHED CLAIMS ---
+[
+  {
+    "canonical_claim_text": "support service uses Freshdesk for customer tickets",
+    "claim_group": "descriptor",
+    "claim_id": "d5fcb256-36be-45e7-a626-29fd6de52792",
+    "claim_semantic_type": "relation",
+    "claim_text": "support service uses Freshdesk for customer tickets",
+    "conflict_marker": false,
+    "display_claim_text": "support service uses Freshdesk for customer tickets",
+    "entity_name": "support service",
+    "fact_bucket": "relations",
+    "language": "",
+    "object": "Freshdesk for customer tickets",
+    "predicate": "uses",
+    "profile_id": "global-profile:b1603d49-3d3a-486b-8ecc-d311e74f3cff",
+    "raw_claim_text": "support service uses Freshdesk for customer tickets",
+    "sentence_ids": [
+      "4e551b25-cde3-4361-a280-2cd6ce8b5e1b"
+    ],
+    "sentence_text": "The support service uses Freshdesk for customer tickets.",
+    "sentence_texts": [
+      "The support service uses Freshdesk for customer tickets."
+    ],
+    "source_ids": [
+      "ebb2e068-04dd-45d8-8f87-61b8f4f2cdda"
+    ],
+    "state": null,
+    "time_filter": "current",
+    "time_values": []
+  }
+]
+
+--- EVIDENCE ---
+[
+  {
+    "claim_id": "d5fcb256-36be-45e7-a626-29fd6de52792",
+    "sentence_id": "4e551b25-cde3-4361-a280-2cd6ce8b5e1b",
+    "source_id": "ebb2e068-04dd-45d8-8f87-61b8f4f2cdda"
+  }
+]
+
+--- EXPLANATION ---
+{
+  "builder_version": "explanation_builder_v0",
+  "claims": [
+    {
+      "claim_id": "d5fcb256-36be-45e7-a626-29fd6de52792",
+      "claim_text": "support service uses Freshdesk for customer tickets",
+      "sentence_ids": [
+        "4e551b25-cde3-4361-a280-2cd6ce8b5e1b"
+      ],
+      "source_ids": [
+        "ebb2e068-04dd-45d8-8f87-61b8f4f2cdda"
+      ]
+    }
+  ],
+  "sentences": [
+    {
+      "claim_ids": [
+        "d5fcb256-36be-45e7-a626-29fd6de52792"
+      ],
+      "sentence_id": "4e551b25-cde3-4361-a280-2cd6ce8b5e1b",
+      "sentence_text": "The support service uses Freshdesk for customer tickets.",
+      "source_ids": [
+        "ebb2e068-04dd-45d8-8f87-61b8f4f2cdda"
+      ]
+    }
+  ],
+  "sources": [
+    {
+      "claim_ids": [
+        "d5fcb256-36be-45e7-a626-29fd6de52792"
+      ],
+      "sentence_ids": [
+        "4e551b25-cde3-4361-a280-2cd6ce8b5e1b"
+      ],
+      "source_id": "ebb2e068-04dd-45d8-8f87-61b8f4f2cdda"
+    }
+  ]
+}
+
+--- EVIDENCE DISPLAY ---
+- Claim: support service uses Freshdesk for customer tickets
+- Sentence: "The support service uses Freshdesk for customer tickets."
+- Source: ebb2e068-04dd-45d8-8f87-61b8f4f2cdda
+
+--- RETRIEVAL CHUNK ---
+support service (software)
+
+Relation facts:
+- uses Freshdesk for customer tickets
+
+=== TEST CASE: rule multilingual ===
+
+--- TRAIN ---
+The admin user must enable two-factor authentication.
+El usuario administrador debe activar la autenticación de dos factores.
+Az admin felhasználónak kötelező kétfaktoros azonosítást használnia.
+
+--- QUERY ---
+What must the admin user enable?
+
+--- EXPECT ---
+{
+  "answer_contains": [
+    "The admin user must enable two-factor authentication."
+  ],
+  "answer_mode": "direct",
+  "answer_not_contains": [],
+  "evidence_required": true,
+  "matched_chunks_min": 1,
+  "matched_claims_min": 1,
+  "retrieval_chunk_contains": [
+    "Rules:",
+    "must enable two-factor authentication"
+  ]
+}
+
+RESULT: PASS
+Checks:
+[PASS] answer contains "The admin user must enable two-factor authentication."
+[PASS] answer_mode is direct
+[PASS] matched_chunks_count >= 1
+[PASS] matched_claims_count >= 1
+[PASS] retrieval chunk contains "Rules:"
+[PASS] retrieval chunk contains "must enable two-factor authentication"
+[PASS] cited_claim_ids not empty
+[PASS] cited_sentence_ids not empty
+[PASS] cited_source_ids not empty
+[PASS] explanation claims not empty
+[PASS] explanation sentences not empty
+[PASS] explanation sources not empty
+
+--- TRAIN RESPONSE SUMMARY ---
+{
+  "claim_count": 3,
+  "global_profile_count": 1,
+  "retrieval_chunk_count": 1,
+  "run_id": "fd97994f-1205-48b6-82e5-8c346d4f452a",
+  "sentence_count": 3,
+  "source_id": "7703059f-3d93-44b5-9a90-a51c75ec3e78"
+}
+
+--- ACTIONS ---
+{}
+
+--- ANSWER ---
+The admin user must enable two-factor authentication.
+
+--- DEBUG ---
+matched_chunks_count: 1
+matched_claims_count: 1
+conflict_marker_included: false
+temporal_context_used: false
+answer_mode: direct
+synthesis_confidence: 0.8
+
+--- QUERY PROFILE ---
+{
+  "builder_version": "query_resolver_v0",
+  "confidence": 0.85,
+  "detected_entities": [
+    {
+      "entity_type": "user",
+      "source": "query_pattern",
+      "text": "admin user"
+    }
+  ],
+  "entity": "admin user",
+  "entity_type": "user",
+  "expected_answer_type": null,
+  "intent": "rule",
+  "keywords": [
+    "must",
+    "admin",
+    "user",
+    "enable",
+    "rule"
+  ],
+  "reasons": [
+    "intent:rule_marker",
+    "rule_action:enable",
+    "time:no_forced_filter",
+    "entity_type:user_keyword",
+    "entity:explicit_query_entity"
+  ],
+  "relation_object": null,
+  "relation_predicate": null,
+  "rule_action": "enable",
+  "space_filter": null,
+  "state": null,
+  "time_filter": null
+}
+
+--- MATCHED CHUNKS ---
+[
+  {
+    "conflict_marker": false,
+    "entity_name": "admin user",
+    "entity_type": "user",
+    "evidence_ids": [
+      "9c763bde-cd2a-4184-ae7b-a499b15bf2e6",
+      "3a59ea32-f6e6-417a-ae47-2f2c4048cee4",
+      "7b03a060-5890-4259-a1e4-a08f20a1f3e4",
+      "bb71468c-7fbf-4c25-94c0-1bacf47909b0"
+    ],
+    "matched_claim_ids": [
+      "9c763bde-cd2a-4184-ae7b-a499b15bf2e6"
+    ],
+    "profile_id": "global-profile:bb0f8208-9ead-4a5d-9f08-64f89d558300",
+    "retrieval_chunk_text": "admin user (user)\n\nRules:\n- must enable two-factor authentication",
+    "retrieval_confidence": 0.85,
+    "source_ids": [
+      "7703059f-3d93-44b5-9a90-a51c75ec3e78"
+    ],
+    "temporal_context_used": false
+  }
+]
+
+--- MATCHED CLAIMS ---
+[
+  {
+    "canonical_claim_text": "admin user must enable two-factor authentication",
+    "claim_group": "rule",
+    "claim_id": "9c763bde-cd2a-4184-ae7b-a499b15bf2e6",
+    "claim_semantic_type": "descriptor",
+    "claim_text": "admin user must enable two-factor authentication",
+    "conflict_marker": false,
+    "display_claim_text": "admin user must enable two-factor authentication",
+    "entity_name": "admin user",
+    "fact_bucket": "rules",
+    "language": "",
+    "object": "kétfaktoros azonosítást használnia",
+    "predicate": "kötelező",
+    "profile_id": "global-profile:bb0f8208-9ead-4a5d-9f08-64f89d558300",
+    "raw_claim_text": "admin user kötelező kétfaktoros azonosítást használnia",
+    "sentence_ids": [
+      "3a59ea32-f6e6-417a-ae47-2f2c4048cee4",
+      "7b03a060-5890-4259-a1e4-a08f20a1f3e4",
+      "bb71468c-7fbf-4c25-94c0-1bacf47909b0"
+    ],
+    "sentence_text": "Az admin felhasználónak kötelező kétfaktoros azonosítást használnia.",
+    "sentence_texts": [
+      "Az admin felhasználónak kötelező kétfaktoros azonosítást használnia.",
+      "The admin user must enable two-factor authentication.",
+      "El usuario administrador debe activar la autenticación de dos factores."
+    ],
+    "source_ids": [
+      "7703059f-3d93-44b5-9a90-a51c75ec3e78"
+    ],
+    "state": null,
+    "time_filter": "current",
+    "time_values": []
+  }
+]
+
+--- EVIDENCE ---
+[
+  {
+    "claim_id": "9c763bde-cd2a-4184-ae7b-a499b15bf2e6",
+    "sentence_id": "3a59ea32-f6e6-417a-ae47-2f2c4048cee4",
+    "source_id": "7703059f-3d93-44b5-9a90-a51c75ec3e78"
+  },
+  {
+    "claim_id": "9c763bde-cd2a-4184-ae7b-a499b15bf2e6",
+    "sentence_id": "7b03a060-5890-4259-a1e4-a08f20a1f3e4",
+    "source_id": "7703059f-3d93-44b5-9a90-a51c75ec3e78"
+  },
+  {
+    "claim_id": "9c763bde-cd2a-4184-ae7b-a499b15bf2e6",
+    "sentence_id": "bb71468c-7fbf-4c25-94c0-1bacf47909b0",
+    "source_id": "7703059f-3d93-44b5-9a90-a51c75ec3e78"
+  }
+]
+
+--- EXPLANATION ---
+{
+  "builder_version": "explanation_builder_v0",
+  "claims": [
+    {
+      "claim_id": "9c763bde-cd2a-4184-ae7b-a499b15bf2e6",
+      "claim_text": "admin user must enable two-factor authentication",
+      "sentence_ids": [
+        "3a59ea32-f6e6-417a-ae47-2f2c4048cee4",
+        "7b03a060-5890-4259-a1e4-a08f20a1f3e4",
+        "bb71468c-7fbf-4c25-94c0-1bacf47909b0"
+      ],
+      "source_ids": [
+        "7703059f-3d93-44b5-9a90-a51c75ec3e78"
+      ]
+    }
+  ],
+  "sentences": [
+    {
+      "claim_ids": [
+        "9c763bde-cd2a-4184-ae7b-a499b15bf2e6"
+      ],
+      "sentence_id": "3a59ea32-f6e6-417a-ae47-2f2c4048cee4",
+      "sentence_text": "Az admin felhasználónak kötelező kétfaktoros azonosítást használnia.",
+      "source_ids": [
+        "7703059f-3d93-44b5-9a90-a51c75ec3e78"
+      ]
+    },
+    {
+      "claim_ids": [
+        "9c763bde-cd2a-4184-ae7b-a499b15bf2e6"
+      ],
+      "sentence_id": "7b03a060-5890-4259-a1e4-a08f20a1f3e4",
+      "sentence_text": "The admin user must enable two-factor authentication.",
+      "source_ids": [
+        "7703059f-3d93-44b5-9a90-a51c75ec3e78"
+      ]
+    },
+    {
+      "claim_ids": [
+        "9c763bde-cd2a-4184-ae7b-a499b15bf2e6"
+      ],
+      "sentence_id": "bb71468c-7fbf-4c25-94c0-1bacf47909b0",
+      "sentence_text": "El usuario administrador debe activar la autenticación de dos factores.",
+      "source_ids": [
+        "7703059f-3d93-44b5-9a90-a51c75ec3e78"
+      ]
+    }
+  ],
+  "sources": [
+    {
+      "claim_ids": [
+        "9c763bde-cd2a-4184-ae7b-a499b15bf2e6"
+      ],
+      "sentence_ids": [
+        "3a59ea32-f6e6-417a-ae47-2f2c4048cee4",
+        "7b03a060-5890-4259-a1e4-a08f20a1f3e4",
+        "bb71468c-7fbf-4c25-94c0-1bacf47909b0"
+      ],
+      "source_id": "7703059f-3d93-44b5-9a90-a51c75ec3e78"
+    }
+  ]
+}
+
+--- EVIDENCE DISPLAY ---
+- Claim: admin user must enable two-factor authentication
+- Sentence: "Az admin felhasználónak kötelező kétfaktoros azonosítást használnia."
+- Sentence: "The admin user must enable two-factor authentication."
+- Sentence: "El usuario administrador debe activar la autenticación de dos factores."
+- Source: 7703059f-3d93-44b5-9a90-a51c75ec3e78
+
+--- RETRIEVAL CHUNK ---
+admin user (user)
+
+Rules:
+- must enable two-factor authentication
+
+=== TEST CASE: descriptor ===
+
+--- TRAIN ---
+The compliance policy applies to all external contractors.
+
+--- QUERY ---
+What does the compliance policy apply to?
+
+--- EXPECT ---
+{
+  "answer_contains": [
+    "The compliance policy applies to all external contractors."
+  ],
+  "answer_mode": "direct",
+  "answer_not_contains": [],
+  "evidence_required": true,
+  "matched_chunks_min": 1,
+  "matched_claims_min": 1,
+  "retrieval_chunk_contains": [
+    "Descriptors:",
+    "applies to all external contractors"
+  ]
+}
+
+RESULT: PASS
+Checks:
+[PASS] answer contains "The compliance policy applies to all external contractors."
+[PASS] answer_mode is direct
+[PASS] matched_chunks_count >= 1
+[PASS] matched_claims_count >= 1
+[PASS] retrieval chunk contains "Descriptors:"
+[PASS] retrieval chunk contains "applies to all external contractors"
+[PASS] cited_claim_ids not empty
+[PASS] cited_sentence_ids not empty
+[PASS] cited_source_ids not empty
+[PASS] explanation claims not empty
+[PASS] explanation sentences not empty
+[PASS] explanation sources not empty
+
+--- TRAIN RESPONSE SUMMARY ---
+{
+  "claim_count": 1,
+  "global_profile_count": 1,
+  "retrieval_chunk_count": 1,
+  "run_id": "98af6e67-d1d1-4d0d-a2c4-f98c5d563140",
+  "sentence_count": 1,
+  "source_id": "aba4bf41-ea4f-4e2c-9745-96e3b30590d1"
+}
+
+--- ACTIONS ---
+{}
+
+--- ANSWER ---
+The compliance policy applies to all external contractors.
+
+--- DEBUG ---
+matched_chunks_count: 1
+matched_claims_count: 1
+conflict_marker_included: false
+temporal_context_used: false
+answer_mode: direct
+synthesis_confidence: 0.8
+
+--- QUERY PROFILE ---
+{
+  "builder_version": "query_resolver_v0",
+  "confidence": 0.85,
+  "detected_entities": [
+    {
+      "entity_type": "policy",
+      "source": "query_pattern",
+      "text": "compliance policy"
+    }
+  ],
+  "entity": "compliance policy",
+  "entity_type": "policy",
+  "expected_answer_type": null,
+  "intent": "descriptor",
+  "keywords": [
+    "compliance",
+    "policy",
+    "apply",
+    "descriptor"
+  ],
+  "reasons": [
+    "intent:descriptor_apply_to_marker",
+    "time:no_forced_filter",
+    "entity_type:policy_keyword",
+    "entity:explicit_query_entity"
+  ],
+  "relation_object": null,
+  "relation_predicate": null,
+  "rule_action": null,
+  "space_filter": null,
+  "state": null,
+  "time_filter": null
+}
+
+--- MATCHED CHUNKS ---
+[
+  {
+    "conflict_marker": false,
+    "entity_name": "compliance policy",
+    "entity_type": "policy",
+    "evidence_ids": [
+      "4e9e046e-2577-48fd-85fc-31009a575f02",
+      "7ad8b902-3f11-4d38-951a-f1abf2e795ca"
+    ],
+    "matched_claim_ids": [
+      "4e9e046e-2577-48fd-85fc-31009a575f02"
+    ],
+    "profile_id": "global-profile:7f62d0d0-34e5-4941-8adb-1e75e97b7ea1",
+    "retrieval_chunk_text": "compliance policy (policy)\n\nDescriptors:\n- applies to all external contractors",
+    "retrieval_confidence": 0.7875,
+    "source_ids": [
+      "aba4bf41-ea4f-4e2c-9745-96e3b30590d1"
+    ],
+    "temporal_context_used": false
+  }
+]
+
+--- MATCHED CLAIMS ---
+[
+  {
+    "canonical_claim_text": "compliance policy applies to all external contractors",
+    "claim_group": "descriptor",
+    "claim_id": "4e9e046e-2577-48fd-85fc-31009a575f02",
+    "claim_semantic_type": "descriptor",
+    "claim_text": "compliance policy applies to all external contractors",
+    "conflict_marker": false,
+    "display_claim_text": "compliance policy applies to all external contractors",
+    "entity_name": "compliance policy",
+    "fact_bucket": "descriptors",
+    "language": "",
+    "object": "all external contractors",
+    "predicate": "applies to",
+    "profile_id": "global-profile:7f62d0d0-34e5-4941-8adb-1e75e97b7ea1",
+    "raw_claim_text": "compliance policy applies to all external contractors",
+    "sentence_ids": [
+      "7ad8b902-3f11-4d38-951a-f1abf2e795ca"
+    ],
+    "sentence_text": "The compliance policy applies to all external contractors.",
+    "sentence_texts": [
+      "The compliance policy applies to all external contractors."
+    ],
+    "source_ids": [
+      "aba4bf41-ea4f-4e2c-9745-96e3b30590d1"
+    ],
+    "state": null,
+    "time_filter": "current",
+    "time_values": []
+  }
+]
+
+--- EVIDENCE ---
+[
+  {
+    "claim_id": "4e9e046e-2577-48fd-85fc-31009a575f02",
+    "sentence_id": "7ad8b902-3f11-4d38-951a-f1abf2e795ca",
+    "source_id": "aba4bf41-ea4f-4e2c-9745-96e3b30590d1"
+  }
+]
+
+--- EXPLANATION ---
+{
+  "builder_version": "explanation_builder_v0",
+  "claims": [
+    {
+      "claim_id": "4e9e046e-2577-48fd-85fc-31009a575f02",
+      "claim_text": "compliance policy applies to all external contractors",
+      "sentence_ids": [
+        "7ad8b902-3f11-4d38-951a-f1abf2e795ca"
+      ],
+      "source_ids": [
+        "aba4bf41-ea4f-4e2c-9745-96e3b30590d1"
+      ]
+    }
+  ],
+  "sentences": [
+    {
+      "claim_ids": [
+        "4e9e046e-2577-48fd-85fc-31009a575f02"
+      ],
+      "sentence_id": "7ad8b902-3f11-4d38-951a-f1abf2e795ca",
+      "sentence_text": "The compliance policy applies to all external contractors.",
+      "source_ids": [
+        "aba4bf41-ea4f-4e2c-9745-96e3b30590d1"
+      ]
+    }
+  ],
+  "sources": [
+    {
+      "claim_ids": [
+        "4e9e046e-2577-48fd-85fc-31009a575f02"
+      ],
+      "sentence_ids": [
+        "7ad8b902-3f11-4d38-951a-f1abf2e795ca"
+      ],
+      "source_id": "aba4bf41-ea4f-4e2c-9745-96e3b30590d1"
+    }
+  ]
+}
+
+--- EVIDENCE DISPLAY ---
+- Claim: compliance policy applies to all external contractors
+- Sentence: "The compliance policy applies to all external contractors."
+- Source: aba4bf41-ea4f-4e2c-9745-96e3b30590d1
+
+--- RETRIEVAL CHUNK ---
+compliance policy (policy)
+
+Descriptors:
+- applies to all external contractors
+
+=== TEST CASE: event ===
+
+--- TRAIN ---
+The security review was completed on 12 March 2025.
+
+--- QUERY ---
+When was the security review completed?
+
+--- EXPECT ---
+{
+  "answer_contains": [
+    "The security review was completed on 12 March 2025."
+  ],
+  "answer_mode": "direct",
+  "answer_not_contains": [],
+  "evidence_required": true,
+  "matched_chunks_min": 1,
+  "matched_claims_min": 1,
+  "retrieval_chunk_contains": [
+    "Events:",
+    "completed on 12 March 2025"
+  ]
+}
+
+RESULT: PASS
+Checks:
+[PASS] answer contains "The security review was completed on 12 March 2025."
+[PASS] answer_mode is direct
+[PASS] matched_chunks_count >= 1
+[PASS] matched_claims_count >= 1
+[PASS] retrieval chunk contains "Events:"
+[PASS] retrieval chunk contains "completed on 12 March 2025"
+[PASS] cited_claim_ids not empty
+[PASS] cited_sentence_ids not empty
+[PASS] cited_source_ids not empty
+[PASS] explanation claims not empty
+[PASS] explanation sentences not empty
+[PASS] explanation sources not empty
+
+--- TRAIN RESPONSE SUMMARY ---
+{
+  "claim_count": 1,
+  "global_profile_count": 1,
+  "retrieval_chunk_count": 1,
+  "run_id": "ae2681ef-68c3-4769-8e74-c56389a968bf",
+  "sentence_count": 1,
+  "source_id": "df3633cd-6c3a-4b5c-a367-a0502d3ca972"
+}
+
+--- ACTIONS ---
+{}
+
+--- ANSWER ---
+The security review was completed on 12 March 2025.
+
+--- DEBUG ---
+matched_chunks_count: 1
+matched_claims_count: 1
+conflict_marker_included: false
+temporal_context_used: false
+answer_mode: direct
+synthesis_confidence: 0.8
+
+--- QUERY PROFILE ---
+{
+  "builder_version": "query_resolver_v0",
+  "confidence": 0.9,
+  "detected_entities": [
+    {
+      "entity_type": "system_component",
+      "source": "query_pattern",
+      "text": "security review"
+    }
+  ],
+  "entity": "security review",
+  "entity_type": "system_component",
+  "expected_answer_type": null,
+  "intent": "event",
+  "keywords": [
+    "when",
+    "security",
+    "review",
+    "completed",
+    "event"
+  ],
+  "reasons": [
+    "intent:event_marker",
+    "time:event_time",
+    "entity_type:technical_component_keyword",
+    "entity:explicit_query_entity"
+  ],
+  "relation_object": null,
+  "relation_predicate": null,
+  "rule_action": null,
+  "space_filter": null,
+  "state": null,
+  "time_filter": "event_time"
+}
+
+--- MATCHED CHUNKS ---
+[
+  {
+    "conflict_marker": false,
+    "entity_name": "security review",
+    "entity_type": "process",
+    "evidence_ids": [
+      "2fe6fe37-f0be-4ab4-93c4-923912f2a341",
+      "c3121ac2-e921-43b9-8068-b61e5bce95c0"
+    ],
+    "matched_claim_ids": [
+      "2fe6fe37-f0be-4ab4-93c4-923912f2a341"
+    ],
+    "profile_id": "global-profile:66f1dd46-2924-4a2d-b4ac-d7cc55750a15",
+    "retrieval_chunk_text": "security review (process)\n\nEvents:\n- completed on 12 March 2025",
+    "retrieval_confidence": 0.8,
+    "source_ids": [
+      "df3633cd-6c3a-4b5c-a367-a0502d3ca972"
+    ],
+    "temporal_context_used": false
+  }
+]
+
+--- MATCHED CLAIMS ---
+[
+  {
+    "canonical_claim_text": "security review was completed on 12 March 2025",
+    "claim_group": "event",
+    "claim_id": "2fe6fe37-f0be-4ab4-93c4-923912f2a341",
+    "claim_semantic_type": "event",
+    "claim_text": "security review was completed on 12 March 2025",
+    "conflict_marker": false,
+    "display_claim_text": "security review was completed on 12 March 2025",
+    "entity_name": "security review",
+    "fact_bucket": "events",
+    "language": "",
+    "object": "on 12 March 2025",
+    "predicate": "was completed",
+    "profile_id": "global-profile:66f1dd46-2924-4a2d-b4ac-d7cc55750a15",
+    "raw_claim_text": "security review was completed on 12 March 2025",
+    "sentence_ids": [
+      "c3121ac2-e921-43b9-8068-b61e5bce95c0"
+    ],
+    "sentence_text": "The security review was completed on 12 March 2025.",
+    "sentence_texts": [
+      "The security review was completed on 12 March 2025."
+    ],
+    "source_ids": [
+      "df3633cd-6c3a-4b5c-a367-a0502d3ca972"
+    ],
+    "state": null,
+    "time_filter": "event_time",
+    "time_values": [
+      "March 2025"
+    ]
+  }
+]
+
+--- EVIDENCE ---
+[
+  {
+    "claim_id": "2fe6fe37-f0be-4ab4-93c4-923912f2a341",
+    "sentence_id": "c3121ac2-e921-43b9-8068-b61e5bce95c0",
+    "source_id": "df3633cd-6c3a-4b5c-a367-a0502d3ca972"
+  }
+]
+
+--- EXPLANATION ---
+{
+  "builder_version": "explanation_builder_v0",
+  "claims": [
+    {
+      "claim_id": "2fe6fe37-f0be-4ab4-93c4-923912f2a341",
+      "claim_text": "security review was completed on 12 March 2025",
+      "sentence_ids": [
+        "c3121ac2-e921-43b9-8068-b61e5bce95c0"
+      ],
+      "source_ids": [
+        "df3633cd-6c3a-4b5c-a367-a0502d3ca972"
+      ]
+    }
+  ],
+  "sentences": [
+    {
+      "claim_ids": [
+        "2fe6fe37-f0be-4ab4-93c4-923912f2a341"
+      ],
+      "sentence_id": "c3121ac2-e921-43b9-8068-b61e5bce95c0",
+      "sentence_text": "The security review was completed on 12 March 2025.",
+      "source_ids": [
+        "df3633cd-6c3a-4b5c-a367-a0502d3ca972"
+      ]
+    }
+  ],
+  "sources": [
+    {
+      "claim_ids": [
+        "2fe6fe37-f0be-4ab4-93c4-923912f2a341"
+      ],
+      "sentence_ids": [
+        "c3121ac2-e921-43b9-8068-b61e5bce95c0"
+      ],
+      "source_id": "df3633cd-6c3a-4b5c-a367-a0502d3ca972"
+    }
+  ]
+}
+
+--- EVIDENCE DISPLAY ---
+- Claim: security review was completed on 12 March 2025
+- Sentence: "The security review was completed on 12 March 2025."
+- Source: df3633cd-6c3a-4b5c-a367-a0502d3ca972
+
+--- RETRIEVAL CHUNK ---
+security review (process)
+
+Events:
+- completed on 12 March 2025
+
+=== TEST CASE: entity guard admin rule ignores billing state ===
+
+--- TRAIN ---
+The billing service is currently active.
+The admin user must enable two-factor authentication.
+
+--- QUERY ---
+What must the admin user enable?
+
+--- EXPECT ---
+{
+  "answer_contains": [
+    "The admin user must enable two-factor authentication."
+  ],
+  "answer_mode": "direct",
+  "answer_not_contains": [
+    "billing service"
+  ],
+  "evidence_required": true,
+  "matched_chunks_min": 1,
+  "matched_claims_min": 1,
+  "retrieval_chunk_contains": []
+}
+
+RESULT: PASS
+Checks:
+[PASS] answer contains "The admin user must enable two-factor authentication."
+[PASS] answer does not contain "billing service"
+[PASS] answer_mode is direct
+[PASS] matched_chunks_count >= 1
+[PASS] matched_claims_count >= 1
+[PASS] cited_claim_ids not empty
+[PASS] cited_sentence_ids not empty
+[PASS] cited_source_ids not empty
+[PASS] explanation claims not empty
+[PASS] explanation sentences not empty
+[PASS] explanation sources not empty
+
+--- TRAIN RESPONSE SUMMARY ---
+{
+  "claim_count": 2,
+  "global_profile_count": 2,
+  "retrieval_chunk_count": 2,
+  "run_id": "a1b989c5-8caf-4ea9-8686-bdfc5be05d59",
+  "sentence_count": 2,
+  "source_id": "2c07f35a-9d2e-42c8-b7e5-1567085766af"
+}
+
+--- ACTIONS ---
+{}
+
+--- ANSWER ---
+The admin user must enable two-factor authentication.
+
+--- DEBUG ---
+matched_chunks_count: 1
+matched_claims_count: 1
+conflict_marker_included: false
+temporal_context_used: false
+answer_mode: direct
+synthesis_confidence: 0.8
+
+--- QUERY PROFILE ---
+{
+  "builder_version": "query_resolver_v0",
+  "confidence": 0.85,
+  "detected_entities": [
+    {
+      "entity_type": "user",
+      "source": "query_pattern",
+      "text": "admin user"
+    }
+  ],
+  "entity": "admin user",
+  "entity_type": "user",
+  "expected_answer_type": null,
+  "intent": "rule",
+  "keywords": [
+    "must",
+    "admin",
+    "user",
+    "enable",
+    "rule"
+  ],
+  "reasons": [
+    "intent:rule_marker",
+    "rule_action:enable",
+    "time:no_forced_filter",
+    "entity_type:user_keyword",
+    "entity:explicit_query_entity"
+  ],
+  "relation_object": null,
+  "relation_predicate": null,
+  "rule_action": "enable",
+  "space_filter": null,
+  "state": null,
+  "time_filter": null
+}
+
+--- MATCHED CHUNKS ---
+[
+  {
+    "conflict_marker": false,
+    "entity_name": "admin user",
+    "entity_type": "user",
+    "evidence_ids": [
+      "6cdc6437-d70e-4092-b057-46d0e920d238",
+      "4f68e512-70c2-49da-94be-3ec57eacf155"
+    ],
+    "matched_claim_ids": [
+      "6cdc6437-d70e-4092-b057-46d0e920d238"
+    ],
+    "profile_id": "global-profile:3c69e616-a17f-46b1-b9bb-b434be16119b",
+    "retrieval_chunk_text": "admin user (user)\n\nRules:\n- must enable two-factor authentication",
+    "retrieval_confidence": 0.85,
+    "source_ids": [
+      "2c07f35a-9d2e-42c8-b7e5-1567085766af"
+    ],
+    "temporal_context_used": false
+  }
+]
+
+--- MATCHED CLAIMS ---
+[
+  {
+    "canonical_claim_text": "admin user must enable two-factor authentication",
+    "claim_group": "rule",
+    "claim_id": "6cdc6437-d70e-4092-b057-46d0e920d238",
+    "claim_semantic_type": "descriptor",
+    "claim_text": "admin user must enable two-factor authentication",
+    "conflict_marker": false,
+    "display_claim_text": "admin user must enable two-factor authentication",
+    "entity_name": "admin user",
+    "fact_bucket": "rules",
+    "language": "",
+    "object": "enable two-factor authentication",
+    "predicate": "must",
+    "profile_id": "global-profile:3c69e616-a17f-46b1-b9bb-b434be16119b",
+    "raw_claim_text": "admin user must enable two-factor authentication",
+    "sentence_ids": [
+      "4f68e512-70c2-49da-94be-3ec57eacf155"
+    ],
+    "sentence_text": "The admin user must enable two-factor authentication.",
+    "sentence_texts": [
+      "The admin user must enable two-factor authentication."
+    ],
+    "source_ids": [
+      "2c07f35a-9d2e-42c8-b7e5-1567085766af"
+    ],
+    "state": null,
+    "time_filter": "current",
+    "time_values": []
+  }
+]
+
+--- EVIDENCE ---
+[
+  {
+    "claim_id": "6cdc6437-d70e-4092-b057-46d0e920d238",
+    "sentence_id": "4f68e512-70c2-49da-94be-3ec57eacf155",
+    "source_id": "2c07f35a-9d2e-42c8-b7e5-1567085766af"
+  }
+]
+
+--- EXPLANATION ---
+{
+  "builder_version": "explanation_builder_v0",
+  "claims": [
+    {
+      "claim_id": "6cdc6437-d70e-4092-b057-46d0e920d238",
+      "claim_text": "admin user must enable two-factor authentication",
+      "sentence_ids": [
+        "4f68e512-70c2-49da-94be-3ec57eacf155"
+      ],
+      "source_ids": [
+        "2c07f35a-9d2e-42c8-b7e5-1567085766af"
+      ]
+    }
+  ],
+  "sentences": [
+    {
+      "claim_ids": [
+        "6cdc6437-d70e-4092-b057-46d0e920d238"
+      ],
+      "sentence_id": "4f68e512-70c2-49da-94be-3ec57eacf155",
+      "sentence_text": "The admin user must enable two-factor authentication.",
+      "source_ids": [
+        "2c07f35a-9d2e-42c8-b7e5-1567085766af"
+      ]
+    }
+  ],
+  "sources": [
+    {
+      "claim_ids": [
+        "6cdc6437-d70e-4092-b057-46d0e920d238"
+      ],
+      "sentence_ids": [
+        "4f68e512-70c2-49da-94be-3ec57eacf155"
+      ],
+      "source_id": "2c07f35a-9d2e-42c8-b7e5-1567085766af"
+    }
+  ]
+}
+
+--- EVIDENCE DISPLAY ---
+- Claim: admin user must enable two-factor authentication
+- Sentence: "The admin user must enable two-factor authentication."
+- Source: 2c07f35a-9d2e-42c8-b7e5-1567085766af
+
+--- RETRIEVAL CHUNK ---
+admin user (user)
+
+Rules:
+- must enable two-factor authentication
+
+=== TEST CASE: entity guard no wrong entity fallback ===
+
+--- TRAIN ---
+The London office is currently inactive.
+
+--- QUERY ---
+What must the admin user enable?
+
+--- EXPECT ---
+{
+  "answer_contains": [],
+  "answer_mode": "no_answer",
+  "answer_not_contains": [
+    "London office"
+  ],
+  "retrieval_chunk_contains": []
+}
+
+RESULT: PASS
+Checks:
+[PASS] answer does not contain "London office"
+[PASS] answer_mode is no_answer
+
+--- TRAIN RESPONSE SUMMARY ---
+{
+  "claim_count": 1,
+  "global_profile_count": 1,
+  "retrieval_chunk_count": 1,
+  "run_id": "8931ad3a-7fd2-42dc-a528-6f09257122f6",
+  "sentence_count": 1,
+  "source_id": "87a45d29-80e7-4038-8a9b-65b035377753"
+}
+
+--- ACTIONS ---
+{}
+
+--- ANSWER ---
+I could not find enough information to answer this question.
+
+--- DEBUG ---
+matched_chunks_count: 0
+matched_claims_count: 0
+conflict_marker_included: false
+temporal_context_used: false
+answer_mode: no_answer
+synthesis_confidence: 0.0
+
+--- QUERY PROFILE ---
+{
+  "builder_version": "query_resolver_v0",
+  "confidence": 0.85,
+  "detected_entities": [
+    {
+      "entity_type": "user",
+      "source": "query_pattern",
+      "text": "admin user"
+    }
+  ],
+  "entity": "admin user",
+  "entity_type": "user",
+  "expected_answer_type": null,
+  "intent": "rule",
+  "keywords": [
+    "must",
+    "admin",
+    "user",
+    "enable",
+    "rule"
+  ],
+  "reasons": [
+    "intent:rule_marker",
+    "rule_action:enable",
+    "time:no_forced_filter",
+    "entity_type:user_keyword",
+    "entity:explicit_query_entity"
+  ],
+  "relation_object": null,
+  "relation_predicate": null,
+  "rule_action": "enable",
+  "space_filter": null,
+  "state": null,
+  "time_filter": null
+}
+
+--- MATCHED CHUNKS ---
+[]
+
+--- MATCHED CLAIMS ---
+[]
+
+--- EVIDENCE ---
+[]
+
+--- EXPLANATION ---
+{
+  "builder_version": "explanation_builder_v0",
+  "claims": [],
+  "sentences": [],
+  "sources": []
+}
+
+--- EVIDENCE DISPLAY ---
+(no explanation evidence)
+
+--- RETRIEVAL CHUNK ---
+London office (location)
+
+Current facts:
+- currently inactive
+
+=== TEST CASE: feedback replace updates answer ===
+
+--- TRAIN ---
+The London office is currently inactive.
+
+--- QUERY ---
+What is the status of London office?
+
+--- EXPECT ---
+{
+  "answer_contains": [
+    "The London office is currently active."
+  ],
+  "answer_mode": "direct",
+  "answer_not_contains": [
+    "currently inactive"
+  ],
+  "evidence_required": true,
+  "feedback_claim_text": "The London office is currently inactive.",
+  "feedback_event_required": true,
+  "feedback_new_claim": "The London office is currently active.",
+  "feedback_target_entity": "London office",
+  "feedback_type": "replace",
+  "feedback_user_input": "This is wrong -> London office is active",
+  "matched_chunks_min": 1,
+  "matched_claims_min": 1,
+  "retrieval_chunk_contains": []
+}
+
+RESULT: PASS
+Checks:
+[PASS] answer contains "The London office is currently active."
+[PASS] answer does not contain "currently inactive"
+[PASS] answer_mode is direct
+[PASS] matched_chunks_count >= 1
+[PASS] matched_claims_count >= 1
+[PASS] feedback action returned event
+[PASS] query metadata feedback_events not empty
+[PASS] cited_claim_ids not empty
+[PASS] cited_sentence_ids not empty
+[PASS] cited_source_ids not empty
+[PASS] explanation claims not empty
+[PASS] explanation sentences not empty
+[PASS] explanation sources not empty
+
+--- TRAIN RESPONSE SUMMARY ---
+{
+  "claim_count": 1,
+  "global_profile_count": 1,
+  "retrieval_chunk_count": 1,
+  "run_id": "5858c356-e4b3-42f2-9f9a-18baaf7cbbe1",
+  "sentence_count": 1,
+  "source_id": "f870013b-b0a2-4572-a56f-4df5fc4b69c3"
+}
+
+--- ACTIONS ---
+{
+  "feedback": {
+    "feedback_event": {
+      "affected_claim_ids": [
+        "44da2298-07c3-49be-b79e-926c991be6e1"
+      ],
+      "claim_text": "The London office is currently inactive.",
+      "corpus_uuid": "kb-regression",
+      "created_at": "2026-04-27T13:15:25.912140+00:00",
+      "feedback_event_id": "98d3abd0-06ef-4aef-881d-e242c5bda90f",
+      "feedback_type": "replace",
+      "new_claim_ids": [
+        "feedback-claim:98d3abd0-06ef-4aef-881d-e242c5bda90f"
+      ],
+      "optional_new_claim": "The London office is currently active.",
+      "target_entity": "London office",
+      "tenant": "demo",
+      "user_id": null,
+      "user_input": "This is wrong -> London office is active"
+    }
+  }
+}
+
+--- ANSWER ---
+The London office is currently active.
+
+--- DEBUG ---
+matched_chunks_count: 1
+matched_claims_count: 1
+conflict_marker_included: false
+temporal_context_used: false
+answer_mode: direct
+synthesis_confidence: 0.8
+
+--- QUERY PROFILE ---
+{
+  "builder_version": "query_resolver_v0",
+  "confidence": 0.85,
+  "detected_entities": [
+    {
+      "entity_type": "location",
+      "source": "query_pattern",
+      "text": "London office"
+    }
+  ],
+  "entity": "London office",
+  "entity_type": "location",
+  "expected_answer_type": null,
+  "intent": "state",
+  "keywords": [
+    "status",
+    "london",
+    "office",
+    "state"
+  ],
+  "reasons": [
+    "intent:state_marker",
+    "time:no_forced_filter_status_question",
+    "entity_type:location_qualifier",
+    "entity:explicit_query_entity"
+  ],
+  "relation_object": null,
+  "relation_predicate": null,
+  "rule_action": null,
+  "space_filter": "London office",
+  "state": null,
+  "time_filter": null
+}
+
+--- MATCHED CHUNKS ---
+[
+  {
+    "conflict_marker": false,
+    "entity_name": "London office",
+    "entity_type": "location",
+    "evidence_ids": [
+      "feedback-claim:98d3abd0-06ef-4aef-881d-e242c5bda90f",
+      "feedback-sentence:98d3abd0-06ef-4aef-881d-e242c5bda90f"
+    ],
+    "matched_claim_ids": [
+      "feedback-claim:98d3abd0-06ef-4aef-881d-e242c5bda90f"
+    ],
+    "profile_id": "global-profile:a84a1540-46fc-451f-8113-4347fee25b84",
+    "retrieval_chunk_text": "London office (location)\n\nCurrent facts:\n- currently active",
+    "retrieval_confidence": 0.725,
+    "source_ids": [
+      "feedback-source:98d3abd0-06ef-4aef-881d-e242c5bda90f"
+    ],
+    "temporal_context_used": false
+  }
+]
+
+--- MATCHED CLAIMS ---
+[
+  {
+    "canonical_claim_text": "currently active",
+    "claim_group": "state",
+    "claim_id": "feedback-claim:98d3abd0-06ef-4aef-881d-e242c5bda90f",
+    "claim_semantic_type": "state",
+    "claim_text": "currently active",
+    "conflict_marker": false,
+    "display_claim_text": "currently active",
+    "entity_name": "London office",
+    "fact_bucket": "current",
+    "language": "",
+    "object": "true",
+    "predicate": "active",
+    "profile_id": "global-profile:a84a1540-46fc-451f-8113-4347fee25b84",
+    "raw_claim_text": "The London office is currently active",
+    "sentence_ids": [
+      "feedback-sentence:98d3abd0-06ef-4aef-881d-e242c5bda90f"
+    ],
+    "source_ids": [
+      "feedback-source:98d3abd0-06ef-4aef-881d-e242c5bda90f"
+    ],
+    "state": "active",
+    "time_filter": "current",
+    "time_values": []
+  }
+]
+
+--- EVIDENCE ---
+[
+  {
+    "claim_id": "feedback-claim:98d3abd0-06ef-4aef-881d-e242c5bda90f",
+    "sentence_id": "feedback-sentence:98d3abd0-06ef-4aef-881d-e242c5bda90f",
+    "source_id": "feedback-source:98d3abd0-06ef-4aef-881d-e242c5bda90f"
+  }
+]
+
+--- EXPLANATION ---
+{
+  "builder_version": "explanation_builder_v0",
+  "claims": [
+    {
+      "claim_id": "feedback-claim:98d3abd0-06ef-4aef-881d-e242c5bda90f",
+      "claim_text": "currently active",
+      "sentence_ids": [
+        "feedback-sentence:98d3abd0-06ef-4aef-881d-e242c5bda90f"
+      ],
+      "source_ids": [
+        "feedback-source:98d3abd0-06ef-4aef-881d-e242c5bda90f"
+      ]
+    }
+  ],
+  "sentences": [
+    {
+      "claim_ids": [
+        "feedback-claim:98d3abd0-06ef-4aef-881d-e242c5bda90f"
+      ],
+      "sentence_id": "feedback-sentence:98d3abd0-06ef-4aef-881d-e242c5bda90f",
+      "sentence_text": "",
+      "source_ids": [
+        "feedback-source:98d3abd0-06ef-4aef-881d-e242c5bda90f"
+      ]
+    }
+  ],
+  "sources": [
+    {
+      "claim_ids": [
+        "feedback-claim:98d3abd0-06ef-4aef-881d-e242c5bda90f"
+      ],
+      "sentence_ids": [
+        "feedback-sentence:98d3abd0-06ef-4aef-881d-e242c5bda90f"
+      ],
+      "source_id": "feedback-source:98d3abd0-06ef-4aef-881d-e242c5bda90f"
+    }
+  ]
+}
+
+--- EVIDENCE DISPLAY ---
+- Claim: currently active
+- Sentence: "feedback-sentence:98d3abd0-06ef-4aef-881d-e242c5bda90f"
+- Source: feedback-source:98d3abd0-06ef-4aef-881d-e242c5bda90f
+
+--- RETRIEVAL CHUNK ---
+London office (location)
+
+Current facts:
+- currently active
+
+=== TEST CASE: source withdrawal removes old claim ===
+
+--- TRAIN ---
+The London office is currently inactive.
+
+--- QUERY ---
+What is the status of London office?
+
+--- EXPECT ---
+{
+  "answer_contains": [],
+  "answer_mode": "no_answer",
+  "answer_not_contains": [
+    "London office is currently inactive"
+  ],
+  "retrieval_chunk_contains": [],
+  "withdraw_source": "first_source",
+  "withdrawal_event_required": true
+}
+
+RESULT: PASS
+Checks:
+[PASS] answer does not contain "London office is currently inactive"
+[PASS] answer_mode is no_answer
+[PASS] withdrawal action returned event
+[PASS] query metadata source_withdrawal_events not empty
+
+--- TRAIN RESPONSE SUMMARY ---
+{
+  "claim_count": 1,
+  "global_profile_count": 1,
+  "retrieval_chunk_count": 1,
+  "run_id": "60521c81-5775-4eb0-b543-d332789cd654",
+  "sentence_count": 1,
+  "source_id": "a5affe82-8bec-4b34-a6da-9d336d991603"
+}
+
+--- ACTIONS ---
+{
+  "withdrawal": {
+    "source_withdrawal_event": {
+      "affected_claim_ids": [
+        "a26560d8-6567-4024-84b5-9d754b1198f5"
+      ],
+      "affected_profile_ids": [
+        "global-profile:0dbdce8a-7a2a-4bca-a44e-96b66880b02a"
+      ],
+      "corpus_uuid": "kb-regression",
+      "created_at": "2026-04-27T13:15:25.917571+00:00",
+      "source_id": "a5affe82-8bec-4b34-a6da-9d336d991603",
+      "source_withdrawal_event_id": "a52db6d2-ab8e-497a-bd72-6a14d1fdfff1",
+      "tenant": "demo",
+      "user_id": null,
+      "user_input": "withdraw_source(a5affe82-8bec-4b34-a6da-9d336d991603)"
+    }
+  }
+}
+
+--- ANSWER ---
+I could not find enough information to answer this question.
+
+--- DEBUG ---
+matched_chunks_count: 1
+matched_claims_count: 0
+conflict_marker_included: false
+temporal_context_used: false
+answer_mode: no_answer
+synthesis_confidence: 0.0
+
+--- QUERY PROFILE ---
+{
+  "builder_version": "query_resolver_v0",
+  "confidence": 0.85,
+  "detected_entities": [
+    {
+      "entity_type": "location",
+      "source": "query_pattern",
+      "text": "London office"
+    }
+  ],
+  "entity": "London office",
+  "entity_type": "location",
+  "expected_answer_type": null,
+  "intent": "state",
+  "keywords": [
+    "status",
+    "london",
+    "office",
+    "state"
+  ],
+  "reasons": [
+    "intent:state_marker",
+    "time:no_forced_filter_status_question",
+    "entity_type:location_qualifier",
+    "entity:explicit_query_entity"
+  ],
+  "relation_object": null,
+  "relation_predicate": null,
+  "rule_action": null,
+  "space_filter": "London office",
+  "state": null,
+  "time_filter": null
+}
+
+--- MATCHED CHUNKS ---
+[
+  {
+    "conflict_marker": false,
+    "entity_name": "London office",
+    "entity_type": "location",
+    "evidence_ids": [],
+    "matched_claim_ids": [],
+    "profile_id": "global-profile:0dbdce8a-7a2a-4bca-a44e-96b66880b02a",
+    "retrieval_chunk_text": "London office (location)",
+    "retrieval_confidence": 0.575,
+    "source_ids": [],
+    "temporal_context_used": false
+  }
+]
+
+--- MATCHED CLAIMS ---
+[]
+
+--- EVIDENCE ---
+[]
+
+--- EXPLANATION ---
+{
+  "builder_version": "explanation_builder_v0",
+  "claims": [],
+  "sentences": [],
+  "sources": []
+}
+
+--- EVIDENCE DISPLAY ---
+(no explanation evidence)
+
+--- RETRIEVAL CHUNK ---
+London office (location)
+
+=== TEST CASE: profile split keeps entities separate ===
+
+--- TRAIN ---
+The support service uses Freshdesk for customer tickets.
+The billing service uses Stripe for invoice payments.
+
+--- QUERY ---
+What does the support service use?
+
+--- EXPECT ---
+{
+  "answer_contains": [],
+  "answer_not_contains": [],
+  "feature_check": [
+    "split"
+  ],
+  "global_profiles_min": 2,
+  "retrieval_chunk_contains": [],
+  "train_claims_min": 2
+}
+
+RESULT: PASS
+Checks:
+[PASS] global_profile_count >= 2
+[PASS] train claim_count >= 2
+[PASS] split feature check passes
+
+--- TRAIN RESPONSE SUMMARY ---
+{
+  "claim_count": 2,
+  "global_profile_count": 2,
+  "retrieval_chunk_count": 0,
+  "run_id": "7c5b1226-6d7c-49cf-ba20-48042f4da15a",
+  "sentence_count": 2,
+  "source_id": "6115c4b9-a2c9-49c2-88e6-bf71c8c05091"
+}
+
+--- ACTIONS ---
+{}
+
+--- ANSWER ---
+I could not find enough information to answer this question.
+
+--- DEBUG ---
+matched_chunks_count: 0
+matched_claims_count: 0
+conflict_marker_included: false
+temporal_context_used: false
+answer_mode: no_answer
+synthesis_confidence: 0.0
+
+--- QUERY PROFILE ---
+{
+  "builder_version": "query_resolver_v0",
+  "confidence": 0.85,
+  "detected_entities": [
+    {
+      "entity_type": "system_component",
+      "source": "query_pattern",
+      "text": "support service"
+    }
+  ],
+  "entity": "support service",
+  "entity_type": "system_component",
+  "expected_answer_type": null,
+  "intent": "relation",
+  "keywords": [
+    "support",
+    "service",
+    "use",
+    "relation"
+  ],
+  "reasons": [
+    "intent:relation_marker",
+    "relation_predicate:uses",
+    "time:no_forced_filter",
+    "entity_type:technical_component_keyword",
+    "entity:explicit_query_entity"
+  ],
+  "relation_object": null,
+  "relation_predicate": "uses",
+  "rule_action": null,
+  "space_filter": null,
+  "state": null,
+  "time_filter": null
+}
+
+--- MATCHED CHUNKS ---
+[]
+
+--- MATCHED CLAIMS ---
+[]
+
+--- EVIDENCE ---
+[]
+
+--- EXPLANATION ---
+{
+  "builder_version": "explanation_builder_v0",
+  "claims": [],
+  "sentences": [],
+  "sources": []
+}
+
+--- EVIDENCE DISPLAY ---
+(no explanation evidence)
+
+--- RETRIEVAL CHUNK ---
+
+=== TEST CASE: profile merge deduplicates duplicate entity ===
+
+--- TRAIN ---
+The support service uses Freshdesk for customer tickets.
+The support service uses Freshdesk for customer tickets.
+
+--- QUERY ---
+What does the support service use?
+
+--- EXPECT ---
+{
+  "answer_contains": [
+    "The support service uses Freshdesk for customer tickets."
+  ],
+  "answer_mode": "direct",
+  "answer_not_contains": [],
+  "evidence_required": true,
+  "feature_check": [
+    "merge"
+  ],
+  "global_profiles_min": 1,
+  "matched_chunks_min": 1,
+  "matched_claims_min": 1,
+  "retrieval_chunk_contains": []
+}
+
+RESULT: PASS
+Checks:
+[PASS] answer contains "The support service uses Freshdesk for customer tickets."
+[PASS] answer_mode is direct
+[PASS] matched_chunks_count >= 1
+[PASS] matched_claims_count >= 1
+[PASS] global_profile_count >= 1
+[PASS] merge feature check passes
+[PASS] cited_claim_ids not empty
+[PASS] cited_sentence_ids not empty
+[PASS] cited_source_ids not empty
+[PASS] explanation claims not empty
+[PASS] explanation sentences not empty
+[PASS] explanation sources not empty
+
+--- TRAIN RESPONSE SUMMARY ---
+{
+  "claim_count": 2,
+  "global_profile_count": 1,
+  "retrieval_chunk_count": 1,
+  "run_id": "21193acf-d92a-411b-b982-2053693c142e",
+  "sentence_count": 2,
+  "source_id": "c8bff6df-c2f2-4a6b-8e5d-2519fcf00068"
+}
+
+--- ACTIONS ---
+{}
+
+--- ANSWER ---
+The support service uses Freshdesk for customer tickets.
+
+--- DEBUG ---
+matched_chunks_count: 1
+matched_claims_count: 1
+conflict_marker_included: false
+temporal_context_used: false
+answer_mode: direct
+synthesis_confidence: 0.8
+
+--- QUERY PROFILE ---
+{
+  "builder_version": "query_resolver_v0",
+  "confidence": 0.85,
+  "detected_entities": [
+    {
+      "entity_type": "system_component",
+      "source": "query_pattern",
+      "text": "support service"
+    }
+  ],
+  "entity": "support service",
+  "entity_type": "system_component",
+  "expected_answer_type": null,
+  "intent": "relation",
+  "keywords": [
+    "support",
+    "service",
+    "use",
+    "relation"
+  ],
+  "reasons": [
+    "intent:relation_marker",
+    "relation_predicate:uses",
+    "time:no_forced_filter",
+    "entity_type:technical_component_keyword",
+    "entity:explicit_query_entity"
+  ],
+  "relation_object": null,
+  "relation_predicate": "uses",
+  "rule_action": null,
+  "space_filter": null,
+  "state": null,
+  "time_filter": null
+}
+
+--- MATCHED CHUNKS ---
+[
+  {
+    "conflict_marker": false,
+    "entity_name": "support service",
+    "entity_type": "software",
+    "evidence_ids": [
+      "205186ee-348b-4d75-9d12-c70024659bd1",
+      "e31e8b79-4268-42d8-8b93-cb7a7fc9cfdf",
+      "e5df7221-fea4-4c0f-b787-cb35defa7b85"
+    ],
+    "matched_claim_ids": [
+      "205186ee-348b-4d75-9d12-c70024659bd1"
+    ],
+    "profile_id": "global-profile:a48a8e55-c51c-4b03-a70b-6d953256160b",
+    "retrieval_chunk_text": "support service (software)\n\nRelation facts:\n- uses Freshdesk for customer tickets",
+    "retrieval_confidence": 0.85,
+    "source_ids": [
+      "c8bff6df-c2f2-4a6b-8e5d-2519fcf00068"
+    ],
+    "temporal_context_used": false
+  }
+]
+
+--- MATCHED CLAIMS ---
+[
+  {
+    "canonical_claim_text": "support service uses Freshdesk for customer tickets",
+    "claim_group": "descriptor",
+    "claim_id": "205186ee-348b-4d75-9d12-c70024659bd1",
+    "claim_semantic_type": "relation",
+    "claim_text": "support service uses Freshdesk for customer tickets",
+    "conflict_marker": false,
+    "display_claim_text": "support service uses Freshdesk for customer tickets",
+    "entity_name": "support service",
+    "fact_bucket": "relations",
+    "language": "",
+    "object": "Freshdesk for customer tickets",
+    "predicate": "uses",
+    "profile_id": "global-profile:a48a8e55-c51c-4b03-a70b-6d953256160b",
+    "raw_claim_text": "support service uses Freshdesk for customer tickets",
+    "sentence_ids": [
+      "e31e8b79-4268-42d8-8b93-cb7a7fc9cfdf",
+      "e5df7221-fea4-4c0f-b787-cb35defa7b85"
+    ],
+    "sentence_text": "The support service uses Freshdesk for customer tickets.",
+    "sentence_texts": [
+      "The support service uses Freshdesk for customer tickets.",
+      "The support service uses Freshdesk for customer tickets."
+    ],
+    "source_ids": [
+      "c8bff6df-c2f2-4a6b-8e5d-2519fcf00068"
+    ],
+    "state": null,
+    "time_filter": "current",
+    "time_values": []
+  }
+]
+
+--- EVIDENCE ---
+[
+  {
+    "claim_id": "205186ee-348b-4d75-9d12-c70024659bd1",
+    "sentence_id": "e31e8b79-4268-42d8-8b93-cb7a7fc9cfdf",
+    "source_id": "c8bff6df-c2f2-4a6b-8e5d-2519fcf00068"
+  },
+  {
+    "claim_id": "205186ee-348b-4d75-9d12-c70024659bd1",
+    "sentence_id": "e5df7221-fea4-4c0f-b787-cb35defa7b85",
+    "source_id": "c8bff6df-c2f2-4a6b-8e5d-2519fcf00068"
+  }
+]
+
+--- EXPLANATION ---
+{
+  "builder_version": "explanation_builder_v0",
+  "claims": [
+    {
+      "claim_id": "205186ee-348b-4d75-9d12-c70024659bd1",
+      "claim_text": "support service uses Freshdesk for customer tickets",
+      "sentence_ids": [
+        "e31e8b79-4268-42d8-8b93-cb7a7fc9cfdf",
+        "e5df7221-fea4-4c0f-b787-cb35defa7b85"
+      ],
+      "source_ids": [
+        "c8bff6df-c2f2-4a6b-8e5d-2519fcf00068"
+      ]
+    }
+  ],
+  "sentences": [
+    {
+      "claim_ids": [
+        "205186ee-348b-4d75-9d12-c70024659bd1"
+      ],
+      "sentence_id": "e31e8b79-4268-42d8-8b93-cb7a7fc9cfdf",
+      "sentence_text": "The support service uses Freshdesk for customer tickets.",
+      "source_ids": [
+        "c8bff6df-c2f2-4a6b-8e5d-2519fcf00068"
+      ]
+    },
+    {
+      "claim_ids": [
+        "205186ee-348b-4d75-9d12-c70024659bd1"
+      ],
+      "sentence_id": "e5df7221-fea4-4c0f-b787-cb35defa7b85",
+      "sentence_text": "The support service uses Freshdesk for customer tickets.",
+      "source_ids": [
+        "c8bff6df-c2f2-4a6b-8e5d-2519fcf00068"
+      ]
+    }
+  ],
+  "sources": [
+    {
+      "claim_ids": [
+        "205186ee-348b-4d75-9d12-c70024659bd1"
+      ],
+      "sentence_ids": [
+        "e31e8b79-4268-42d8-8b93-cb7a7fc9cfdf",
+        "e5df7221-fea4-4c0f-b787-cb35defa7b85"
+      ],
+      "source_id": "c8bff6df-c2f2-4a6b-8e5d-2519fcf00068"
+    }
+  ]
+}
+
+--- EVIDENCE DISPLAY ---
+- Claim: support service uses Freshdesk for customer tickets
+- Sentence: "The support service uses Freshdesk for customer tickets."
+- Sentence: "The support service uses Freshdesk for customer tickets."
+- Source: c8bff6df-c2f2-4a6b-8e5d-2519fcf00068
+
+--- RETRIEVAL CHUNK ---
+support service (software)
+
+Relation facts:
+- uses Freshdesk for customer tickets
+
+=== TEST CASE: vector retrieval chunk answers same fact ===
+
+--- TRAIN ---
+The support service uses Freshdesk for customer tickets.
+
+--- QUERY ---
+What does the support service use?
+
+--- EXPECT ---
+{
+  "answer_contains": [
+    "The support service uses Freshdesk for customer tickets."
+  ],
+  "answer_mode": "direct",
+  "answer_not_contains": [],
+  "evidence_required": true,
+  "index_build": true,
+  "matched_chunks_min": 1,
+  "matched_claims_min": 1,
+  "retrieval_chunk_contains": [
+    "Relation facts:"
+  ],
+  "vector_index_required": true
+}
+
+RESULT: PASS
+Checks:
+[PASS] answer contains "The support service uses Freshdesk for customer tickets."
+[PASS] answer_mode is direct
+[PASS] matched_chunks_count >= 1
+[PASS] matched_claims_count >= 1
+[PASS] retrieval chunk contains "Relation facts:"
+[PASS] retrieval chunks indexed for vector search
+[PASS] query used ready index build
+[PASS] cited_claim_ids not empty
+[PASS] cited_sentence_ids not empty
+[PASS] cited_source_ids not empty
+[PASS] explanation claims not empty
+[PASS] explanation sentences not empty
+[PASS] explanation sources not empty
+
+--- TRAIN RESPONSE SUMMARY ---
+{
+  "claim_count": 1,
+  "global_profile_count": 1,
+  "retrieval_chunk_count": 1,
+  "run_id": "f2dd091d-9a6f-4569-b366-1deb74740eb1",
+  "sentence_count": 1,
+  "source_id": "436b9a04-ef8d-4a3a-8fa5-4505801e84eb"
+}
+
+--- ACTIONS ---
+{
+  "index_build": {
+    "build_id": "d317c923-ec68-4742-9e29-25e1098b9d61",
+    "collection_name": "kb_regression__basic_chunk_v1",
+    "profile_key": "basic_chunk_v1",
+    "retrieval_chunk_count": 1,
+    "retrieval_chunk_indexed": true,
+    "source_count": 1,
+    "status": "ready"
+  }
+}
+
+--- ANSWER ---
+The support service uses Freshdesk for customer tickets.
+
+--- DEBUG ---
+matched_chunks_count: 1
+matched_claims_count: 1
+conflict_marker_included: false
+temporal_context_used: false
+answer_mode: direct
+synthesis_confidence: 0.8
+
+--- QUERY PROFILE ---
+{
+  "builder_version": "query_resolver_v0",
+  "confidence": 0.85,
+  "detected_entities": [
+    {
+      "entity_type": "system_component",
+      "source": "query_pattern",
+      "text": "support service"
+    }
+  ],
+  "entity": "support service",
+  "entity_type": "system_component",
+  "expected_answer_type": null,
+  "intent": "relation",
+  "keywords": [
+    "support",
+    "service",
+    "use",
+    "relation"
+  ],
+  "reasons": [
+    "intent:relation_marker",
+    "relation_predicate:uses",
+    "time:no_forced_filter",
+    "entity_type:technical_component_keyword",
+    "entity:explicit_query_entity"
+  ],
+  "relation_object": null,
+  "relation_predicate": "uses",
+  "rule_action": null,
+  "space_filter": null,
+  "state": null,
+  "time_filter": null
+}
+
+--- MATCHED CHUNKS ---
+[
+  {
+    "conflict_marker": false,
+    "entity_name": "support service",
+    "entity_type": "software",
+    "evidence_ids": [
+      "9f857992-5112-496f-b65e-02bcbae3c92a",
+      "f3d2131b-05ac-4e44-9922-93e688b6f96e"
+    ],
+    "matched_claim_ids": [
+      "9f857992-5112-496f-b65e-02bcbae3c92a"
+    ],
+    "profile_id": "global-profile:60cca36d-6463-447d-a614-d636b5889d34",
+    "retrieval_chunk_text": "support service (software)\n\nRelation facts:\n- uses Freshdesk for customer tickets",
+    "retrieval_confidence": 0.85,
+    "source_ids": [
+      "436b9a04-ef8d-4a3a-8fa5-4505801e84eb"
+    ],
+    "temporal_context_used": false
+  }
+]
+
+--- MATCHED CLAIMS ---
+[
+  {
+    "canonical_claim_text": "support service uses Freshdesk for customer tickets",
+    "claim_group": "descriptor",
+    "claim_id": "9f857992-5112-496f-b65e-02bcbae3c92a",
+    "claim_semantic_type": "relation",
+    "claim_text": "support service uses Freshdesk for customer tickets",
+    "conflict_marker": false,
+    "display_claim_text": "support service uses Freshdesk for customer tickets",
+    "entity_name": "support service",
+    "fact_bucket": "relations",
+    "language": "",
+    "object": "Freshdesk for customer tickets",
+    "predicate": "uses",
+    "profile_id": "global-profile:60cca36d-6463-447d-a614-d636b5889d34",
+    "raw_claim_text": "support service uses Freshdesk for customer tickets",
+    "sentence_ids": [
+      "f3d2131b-05ac-4e44-9922-93e688b6f96e"
+    ],
+    "sentence_text": "The support service uses Freshdesk for customer tickets.",
+    "sentence_texts": [
+      "The support service uses Freshdesk for customer tickets."
+    ],
+    "source_ids": [
+      "436b9a04-ef8d-4a3a-8fa5-4505801e84eb"
+    ],
+    "state": null,
+    "time_filter": "current",
+    "time_values": []
+  }
+]
+
+--- EVIDENCE ---
+[
+  {
+    "claim_id": "9f857992-5112-496f-b65e-02bcbae3c92a",
+    "sentence_id": "f3d2131b-05ac-4e44-9922-93e688b6f96e",
+    "source_id": "436b9a04-ef8d-4a3a-8fa5-4505801e84eb"
+  }
+]
+
+--- EXPLANATION ---
+{
+  "builder_version": "explanation_builder_v0",
+  "claims": [
+    {
+      "claim_id": "9f857992-5112-496f-b65e-02bcbae3c92a",
+      "claim_text": "support service uses Freshdesk for customer tickets",
+      "sentence_ids": [
+        "f3d2131b-05ac-4e44-9922-93e688b6f96e"
+      ],
+      "source_ids": [
+        "436b9a04-ef8d-4a3a-8fa5-4505801e84eb"
+      ]
+    }
+  ],
+  "sentences": [
+    {
+      "claim_ids": [
+        "9f857992-5112-496f-b65e-02bcbae3c92a"
+      ],
+      "sentence_id": "f3d2131b-05ac-4e44-9922-93e688b6f96e",
+      "sentence_text": "The support service uses Freshdesk for customer tickets.",
+      "source_ids": [
+        "436b9a04-ef8d-4a3a-8fa5-4505801e84eb"
+      ]
+    }
+  ],
+  "sources": [
+    {
+      "claim_ids": [
+        "9f857992-5112-496f-b65e-02bcbae3c92a"
+      ],
+      "sentence_ids": [
+        "f3d2131b-05ac-4e44-9922-93e688b6f96e"
+      ],
+      "source_id": "436b9a04-ef8d-4a3a-8fa5-4505801e84eb"
+    }
+  ]
+}
+
+--- EVIDENCE DISPLAY ---
+- Claim: support service uses Freshdesk for customer tickets
+- Sentence: "The support service uses Freshdesk for customer tickets."
+- Source: 436b9a04-ef8d-4a3a-8fa5-4505801e84eb
+
+--- RETRIEVAL CHUNK ---
+support service (software)
+
+Relation facts:
+- uses Freshdesk for customer tickets
+
+=== TEST CASE: stress multilingual conflict mix ===
+
+--- TRAIN ---
+The Stress service is currently active.
+The Stress service is currently inactive.
+The admin user must enable two-factor authentication.
+El usuario administrador debe activar la autenticación de dos factores.
+Az admin felhasználónak kötelező kétfaktoros azonosítást használnia.
+The Entity01 service is currently active.
+The Entity02 service is currently active.
+The Entity03 service is currently active.
+The Entity04 service is currently active.
+The Entity05 service is currently active.
+The Entity06 service is currently active.
+The Entity07 service is currently active.
+The Entity08 service is currently active.
+The Entity09 service is currently active.
+The Entity10 service is currently active.
+The Entity11 service is currently active.
+The Entity12 service is currently active.
+The Entity13 service is currently active.
+The Entity14 service is currently active.
+The Entity15 service is currently active.
+The Entity16 service is currently active.
+The Entity17 service is currently active.
+The Entity18 service is currently active.
+The Entity19 service is currently active.
+The Entity20 service is currently active.
+The Entity21 service is currently active.
+The Entity22 service is currently active.
+The Entity23 service is currently active.
+The Entity24 service is currently active.
+The Entity25 service is currently active.
+The Entity26 service is currently active.
+The Entity27 service is currently active.
+The Entity28 service is currently active.
+The Entity29 service is currently active.
+The Entity30 service is currently active.
+The Entity31 service is currently active.
+The Entity32 service is currently active.
+The Entity33 service is currently active.
+The Entity34 service is currently active.
+The Entity35 service is currently active.
+The Entity36 service is currently active.
+The Entity37 service is currently active.
+The Entity38 service is currently active.
+The Entity39 service is currently active.
+The Entity40 service is currently active.
+The Entity41 service is currently active.
+The Entity42 service is currently active.
+The Entity43 service is currently active.
+The Entity44 service is currently active.
+The Entity45 service is currently active.
+The Entity46 service is currently active.
+The Entity47 service is currently active.
+The Entity48 service is currently active.
+The Entity49 service is currently active.
+The Entity50 service is currently active.
+The Entity51 service is currently active.
+The Entity52 service is currently active.
+
+--- QUERY ---
+What must the admin user enable?
+
+--- EXPECT ---
+{
+  "answer_contains": [
+    "The admin user must enable two-factor authentication."
+  ],
+  "answer_mode": "direct",
+  "answer_not_contains": [],
+  "evidence_required": true,
+  "global_profiles_min": 40,
+  "matched_chunks_min": 1,
+  "matched_claims_min": 1,
+  "retrieval_chunk_contains": [
+    "Rules:",
+    "must enable two-factor authentication"
+  ],
+  "retrieval_chunks_min": 1,
+  "train_claims_min": 50
+}
+
+RESULT: PASS
+Checks:
+[PASS] answer contains "The admin user must enable two-factor authentication."
+[PASS] answer_mode is direct
+[PASS] matched_chunks_count >= 1
+[PASS] matched_claims_count >= 1
+[PASS] retrieval chunk contains "Rules:"
+[PASS] retrieval chunk contains "must enable two-factor authentication"
+[PASS] global_profile_count >= 40
+[PASS] retrieval_chunk_count >= 1
+[PASS] train claim_count >= 50
+[PASS] cited_claim_ids not empty
+[PASS] cited_sentence_ids not empty
+[PASS] cited_source_ids not empty
+[PASS] explanation claims not empty
+[PASS] explanation sentences not empty
+[PASS] explanation sources not empty
+
+--- TRAIN RESPONSE SUMMARY ---
+{
+  "claim_count": 57,
+  "global_profile_count": 54,
+  "retrieval_chunk_count": 1,
+  "run_id": "d91e33cb-1a49-4e0e-82ce-5f4667ba3977",
+  "sentence_count": 57,
+  "source_id": "eefb7362-bd78-44ba-8e88-bc51bc8496fd"
+}
+
+--- ACTIONS ---
+{}
+
+--- ANSWER ---
+The admin user must enable two-factor authentication.
+
+--- DEBUG ---
+matched_chunks_count: 1
+matched_claims_count: 1
+conflict_marker_included: false
+temporal_context_used: false
+answer_mode: direct
+synthesis_confidence: 0.8
+
+--- QUERY PROFILE ---
+{
+  "builder_version": "query_resolver_v0",
+  "confidence": 0.85,
+  "detected_entities": [
+    {
+      "entity_type": "user",
+      "source": "query_pattern",
+      "text": "admin user"
+    }
+  ],
+  "entity": "admin user",
+  "entity_type": "user",
+  "expected_answer_type": null,
+  "intent": "rule",
+  "keywords": [
+    "must",
+    "admin",
+    "user",
+    "enable",
+    "rule"
+  ],
+  "reasons": [
+    "intent:rule_marker",
+    "rule_action:enable",
+    "time:no_forced_filter",
+    "entity_type:user_keyword",
+    "entity:explicit_query_entity"
+  ],
+  "relation_object": null,
+  "relation_predicate": null,
+  "rule_action": "enable",
+  "space_filter": null,
+  "state": null,
+  "time_filter": null
+}
+
+--- MATCHED CHUNKS ---
+[
+  {
+    "conflict_marker": false,
+    "entity_name": "admin user",
+    "entity_type": "user",
+    "evidence_ids": [
+      "258d972a-eb52-4fda-8dd6-df89d2c0f423",
+      "40dcf372-0d0d-435d-a651-60a6ef2a1730",
+      "53088caf-c670-4126-8eea-4f09825f7942",
+      "cef2017d-8d29-48a5-a894-01ad3dd1c704"
+    ],
+    "matched_claim_ids": [
+      "258d972a-eb52-4fda-8dd6-df89d2c0f423"
+    ],
+    "profile_id": "global-profile:7a71d838-033e-4527-b9cc-49c052b8a0e8",
+    "retrieval_chunk_text": "admin user (user)\n\nRules:\n- must enable two-factor authentication",
+    "retrieval_confidence": 0.85,
+    "source_ids": [
+      "eefb7362-bd78-44ba-8e88-bc51bc8496fd"
+    ],
+    "temporal_context_used": false
+  }
+]
+
+--- MATCHED CLAIMS ---
+[
+  {
+    "canonical_claim_text": "admin user must enable two-factor authentication",
+    "claim_group": "rule",
+    "claim_id": "258d972a-eb52-4fda-8dd6-df89d2c0f423",
+    "claim_semantic_type": "descriptor",
+    "claim_text": "admin user must enable two-factor authentication",
+    "conflict_marker": false,
+    "display_claim_text": "admin user must enable two-factor authentication",
+    "entity_name": "admin user",
+    "fact_bucket": "rules",
+    "language": "",
+    "object": "activar la autenticación de dos factores",
+    "predicate": "debe",
+    "profile_id": "global-profile:7a71d838-033e-4527-b9cc-49c052b8a0e8",
+    "raw_claim_text": "admin user debe activar la autenticación de dos factores",
+    "sentence_ids": [
+      "40dcf372-0d0d-435d-a651-60a6ef2a1730",
+      "53088caf-c670-4126-8eea-4f09825f7942",
+      "cef2017d-8d29-48a5-a894-01ad3dd1c704"
+    ],
+    "sentence_text": "El usuario administrador debe activar la autenticación de dos factores.",
+    "sentence_texts": [
+      "El usuario administrador debe activar la autenticación de dos factores.",
+      "The admin user must enable two-factor authentication.",
+      "Az admin felhasználónak kötelező kétfaktoros azonosítást használnia."
+    ],
+    "source_ids": [
+      "eefb7362-bd78-44ba-8e88-bc51bc8496fd"
+    ],
+    "state": null,
+    "time_filter": "current",
+    "time_values": []
+  }
+]
+
+--- EVIDENCE ---
+[
+  {
+    "claim_id": "258d972a-eb52-4fda-8dd6-df89d2c0f423",
+    "sentence_id": "40dcf372-0d0d-435d-a651-60a6ef2a1730",
+    "source_id": "eefb7362-bd78-44ba-8e88-bc51bc8496fd"
+  },
+  {
+    "claim_id": "258d972a-eb52-4fda-8dd6-df89d2c0f423",
+    "sentence_id": "53088caf-c670-4126-8eea-4f09825f7942",
+    "source_id": "eefb7362-bd78-44ba-8e88-bc51bc8496fd"
+  },
+  {
+    "claim_id": "258d972a-eb52-4fda-8dd6-df89d2c0f423",
+    "sentence_id": "cef2017d-8d29-48a5-a894-01ad3dd1c704",
+    "source_id": "eefb7362-bd78-44ba-8e88-bc51bc8496fd"
+  }
+]
+
+--- EXPLANATION ---
+{
+  "builder_version": "explanation_builder_v0",
+  "claims": [
+    {
+      "claim_id": "258d972a-eb52-4fda-8dd6-df89d2c0f423",
+      "claim_text": "admin user must enable two-factor authentication",
+      "sentence_ids": [
+        "40dcf372-0d0d-435d-a651-60a6ef2a1730",
+        "53088caf-c670-4126-8eea-4f09825f7942",
+        "cef2017d-8d29-48a5-a894-01ad3dd1c704"
+      ],
+      "source_ids": [
+        "eefb7362-bd78-44ba-8e88-bc51bc8496fd"
+      ]
+    }
+  ],
+  "sentences": [
+    {
+      "claim_ids": [
+        "258d972a-eb52-4fda-8dd6-df89d2c0f423"
+      ],
+      "sentence_id": "40dcf372-0d0d-435d-a651-60a6ef2a1730",
+      "sentence_text": "El usuario administrador debe activar la autenticación de dos factores.",
+      "source_ids": [
+        "eefb7362-bd78-44ba-8e88-bc51bc8496fd"
+      ]
+    },
+    {
+      "claim_ids": [
+        "258d972a-eb52-4fda-8dd6-df89d2c0f423"
+      ],
+      "sentence_id": "53088caf-c670-4126-8eea-4f09825f7942",
+      "sentence_text": "The admin user must enable two-factor authentication.",
+      "source_ids": [
+        "eefb7362-bd78-44ba-8e88-bc51bc8496fd"
+      ]
+    },
+    {
+      "claim_ids": [
+        "258d972a-eb52-4fda-8dd6-df89d2c0f423"
+      ],
+      "sentence_id": "cef2017d-8d29-48a5-a894-01ad3dd1c704",
+      "sentence_text": "Az admin felhasználónak kötelező kétfaktoros azonosítást használnia.",
+      "source_ids": [
+        "eefb7362-bd78-44ba-8e88-bc51bc8496fd"
+      ]
+    }
+  ],
+  "sources": [
+    {
+      "claim_ids": [
+        "258d972a-eb52-4fda-8dd6-df89d2c0f423"
+      ],
+      "sentence_ids": [
+        "40dcf372-0d0d-435d-a651-60a6ef2a1730",
+        "53088caf-c670-4126-8eea-4f09825f7942",
+        "cef2017d-8d29-48a5-a894-01ad3dd1c704"
+      ],
+      "source_id": "eefb7362-bd78-44ba-8e88-bc51bc8496fd"
+    }
+  ]
+}
+
+--- EVIDENCE DISPLAY ---
+- Claim: admin user must enable two-factor authentication
+- Sentence: "El usuario administrador debe activar la autenticación de dos factores."
+- Sentence: "The admin user must enable two-factor authentication."
+- Sentence: "Az admin felhasználónak kötelező kétfaktoros azonosítást használnia."
+- Source: eefb7362-bd78-44ba-8e88-bc51bc8496fd
+
+--- RETRIEVAL CHUNK ---
+admin user (user)
+
+Rules:
+- must enable two-factor authentication
+
+=== SUMMARY ===
+Total: 15
+Passed: 15
+Failed: 0

@@ -4,6 +4,7 @@ import pytest
 
 from apps.knowledge.domain.sentence import Sentence
 from apps.knowledge.service.claim_extractor_v1 import ClaimExtractorV1
+from apps.knowledge.service.claim_extraction_pipeline import run_v1_sentence_claim_pipeline
 from apps.knowledge.service.claim_quality_gate import ClaimQualityGate
 from apps.knowledge.service.knowledge_trace_service import _trace_claim_extraction_fields
 from apps.knowledge.service.claim_typing import debug_claim_type
@@ -28,6 +29,67 @@ def _extract_claims(text: str, language: str | None = None):
         debug_claim_type(claim)
 
     return sentence, mentions, claims, resolved_language
+
+
+def test_stress_noise_sentences_are_screened_before_active_claims() -> None:
+    gate = ClaimQualityGate()
+    extractor = ClaimExtractorV1()
+    for text in (
+        "TODO: fix login bug",
+        "Random note: Paris onboarding is smooth.",
+        "The office has blue chairs.",
+    ):
+        sentence = Sentence(text_content=text, metadata={"language": "en"})
+        claims, diagnostics = run_v1_sentence_claim_pipeline(
+            sentence=sentence,
+            mentions=MentionExtractor().extract(sentence, language="en"),
+            resolved_language="en",
+            extractor=extractor,
+            quality_gate=gate,
+        )
+        assert claims == []
+        assert diagnostics.get("skipped") is True
+        assert diagnostics.get("sentence_reason") == "noise_sentence"
+
+
+def test_trace_noise_instruction_sentence_is_screened_before_active_claims() -> None:
+    sentence = Sentence(
+        text_content="This sentence should not create an important claim.",
+        metadata={"language": "en"},
+    )
+    claims, diagnostics = run_v1_sentence_claim_pipeline(
+        sentence=sentence,
+        mentions=MentionExtractor().extract(sentence, language="en"),
+        resolved_language="en",
+        extractor=ClaimExtractorV1(),
+        quality_gate=ClaimQualityGate(),
+    )
+
+    assert claims == []
+    assert diagnostics.get("skipped") is True
+    assert diagnostics.get("sentence_reason") == "noise_sentence"
+
+
+def test_stress_negative_billing_module_refund_claim_is_negated_and_scoped() -> None:
+    sentence = Sentence(
+        text_content="The billing module does not use Stripe for refunds.",
+        metadata={"language": "en"},
+    )
+    claims, diagnostics = run_v1_sentence_claim_pipeline(
+        sentence=sentence,
+        mentions=MentionExtractor().extract(sentence, language="en"),
+        resolved_language="en",
+        extractor=ClaimExtractorV1(),
+        quality_gate=ClaimQualityGate(),
+    )
+
+    assert diagnostics.get("accepted_claim_count") == 1
+    assert len(claims) == 1
+    claim = claims[0]
+    assert claim.subject_text == "billing module"
+    assert claim.predicate_text == "use"
+    assert claim.object_text == "Stripe for refunds"
+    assert claim.assertion_mode == "negation"
 
 
 def test_claim_extractor_hu(capsys: pytest.CaptureFixture[str]) -> None:

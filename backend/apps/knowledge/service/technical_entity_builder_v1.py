@@ -208,9 +208,12 @@ class TechnicalEntityBuilderV1:
             buckets[_bucket_name(ref)].append(ref)
 
         surface_forms = sorted({str(item).strip() for item in cluster.surface_forms if str(item).strip()})
+        explanation = dict(getattr(cluster, "explanation", {}) or {})
+        canonical_key = str(explanation.get("canonical_key") or cluster.normalized_key or "")
         surface_bundle = {
             "canonical_name": cluster.canonical_name,
             "normalized_key": cluster.normalized_key,
+            "canonical_key": canonical_key,
             "surface_forms": surface_forms,
             "aliases": list(surface_forms),
             "mention_texts": list(surface_forms),
@@ -226,6 +229,7 @@ class TechnicalEntityBuilderV1:
             canonical_name=cluster.canonical_name,
             entity_type=cluster.entity_type,
             normalized_key=cluster.normalized_key,
+            canonical_key=canonical_key,
             surface_bundle=surface_bundle,
             identity_claims=buckets["identity_claims"],
             descriptor_claims=buckets["descriptor_claims"],

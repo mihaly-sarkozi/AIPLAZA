@@ -10,6 +10,7 @@ from typing import Any
 
 from apps.knowledge.domain.search_profile import SEARCH_PROFILE_BUILDER_VERSION, SearchProfile
 from apps.knowledge.domain.technical_memory_chunk import TechnicalMemoryChunk
+from apps.knowledge.service.entity_key_normalization import canonicalize_entity_key
 
 
 _MAX_SEARCH_TEXT_LENGTH = 1000
@@ -216,6 +217,19 @@ def _relation_filters(chunk: TechnicalMemoryChunk) -> dict[str, list[str]]:
     }
 
 
+def _profile_normalized_key(chunk: TechnicalMemoryChunk) -> str:
+    if str(chunk.entity_type or "") == "person":
+        return chunk.normalized_key
+    canonical = canonicalize_entity_key(chunk.normalized_key or chunk.entity_name)
+    return canonical or chunk.normalized_key
+
+
+def _profile_canonical_key(chunk: TechnicalMemoryChunk) -> str:
+    if str(chunk.entity_type or "") == "person":
+        return chunk.normalized_key
+    return canonicalize_entity_key(chunk.normalized_key or chunk.entity_name) or chunk.normalized_key
+
+
 def _evidence_refs(chunk: TechnicalMemoryChunk) -> list[dict[str, Any]]:
     claim_ids: list[str] = []
     sentence_ids: list[str] = []
@@ -263,7 +277,8 @@ class SearchProfileBuilderV1:
             local_entity_id=technical_memory_chunk.local_entity_id,
             entity_name=technical_memory_chunk.entity_name,
             entity_type=technical_memory_chunk.entity_type,
-            normalized_key=technical_memory_chunk.normalized_key,
+            normalized_key=_profile_normalized_key(technical_memory_chunk),
+            canonical_key=_profile_canonical_key(technical_memory_chunk),
             canonical_text=canonical_text,
             search_text=_search_text(technical_memory_chunk, keywords),
             aliases=aliases,

@@ -5,7 +5,8 @@ from uuid import uuid4
 import pytest
 
 from apps.knowledge.domain.search_profile import SearchProfile
-from apps.knowledge.service.candidate_selection_v1 import CandidateSelectionV1
+from apps.knowledge.domain.similarity_analysis import similarity_analysis_to_json_dict
+from apps.knowledge.service.candidate_selection_v1 import CandidateSelectionV1, candidate_selection_attempt_count
 from apps.knowledge.service.similarity_engine_v1 import SimilarityEngineV1
 
 
@@ -21,6 +22,7 @@ def _profile(
     relation_objects: list[str] | None = None,
     time_values: list[str] | None = None,
     space_values: list[str] | None = None,
+    canonical_key: str = "",
     evidence: bool = True,
 ) -> SearchProfile:
     claim_id = str(uuid4())
@@ -33,6 +35,7 @@ def _profile(
         entity_name=name,
         entity_type=entity_type,
         normalized_key=name.lower(),
+        canonical_key=canonical_key,
         canonical_text=f"{name} | {entity_type}",
         search_text=f"{name} {' '.join(keywords or [])}",
         keywords=keywords or [],
@@ -63,6 +66,10 @@ def _analyze(new: SearchProfile, candidate_profile: SearchProfile):
     return SimilarityEngineV1().analyze_for_profile(new, candidates, [candidate_profile])[0]
 
 
+def _has_normalized_name_match(analysis) -> bool:
+    return any(reason in {"name:canonical_exact", "name:normalized_key_exact", "name:normalized_exact"} for reason in analysis.similarity_reasons)
+
+
 def test_similarity_same_sarah_miller_is_high() -> None:
     new = _profile(
         "Sarah Miller",
@@ -84,6 +91,73 @@ def test_similarity_same_sarah_miller_is_high() -> None:
     assert analysis.similarity_band == "high"
     assert analysis.total_similarity_score >= 0.75
     assert analysis.component_scores["name_similarity"] == 1.0
+
+
+def test_existing_memory_support_module_spanish_profile_scores_high() -> None:
+    existing = _profile(
+        "support module",
+        "module",
+        canonical_key="support module",
+        keywords=["support", "module", "freshdesk"],
+        relation_predicates=["uses"],
+        relation_objects=["Freshdesk"],
+    )
+    new = _profile(
+        "El módulo de soporte",
+        "module",
+        canonical_key="support module",
+        keywords=["módulo", "soporte", "freshdesk"],
+        relation_predicates=["utiliza"],
+        relation_objects=["Freshdesk"],
+    )
+
+    candidates = CandidateSelectionV1().select_many([new], existing_profiles=[existing], limit_per_profile=3)
+    analyses = SimilarityEngineV1().analyze_many([new], candidates, [existing])
+
+    assert candidates
+    assert candidates[0].candidate_source == "existing_memory"
+    assert analyses
+    assert analyses[0].component_scores["name_similarity"] == 1.0
+    assert analyses[0].total_similarity_score >= 0.65
+
+
+def test_similarity_normalized_key_match_without_relation_object_is_capped_below_perfect() -> None:
+    existing = _profile("support module", "module", canonical_key="support module", keywords=["support", "module"])
+    new = _profile("El módulo de soporte", "module", canonical_key="support module", keywords=["soporte", "módulo"])
+
+    analysis = _analyze(new, existing)
+
+    assert analysis.component_scores["name_similarity"] == 1.0
+    assert analysis.component_scores["relation_similarity"] == 0.0
+    assert analysis.component_scores["object_similarity"] == 0.0
+    assert analysis.total_similarity_score <= 0.85
+    assert "missing_relation_object_similarity_cap" in analysis.similarity_reasons
+
+
+def test_similarity_normalized_key_relation_and_object_match_can_be_near_perfect() -> None:
+    existing = _profile(
+        "support module",
+        "module",
+        canonical_key="support module",
+        keywords=["support", "module", "freshdesk"],
+        relation_predicates=["uses"],
+        relation_objects=["Freshdesk"],
+    )
+    new = _profile(
+        "El módulo de soporte",
+        "module",
+        canonical_key="support module",
+        keywords=["soporte", "módulo", "freshdesk"],
+        relation_predicates=["utiliza"],
+        relation_objects=["Freshdesk"],
+    )
+
+    analysis = _analyze(new, existing)
+
+    assert analysis.component_scores["name_similarity"] == 1.0
+    assert analysis.component_scores["relation_similarity"] > 0.0
+    assert analysis.component_scores["object_similarity"] > 0.0
+    assert analysis.total_similarity_score >= 0.95
 
 
 def test_similarity_london_vs_berlin_office_is_low() -> None:
@@ -143,7 +217,7 @@ def test_similarity_admin_user_vs_admin_felhasznalo_is_medium_or_high() -> None:
     assert analysis.component_scores["name_similarity"] == 1.0
     assert analysis.component_scores["keyword_similarity"] > 0
     assert analysis.component_scores["object_similarity"] > 0
-    assert "name:canonical_exact" in analysis.similarity_reasons
+    assert _has_normalized_name_match(analysis)
 
 
 def test_similarity_admin_user_vs_usuario_administrador_is_medium_or_high() -> None:
@@ -167,7 +241,7 @@ def test_similarity_admin_user_vs_usuario_administrador_is_medium_or_high() -> N
     assert analysis.similarity_band in {"medium", "high"}
     assert analysis.component_scores["type_similarity"] == 1.0
     assert analysis.component_scores["name_similarity"] == 1.0
-    assert "name:canonical_exact" in analysis.similarity_reasons
+    assert _has_normalized_name_match(analysis)
     assert analysis.evidence["claim_ids"]
 
 
@@ -190,7 +264,58 @@ def test_similarity_rule_objects_use_semantic_normalized_overlap() -> None:
     analysis = _analyze(new, existing)
 
     assert analysis.component_scores["object_similarity"] > 0
-    assert any(reason.startswith("relation_object:semantic_overlap") for reason in analysis.similarity_reasons)
+    assert any(reason.startswith("relation_object:normalized_semantic_overlap") for reason in analysis.similarity_reasons)
+
+
+def test_similarity_predicates_and_objects_are_normalized_cross_language() -> None:
+    new = _profile(
+        "support module",
+        "module",
+        keywords=["support", "module"],
+        relation_predicates=["uses"],
+        relation_objects=["Freshdesk"],
+    )
+    existing = _profile(
+        "support modul",
+        "module",
+        keywords=["support", "modul"],
+        relation_predicates=["használ"],
+        relation_objects=["Freshdesk rendszert"],
+    )
+
+    analysis = _analyze(new, existing)
+
+    assert analysis.similarity_band == "high"
+    assert analysis.total_similarity_score > 0.7
+    assert analysis.component_scores["name_similarity"] == 1.0
+    assert analysis.component_scores["relation_similarity"] == 1.0
+    assert analysis.component_scores["object_similarity"] == 1.0
+    assert "relation_predicate:semantic_overlap:1.00" in analysis.similarity_reasons
+    assert "relation_object:normalized_semantic_overlap:1.00" in analysis.similarity_reasons
+
+
+def test_similarity_integrates_with_maps_to_uses_or_integrates_relation_class() -> None:
+    new = _profile(
+        "support module",
+        "module",
+        keywords=["support", "module"],
+        relation_predicates=["integrates with"],
+        relation_objects=["Freshdesk"],
+    )
+    existing = _profile(
+        "módulo de soporte",
+        "module",
+        keywords=["módulo", "soporte"],
+        relation_predicates=["utiliza"],
+        relation_objects=["Freshdesk sistema"],
+    )
+
+    analysis = _analyze(new, existing)
+
+    assert analysis.total_similarity_score >= 0.65
+    assert analysis.component_scores["name_similarity"] == 1.0
+    assert analysis.component_scores["relation_similarity"] == 1.0
+    assert analysis.component_scores["object_similarity"] == 1.0
 
 
 def test_similarity_different_type_and_keywords_is_low() -> None:
@@ -224,6 +349,7 @@ def test_similarity_analysis_contains_component_scores_and_evidence() -> None:
 
     assert set(analysis.component_scores) == {
         "name_similarity",
+        "canonical_text_similarity",
         "type_similarity",
         "keyword_similarity",
         "relation_similarity",
@@ -313,6 +439,118 @@ def test_similarity_legacy_helpdesk_import_vs_regi_helpdesk_import_is_strong_med
     assert analysis.similarity_band == "high"
     assert analysis.total_similarity_score >= 0.75
     assert analysis.component_scores["name_similarity"] == 1.0
-    assert "name:canonical_exact" in analysis.similarity_reasons
+    assert _has_normalized_name_match(analysis)
     assert "same_type_strong_lexical_overlap_boost" in analysis.similarity_reasons
     assert analysis.evidence["claim_ids"]
+
+
+def test_stress_multilingual_data_protection_role_similarity_is_medium_or_high() -> None:
+    new = _profile(
+        "data protection lead",
+        "policy",
+        keywords=["data", "protection", "lead", "gdpr"],
+        relation_predicates=["responsible"],
+    )
+    hu = _profile(
+        "adatvédelmi felelős",
+        "policy",
+        keywords=["adatvédelmi", "felelős", "felhasználói", "adatokat"],
+        relation_predicates=["kezeli"],
+    )
+    es = _profile(
+        "responsable de protección de datos",
+        "policy",
+        keywords=["responsable", "protección", "datos", "usuario"],
+        relation_predicates=["gestiona"],
+    )
+
+    analysis_hu = _analyze(new, hu)
+    analysis_es = _analyze(new, es)
+
+    assert analysis_hu.similarity_band in {"medium", "high"}
+    assert analysis_es.similarity_band in {"medium", "high"}
+    assert _has_normalized_name_match(analysis_hu)
+    assert _has_normalized_name_match(analysis_es)
+
+
+def test_similarity_multilingual_support_module_is_merge_suggestion_strength() -> None:
+    new = _profile("support module", "module", keywords=["support", "module"])
+    existing_hu = _profile("support modul", "module", keywords=["support", "modul"])
+    existing_es = _profile("módulo de soporte", "module", keywords=["módulo", "soporte"])
+
+    analysis_hu = _analyze(new, existing_hu)
+    analysis_es = _analyze(new, existing_es)
+
+    assert analysis_hu.similarity_band == "high"
+    assert analysis_es.similarity_band == "high"
+    assert analysis_hu.total_similarity_score > 0.7
+    assert analysis_es.total_similarity_score > 0.7
+    assert _has_normalized_name_match(analysis_hu)
+    assert _has_normalized_name_match(analysis_es)
+
+
+@pytest.mark.parametrize(
+    ("left", "right", "entity_type"),
+    [
+        ("support module", "módulo de soporte", "module"),
+        ("billing service", "servicio de facturación", "software"),
+        ("admin user", "usuario administrador", "user"),
+        ("account", "cuenta", "account"),
+    ],
+)
+def test_similarity_canonical_alias_exact_gets_explicit_boost(left: str, right: str, entity_type: str) -> None:
+    new = _profile(left, entity_type, keywords=left.split())
+    existing = _profile(right, entity_type, keywords=right.split())
+
+    analysis = _analyze(new, existing)
+
+    assert analysis.similarity_band in {"medium", "high"}
+    assert analysis.total_similarity_score >= 0.7
+    assert _has_normalized_name_match(analysis)
+    assert "canonical_alias_similarity_boost" in analysis.similarity_reasons
+
+
+def test_similarity_explicit_canonical_key_match_is_at_least_medium() -> None:
+    new = _profile(
+        "legacy helpdesk importer",
+        "module",
+        keywords=["legacy"],
+        canonical_key="legacy helpdesk import",
+    )
+    existing = _profile(
+        "régi Helpdesk import",
+        "module",
+        keywords=["régi"],
+        canonical_key="legacy helpdesk import",
+    )
+
+    candidate = CandidateSelectionV1().select_for_profile(new, [existing])[0]
+    analysis = SimilarityEngineV1().analyze_for_profile(new, [candidate], [existing])[0]
+
+    assert candidate.score >= 0.55
+    assert "canonical_key_match" in " ".join(candidate.reasons)
+    assert analysis.similarity_band in {"medium", "high"}
+    assert analysis.total_similarity_score >= 0.7
+    assert "name:normalized_key_exact" in analysis.similarity_reasons
+    assert "normalized_key_similarity_boost" in analysis.similarity_reasons
+    assert similarity_analysis_to_json_dict(analysis)["similarity_score"] == analysis.total_similarity_score
+
+
+def test_candidate_selection_attempts_all_pairs_and_returns_top_canonical_groups() -> None:
+    new = _profile("admin user", "user", keywords=["admin", "user"])
+    existing = [
+        _profile("admin felhasználó", "user", keywords=["admin", "felhasználó"]),
+        _profile("usuario administrador", "user", keywords=["usuario", "administrador"]),
+        _profile("regular user", "user", keywords=["regular", "user"]),
+        _profile("legacy helpdesk import", "module", keywords=["legacy", "helpdesk", "import"]),
+    ]
+
+    selector = CandidateSelectionV1()
+    candidates = selector.select_for_profile(new, [new, *existing], limit=3)
+
+    assert candidate_selection_attempt_count([new], [new, *existing]) == 4
+    assert len(candidates) == 2
+    assert candidates[0].score >= candidates[-1].score
+    assert candidates[0].score >= 0.5
+    assert candidates[0].merge_candidate_group["canonical_key"] == "admin user"
+    assert candidates[0].merge_candidate_group["group_size"] == 2

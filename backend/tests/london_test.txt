@@ -1,0 +1,387 @@
+=== TEST CASE: state basic ===
+
+TRAIN:
+"""
+The London office is currently inactive.
+The London office was inactive in 2024.
+"""
+
+QUERY:
+"""
+What is the status of London office?
+"""
+
+EXPECT:
+answer_contains: The London office is currently inactive. Historically, it was inactive in 2024.
+answer_mode: state_with_history
+matched_chunks_min: 1
+matched_claims_min: 2
+retrieval_chunk_contains: Current facts:
+retrieval_chunk_contains: Historical facts:
+evidence_required: true
+
+
+=== TEST CASE: state conflict ===
+
+TRAIN:
+"""
+The London office is currently active.
+The London office is currently inactive.
+The London office was inactive in 2024.
+"""
+
+QUERY:
+"""
+What is the status of London office?
+"""
+
+EXPECT:
+answer_contains: conflicting current status
+answer_mode: conflict
+matched_chunks_min: 1
+matched_claims_min: 3
+retrieval_chunk_contains: Conflicts:
+evidence_required: true
+
+
+=== TEST CASE: relation direct ===
+
+TRAIN:
+"""
+The support service uses Freshdesk for customer tickets.
+"""
+
+QUERY:
+"""
+What does the support service use?
+"""
+
+EXPECT:
+answer_contains: The support service uses Freshdesk for customer tickets.
+answer_mode: direct
+matched_chunks_min: 1
+matched_claims_min: 1
+retrieval_chunk_contains: Relation facts:
+retrieval_chunk_contains: uses Freshdesk for customer tickets
+evidence_required: true
+
+
+=== TEST CASE: relation reverse ===
+
+TRAIN:
+"""
+The support service uses Freshdesk for customer tickets.
+"""
+
+QUERY:
+"""
+Which systems use Freshdesk?
+"""
+
+EXPECT:
+answer_contains: The support service uses Freshdesk for customer tickets.
+answer_mode: direct
+matched_chunks_min: 1
+matched_claims_min: 1
+retrieval_chunk_contains: Relation facts:
+retrieval_chunk_contains: uses Freshdesk for customer tickets
+evidence_required: true
+
+
+=== TEST CASE: rule multilingual ===
+
+TRAIN:
+"""
+The admin user must enable two-factor authentication.
+El usuario administrador debe activar la autenticación de dos factores.
+Az admin felhasználónak kötelező kétfaktoros azonosítást használnia.
+"""
+
+QUERY:
+"""
+What must the admin user enable?
+"""
+
+EXPECT:
+answer_contains: The admin user must enable two-factor authentication.
+answer_mode: direct
+matched_chunks_min: 1
+matched_claims_min: 1
+retrieval_chunk_contains: Rules:
+retrieval_chunk_contains: must enable two-factor authentication
+evidence_required: true
+
+
+=== TEST CASE: descriptor ===
+
+TRAIN:
+"""
+The compliance policy applies to all external contractors.
+"""
+
+QUERY:
+"""
+What does the compliance policy apply to?
+"""
+
+EXPECT:
+answer_contains: The compliance policy applies to all external contractors.
+answer_mode: direct
+matched_chunks_min: 1
+matched_claims_min: 1
+retrieval_chunk_contains: Descriptors:
+retrieval_chunk_contains: applies to all external contractors
+evidence_required: true
+
+
+=== TEST CASE: event ===
+
+TRAIN:
+"""
+The security review was completed on 12 March 2025.
+"""
+
+QUERY:
+"""
+When was the security review completed?
+"""
+
+EXPECT:
+answer_contains: The security review was completed on 12 March 2025.
+answer_mode: direct
+matched_chunks_min: 1
+matched_claims_min: 1
+retrieval_chunk_contains: Events:
+retrieval_chunk_contains: completed on 12 March 2025
+evidence_required: true
+
+
+=== TEST CASE: entity guard admin rule ignores billing state ===
+
+TRAIN:
+"""
+The billing service is currently active.
+The admin user must enable two-factor authentication.
+"""
+
+QUERY:
+"""
+What must the admin user enable?
+"""
+
+EXPECT:
+answer_contains: The admin user must enable two-factor authentication.
+answer_not_contains: billing service
+answer_mode: direct
+matched_chunks_min: 1
+matched_claims_min: 1
+evidence_required: true
+
+
+=== TEST CASE: entity guard no wrong entity fallback ===
+
+TRAIN:
+"""
+The London office is currently inactive.
+"""
+
+QUERY:
+"""
+What must the admin user enable?
+"""
+
+EXPECT:
+answer_mode: no_answer
+answer_not_contains: London office
+
+
+=== TEST CASE: feedback replace updates answer ===
+
+TRAIN:
+"""
+The London office is currently inactive.
+"""
+
+QUERY:
+"""
+What is the status of London office?
+"""
+
+EXPECT:
+feedback_type: replace
+feedback_target_entity: London office
+feedback_claim_text: The London office is currently inactive.
+feedback_new_claim: The London office is currently active.
+feedback_user_input: This is wrong -> London office is active
+feedback_event_required: true
+answer_contains: The London office is currently active.
+answer_not_contains: currently inactive
+answer_mode: direct
+matched_chunks_min: 1
+matched_claims_min: 1
+evidence_required: true
+
+
+=== TEST CASE: source withdrawal removes old claim ===
+
+TRAIN:
+"""
+The London office is currently inactive.
+"""
+
+QUERY:
+"""
+What is the status of London office?
+"""
+
+EXPECT:
+withdraw_source: first_source
+withdrawal_event_required: true
+answer_mode: no_answer
+answer_not_contains: London office is currently inactive
+
+
+=== TEST CASE: profile split keeps entities separate ===
+
+TRAIN:
+"""
+The support service uses Freshdesk for customer tickets.
+The billing service uses Stripe for invoice payments.
+"""
+
+QUERY:
+"""
+What does the support service use?
+"""
+
+EXPECT:
+feature_check: split
+global_profiles_min: 2
+train_claims_min: 2
+
+
+=== TEST CASE: profile merge deduplicates duplicate entity ===
+
+TRAIN:
+"""
+The support service uses Freshdesk for customer tickets.
+The support service uses Freshdesk for customer tickets.
+"""
+
+QUERY:
+"""
+What does the support service use?
+"""
+
+EXPECT:
+feature_check: merge
+answer_contains: The support service uses Freshdesk for customer tickets.
+answer_mode: direct
+global_profiles_min: 1
+matched_chunks_min: 1
+matched_claims_min: 1
+evidence_required: true
+
+
+=== TEST CASE: vector retrieval chunk answers same fact ===
+
+TRAIN:
+"""
+The support service uses Freshdesk for customer tickets.
+"""
+
+QUERY:
+"""
+What does the support service use?
+"""
+
+EXPECT:
+index_build: true
+vector_index_required: true
+answer_contains: The support service uses Freshdesk for customer tickets.
+answer_mode: direct
+matched_chunks_min: 1
+matched_claims_min: 1
+retrieval_chunk_contains: Relation facts:
+evidence_required: true
+
+
+=== TEST CASE: stress multilingual conflict mix ===
+
+TRAIN:
+"""
+The Stress service is currently active.
+The Stress service is currently inactive.
+The admin user must enable two-factor authentication.
+El usuario administrador debe activar la autenticación de dos factores.
+Az admin felhasználónak kötelező kétfaktoros azonosítást használnia.
+The Entity01 service is currently active.
+The Entity02 service is currently active.
+The Entity03 service is currently active.
+The Entity04 service is currently active.
+The Entity05 service is currently active.
+The Entity06 service is currently active.
+The Entity07 service is currently active.
+The Entity08 service is currently active.
+The Entity09 service is currently active.
+The Entity10 service is currently active.
+The Entity11 service is currently active.
+The Entity12 service is currently active.
+The Entity13 service is currently active.
+The Entity14 service is currently active.
+The Entity15 service is currently active.
+The Entity16 service is currently active.
+The Entity17 service is currently active.
+The Entity18 service is currently active.
+The Entity19 service is currently active.
+The Entity20 service is currently active.
+The Entity21 service is currently active.
+The Entity22 service is currently active.
+The Entity23 service is currently active.
+The Entity24 service is currently active.
+The Entity25 service is currently active.
+The Entity26 service is currently active.
+The Entity27 service is currently active.
+The Entity28 service is currently active.
+The Entity29 service is currently active.
+The Entity30 service is currently active.
+The Entity31 service is currently active.
+The Entity32 service is currently active.
+The Entity33 service is currently active.
+The Entity34 service is currently active.
+The Entity35 service is currently active.
+The Entity36 service is currently active.
+The Entity37 service is currently active.
+The Entity38 service is currently active.
+The Entity39 service is currently active.
+The Entity40 service is currently active.
+The Entity41 service is currently active.
+The Entity42 service is currently active.
+The Entity43 service is currently active.
+The Entity44 service is currently active.
+The Entity45 service is currently active.
+The Entity46 service is currently active.
+The Entity47 service is currently active.
+The Entity48 service is currently active.
+The Entity49 service is currently active.
+The Entity50 service is currently active.
+The Entity51 service is currently active.
+The Entity52 service is currently active.
+"""
+
+QUERY:
+"""
+What must the admin user enable?
+"""
+
+EXPECT:
+answer_contains: The admin user must enable two-factor authentication.
+answer_mode: direct
+matched_chunks_min: 1
+matched_claims_min: 1
+global_profiles_min: 40
+retrieval_chunks_min: 1
+train_claims_min: 50
+retrieval_chunk_contains: Rules:
+retrieval_chunk_contains: must enable two-factor authentication
+evidence_required: true

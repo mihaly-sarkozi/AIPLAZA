@@ -36,6 +36,23 @@ _STATE_TOKENS = {
 }
 _CURRENT_TIME_TOKENS = {fold_text(item) for item in ("current", "currently", "jelenleg", "most", "actualmente")}
 _USE_PREDICATE_TOKENS = {fold_text(item) for item in ("uses", "use", "használ", "használja", "utiliza", "usa")}
+_PREDICATE_CLASSES = {
+    "uses": "uses_or_integrates",
+    "use": "uses_or_integrates",
+    "hasznal": "uses_or_integrates",
+    "használ": "uses_or_integrates",
+    "hasznalja": "uses_or_integrates",
+    "használja": "uses_or_integrates",
+    "utiliza": "uses_or_integrates",
+    "usa": "uses_or_integrates",
+    "integrates": "uses_or_integrates",
+    "integrates with": "uses_or_integrates",
+    "active": "state",
+    "inactive": "state",
+    "closed": "state",
+    "responsible": "ownership",
+    "owns": "ownership",
+}
 _EXCLUSIVE_OBJECT_GROUPS = (
     {fold_text("stripe"), fold_text("manual"), fold_text("manual invoicing")},
 )
@@ -58,6 +75,57 @@ def _fold_tokens(values: list[str]) -> set[str]:
             tokens.add(folded)
             tokens.update(_split_folded_words(folded))
     return tokens
+
+
+def _semantic_predicate(value: str) -> str:
+    folded = fold_text(str(value or "")).strip()
+    return _PREDICATE_CLASSES.get(folded, folded)
+
+
+def _claim_subject(claim: dict[str, object], fallback: str = "") -> str:
+    return normalize_entity_key(str(claim.get("subject") or claim.get("subject_text") or fallback), strip_accents=True)
+
+
+def _claim_predicate(claim: dict[str, object]) -> str:
+    predicates = claim.get("predicates")
+    if isinstance(predicates, list) and predicates:
+        return str(predicates[0] or "")
+    return str(claim.get("predicate") or claim.get("predicate_text") or "")
+
+
+def _claim_object(claim: dict[str, object]) -> str:
+    objects = claim.get("objects")
+    if isinstance(objects, list) and objects:
+        return normalize_entity_key(str(objects[0] or ""), strip_accents=True)
+    return normalize_entity_key(str(claim.get("object") or claim.get("object_text") or ""), strip_accents=True)
+
+
+def _claim_time_values(claim: dict[str, object]) -> set[str]:
+    values = claim.get("time_values")
+    if isinstance(values, list):
+        return {fold_text(str(value or "")) for value in values if value}
+    value = str(claim.get("time_value") or "").strip()
+    return {fold_text(value)} if value else set()
+
+
+def _claim_time_mode(claim: dict[str, object]) -> str:
+    return fold_text(str(claim.get("time_dominant") or claim.get("time_mode") or "current"))
+
+
+def _same_claim_time(left: dict[str, object], right: dict[str, object]) -> bool:
+    left_values = _claim_time_values(left)
+    right_values = _claim_time_values(right)
+    if left_values or right_values:
+        return left_values == right_values
+    return _claim_time_mode(left) == _claim_time_mode(right)
+
+
+def _different_claim_time(left: dict[str, object], right: dict[str, object]) -> bool:
+    left_values = _claim_time_values(left)
+    right_values = _claim_time_values(right)
+    if left_values and right_values:
+        return left_values != right_values
+    return _claim_time_mode(left) != _claim_time_mode(right)
 
 
 def _jaccard(a: set[str], b: set[str]) -> float:
@@ -347,6 +415,142 @@ class TensionEngineV1:
             analyses.append(self.analyze(left, right, similarity=similarity))
         return analyses
 
+    def analyze_global_profiles(self, global_profiles: list[dict[str, object]]) -> list[TensionAnalysis]:
+        analyses: list[TensionAnalysis] = []
+        for profile in global_profiles:
+            if str(profile.get("operation") or "") != "update":
+                if str(profile.get("operation") or "") != "review":
+                    continue
+            claims = [dict(item) for item in profile.get("claims") or [] if isinstance(item, dict)]
+            new_claim_ids = {str(item or "") for item in profile.get("new_claim_ids") or [] if item}
+            if not claims:
+                continue
+            seen_pairs: set[tuple[str, str, str]] = set()
+            for index, left in enumerate(claims):
+                left_id = str(left.get("claim_id") or "")
+                for right in claims[index + 1 :]:
+                    right_id = str(right.get("claim_id") or "")
+                    if new_claim_ids and left_id not in new_claim_ids and right_id not in new_claim_ids:
+                        # Historical profile conflicts should remain visible on review chunks,
+                        # but update noise is bounded by requiring at least one new claim.
+                        if str(profile.get("operation") or "") == "update":
+                            continue
+                    incoming, existing = (right, left) if right_id in new_claim_ids and left_id not in new_claim_ids else (left, right)
+                    incoming_id = str(incoming.get("claim_id") or "")
+                    existing_id = str(existing.get("claim_id") or "")
+                    analysis = self._analyze_claim_pair(profile, incoming, existing)
+                    if not analysis.tension_detected:
+                        continue
+                    pair_key = tuple(sorted((incoming_id, existing_id))) + (analysis.tension_type,)
+                    if pair_key in seen_pairs:
+                        continue
+                    seen_pairs.add(pair_key)
+                    analyses.append(analysis)
+        return analyses
+
+    def _analyze_claim_pair(
+        self,
+        profile: dict[str, object],
+        incoming: dict[str, object],
+        existing: dict[str, object],
+    ) -> TensionAnalysis:
+        profile_name = str(profile.get("entity_name") or profile.get("canonical_key") or "")
+        subject_new = _claim_subject(incoming, profile_name)
+        subject_existing = _claim_subject(existing, profile_name)
+        predicate_new = _claim_predicate(incoming)
+        predicate_existing = _claim_predicate(existing)
+        predicate_new_folded = fold_text(predicate_new)
+        predicate_existing_folded = fold_text(predicate_existing)
+        object_new = _claim_object(incoming)
+        object_existing = _claim_object(existing)
+        claim_ids = [str(existing.get("claim_id") or ""), str(incoming.get("claim_id") or "")]
+        claim_ids = [claim_id for claim_id in claim_ids if claim_id]
+        evidence = {
+            "claim_ids": claim_ids,
+            "sentence_ids": [
+                *[str(value) for value in existing.get("sentence_ids") or [] if value],
+                *[str(value) for value in incoming.get("sentence_ids") or [] if value],
+            ],
+            "profile_id": profile.get("profile_id"),
+        }
+
+        if (
+            subject_new
+            and subject_existing
+            and subject_new == subject_existing
+            and predicate_new_folded
+            and predicate_new_folded == predicate_existing_folded
+            and object_new
+            and object_existing
+            and object_new != object_existing
+            and _same_claim_time(incoming, existing)
+        ):
+            return self._claim_analysis(
+                profile,
+                "hard_conflict",
+                0.9,
+                "hard_conflict:same_subject_predicate_different_object_same_time",
+                claim_ids,
+                evidence,
+            )
+
+        if subject_new and subject_existing and subject_new == subject_existing and _different_claim_time(incoming, existing):
+            return self._claim_analysis(
+                profile,
+                "temporal_change",
+                0.45,
+                "temporal_change:same_subject_different_time_frame",
+                claim_ids,
+                evidence,
+            )
+
+        new_class = _semantic_predicate(predicate_new)
+        existing_class = _semantic_predicate(predicate_existing)
+        if (
+            subject_new
+            and subject_existing
+            and subject_new == subject_existing
+            and predicate_new_folded
+            and predicate_existing_folded
+            and predicate_new_folded != predicate_existing_folded
+            and new_class
+            and new_class == existing_class
+        ):
+            return self._claim_analysis(
+                profile,
+                "soft_conflict",
+                0.55,
+                "soft_conflict:semantically_related_predicates",
+                claim_ids,
+                evidence,
+            )
+
+        return self._claim_analysis(profile, "none", 0.0, "none:no_structured_tension", [], evidence)
+
+    def _claim_analysis(
+        self,
+        profile: dict[str, object],
+        tension_type: str,
+        tension_score: float,
+        reason: str,
+        conflicting_claim_ids: list[str],
+        evidence: dict[str, object],
+    ) -> TensionAnalysis:
+        clean_score = round(max(0.0, min(1.0, tension_score)), 4)
+        return TensionAnalysis(
+            candidate_name_a=str(profile.get("entity_name") or ""),
+            candidate_name_b=str(profile.get("entity_name") or ""),
+            tension_detected=clean_score > 0,
+            tension_score=clean_score,
+            tension_band=_band(clean_score),
+            tension_type=tension_type,
+            tension_reason=reason,
+            tension_reasons=[reason],
+            conflicting_claim_ids=conflicting_claim_ids,
+            evidence=evidence,
+            builder_version=self.version,
+        )
+
     def _analysis(
         self,
         profile_a: SearchProfile,
@@ -368,6 +572,7 @@ class TensionEngineV1:
             technical_entity_id_b=profile_b.technical_entity_id,
             candidate_name_a=profile_a.entity_name,
             candidate_name_b=profile_b.entity_name,
+            tension_detected=clean_score > 0,
             tension_score=clean_score,
             tension_band=_band(clean_score),
             tension_type=tension_type,

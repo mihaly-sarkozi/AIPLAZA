@@ -484,8 +484,8 @@ class SpaceTimeExtractorV1:
             overall_confidence = max(overall_confidence, 0.6)
         elif event_keyword is not None:
             time_mode = "event"
-            time_value = precise_time_value or event_keyword
-            time_precision = "lexical_event"
+            time_value = precise_time_value or year_with_marker or event_keyword
+            time_precision = "year" if year_with_marker and not precise_time_value else "lexical_event"
             time_confidence = max(time_confidence, 0.7)
             overall_confidence = max(overall_confidence, 0.7)
         elif open_keyword is not None:

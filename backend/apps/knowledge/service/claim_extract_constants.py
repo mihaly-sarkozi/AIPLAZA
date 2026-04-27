@@ -43,7 +43,7 @@ WEAK_DUPLICATE_USE_PREDICATES = {
 USE_SUBJECT_MENTION_TYPES = {"module", "feature", "software", "product"}
 USE_PREDICATE_FOLDS: dict[str, set[str]] = {
     "hu": set(HU_USE_PREDICATE_FOLDS),
-    "en": {"use", "uses"},
+    "en": {"use", "uses", "integrates", "integrates with"},
     "es": {"usa", "utiliza"},
 }
 EN_RESPONSIBLE_COMPOUNDS: tuple[str, ...] = (

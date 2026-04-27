@@ -10,6 +10,7 @@ from core.kernel.logging.observability import (
     log_structured_event,
     reset_metrics,
     reset_observability_context,
+    render_prometheus_metrics,
     set_correlation_id,
 )
 from core.kernel.logging.request_timing import clear_request_timing, init_request_timing, record_db_query, record_span
@@ -44,6 +45,21 @@ def test_request_timing_records_platform_metrics():
     assert snapshot["platform.auth.total.ms"]["count"] == 1
     assert snapshot["platform.db.query.ms"]["count"] == 1
     assert snapshot["platform.db.query.count"]["sum"] == 1.0
+
+    clear_request_timing()
+    reset_metrics()
+
+
+def test_prometheus_metrics_export_uses_text_format():
+    reset_metrics()
+    init_request_timing()
+
+    record_span("tenant_resolve", 12.5)
+    body = render_prometheus_metrics()
+
+    assert "# TYPE aiplaza_metric_count counter" in body
+    assert 'aiplaza_metric_count{metric="platform_tenant_resolve_ms"} 1.0' in body
+    assert 'aiplaza_metric_sum{metric="platform_tenant_resolve_ms"} 12.5' in body
 
     clear_request_timing()
     reset_metrics()

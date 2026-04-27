@@ -41,11 +41,65 @@ type PersistedChatSession = {
 };
 type ChatApiResponse = {
   answer: string;
+  query_run_id?: string | null;
+  answer_mode?: string;
+  answer_source?: string;
+  confidence?: number;
+  evidence?: ChatEvidenceItem[];
+  cited_claim_ids?: string[];
+  cited_sentence_ids?: string[];
+  cited_source_ids?: string[];
+  query_profile?: Record<string, unknown>;
+  matched_chunks?: Array<Record<string, unknown>>;
+  claims?: Array<Record<string, unknown>>;
+  sources?: ChatSourceItem[];
+  debug?: Record<string, unknown> | null;
+};
+type ChatApiRequest = {
+  question: string;
+  kb_uuid?: string;
+  debug?: boolean;
+};
+
+type ChatEvidenceItem = {
+  claim_id?: string;
+  sentence_id?: string;
+  source_id?: string;
+  claim_text?: string;
+  sentence_text?: string;
+  [key: string]: unknown;
+};
+
+type ChatSourceItem = {
+  kb_uuid: string;
+  point_id: string;
+  source_id?: string;
+  title?: string;
+  snippet?: string;
+  source_type?: string;
+  file_ref?: string | null;
+  display_type?: string;
+  created_by?: number | null;
+  created_by_label?: string;
 };
 
 export type ChatMessageType = {
   role: string;
   text: string;
+  question?: string;
+  queryRunId?: string | null;
+  answerMode?: string;
+  answerSource?: string;
+  confidence?: number;
+  evidence?: ChatEvidenceItem[];
+  citedClaimIds?: string[];
+  citedSentenceIds?: string[];
+  citedSourceIds?: string[];
+  queryProfile?: Record<string, unknown>;
+  matchedChunks?: Array<Record<string, unknown>>;
+  claims?: Array<Record<string, unknown>>;
+  sources?: ChatSourceItem[];
+  debug?: Record<string, unknown> | null;
 };
 
 function trimToLastN(messages: ChatMessageType[], n: number): ChatMessageType[] {
@@ -199,6 +253,7 @@ export default function ChatPage() {
   const simTrainingRunning =
     createTextMutation.isPending || createFileMutation.isPending || isTrainingActive(activeTrainingRun?.status);
   const effectiveTrainKbUuid = selectedTrainKbUuid || trainableKbList[0]?.uuid || "";
+  const effectiveChatKbUuid = effectiveTrainKbUuid || kbList[0]?.uuid || "";
   const selectedTrainKb = useMemo(
     () => trainableKbList.find((kb) => kb.uuid === effectiveTrainKbUuid) ?? null,
     [effectiveTrainKbUuid, trainableKbList]
@@ -275,11 +330,28 @@ export default function ChatPage() {
     setTimeout(() => inputRef.current?.focus(), 50);
     setLoading(true);
     try {
-      const res = await api.post<ChatApiResponse>("/chat", { question });
+      const payload: ChatApiRequest = { question, debug: true };
+      if (effectiveChatKbUuid) payload.kb_uuid = effectiveChatKbUuid;
+      const res = await api.post<ChatApiResponse>("/chat", payload);
       const data = res.data;
+      const answer = String(data?.answer || "").trim() || "Nincs elegendő információ a válaszhoz a kiválasztott tudástár alapján.";
       appendMessage({
         role: "assistant",
-        text: String(data?.answer || ""),
+        text: answer,
+        question,
+        queryRunId: data?.query_run_id ?? null,
+        answerMode: data?.answer_mode,
+        answerSource: data?.answer_source,
+        confidence: typeof data?.confidence === "number" ? data.confidence : undefined,
+        evidence: Array.isArray(data?.evidence) ? data.evidence : [],
+        citedClaimIds: Array.isArray(data?.cited_claim_ids) ? data.cited_claim_ids : [],
+        citedSentenceIds: Array.isArray(data?.cited_sentence_ids) ? data.cited_sentence_ids : [],
+        citedSourceIds: Array.isArray(data?.cited_source_ids) ? data.cited_source_ids : [],
+        queryProfile: data?.query_profile,
+        matchedChunks: Array.isArray(data?.matched_chunks) ? data.matched_chunks : [],
+        claims: Array.isArray(data?.claims) ? data.claims : [],
+        sources: Array.isArray(data?.sources) ? data.sources : [],
+        debug: data?.debug ?? null,
       });
     } catch (err) {
       appendMessage({
@@ -290,7 +362,7 @@ export default function ChatPage() {
       setLoading(false);
       requestAnimationFrame(() => flushPersistToDisk());
     }
-  }, [appendMessage, loading, inputDraft, flushPersistToDisk]);
+  }, [appendMessage, loading, inputDraft, flushPersistToDisk, effectiveChatKbUuid]);
 
   const onUploadTraining = () => {
     if (simTrainingRunning || !canTrainAnyKb) return;
@@ -382,7 +454,24 @@ export default function ChatPage() {
                   {messages.map((msg, index) => (
                     <div key={`${msg.role}-${index}`} className="flex items-start px-2 mb-[1px]">
                       <div className={`flex w-full ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
-                        <ChatMessage role={msg.role} text={msg.text} />
+                        <ChatMessage
+                          role={msg.role}
+                          text={msg.text}
+                          question={msg.question}
+                          queryRunId={msg.queryRunId}
+                          answerMode={msg.answerMode}
+                          answerSource={msg.answerSource}
+                          confidence={msg.confidence}
+                          evidence={msg.evidence}
+                          citedClaimIds={msg.citedClaimIds}
+                          citedSentenceIds={msg.citedSentenceIds}
+                          citedSourceIds={msg.citedSourceIds}
+                          queryProfile={msg.queryProfile}
+                          matchedChunks={msg.matchedChunks}
+                          claims={msg.claims}
+                          sources={msg.sources}
+                          debug={msg.debug}
+                        />
                       </div>
                     </div>
                   ))}
@@ -433,7 +522,7 @@ export default function ChatPage() {
                     send();
                   }
                 }}
-                className={`chat-question-input w-full h-full min-h-0 bg-[var(--color-background)] text-[var(--color-foreground)] border-[1px] border-[var(--color-border)] rounded-lg resize-none box-border text-[11px] leading-snug px-3 py-2 ${
+                className={`chat-question-input w-full h-full min-h-0 bg-[var(--color-background)] text-[var(--color-foreground)] border-[1px] border-[var(--color-border)] rounded-lg resize-none box-border text-base leading-relaxed px-3 py-2 ${
                   canTrainAnyKb
                     ? simTrainingRunning
                       ? "pb-6 pr-[7.25rem]"
@@ -445,7 +534,7 @@ export default function ChatPage() {
               />
               {canTrainAnyKb ? (
                 <div
-                  className="absolute bottom-1 right-2 flex items-center gap-1 pointer-events-auto text-[11px] font-normal text-gray-600 dark:text-gray-400"
+                  className="absolute bottom-1 right-2 flex items-center gap-1 pointer-events-auto text-sm font-medium text-gray-600 dark:text-gray-400"
                   aria-live={simTrainingRunning ? "polite" : undefined}
                 >
                   <button
@@ -456,7 +545,7 @@ export default function ChatPage() {
                     aria-label={t("nav.train")}
                   >
                     <svg
-                      className="w-3.5 h-3.5 shrink-0 opacity-90"
+                      className="w-4 h-4 shrink-0 opacity-90"
                       viewBox="0 0 24 24"
                       fill="none"
                       stroke="currentColor"

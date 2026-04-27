@@ -28,6 +28,7 @@ class TechnicalEntity:
     canonical_name: str = ""
     entity_type: str = "unknown"
     normalized_key: str = ""
+    canonical_key: str = ""
 
     surface_bundle: dict[str, Any] = field(default_factory=dict)
     identity_claims: list[dict[str, Any]] = field(default_factory=list)
@@ -60,6 +61,7 @@ def technical_entity_to_json_dict(entity: TechnicalEntity) -> dict[str, Any]:
         "canonical_name": entity.canonical_name,
         "entity_type": entity.entity_type,
         "normalized_key": entity.normalized_key,
+        "canonical_key": entity.canonical_key or entity.normalized_key,
         "surface_bundle": dict(entity.surface_bundle or {}),
         "identity_claims": list(entity.identity_claims),
         "descriptor_claims": list(entity.descriptor_claims),

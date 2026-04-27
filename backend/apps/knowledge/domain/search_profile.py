@@ -30,6 +30,7 @@ class SearchProfile:
     entity_name: str = ""
     entity_type: str = "unknown"
     normalized_key: str = ""
+    canonical_key: str = ""
 
     canonical_text: str = ""
     search_text: str = ""
@@ -60,6 +61,7 @@ def search_profile_to_json_dict(profile: SearchProfile) -> dict[str, Any]:
         "entity_name": profile.entity_name,
         "entity_type": profile.entity_type,
         "normalized_key": profile.normalized_key,
+        "canonical_key": profile.canonical_key or profile.normalized_key,
         "canonical_text": profile.canonical_text,
         "search_text": profile.search_text,
         "aliases": list(profile.aliases),

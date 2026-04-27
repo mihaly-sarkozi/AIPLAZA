@@ -14,14 +14,11 @@ from apps.knowledge.service.technical_memory_chunk_builder_v1 import TechnicalMe
 from apps.knowledge.domain.technical_memory_chunk import technical_memory_chunk_to_json_dict
 from apps.knowledge.service.search_profile_builder_v1 import SearchProfileBuilderV1
 from apps.knowledge.domain.search_profile import search_profile_to_json_dict
-from apps.knowledge.service.candidate_selection_v1 import CandidateSelectionV1
+from apps.knowledge.service.candidate_selection_v1 import CandidateSelectionV1, candidate_selection_attempt_count
 from apps.knowledge.domain.candidate_selection import entity_candidate_to_json_dict
 from apps.knowledge.service.similarity_engine_v1 import SimilarityEngineV1
 from apps.knowledge.domain.similarity_analysis import similarity_analysis_to_json_dict
-from apps.knowledge.service.tension_engine_v1 import TensionEngineV1
-from apps.knowledge.domain.tension_analysis import tension_analysis_to_json_dict
-from apps.knowledge.service.decision_engine_v1 import DecisionEngineV1
-from apps.knowledge.domain.decision_analysis import decision_analysis_to_json_dict
+from apps.knowledge.domain.search_profile import SearchProfile
 
 
 logger = logging.getLogger(__name__)
@@ -131,6 +128,21 @@ def _top_candidate_score(candidates: list[dict[str, Any]]) -> float:
     return max(scores, default=0.0)
 
 
+def _similarity_score_distribution(analyses: list[dict[str, Any]]) -> dict[str, Any]:
+    scores = [_similarity_score(item) for item in analyses]
+    if not scores:
+        return {"count": 0, "min": 0.0, "max": 0.0, "avg": 0.0, "high": 0, "medium": 0, "low": 0}
+    return {
+        "count": len(scores),
+        "min": round(min(scores), 4),
+        "max": round(max(scores), 4),
+        "avg": round(sum(scores) / len(scores), 4),
+        "high": _similarity_band_count(analyses, "high"),
+        "medium": _similarity_band_count(analyses, "medium"),
+        "low": _similarity_band_count(analyses, "low"),
+    }
+
+
 def _candidate_selection_ready(candidates: list[dict[str, Any]]) -> bool:
     return _candidates_without_evidence_count(candidates) == 0
 
@@ -173,12 +185,492 @@ def _tension_type_count(analyses: list[dict[str, Any]], tension_type: str) -> in
     return sum(1 for item in analyses if str(item.get("tension_type") or "") == tension_type)
 
 
+def _conflict_count(analyses: list[dict[str, Any]]) -> int:
+    return sum(
+        1
+        for item in analyses
+        if str(item.get("tension_type") or "") in {"hard_conflict", "contradiction"}
+    )
+
+
+def _hard_conflict_count(analyses: list[dict[str, Any]]) -> int:
+    return sum(1 for item in analyses if str(item.get("tension_type") or "") == "hard_conflict")
+
+
+def _reason_values(items: list[dict[str, Any]], key: str) -> list[str]:
+    reasons: list[str] = []
+    for item in items:
+        raw = item.get(key)
+        values = raw if isinstance(raw, list) else [raw] if raw else []
+        for value in values:
+            text = str(value or "").strip()
+            if text and text not in reasons:
+                reasons.append(text)
+    return reasons
+
+
+def _similarity_boost_reason_count(analyses: list[dict[str, Any]]) -> int:
+    return sum(
+        1
+        for reason in _reason_values(analyses, "similarity_reasons")
+        if "boost" in reason or reason.startswith("name:canonical")
+    )
+
+
+def _multilingual_alias_match_count(candidate_selections: list[dict[str, Any]], similarity_analyses: list[dict[str, Any]]) -> int:
+    count = 0
+    for reason in _reason_values(candidate_selections, "reasons"):
+        if reason.startswith("canonical_name_match"):
+            count += 1
+    for reason in _reason_values(similarity_analyses, "similarity_reasons"):
+        if reason.startswith("name:canonical_exact"):
+            count += 1
+    return count
+
+
+def _candidate_duplicate_removed_count(candidate_selections: list[dict[str, Any]]) -> int:
+    seen: set[str] = set()
+    duplicates = 0
+    for item in candidate_selections:
+        candidate_id = str(item.get("candidate_entity_id") or "")
+        if not candidate_id:
+            continue
+        if candidate_id in seen:
+            duplicates += 1
+            continue
+        seen.add(candidate_id)
+    return duplicates
+
+
+def _candidate_group_count(candidate_selections: list[dict[str, Any]]) -> int:
+    keys = {
+        str(item.get("candidate_canonical_key") or (item.get("merge_candidate_group") or {}).get("canonical_key") or "")
+        for item in candidate_selections
+    }
+    keys.discard("")
+    return len(keys)
+
+
+def _duplicate_memory_profile_count(candidate_selections: list[dict[str, Any]]) -> int:
+    count = 0
+    for item in candidate_selections:
+        group = item.get("merge_candidate_group")
+        if isinstance(group, dict):
+            try:
+                count += int(group.get("duplicate_memory_profile_count") or 0)
+            except (TypeError, ValueError):
+                continue
+    return count
+
+
+def _candidate_score(item: dict[str, Any]) -> float:
+    try:
+        return float(item.get("score") or item.get("candidate_score") or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _similarity_score(item: dict[str, Any]) -> float:
+    try:
+        return float(item.get("similarity_score") or item.get("total_similarity_score") or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _dedupe_candidate_selection_dicts(candidate_selections: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], int]:
+    by_key: dict[tuple[str, str], dict[str, Any]] = {}
+    removed = 0
+    passthrough: list[dict[str, Any]] = []
+    for item in candidate_selections:
+        profile_id = str(item.get("search_profile_id") or "")
+        candidate_id = str(item.get("candidate_entity_id") or "")
+        if not profile_id or not candidate_id:
+            passthrough.append(item)
+            continue
+        key = (profile_id, candidate_id)
+        current = by_key.get(key)
+        if current is None:
+            by_key[key] = item
+            continue
+        removed += 1
+        if _candidate_score(item) > _candidate_score(current):
+            by_key[key] = item
+    return [*passthrough, *by_key.values()], removed
+
+
+def _dedupe_similarity_analysis_dicts(similarity_analyses: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], int]:
+    by_key: dict[tuple[str, str], dict[str, Any]] = {}
+    passthrough: list[dict[str, Any]] = []
+    removed = 0
+    for item in similarity_analyses:
+        compared_entity_id = str(
+            item.get("technical_entity_id")
+            or item.get("compared_entity_id")
+            or item.get("search_profile_id")
+            or ""
+        )
+        candidate_id = str(item.get("candidate_entity_id") or "")
+        if not compared_entity_id or not candidate_id:
+            passthrough.append(item)
+            continue
+        key = (candidate_id, compared_entity_id)
+        current = by_key.get(key)
+        if current is None:
+            by_key[key] = item
+            continue
+        removed += 1
+        if _similarity_score(item) > _similarity_score(current):
+            by_key[key] = item
+    return [*passthrough, *by_key.values()], removed
+
+
+def _canonical_entity_merge_suggestion_count(similarity_analyses: list[dict[str, Any]]) -> int:
+    count = 0
+    for item in similarity_analyses:
+        band = str(item.get("similarity_band") or "")
+        if band not in {"medium", "high"}:
+            continue
+        reasons = [str(reason or "") for reason in item.get("similarity_reasons") or []]
+        if any(reason.startswith("name:canonical") for reason in reasons):
+            count += 1
+    return count
+
+
+def _unknown_entity_type_examples(local_entities: list[dict[str, Any]], *, limit: int = 5) -> list[str]:
+    examples: list[str] = []
+    for item in local_entities:
+        if str(item.get("entity_type") or "") != "unknown":
+            continue
+        name = str(item.get("canonical_name") or item.get("normalized_key") or "").strip()
+        if name and name not in examples:
+            examples.append(name)
+        if len(examples) >= limit:
+            break
+    return examples
+
+
+def _bad_subject_claim_examples(quality_summary: dict[str, Any], *, limit: int = 5) -> list[dict[str, Any]]:
+    raw_items = quality_summary.get("bad_subject_claim_examples")
+    if isinstance(raw_items, list) and raw_items:
+        examples = [dict(item) for item in raw_items if isinstance(item, dict)][:limit]
+        for item in examples:
+            item["reason"] = str(item.get("reason") or "claim_bad_subject")
+        return examples
+    examples: list[dict[str, Any]] = []
+    candidates = []
+    for key in ("rejected_claims", "rejected_claim_examples"):
+        raw = quality_summary.get(key)
+        if isinstance(raw, list):
+            candidates.extend(item for item in raw if isinstance(item, dict))
+    for item in candidates:
+        reason = str(item.get("reason") or item.get("rejection_reason") or item.get("raw_reason") or "")
+        if reason != "claim_bad_subject" and "bad_subject" not in reason:
+            continue
+        examples.append(
+            {
+                "reason": reason,
+                "subject_text": str(item.get("subject_text") or ""),
+                "predicate": str(item.get("predicate") or item.get("predicate_text") or ""),
+                "object_text": item.get("object_text"),
+                "claim_type": str(item.get("claim_type") or ""),
+            }
+        )
+        if len(examples) >= limit:
+            break
+    if not examples and int(quality_summary.get("bad_subject_claim_count") or 0) > 0:
+        examples.append(
+            {
+                "reason": "missing_bad_subject_claim_examples",
+                "subject_text": "",
+                "predicate": "",
+                "object_text": None,
+                "claim_type": "",
+            }
+        )
+    return examples
+
+
+def _normalize_trace_log_level(log_level: str | None, *, debug: bool = False) -> str:
+    if debug:
+        return "FULL_TRACE"
+    value = str(log_level or "FULL_TRACE").strip().upper()
+    aliases = {"DEBUG": "FULL_TRACE", "FULL": "FULL_TRACE", "TRACE": "FULL_TRACE"}
+    value = aliases.get(value, value)
+    return value if value in {"SUMMARY", "INSPECT", "FULL_TRACE"} else "SUMMARY"
+
+
+def _score_value(item: dict[str, Any], *keys: str) -> float:
+    for key in keys:
+        try:
+            return float(item.get(key) or 0.0)
+        except (TypeError, ValueError):
+            continue
+    return 0.0
+
+
+def _uuid_or_none(value: Any) -> UUID | None:
+    if not value:
+        return None
+    try:
+        return UUID(str(value))
+    except (TypeError, ValueError):
+        return None
+
+
+def _search_profile_from_dict(item: dict[str, Any]) -> SearchProfile:
+    return SearchProfile(
+        search_profile_id=_uuid_or_none(item.get("search_profile_id")) or UUID(int=0),
+        run_id=_uuid_or_none(item.get("run_id")),
+        source_id=_uuid_or_none(item.get("source_id")),
+        technical_memory_chunk_id=_uuid_or_none(item.get("technical_memory_chunk_id")),
+        technical_entity_id=_uuid_or_none(item.get("technical_entity_id")),
+        local_entity_id=_uuid_or_none(item.get("local_entity_id")),
+        entity_name=str(item.get("entity_name") or ""),
+        entity_type=str(item.get("entity_type") or "unknown"),
+        normalized_key=str(item.get("normalized_key") or ""),
+        canonical_key=str(item.get("canonical_key") or item.get("normalized_key") or ""),
+        canonical_text=str(item.get("canonical_text") or ""),
+        search_text=str(item.get("search_text") or ""),
+        aliases=[str(value) for value in item.get("aliases") or []],
+        keywords=[str(value) for value in item.get("keywords") or []],
+        claim_group_signals=dict(item.get("claim_group_signals") or {}),
+        time_filters=dict(item.get("time_filters") or {}),
+        space_filters=dict(item.get("space_filters") or {}),
+        relation_filters=dict(item.get("relation_filters") or {}),
+        evidence_refs=[dict(value) for value in item.get("evidence_refs") or [] if isinstance(value, dict)],
+        builder_version=str(item.get("builder_version") or "search_profile_builder_v1"),
+    )
+
+
+def _top_entities(local_entities: list[dict[str, Any]], *, limit: int = 5) -> list[dict[str, Any]]:
+    rows = sorted(
+        local_entities,
+        key=lambda item: (
+            len(item.get("claim_ids") or []),
+            _score_value(item, "coherence_score"),
+            _score_value(item, "confidence"),
+        ),
+        reverse=True,
+    )
+    return [
+        {
+            "canonical_name": item.get("canonical_name"),
+            "canonical_key": item.get("canonical_key") or item.get("normalized_key"),
+            "entity_type": item.get("entity_type"),
+            "claim_count": len(item.get("claim_ids") or []),
+            "coherence_score": item.get("coherence_score"),
+            "alias_match_reason": item.get("alias_match_reason"),
+        }
+        for item in rows[:limit]
+    ]
+
+
+def _top_candidates(candidate_selections: list[dict[str, Any]], *, limit: int = 5) -> list[dict[str, Any]]:
+    rows = sorted(candidate_selections, key=lambda item: _score_value(item, "score", "candidate_score"), reverse=True)
+    return [
+        {
+            "candidate_entity_id": item.get("candidate_entity_id"),
+            "candidate_name": item.get("candidate_name"),
+            "candidate_type": item.get("candidate_type"),
+            "score": item.get("score") or item.get("candidate_score"),
+            "reasons": list(item.get("reasons") or item.get("candidate_reason") or [])[:3],
+        }
+        for item in rows[:limit]
+    ]
+
+
+def _top_problems(summary: dict[str, Any]) -> list[dict[str, Any]]:
+    quality = summary.get("quality") if isinstance(summary.get("quality"), dict) else {}
+    candidates = [
+        ("unknown_entity_type", summary.get("unknown_entity_type_count"), summary.get("unknown_entity_type_examples")),
+        ("bad_subject_claim", quality.get("bad_subject_claim_count"), quality.get("bad_subject_claim_examples")),
+        ("rejected_noise_sentence", quality.get("rejected_noise_sentence_count"), quality.get("skipped_sentences")),
+        ("low_similarity", summary.get("low_similarity_count"), None),
+        ("contradiction", summary.get("contradiction_count"), None),
+    ]
+    out: list[dict[str, Any]] = []
+    for kind, count, examples in candidates:
+        count_int = int(count or 0)
+        if count_int <= 0:
+            continue
+        out.append({"problem": kind, "count": count_int, "examples": examples or []})
+    return sorted(out, key=lambda item: int(item.get("count") or 0), reverse=True)[:5]
+
+
+def _merge_events(similarity_analyses: list[dict[str, Any]], decision_analyses: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    events: list[dict[str, Any]] = []
+    for item in similarity_analyses:
+        reasons = [str(reason or "") for reason in item.get("similarity_reasons") or item.get("reasons") or []]
+        if not any(reason.startswith("name:canonical") or "boost" in reason for reason in reasons):
+            continue
+        events.append(
+            {
+                "type": "canonical_similarity",
+                "search_profile_id": item.get("search_profile_id"),
+                "candidate_entity_id": item.get("candidate_entity_id"),
+                "candidate_name": item.get("candidate_name"),
+                "score": item.get("total_similarity_score"),
+                "band": item.get("similarity_band"),
+                "reasons": reasons[:3],
+            }
+        )
+    for item in decision_analyses:
+        if str(item.get("decision") or "") in {"attach_existing", "merge", "keep_separate"}:
+            events.append({"type": "decision", "decision": item.get("decision"), "reason": item.get("decision_reason")})
+    return events[:10]
+
+
+def _decision_entity_fields(decision: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "decision_type": decision.get("decision_type") or decision.get("decision"),
+        "selected_candidate_id": decision.get("selected_candidate_id") or decision.get("candidate_entity_id"),
+        "selected_candidate_score": decision.get("selected_candidate_score"),
+        "decision_reason": decision.get("decision_reason"),
+    }
+
+
+def _attach_decisions_to_entity_rows(rows: list[dict[str, Any]], decision_analyses: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    if not rows or not decision_analyses:
+        return rows
+    decisions_by_local_id = {
+        str(item.get("local_entity_id") or ""): item
+        for item in decision_analyses
+        if str(item.get("local_entity_id") or "")
+    }
+    decisions_by_technical_id = {
+        str(item.get("technical_entity_id") or ""): item
+        for item in decision_analyses
+        if str(item.get("technical_entity_id") or "")
+    }
+    decisions_by_profile_id = {
+        str(item.get("search_profile_id") or ""): item
+        for item in decision_analyses
+        if str(item.get("search_profile_id") or "")
+    }
+    annotated: list[dict[str, Any]] = []
+    for row in rows:
+        decision = (
+            decisions_by_local_id.get(str(row.get("local_entity_id") or ""))
+            or decisions_by_technical_id.get(str(row.get("technical_entity_id") or ""))
+            or decisions_by_profile_id.get(str(row.get("search_profile_id") or ""))
+        )
+        if decision is None:
+            annotated.append(row)
+            continue
+        annotated.append({**row, **_decision_entity_fields(decision)})
+    return annotated
+
+
+def _global_profiles_from_dicts(decision_analyses: list[dict[str, Any]], search_profiles: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    profiles_by_id = {str(item.get("search_profile_id") or ""): item for item in search_profiles}
+    rows: list[dict[str, Any]] = []
+    for decision in decision_analyses:
+        profile_id = decision.get("selected_profile_id") or decision.get("created_profile_id")
+        if not profile_id:
+            continue
+        profile = profiles_by_id.get(str(decision.get("search_profile_id") or ""), {})
+        rows.append(
+            {
+                "profile_id": profile_id,
+                "source_decision_id": decision.get("decision_analysis_id"),
+                "decision": decision.get("decision"),
+                "entity_name": profile.get("entity_name") or decision.get("candidate_name"),
+                "entity_type": profile.get("entity_type") or decision.get("candidate_type"),
+                "canonical_key": profile.get("canonical_key") or profile.get("normalized_key"),
+                "selected_profile_id": decision.get("selected_profile_id"),
+                "created_profile_id": decision.get("created_profile_id"),
+                "decision_confidence": decision.get("decision_confidence"),
+                "decision_reason": decision.get("decision_reason"),
+                "manual_review_required": decision.get("manual_review_required"),
+                "evidence": decision.get("evidence") if isinstance(decision.get("evidence"), dict) else {},
+                "builder_version": "global_profile_builder_v0",
+            }
+        )
+    return rows
+
+
+def _short_local_entity(item: dict[str, Any]) -> dict[str, Any]:
+    return {
+        **item,
+        "claim_ids": list(item.get("claim_ids") or [])[:2],
+        "sentence_ids": list(item.get("sentence_ids") or [])[:2],
+        "evidence_refs": list(item.get("evidence_refs") or [])[:2],
+    }
+
+
+def _sentences_without_claims(sentences: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [{**row, "claims": []} for row in sentences]
+
+
+def _apply_trace_log_level(trace: dict[str, Any], log_level: str) -> dict[str, Any]:
+    level = _normalize_trace_log_level(log_level)
+    out = dict(trace)
+    out["log_level"] = level
+    out["top_entities"] = _top_entities(list(trace.get("local_entities") or []))
+    out["top_candidates"] = _top_candidates(list(trace.get("candidate_selections") or []))
+    out["top_problems"] = _top_problems(dict(trace.get("summary") or {}))
+    out["merge_events"] = _merge_events(list(trace.get("similarity_analyses") or []), list(trace.get("decision_analyses") or []))
+    if level == "FULL_TRACE":
+        return out
+
+    out["search_profiles"] = []
+    out["technical_entities"] = []
+    out["technical_memory_chunks"] = []
+    out["decision_analyses"] = []
+    out["local_resolver_trace"] = None
+    out["similarity_analyses"] = list(trace.get("similarity_analyses") or [])[:5]
+    out["tension_analyses"] = list(trace.get("tension_analyses") or [])[:5]
+    out["retrieval_chunks"] = list(trace.get("retrieval_chunks") or [])[:5]
+
+    if level == "SUMMARY":
+        out["sentences"] = []
+        out["local_entities"] = []
+        out["local_entity_clusters"] = []
+        out["candidate_selections"] = list(trace.get("candidate_selections") or [])[:5]
+        return out
+
+    quality = dict((trace.get("summary") or {}).get("quality") or {})
+    out["sentences"] = _sentences_without_claims(list(trace.get("sentences") or []))
+    out["local_entities"] = [_short_local_entity(item) for item in list(trace.get("local_entities") or [])]
+    out["local_entity_clusters"] = []
+    out["candidate_selections"] = list(trace.get("candidate_selections") or [])
+    out["inspect"] = {
+        "bad_subject_claim_examples": quality.get("bad_subject_claim_examples") or [],
+        "rejected_claim_examples": quality.get("rejected_claim_examples") or quality.get("rejected_claims") or [],
+        "noise_examples": quality.get("skipped_sentences") or [],
+        "candidate_shortlist": list(trace.get("candidate_selections") or []),
+    }
+    return out
+
+
+def _timeline_compatibility_reasons(analyses: list[dict[str, Any]]) -> list[str]:
+    return [
+        reason
+        for reason in _reason_values(analyses, "tension_reasons")
+        if reason.startswith("temporal_change:")
+    ]
+
+
+def _near_duplicate_guard_trigger_count(
+    decision_analyses: list[dict[str, Any]],
+    local_resolver_trace: dict[str, Any] | None,
+) -> int:
+    decision_count = _decision_kind_count(decision_analyses, "keep_separate")
+    resolver_count = 0
+    if isinstance(local_resolver_trace, dict):
+        for row in local_resolver_trace.get("entity_type_resolutions") or []:
+            if isinstance(row, dict) and str(row.get("resolution") or "") == "conflict_split":
+                resolver_count += 1
+    return int(decision_count + resolver_count)
+
+
 def _tension_ready(analyses: list[dict[str, Any]]) -> bool:
     return _tension_without_evidence_count(analyses) == 0
 
 
-def _decision_kind_count(analyses: list[dict[str, Any]], decision: str) -> int:
-    return sum(1 for item in analyses if str(item.get("decision") or "") == decision)
+def _decision_kind_count(analyses: list[dict[str, Any]], *decisions: str) -> int:
+    decision_set = set(decisions)
+    return sum(1 for item in analyses if str(item.get("decision") or item.get("decision_type") or "") in decision_set)
 
 
 def _decision_manual_review_count(analyses: list[dict[str, Any]]) -> int:
@@ -193,6 +685,40 @@ def _decision_ready(analyses: list[dict[str, Any]]) -> bool:
         if not str(item.get("decision") or "").strip():
             return False
     return True
+
+
+def _global_profile_operation_count(profiles: list[dict[str, Any]], operation: str) -> int:
+    return sum(1 for item in profiles if str(item.get("operation") or "") == operation)
+
+
+def _global_profile_claim_count(profiles: list[dict[str, Any]], field: str) -> int:
+    total = 0
+    for item in profiles:
+        try:
+            total += int(item.get(field) or 0)
+        except (TypeError, ValueError):
+            continue
+    return total
+
+
+def _affected_profile_ids(profiles: list[dict[str, Any]]) -> list[str]:
+    ids: list[str] = []
+    for item in profiles:
+        values = item.get("affected_profile_ids")
+        candidates = values if isinstance(values, list) else [item.get("profile_id")]
+        for value in candidates:
+            text = str(value or "").strip()
+            if text and text not in ids:
+                ids.append(text)
+    return ids
+
+
+def _retrieval_conflicting_chunk_count(chunks: list[dict[str, Any]]) -> int:
+    return sum(1 for item in chunks if bool(item.get("conflicting")))
+
+
+def _retrieval_temporal_context_included(chunks: list[dict[str, Any]]) -> bool:
+    return any(bool(item.get("temporal_context_included")) for item in chunks)
 
 
 def _trace_claim_extraction_fields(claim: Any) -> dict[str, Any]:
@@ -214,6 +740,9 @@ def _trace_claim_extraction_fields(claim: Any) -> dict[str, Any]:
     }
     if trace_subject_source:
         out["subject_source"] = trace_subject_source
+    subject_text = str(getattr(claim, "subject_text", "") or "").strip()
+    if subject_text:
+        out["subject_token_count"] = len(subject_text.split())
     if sanitizers_applied:
         out["sanitizers_applied"] = sanitizers_applied
     if md.get("context_subject_applied") is True and md.get("context_subject_source_sentence_id"):
@@ -387,14 +916,22 @@ def _normalize_local_entity_trace_dict(raw: dict[str, Any]) -> dict[str, Any]:
             explanation["coherence_factors"] = []
         explanation.setdefault("grouping_rule", "")
         explanation.setdefault("normalized_key", str(raw.get("normalized_key") or ""))
+        explanation.setdefault("canonical_key", str(raw.get("canonical_key") or raw.get("normalized_key") or ""))
+        explanation.setdefault("alias_match_reason", raw.get("alias_match_reason"))
         explanation.setdefault("entity_type_source", "")
         explanation.setdefault("claim_count", int(explanation.get("claim_count") or 0))
         explanation.setdefault("surface_form_count", int(explanation.get("surface_form_count") or 0))
+    canonical_key = str(raw.get("canonical_key") or explanation.get("canonical_key") or raw.get("normalized_key") or "")
+    alias_match_reason = raw.get("alias_match_reason")
+    if alias_match_reason is None:
+        alias_match_reason = explanation.get("alias_match_reason")
     return {
         "local_entity_id": str(raw.get("local_entity_id") or ""),
         "canonical_name": str(raw.get("canonical_name") or ""),
+        "canonical_key": canonical_key,
         "entity_type": str(raw.get("entity_type") or "unknown"),
         "normalized_key": str(raw.get("normalized_key") or ""),
+        "alias_match_reason": alias_match_reason,
         "confidence": float(raw.get("confidence") or 0.0),
         "coherence_score": float(raw.get("coherence_score") or 0.0),
         "surface_forms": _coerce_str_list_optional_strings(raw.get("surface_forms")),
@@ -521,7 +1058,10 @@ class KnowledgeTraceService:
         sentence_limit: int | None = None,
         claim_limit: int | None = None,
         mention_limit: int | None = None,
+        log_level: str | None = "FULL_TRACE",
+        debug: bool = False,
     ) -> dict[str, Any] | None:
+        requested_log_level = _normalize_trace_log_level(log_level, debug=debug)
         run = self._ingest_run_store.get(run_id)
         if run is None:
             return None
@@ -698,7 +1238,11 @@ class KnowledgeTraceService:
         similarity_analyses = interpretation_meta.get("similarity_analyses")
         tension_analyses = interpretation_meta.get("tension_analyses")
         decision_analyses = interpretation_meta.get("decision_analyses")
+        global_profiles = interpretation_meta.get("global_profiles")
+        retrieval_chunks = interpretation_meta.get("retrieval_chunks")
         local_resolver_trace = interpretation_meta.get("local_resolver_trace")
+        candidate_selection_attempted_count = int(interpretation_meta.get("candidate_selection_attempted_count") or 0)
+        candidate_pool_size = int(interpretation_meta.get("candidate_pool_size") or 0)
         if not isinstance(local_clusters, list):
             local_clusters = []
         if not isinstance(technical_entities, list):
@@ -715,6 +1259,10 @@ class KnowledgeTraceService:
             tension_analyses = []
         if not isinstance(decision_analyses, list):
             decision_analyses = []
+        if not isinstance(global_profiles, list):
+            global_profiles = []
+        if not isinstance(retrieval_chunks, list):
+            retrieval_chunks = []
         technical_entities = [
             _technical_entity_trace_dict(item, idx)
             for idx, item in enumerate(technical_entities, start=1)
@@ -726,6 +1274,10 @@ class KnowledgeTraceService:
         similarity_analyses = [item for item in similarity_analyses if isinstance(item, dict)]
         tension_analyses = [item for item in tension_analyses if isinstance(item, dict)]
         decision_analyses = [item for item in decision_analyses if isinstance(item, dict)]
+        global_profiles = [item for item in global_profiles if isinstance(item, dict)]
+        retrieval_chunks = [item for item in retrieval_chunks if isinstance(item, dict)]
+        candidate_selections, candidate_duplicate_removed_count = _dedupe_candidate_selection_dicts(candidate_selections)
+        similarity_analyses, similarity_duplicate_removed_count = _dedupe_similarity_analysis_dicts(similarity_analyses)
         if local_resolver_trace is not None and not isinstance(local_resolver_trace, dict):
             local_resolver_trace = None
 
@@ -760,7 +1312,10 @@ class KnowledgeTraceService:
                     search_profile_objects = SearchProfileBuilderV1().build_many(technical_memory_chunk_objects)
                     search_profiles = [search_profile_to_json_dict(item) for item in search_profile_objects]
                     if not candidate_selections:
-                        candidate_selection_objects = CandidateSelectionV1().select_many(search_profile_objects)
+                        candidate_selection_objects = CandidateSelectionV1().select_many(
+                            search_profile_objects,
+                            limit_per_profile=3,
+                        )
                         candidate_selections = [entity_candidate_to_json_dict(item) for item in candidate_selection_objects]
                         if not similarity_analyses:
                             similarity_analysis_objects = SimilarityEngineV1().analyze_many(
@@ -771,32 +1326,46 @@ class KnowledgeTraceService:
                             similarity_analyses = [
                                 similarity_analysis_to_json_dict(item) for item in similarity_analysis_objects
                             ]
-                            if not tension_analyses:
-                                tension_analysis_objects = TensionEngineV1().analyze_many(
-                                    search_profile_objects,
-                                    similarity_analysis_objects,
-                                    search_profile_objects,
-                                )
-                                tension_analyses = [
-                                    tension_analysis_to_json_dict(item) for item in tension_analysis_objects
-                                ]
-                                if not decision_analyses:
-                                    decision_analysis_objects = DecisionEngineV1().decide_many(
-                                        search_profile_objects,
-                                        candidate_selection_objects,
-                                        similarity_analysis_objects,
-                                        tension_analysis_objects,
-                                    )
-                                    decision_analyses = [
-                                        decision_analysis_to_json_dict(item)
-                                        for item in decision_analysis_objects
-                                    ]
             technical_entities = [
                 _technical_entity_trace_dict(item, idx)
                 for idx, item in enumerate(technical_entities, start=1)
             ]
 
+        search_profile_objects_for_matching = [_search_profile_from_dict(item) for item in search_profiles]
+        if search_profile_objects_for_matching:
+            candidate_pool_size = candidate_pool_size or len(search_profile_objects_for_matching)
+            candidate_selection_attempted_count = candidate_selection_attempted_count or candidate_selection_attempt_count(
+                search_profile_objects_for_matching
+            )
+        if search_profile_objects_for_matching and not candidate_selections:
+            candidate_selection_objects = CandidateSelectionV1().select_many(
+                search_profile_objects_for_matching,
+                limit_per_profile=3,
+            )
+            candidate_selections = [entity_candidate_to_json_dict(item) for item in candidate_selection_objects]
+        if search_profile_objects_for_matching and candidate_selections and not similarity_analyses:
+            candidate_selection_objects = CandidateSelectionV1().select_many(
+                search_profile_objects_for_matching,
+                limit_per_profile=3,
+            )
+            similarity_analysis_objects = SimilarityEngineV1().analyze_many(
+                search_profile_objects_for_matching,
+                candidate_selection_objects,
+                search_profile_objects_for_matching,
+            )
+            similarity_analyses = [similarity_analysis_to_json_dict(item) for item in similarity_analysis_objects]
+
+        candidate_selections, generated_duplicate_removed_count = _dedupe_candidate_selection_dicts(candidate_selections)
+        candidate_duplicate_removed_count += generated_duplicate_removed_count
+        similarity_analyses, generated_similarity_duplicate_removed_count = _dedupe_similarity_analysis_dicts(
+            similarity_analyses
+        )
+        similarity_duplicate_removed_count += generated_similarity_duplicate_removed_count
+
         local_entities = [_normalize_local_entity_trace_dict(item) for item in local_entities_raw]
+        local_entities = _attach_decisions_to_entity_rows(local_entities, decision_analyses)
+        technical_entities = _attach_decisions_to_entity_rows(technical_entities, decision_analyses)
+        search_profiles = _attach_decisions_to_entity_rows(search_profiles, decision_analyses)
         le_stats = _local_entity_summary_counts(local_entities)
         effective_cluster_count = le_stats["local_entity_count"] if le_stats["local_entity_count"] else local_cluster_count_meta
 
@@ -817,10 +1386,23 @@ class KnowledgeTraceService:
         )
         quality_summary.setdefault("noise_sentence_skipped_count", 0)
         quality_summary.setdefault("noise_claim_rejected_count", 0)
+        quality_summary["rejected_noise_sentence_count"] = int(
+            quality_summary.get("noise_sentence_skipped_count")
+            or quality_summary.get("skipped_noise_sentence_count")
+            or 0
+        )
+        quality_summary["bad_subject_claim_examples"] = _bad_subject_claim_examples(quality_summary)
         quality_summary["duplicate_weak_claim_rejected_count"] = int(
             quality_summary.get("duplicate_weak_claim_rejected_count") or 0
         ) + int(subj_ctx_counters["duplicate_weak_compatible"])
         quality_summary.setdefault("carryover_subject_error_count", 0)
+        unknown_entity_type_examples = _unknown_entity_type_examples(local_entities)
+        bad_subject_claim_examples = list(quality_summary.get("bad_subject_claim_examples") or [])
+        multilingual_alias_match_count = _multilingual_alias_match_count(
+            candidate_selections,
+            similarity_analyses,
+        )
+        canonical_entity_merge_suggestion_count = _canonical_entity_merge_suggestion_count(similarity_analyses)
 
         trace = {
             "run_id": run.id,
@@ -838,38 +1420,79 @@ class KnowledgeTraceService:
                 "technical_entities": len(technical_entities),
                 "technical_memory_chunks": len(technical_memory_chunks),
                 "search_profiles": len(search_profiles),
+                "candidate_selection_attempted_count": candidate_selection_attempted_count,
+                "candidate_pool_size": candidate_pool_size,
                 "candidate_selection_count": len(candidate_selections),
+                "candidate_group_count": _candidate_group_count(candidate_selections),
+                "duplicate_memory_profile_count": _duplicate_memory_profile_count(candidate_selections),
                 "candidates_found_count": len(candidate_selections),
                 "candidates_without_evidence_count": _candidates_without_evidence_count(candidate_selections),
                 "top_candidate_score": _top_candidate_score(candidate_selections),
                 "candidate_selection_ready": _candidate_selection_ready(candidate_selections),
                 "similarity_analysis_count": len(similarity_analyses),
+                "similarity_score_distribution": _similarity_score_distribution(similarity_analyses),
                 "similarity_ready": _similarity_ready(similarity_analyses),
                 "high_similarity_count": _similarity_band_count(similarity_analyses, "high"),
                 "medium_similarity_count": _similarity_band_count(similarity_analyses, "medium"),
                 "low_similarity_count": _similarity_band_count(similarity_analyses, "low"),
                 "similarity_without_evidence_count": _similarity_without_evidence_count(similarity_analyses),
+                "rejected_noise_sentence_count": quality_summary["rejected_noise_sentence_count"],
+                "multilingual_alias_match_count": multilingual_alias_match_count,
+                "candidate_duplicate_removed_count": candidate_duplicate_removed_count,
+                "similarity_duplicate_removed_count": similarity_duplicate_removed_count,
+                "canonical_entity_merge_suggestion_count": canonical_entity_merge_suggestion_count,
+                "similarity_boost_reason_count": _similarity_boost_reason_count(similarity_analyses),
+                "similarity_boost_reasons": [
+                    reason
+                    for reason in _reason_values(similarity_analyses, "similarity_reasons")
+                    if "boost" in reason or reason.startswith("name:canonical")
+                ],
                 "tension_analysis_count": len(tension_analyses),
                 "tension_count": len(tension_analyses),
                 "tension_ready": _tension_ready(tension_analyses),
                 "high_tension_count": _tension_band_count(tension_analyses, "high"),
                 "medium_tension_count": _tension_band_count(tension_analyses, "medium"),
                 "low_tension_count": _tension_band_count(tension_analyses, "low"),
+                "conflict_count": _conflict_count(tension_analyses),
+                "hard_conflict_count": _hard_conflict_count(tension_analyses),
+                "soft_conflict_count": _tension_type_count(tension_analyses, "soft_conflict"),
                 "contradiction_count": _tension_type_count(tension_analyses, "contradiction"),
                 "temporal_change_count": _tension_type_count(tension_analyses, "temporal_change"),
+                "timeline_compatibility_reason_count": len(_timeline_compatibility_reasons(tension_analyses)),
+                "timeline_compatibility_reasons": _timeline_compatibility_reasons(tension_analyses),
                 "tension_without_evidence_count": _tension_without_evidence_count(tension_analyses),
                 "decision_analysis_count": len(decision_analyses),
                 "decision_count": len(decision_analyses),
+                "global_profile_count": len(global_profiles),
+                "global_profile_update_count": _global_profile_operation_count(global_profiles, "update"),
+                "global_profile_create_count": _global_profile_operation_count(global_profiles, "create"),
+                "global_profile_attach_count": _global_profile_operation_count(global_profiles, "update"),
+                "affected_profile_ids": _affected_profile_ids(global_profiles),
+                "claim_added_count": _global_profile_claim_count(global_profiles, "claim_added_count"),
+                "claim_deduplicated_count": _global_profile_claim_count(global_profiles, "claim_deduplicated_count"),
+                "retrieval_chunk_count": len(retrieval_chunks),
+                "conflicting_chunk_count": _retrieval_conflicting_chunk_count(retrieval_chunks),
+                "temporal_context_included": _retrieval_temporal_context_included(retrieval_chunks),
                 "decision_ready": _decision_ready(decision_analyses),
+                "attach_existing_count": _decision_kind_count(decision_analyses, "attach_existing"),
                 "auto_attach_count": _decision_kind_count(decision_analyses, "attach_existing"),
-                "create_new_count": _decision_kind_count(decision_analyses, "create_new"),
+                "merge_required_count": _decision_kind_count(decision_analyses, "merge_required"),
+                "uncertain_match_count": _decision_kind_count(decision_analyses, "uncertain_match"),
+                "create_new_profile_count": _decision_kind_count(decision_analyses, "create_new_profile"),
+                "create_new_count": _decision_kind_count(decision_analyses, "create_new", "create_new_profile"),
                 "keep_separate_count": _decision_kind_count(decision_analyses, "keep_separate"),
                 "mark_conflict_count": _decision_kind_count(decision_analyses, "mark_conflict"),
-                "needs_review_count": _decision_kind_count(decision_analyses, "needs_review"),
+                "near_duplicate_guard_trigger_count": _near_duplicate_guard_trigger_count(
+                    decision_analyses,
+                    local_resolver_trace,
+                ),
+                "needs_review_count": _decision_kind_count(decision_analyses, "needs_review", "uncertain_match", "merge_required"),
                 "manual_review_count": _decision_manual_review_count(decision_analyses),
                 "local_entity_count": le_stats["local_entity_count"],
                 "low_coherence_local_entity_count": le_stats["low_coherence_local_entity_count"],
                 "unknown_entity_type_count": le_stats["unknown_entity_type_count"],
+                "unknown_entity_type_examples": unknown_entity_type_examples,
+                "bad_subject_claim_examples": bad_subject_claim_examples,
                 # Spec: entity_type_normalized_count = local entitások, ahol az
                 # entity_type_source nem "fallback" és az entity_type nem "unknown".
                 # Ez azt mutatja, hogy a típusinfer determinisztikusan rátalált
@@ -891,6 +1514,7 @@ class KnowledgeTraceService:
                 "subject_context": {
                     "context_subject_applied_count": int(subj_ctx_counters["applied"]),
                     "context_subject_skipped_count": int(subj_ctx_counters["skipped"]),
+                    "context_subject_blocked_count": int(subj_ctx_counters["blocked"]),
                     "context_subject_reset_count": int(subj_ctx_counters["reset"]),
                     "context_subject_weak_subject_override_count": int(subj_ctx_counters["weak_subject_override"]),
                 },
@@ -911,6 +1535,8 @@ class KnowledgeTraceService:
             "similarity_analyses": similarity_analyses,
             "tension_analyses": tension_analyses,
             "decision_analyses": decision_analyses,
+            "global_profiles": global_profiles,
+            "retrieval_chunks": retrieval_chunks,
             "local_resolver_trace": local_resolver_trace,
         }
         logger.info(
@@ -930,7 +1556,7 @@ class KnowledgeTraceService:
             trace["summary"]["low_coherence_local_entity_count"],
             trace["summary"]["unknown_entity_type_count"],
         )
-        return trace
+        return _apply_trace_log_level(trace, requested_log_level)
 
 
 __all__ = ["KnowledgeTraceService"]

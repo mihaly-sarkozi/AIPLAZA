@@ -208,6 +208,11 @@ class SQLAlchemyQueryRunStore:
     def __init__(self, session_factory) -> None:
         self._sf = session_factory
 
+    def get(self, query_run_id: str) -> QueryRun | None:
+        with self._sf() as session:
+            row = session.get(KnowledgeQueryRunORM, query_run_id)
+            return _query_run_to_domain(row) if row is not None else None
+
     def save(self, run: QueryRun) -> QueryRun:
         with self._sf() as session:
             row = KnowledgeQueryRunORM(

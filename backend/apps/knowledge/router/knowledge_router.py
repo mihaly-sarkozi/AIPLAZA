@@ -51,6 +51,12 @@ def list_kb(
     """Lista: admin/owner mindent lát; user csak azt, amire use/train joga van. can_train = user taníthatja-e."""
     kbs = svc.list_all(current_user_id=user.id, current_user=user)
     trainable_ids = svc.get_trainable_kb_ids(user.id, user)
+    def _has_training(kb_uuid: str) -> bool:
+        try:
+            return bool(svc.list_ingest_runs(kb_uuid, limit=1))
+        except Exception:
+            return False
+
     return [
         KBOut(
             uuid=kb.uuid,
@@ -61,7 +67,8 @@ def list_kb(
             personal_data_sensitivity=getattr(kb, "personal_data_sensitivity", None) or "medium",
             created_at=kb.created_at,
             updated_at=kb.updated_at,
-            can_train=bool(kb.id is not None and kb.id in trainable_ids),
+            can_train=bool(getattr(kb, "id", None) is not None and getattr(kb, "id", None) in trainable_ids),
+            has_training=_has_training(kb.uuid),
         )
         for kb in kbs
     ]

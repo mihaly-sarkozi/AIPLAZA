@@ -5,6 +5,7 @@ LLM, parser, Qdrant indexing, or similarity engine.
 """
 from __future__ import annotations
 
+from dataclasses import replace
 import re
 from typing import Any
 
@@ -57,6 +58,30 @@ _SEMANTIC_TOKEN_ALIASES = {
     "cards": "payment",
     "invoice": "payment",
     "invoices": "payment",
+    "data": "data",
+    "adatvedelmi": "data",
+    "adatvédelmi": "data",
+    "proteccion": "protection",
+    "protección": "protection",
+    "datos": "data",
+    "protection": "protection",
+    "lead": "lead",
+    "felelos": "lead",
+    "felelős": "lead",
+    "responsable": "lead",
+    "support": "support",
+    "soporte": "support",
+    "module": "module",
+    "modul": "module",
+    "modulo": "module",
+    "módulo": "module",
+    "billing": "billing",
+    "facturacion": "billing",
+    "facturación": "billing",
+    "service": "service",
+    "servicio": "service",
+    "account": "account",
+    "cuenta": "account",
 }
 
 
@@ -83,6 +108,11 @@ def _append_reason(reasons: list[str], reason: str, value: float) -> None:
     reasons.append(f"{reason}:{value:.2f}")
 
 
+def candidate_selection_attempt_count(new_profiles: list[SearchProfile], existing_profiles: list[SearchProfile] | None = None) -> int:
+    pool = list(existing_profiles if existing_profiles is not None else new_profiles)
+    return sum(1 for profile in new_profiles for existing in pool if existing.search_profile_id != profile.search_profile_id)
+
+
 def _candidate_entity_id(profile: SearchProfile) -> str:
     for value in (
         profile.technical_entity_id,
@@ -93,6 +123,16 @@ def _candidate_entity_id(profile: SearchProfile) -> str:
         if value is not None:
             return str(value)
     return ""
+
+
+def _candidate_canonical_key(profile: SearchProfile) -> str:
+    explicit = canonicalize_entity_key(getattr(profile, "canonical_key", "") or "")
+    if explicit:
+        return explicit
+    fallback = canonicalize_entity_key(profile.normalized_key or profile.entity_name)
+    if fallback:
+        return fallback
+    return normalize_entity_key(profile.normalized_key or profile.entity_name, strip_accents=True)
 
 
 def _evidence(profile: SearchProfile) -> dict[str, Any]:
@@ -133,6 +173,10 @@ def _type_score(new: SearchProfile, candidate: SearchProfile) -> tuple[float, st
 
 
 def _name_score(new: SearchProfile, candidate: SearchProfile) -> tuple[float, str]:
+    left_explicit_canonical = normalize_entity_key(getattr(new, "canonical_key", "") or "", strip_accents=True)
+    right_explicit_canonical = normalize_entity_key(getattr(candidate, "canonical_key", "") or "", strip_accents=True)
+    if left_explicit_canonical and right_explicit_canonical and left_explicit_canonical == right_explicit_canonical:
+        return 0.46, "canonical_key_match"
     left_key = normalize_entity_key(new.normalized_key or new.entity_name, strip_accents=True)
     right_key = normalize_entity_key(candidate.normalized_key or candidate.entity_name, strip_accents=True)
     if left_key and right_key and left_key == right_key:
@@ -217,6 +261,16 @@ class CandidateSelectionV1:
             if candidate is not None:
                 candidates.append(candidate)
         candidates = self._dedupe_candidates(candidates)
+        if not candidates and any(existing.search_profile_id != new_profile.search_profile_id for existing in existing_profiles):
+            fallback_candidates: list[EntityCandidate] = []
+            for existing in existing_profiles:
+                if existing.search_profile_id == new_profile.search_profile_id:
+                    continue
+                candidate = self._score_pair(new_profile, existing, candidate_source=candidate_source, min_score=0.0)
+                if candidate is not None and candidate.score > 0:
+                    fallback_candidates.append(candidate)
+            candidates = self._dedupe_candidates(fallback_candidates)
+        candidates = self._dedupe_by_canonical_key(candidates)
         return sorted(candidates, key=lambda item: item.score, reverse=True)[:limit]
 
     def select_many(
@@ -246,6 +300,7 @@ class CandidateSelectionV1:
         candidate_profile: SearchProfile,
         *,
         candidate_source: str,
+        min_score: float = _MIN_CANDIDATE_SCORE,
     ) -> EntityCandidate | None:
         if not _has_evidence(candidate_profile):
             return None
@@ -311,7 +366,7 @@ class CandidateSelectionV1:
         _append_reason(reasons, reason, value)
 
         score = max(0.0, min(1.0, round(score, 4)))
-        if score < _MIN_CANDIDATE_SCORE:
+        if score < min_score:
             return None
 
         return EntityCandidate(
@@ -322,6 +377,7 @@ class CandidateSelectionV1:
             candidate_entity_id=_candidate_entity_id(candidate_profile),
             candidate_name=candidate_profile.entity_name,
             candidate_type=candidate_profile.entity_type,
+            candidate_canonical_key=_candidate_canonical_key(candidate_profile),
             candidate_source=candidate_source,
             score=score,
             reasons=reasons,
@@ -341,5 +397,38 @@ class CandidateSelectionV1:
                 by_entity_id[key] = candidate
         return list(by_entity_id.values())
 
+    @staticmethod
+    def _dedupe_by_canonical_key(candidates: list[EntityCandidate]) -> list[EntityCandidate]:
+        grouped: dict[str, list[EntityCandidate]] = {}
+        passthrough: list[EntityCandidate] = []
+        for candidate in candidates:
+            key = str(candidate.candidate_canonical_key or "").strip()
+            if not key:
+                passthrough.append(candidate)
+                continue
+            grouped.setdefault(key, []).append(candidate)
 
-__all__ = ["CandidateSelectionV1"]
+        selected: list[EntityCandidate] = list(passthrough)
+        for canonical_key, group in grouped.items():
+            best = max(group, key=lambda item: float(item.score))
+            if len(group) == 1:
+                selected.append(best)
+                continue
+            selected.append(
+                replace(
+                    best,
+                    best_candidate_selected=True,
+                    merge_candidate_group={
+                        "canonical_key": canonical_key,
+                        "group_size": len(group),
+                        "duplicate_memory_profile_count": len(group) - 1,
+                        "candidate_entity_ids": [item.candidate_entity_id for item in group],
+                        "candidate_names": [item.candidate_name for item in group],
+                        "selected_candidate_entity_id": best.candidate_entity_id,
+                    },
+                )
+            )
+        return selected
+
+
+__all__ = ["CandidateSelectionV1", "candidate_selection_attempt_count"]

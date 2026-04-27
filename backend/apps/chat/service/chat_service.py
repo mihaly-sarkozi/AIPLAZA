@@ -94,6 +94,26 @@ class ChatService:
             note=note,
         )
 
+    def download_answer_source(
+        self,
+        *,
+        query_run_id: str,
+        source_id: str,
+        user_id: int | None = None,
+        user_role: str | None = None,
+    ) -> dict | None:
+        if self.kb_service is None or not hasattr(self.kb_service, "get_query_source_download"):
+            return None
+        download = self.kb_service.get_query_source_download(query_run_id, source_id)
+        if download is None:
+            return None
+        corpus_uuid = str(download.get("corpus_uuid") or "").strip()
+        if corpus_uuid and user_id is not None and hasattr(self.kb_service, "user_can_use"):
+            subject = _PermissionSubject(id=user_id, role=user_role, is_active=True)
+            if not self.kb_service.user_can_use(corpus_uuid, user_id, subject):
+                raise PermissionError("Nincs jogosultság a megadott tudástár használatához.")
+        return download
+
     # Ez a metódus a(z) utcnow_naive logikáját valósítja meg.
     @staticmethod
     def _utcnow_naive() -> datetime:
@@ -446,10 +466,38 @@ class ChatService:
                 packet["scoring_summary"]["latency_ms"]["parse"] = float(parsed.get("parse_time_ms") or 0.0)
                 packet["is_followup"] = self._is_followup(user_id, parsed)
                 return packet
+            if hasattr(self.kb_service, "build_chat_context"):
+                packet = await self.kb_service.build_chat_context(
+                    question=question,
+                    current_user_id=user_id,
+                    current_user_role=user_role,
+                    parsed_query=parsed,
+                    kb_uuid=kb_uuid,
+                    debug=debug,
+                )
+                packet["query_focus"] = parsed
+                packet["parser_audit"] = parsed.get("parser_audit") or {}
+                packet.setdefault("scoring_summary", {})
+                packet.setdefault("scoring_summary", {}).setdefault("latency_ms", {})
+                packet["scoring_summary"]["latency_ms"]["parse"] = float(parsed.get("parse_time_ms") or 0.0)
+                packet["is_followup"] = self._is_followup(user_id, parsed)
+                return packet
 
         assertions = []
         if user_id is not None:
-            assertions = self.kb_service.search_assertions(
+            search_assertions = getattr(self.kb_service, "search_assertions", None)
+            if search_assertions is None:
+                return {
+                    "query_focus": parsed,
+                    "parser_audit": parsed.get("parser_audit") or {},
+                    "top_assertions": [],
+                    "evidence_sentences": [],
+                    "source_chunks": [],
+                    "related_entities": [],
+                    "scoring_summary": {"latency_ms": {"parse": float(parsed.get("parse_time_ms") or 0.0)}},
+                    "is_followup": self._is_followup(user_id, parsed),
+                }
+            assertions = search_assertions(
                 current_user_id=user_id,
                 current_user_role=user_role,
                 predicates=None,
@@ -615,14 +663,39 @@ class ChatService:
         rows = []
         for key in ["top_assertions", "evidence_sentences", "source_chunks"]:
             rows.extend(packet.get(key) or [])
+        fallback_kb_uuid = str(packet.get("kb_uuid") or packet.get("corpus_uuid") or "").strip()
+        fallback_source_ids: list[str] = []
+        for value in [*(packet.get("cited_source_ids") or []), *(packet.get("source_ids") or [])]:
+            text = str(value or "").strip()
+            if text and text not in fallback_source_ids:
+                fallback_source_ids.append(text)
+        for item in packet.get("evidence_summary") or []:
+            if not isinstance(item, dict):
+                continue
+            text = str(item.get("source_id") or "").strip()
+            if text and text not in fallback_source_ids:
+                fallback_source_ids.append(text)
         seen: set[tuple[str, str]] = set()
         out: list[dict] = []
         for row in rows:
             kb_uuid = str(row.get("kb_uuid") or "").strip()
             point_id = str(row.get("source_point_id") or "").strip()
-            if not kb_uuid or not point_id:
+            source_id = str(row.get("source_id") or "").strip()
+            has_source_metadata = bool(
+                row.get("display_type")
+                or row.get("file_ref")
+                or row.get("created_by_label")
+                or row.get("created_by") is not None
+            )
+            if not source_id and has_source_metadata:
+                source_id = point_id
+            if not source_id and row.get("build_id") and not has_source_metadata:
                 continue
-            item_key = (kb_uuid, point_id)
+            if not source_id:
+                source_id = point_id
+            if not kb_uuid or not point_id or not source_id:
+                continue
+            item_key = (kb_uuid, source_id)
             if item_key in seen:
                 continue
             seen.add(item_key)
@@ -630,13 +703,89 @@ class ChatService:
                 {
                     "kb_uuid": kb_uuid,
                     "point_id": point_id,
+                    "source_id": source_id,
                     "title": self._sanitize_debug_text(row.get("source_document_title") or ""),
-                    "snippet": self._sanitize_debug_text(str(row.get("text") or row.get("canonical_text") or "")[:220]),
+                    "snippet": "",
+                    "source_type": self._sanitize_debug_text(row.get("source_type") or ""),
+                    "file_ref": self._sanitize_debug_text(row.get("file_ref") or "") or None,
+                    "display_type": self._sanitize_debug_text(row.get("display_type") or ""),
+                    "created_by": row.get("created_by"),
+                    "created_by_label": self._sanitize_debug_text(row.get("created_by_label") or ""),
                 }
             )
             if len(out) >= 8:
                 break
+        if not out and fallback_kb_uuid:
+            for source_id in fallback_source_ids[:8]:
+                out.append(
+                    {
+                        "kb_uuid": fallback_kb_uuid,
+                        "point_id": source_id,
+                        "source_id": source_id,
+                        "title": f"Forrás {source_id[:8]}",
+                        "snippet": "",
+                        "source_type": "",
+                        "file_ref": None,
+                        "display_type": "",
+                        "created_by": None,
+                        "created_by_label": "",
+                    }
+                )
         return out
+
+    @staticmethod
+    def _is_knowledge_answer(packet: dict) -> bool:
+        answer_text = str(packet.get("answer_text") or "").strip()
+        answer_mode = str(packet.get("answer_mode") or "no_answer").strip()
+        return bool(answer_text and answer_mode and answer_mode != "no_answer")
+
+    @staticmethod
+    def _chat_evidence(packet: dict) -> list[dict]:
+        evidence = packet.get("evidence_summary")
+        if isinstance(evidence, list):
+            return [dict(item) for item in evidence if isinstance(item, dict)]
+        query_debug = packet.get("query_debug") if isinstance(packet.get("query_debug"), dict) else {}
+        evidence = query_debug.get("evidence")
+        if isinstance(evidence, list):
+            return [dict(item) for item in evidence if isinstance(item, dict)]
+        return []
+
+    @staticmethod
+    def _chat_confidence(packet: dict) -> float:
+        value = packet.get("synthesis_confidence")
+        if value is None and isinstance(packet.get("query_debug"), dict):
+            value = packet["query_debug"].get("synthesis_confidence")
+        try:
+            return round(max(0.0, min(1.0, float(value or 0.0))), 4)
+        except (TypeError, ValueError):
+            return 0.0
+
+    def _knowledge_payload(self, *, packet: dict, debug: bool) -> dict:
+        sources = self._build_sources_from_packet(packet)
+        context_preview = self._context_text_from_packet(packet)
+        query_profile = packet.get("query_profile") or (packet.get("query_debug") or {}).get("query_profile") or packet.get("query_focus") or {}
+        matched_chunks = packet.get("matched_chunks") or []
+        matched_claims = packet.get("matched_claims") or []
+        return {
+            "answer": str(packet.get("answer_text") or "").strip(),
+            "query_run_id": str(packet.get("query_run_id") or "").strip() or None,
+            "answer_mode": str(packet.get("answer_mode") or "no_answer"),
+            "answer_source": "knowledge",
+            "confidence": self._chat_confidence(packet),
+            "evidence": self._chat_evidence(packet),
+            "cited_claim_ids": packet.get("cited_claim_ids") or [],
+            "cited_sentence_ids": packet.get("cited_sentence_ids") or [],
+            "cited_source_ids": packet.get("cited_source_ids") or packet.get("source_ids") or [],
+            "query_profile": query_profile,
+            "matched_chunks": matched_chunks,
+            "claims": matched_claims,
+            "sources": sources,
+            "debug": (
+                self._build_debug_payload(packet=packet or {}, context_text=context_preview, sources=sources)
+                if debug
+                else None
+            ),
+        }
 
     # Ez a metódus felépíti a(z) debug payload logikáját.
     def _build_debug_payload(self, packet: dict, context_text: str, sources: list[dict]) -> dict:
@@ -664,6 +813,9 @@ class ChatService:
         )
         return {
             "query_focus": self._sanitize_debug_value(packet.get("query_focus") or {}),
+            "query_profile": self._sanitize_debug_value(packet.get("query_profile") or (packet.get("query_debug") or {}).get("query_profile") or {}),
+            "matched_chunks": self._sanitize_debug_value(packet.get("matched_chunks") or []),
+            "claims": self._sanitize_debug_value(packet.get("matched_claims") or []),
             "scoring_summary": self._sanitize_debug_value(packet.get("scoring_summary") or {}),
             "top_assertion_count": len(top_assertions),
             "evidence_sentence_count": len(evidence_sentences),
@@ -763,6 +915,9 @@ class ChatService:
                 kb_uuid=kb_uuid,
                 debug=debug,
             )
+            synthesized_answer = str(packet.get("answer_text") or "").strip()
+            if synthesized_answer and self._is_knowledge_answer(packet):
+                return self._knowledge_payload(packet=packet, debug=debug)
             context_text = self._context_text_from_packet(packet)
         except PermissionError:
             raise
@@ -773,7 +928,12 @@ class ChatService:
             context_failed = True
 
         if context_failed or not context_text.strip():
-            answer = ""
+            answer = (
+                "A kiválasztott tudástárhoz még nincs kész keresési index. "
+                "Indíts indexépítést vagy várd meg a tanítás befejezését, majd próbáld újra."
+                if packet.get("no_ready_index_build")
+                else ""
+            )
         else:
             messages = self._build_messages(question=question, context_text=context_text)
             response = await self.client.chat.completions.create(
@@ -787,6 +947,17 @@ class ChatService:
             )
         payload = {
             "answer": answer,
+            "query_run_id": str(packet.get("query_run_id") or "").strip() or None,
+            "answer_mode": str(packet.get("answer_mode") or "no_answer"),
+            "answer_source": "llm_fallback" if answer else "none",
+            "confidence": 0.0,
+            "evidence": [],
+            "cited_claim_ids": [],
+            "cited_sentence_ids": [],
+            "cited_source_ids": [],
+            "query_profile": packet.get("query_profile") or packet.get("query_focus") or {},
+            "matched_chunks": packet.get("matched_chunks") or [],
+            "claims": packet.get("matched_claims") or [],
             "sources": self._build_sources_from_packet(packet) if context_text and not context_failed else [],
         }
         if context_text and not context_failed and packet.get("is_followup") and self.kb_service is not None:

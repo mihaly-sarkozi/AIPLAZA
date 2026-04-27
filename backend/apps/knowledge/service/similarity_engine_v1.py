@@ -21,13 +21,14 @@ _COMPATIBLE_TYPES = {
     frozenset({"module", "system"}),
 }
 _WEIGHTS = {
-    "name_similarity": 0.32,
-    "type_similarity": 0.18,
-    "keyword_similarity": 0.18,
+    "name_similarity": 0.30,
+    "canonical_text_similarity": 0.14,
+    "type_similarity": 0.14,
+    "keyword_similarity": 0.16,
     "relation_similarity": 0.10,
-    "object_similarity": 0.12,
-    "time_similarity": 0.04,
-    "space_similarity": 0.04,
+    "object_similarity": 0.16,
+    "time_similarity": 0.03,
+    "space_similarity": 0.03,
     "evidence_overlap_similarity": 0.02,
 }
 
@@ -47,6 +48,21 @@ _SEMANTIC_TOKEN_ALIASES = {
     "enable": "enable",
     "hasznalnia": "enable",
     "használnia": "enable",
+    "use": "uses_or_integrates",
+    "uses": "uses_or_integrates",
+    "used": "uses_or_integrates",
+    "using": "uses_or_integrates",
+    "hasznal": "uses_or_integrates",
+    "használ": "uses_or_integrates",
+    "hasznalja": "uses_or_integrates",
+    "használja": "uses_or_integrates",
+    "utiliza": "uses_or_integrates",
+    "usa": "uses_or_integrates",
+    "integrates": "uses_or_integrates",
+    "integrate": "uses_or_integrates",
+    "integrated": "uses_or_integrates",
+    "integrating": "uses_or_integrates",
+    "with": "",
     "user": "user",
     "felhasznalo": "user",
     "felhasználó": "user",
@@ -68,6 +84,39 @@ _SEMANTIC_TOKEN_ALIASES = {
     "cards": "payment",
     "invoice": "payment",
     "invoices": "payment",
+    "data": "data",
+    "adatvedelmi": "data",
+    "adatvédelmi": "data",
+    "proteccion": "protection",
+    "protección": "protection",
+    "datos": "data",
+    "protection": "protection",
+    "lead": "lead",
+    "felelos": "lead",
+    "felelős": "lead",
+    "responsable": "lead",
+    "support": "support",
+    "soporte": "support",
+    "module": "module",
+    "modul": "module",
+    "modulo": "module",
+    "módulo": "module",
+    "billing": "billing",
+    "facturacion": "billing",
+    "facturación": "billing",
+    "service": "service",
+    "servicio": "service",
+    "account": "account",
+    "cuenta": "account",
+}
+_OBJECT_ARTIFACT_TOKENS = {
+    "rendszer",
+    "rendszert",
+    "system",
+    "sistema",
+    "sistemas",
+    "servicio",
+    "service",
 }
 
 
@@ -78,7 +127,30 @@ def _tokens(value: str) -> set[str]:
 def _semantic_tokens(value: str) -> set[str]:
     tokens: set[str] = set()
     for token in _tokens(value.replace("-", " ")):
-        tokens.add(_SEMANTIC_TOKEN_ALIASES.get(token, token))
+        semantic = _SEMANTIC_TOKEN_ALIASES.get(token, token)
+        if semantic:
+            tokens.add(semantic)
+    return tokens
+
+
+def _normalized_match_key(profile: SearchProfile) -> str:
+    explicit = canonicalize_entity_key(getattr(profile, "canonical_key", "") or "")
+    if explicit:
+        return explicit
+    canonical = canonicalize_entity_key(profile.normalized_key or profile.entity_name)
+    if canonical:
+        return canonical
+    return normalize_entity_key(profile.normalized_key or profile.entity_name, strip_accents=True)
+
+
+def _normalized_object_tokens(values: list[str]) -> set[str]:
+    tokens: set[str] = set()
+    for value in values:
+        normalized = normalize_entity_key(str(value or ""), strip_accents=True)
+        for token in _tokens(normalized):
+            semantic = _SEMANTIC_TOKEN_ALIASES.get(token, token)
+            if semantic and semantic not in _OBJECT_ARTIFACT_TOKENS:
+                tokens.add(semantic)
     return tokens
 
 
@@ -98,6 +170,10 @@ def _candidate_entity_id(profile: SearchProfile) -> str:
         if value is not None:
             return str(value)
     return ""
+
+
+def _profile_canonical_key(profile: SearchProfile) -> str:
+    return _normalized_match_key(profile)
 
 
 def _profile_evidence(profile: SearchProfile) -> dict[str, Any]:
@@ -134,6 +210,10 @@ def _has_evidence(evidence: dict[str, Any]) -> bool:
 
 
 def _name_similarity(left: SearchProfile, right: SearchProfile) -> tuple[float, str]:
+    left_match_key = _normalized_match_key(left)
+    right_match_key = _normalized_match_key(right)
+    if left_match_key and right_match_key and left_match_key == right_match_key:
+        return 1.0, "name:normalized_key_exact"
     left_key = normalize_entity_key(left.normalized_key or left.entity_name, strip_accents=True)
     right_key = normalize_entity_key(right.normalized_key or right.entity_name, strip_accents=True)
     if left_key and right_key and left_key == right_key:
@@ -164,6 +244,14 @@ def _type_similarity(left: SearchProfile, right: SearchProfile) -> tuple[float, 
     return 0.0, "type:mismatch"
 
 
+def _canonical_text_similarity(left: SearchProfile, right: SearchProfile) -> tuple[float, str]:
+    score = max(
+        _jaccard(_tokens(left.canonical_text or left.search_text), _tokens(right.canonical_text or right.search_text)),
+        _jaccard(_semantic_tokens(left.canonical_text or left.search_text), _semantic_tokens(right.canonical_text or right.search_text)),
+    )
+    return score, f"canonical_text:overlap:{score:.2f}"
+
+
 def _value_overlap(left_values: list[str], right_values: list[str], label: str) -> tuple[float, str]:
     score = _jaccard({fold_text(v) for v in left_values if v}, {fold_text(v) for v in right_values if v})
     return score, f"{label}:overlap:{score:.2f}"
@@ -178,6 +266,15 @@ def _semantic_value_overlap(left_values: list[str], right_values: list[str], lab
         right_tokens.update(_semantic_tokens(value))
     score = _jaccard(left_tokens, right_tokens)
     return score, f"{label}:semantic_overlap:{score:.2f}"
+
+
+def _semantic_object_overlap(left_values: list[str], right_values: list[str]) -> tuple[float, str]:
+    left_tokens = _normalized_object_tokens(left_values)
+    right_tokens = _normalized_object_tokens(right_values)
+    if left_tokens and right_tokens and left_tokens & right_tokens:
+        return 1.0, "relation_object:normalized_semantic_overlap:1.00"
+    score = _jaccard(left_tokens, right_tokens)
+    return score, f"relation_object:normalized_semantic_overlap:{score:.2f}"
 
 
 def _location_name_conflict(left: SearchProfile, right: SearchProfile, name_score: float) -> bool:
@@ -282,6 +379,7 @@ class SimilarityEngineV1:
 
         component_values = {
             "name_similarity": _name_similarity(new_profile, candidate_profile),
+            "canonical_text_similarity": _canonical_text_similarity(new_profile, candidate_profile),
             "type_similarity": _type_similarity(new_profile, candidate_profile),
             "keyword_similarity": _value_overlap(new_profile.keywords, candidate_profile.keywords, "keyword"),
             "relation_similarity": _value_overlap(
@@ -318,12 +416,25 @@ class SimilarityEngineV1:
             ]
             reasons.append(semantic_keyword_reason)
 
+        predicate_values_left = list((new_profile.relation_filters or {}).get("predicates") or [])
+        predicate_values_right = list((candidate_profile.relation_filters or {}).get("predicates") or [])
+        semantic_predicate_score, semantic_predicate_reason = _semantic_value_overlap(
+            predicate_values_left,
+            predicate_values_right,
+            "relation_predicate",
+        )
+        if semantic_predicate_score > component_scores["relation_similarity"]:
+            component_scores["relation_similarity"] = round(semantic_predicate_score, 4)
+            total += (semantic_predicate_score - float(component_values["relation_similarity"][0])) * _WEIGHTS[
+                "relation_similarity"
+            ]
+            reasons.append(semantic_predicate_reason)
+
         object_values_left = list((new_profile.relation_filters or {}).get("objects") or [])
         object_values_right = list((candidate_profile.relation_filters or {}).get("objects") or [])
-        semantic_object_score, semantic_object_reason = _semantic_value_overlap(
+        semantic_object_score, semantic_object_reason = _semantic_object_overlap(
             object_values_left,
             object_values_right,
-            "relation_object",
         )
         if semantic_object_score > component_scores["object_similarity"]:
             component_scores["object_similarity"] = round(semantic_object_score, 4)
@@ -350,12 +461,41 @@ class SimilarityEngineV1:
         # detektálható legyen a high band-ben. Kis boost (+0.05), 1.0-ra cap-elve. Ezzel a
         # konzisztens evidence-szel rendelkező duplikátumok stabilan high similarity-t kapnak.
         if (
-            ("name:normalized_exact" in reasons or "name:canonical_exact" in reasons)
+            (
+                "name:normalized_exact" in reasons
+                or "name:canonical_exact" in reasons
+                or "name:normalized_key_exact" in reasons
+            )
             and "type:match" in reasons
             and not _location_name_conflict(new_profile, candidate_profile, component_scores["name_similarity"])
         ):
             total = min(1.0, total + 0.05)
             reasons.append("same_entity_name_boost")
+
+        if (
+            ("name:canonical_exact" in reasons or "name:normalized_key_exact" in reasons)
+            and component_scores["type_similarity"] >= 0.65
+            and not _location_name_conflict(new_profile, candidate_profile, component_scores["name_similarity"])
+        ):
+            total = max(0.55, min(1.0, total + 0.16))
+            reasons.append("canonical_alias_similarity_boost")
+
+        if (
+            "name:normalized_key_exact" in reasons
+            and component_scores["type_similarity"] >= 0.65
+            and not _location_name_conflict(new_profile, candidate_profile, component_scores["name_similarity"])
+        ):
+            total = min(0.95, max(0.7, total + 0.25))
+            reasons.append("normalized_key_similarity_boost")
+
+        if (
+            "name:normalized_key_exact" in reasons
+            and component_scores["relation_similarity"] > 0.0
+            and component_scores["object_similarity"] > 0.0
+            and not _location_name_conflict(new_profile, candidate_profile, component_scores["name_similarity"])
+        ):
+            total = min(1.0, max(0.95, total + 0.1))
+            reasons.append("normalized_key_relation_object_full_match_boost")
 
         if (
             component_scores["type_similarity"] == 1.0
@@ -376,6 +516,10 @@ class SimilarityEngineV1:
         if not _has_evidence(candidate_evidence):
             total = min(total, 0.69)
             reasons.append("evidence:missing_high_cap")
+
+        if component_scores["object_similarity"] == 0.0 and component_scores["relation_similarity"] == 0.0:
+            total = min(total, 0.85)
+            reasons.append("missing_relation_object_similarity_cap")
 
         total = round(max(0.0, min(1.0, total)), 4)
         return SimilarityAnalysis(

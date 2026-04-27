@@ -408,6 +408,9 @@ def _infer_subject_kind(claim: Claim | Mapping[str, Any], row: Mapping[str, Any]
     if any(t in loc_kw for t in tokens):
         return "location"
 
+    if len(tokens) == 1 and _norm_ws(subj)[:1].isupper():
+        return "person"
+
     if language == "hu":
         if _LEADING_PROPER_HU.match(_norm_ws(subj)):
             return "person"
@@ -536,6 +539,24 @@ def _compatible_anchor_kind(
     return anchor_kind in _ALLOWED_CARRY_KINDS
 
 
+def _works_location_anchor(claim: Claim | Mapping[str, Any], row: Mapping[str, Any]) -> tuple[str, str, str, str] | None:
+    predicate = fold_text(_get_predicate(claim))
+    if predicate not in {fold_text("works"), fold_text("work")}:
+        return None
+    obj = _norm_ws(_get_object(claim))
+    if not obj:
+        return None
+    location = re.sub(r"^(?:in|at)\s+(?:the\s+)?", "", obj, flags=re.IGNORECASE).strip(" ,;:-.")
+    location = re.sub(r"^(?:the|a|an)\s+", "", location, flags=re.IGNORECASE).strip(" ,;:-.")
+    if not location or "office" not in fold_text(location):
+        return None
+    cid = _claim_id(claim)
+    sid = str(row.get("sentence_id") or "")
+    if not cid or not sid:
+        return None
+    return (_norm_ws(location), sid, cid, "location")
+
+
 class SubjectContextResolverV1:
     """Mondatsorrendű, dokumentum-lokális implicit alany feloldás."""
 
@@ -581,7 +602,13 @@ class SubjectContextResolverV1:
 
             row["claims"] = updated_claims
 
-            refreshed = _first_verified_strong_in_row(row, updated_claims, language=language)
+            refreshed = None
+            for updated_claim in updated_claims:
+                refreshed = _works_location_anchor(updated_claim, row)
+                if refreshed is not None:
+                    break
+            if refreshed is None:
+                refreshed = _first_verified_strong_in_row(row, updated_claims, language=language)
             if refreshed is not None:
                 last_strong = (*refreshed, i)
 
@@ -658,6 +685,9 @@ class SubjectContextResolverV1:
         blocked, block_reason = _new_explicit_entity_blocks(
             sentence_text, language=language, anchor_subj=anchor_subj, mentions=mentions
         )
+        if blocked and pattern_id in {"en_she_works_in", "en_he_works_in"}:
+            blocked = False
+            block_reason = None
         if blocked:
             return _attach_context_meta(
                 claim,

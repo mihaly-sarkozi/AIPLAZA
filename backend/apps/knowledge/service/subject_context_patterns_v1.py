@@ -23,6 +23,8 @@ _PATTERN_ROWS: dict[str, tuple[tuple[Pattern[str], str], ...]] = {
         (re.compile(r"^most\b.*\bfelel\b", re.IGNORECASE | re.DOTALL), "hu_most_felel"),
     ),
     "en": (
+        (re.compile(r"^she\s+works\s+in\b", re.IGNORECASE | re.DOTALL), "en_she_works_in"),
+        (re.compile(r"^he\s+works\s+in\b", re.IGNORECASE | re.DOTALL), "en_he_works_in"),
         (re.compile(r"^was\s+previously\s+responsible\s+for\b", re.IGNORECASE | re.DOTALL), "en_was_previously_responsible_for"),
         (re.compile(r"^previously\s+responsible\s+for\b", re.IGNORECASE | re.DOTALL), "en_previously_responsible_for"),
         (re.compile(r"^earlier\s+responsible\s+for\b", re.IGNORECASE | re.DOTALL), "en_earlier_responsible_for"),

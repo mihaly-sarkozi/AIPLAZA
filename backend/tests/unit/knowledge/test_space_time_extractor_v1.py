@@ -205,6 +205,24 @@ def test_space_time_extractor_hu_year_suffix_returns_plain_year() -> None:
     assert frame.time_value == "2025"
 
 
+def test_space_time_extractor_event_prefers_explicit_year_over_event_keyword() -> None:
+    sentence = Sentence(text_content="The onboarding checklist was updated in 2023.", metadata={"language": "en"})
+    claim = Claim(
+        sentence_id=sentence.id,
+        source_id=sentence.source_id,
+        claim_type="event",
+        subject_text="onboarding checklist",
+        predicate_text="was updated",
+        object_text="in 2023",
+        metadata={"language": "en"},
+    )
+
+    frame = SpaceTimeExtractorV1().extract(claim, sentence, language="en")
+
+    assert frame.time_mode in {"bounded", "event"}
+    assert frame.time_value == "2023"
+
+
 def test_space_time_extractor_uses_time_nearest_predicate_not_later_sentence_year() -> None:
     sentence = Sentence(
         text_content="A Budapesti iroda 2026 márciusában aktív, 2025-ben tesztüzem.",

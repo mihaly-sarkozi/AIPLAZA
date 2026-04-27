@@ -59,11 +59,13 @@ _KEYWORD_ENTITY_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
     # Spec: "import" → module mert a regression korpuszban "legacy helpdesk import" /
     # "régi Helpdesk import" tipikus integráció-modul; megelőzi a generikus "module"-t.
     (LocalEntityType.MODULE.value, ("import", "modul", "module", "modulo")),
+    (LocalEntityType.PROCESS.value, ("workflow", "process", "folyamat", "flujo de trabajo", "proceso")),
     (LocalEntityType.SOFTWARE.value, ("helpdesk", "software", "szoftver")),
     (LocalEntityType.SYSTEM.value, ("rendszer", "system", "sistema")),
     (LocalEntityType.LOCATION.value, ("office", "iroda", "oficina")),
     (LocalEntityType.USER.value, ("user", "felhasznalo", "usuario")),
     (LocalEntityType.ACCOUNT.value, ("account", "cuenta")),
+    (LocalEntityType.CHECKLIST.value, ("checklist", "ellenorzolista", "ellenőrzőlista", "lista de verificacion", "lista de verificación")),
     (LocalEntityType.POLICY.value, ("policy", "szabalyzat", "politica")),
     (LocalEntityType.DOCUMENT.value, ("document", "dokumentum", "documento")),
     # Spec: "ticket"/"tickets" lokális objektum (nem felhasználó / nem rendszer);

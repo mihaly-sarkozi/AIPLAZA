@@ -525,6 +525,64 @@ def test_subject_context_en_state_weak_subject_gets_location_anchor() -> None:
     assert c2["context_subject_reason"] == "weak_subject_override"
 
 
+def test_stress_pronoun_work_relation_and_it_state_use_safe_anchors() -> None:
+    r = SubjectContextResolverV1().resolve_claims(
+        [
+            {
+                "sentence_id": "s1",
+                "order_index": 0,
+                "text": "Alice is the data protection lead at Acme Corp.",
+                "language": "en",
+                "claims": [
+                    {
+                        "id": "c1",
+                        "subject_text": "Alice",
+                        "predicate_text": "data protection lead at",
+                        "object_text": "Acme Corp",
+                    }
+                ],
+            },
+            {
+                "sentence_id": "s2",
+                "order_index": 1,
+                "text": "She works in the London office.",
+                "language": "en",
+                "claims": [
+                    {
+                        "id": "c2",
+                        "subject_text": "",
+                        "predicate_text": "works",
+                        "object_text": "in the London office",
+                    }
+                ],
+            },
+            {
+                "sentence_id": "s3",
+                "order_index": 2,
+                "text": "It was active before January 2025.",
+                "language": "en",
+                "claims": [
+                    {
+                        "id": "c3",
+                        "subject_text": "",
+                        "predicate_text": "was active",
+                        "object_text": "before January 2025",
+                    }
+                ],
+            },
+        ]
+    )
+
+    c2 = r[1]["claims"][0]
+    c3 = r[2]["claims"][0]
+    assert c2["subject_text"] == "Alice"
+    assert c2["context_subject_applied"] is True
+    assert c2["context_subject_sentence_pattern_id"] == "en_she_works_in"
+    assert c3["subject_text"] == "London office"
+    assert c3["context_subject_applied"] is True
+    assert c3["context_subject_source_subject"] == "London office"
+
+
 def test_subject_context_es_anteriormente_fue_weak_subject_gets_person_anchor() -> None:
     r = SubjectContextResolverV1().resolve_claims(
         [

@@ -34,6 +34,16 @@ def mention_priority(mention: Mention) -> tuple[int, int, int]:
     )
 
 
+_LOCATION_QUALIFIERS = {"office", "branch", "center", "centre", "iroda", "fiók", "fiok", "központ", "kozpont", "oficina", "sucursal", "centro"}
+
+
+def _is_location_qualifier_compound(mention: Mention) -> bool:
+    if str(mention.mention_type or "") != "location":
+        return False
+    tokens = {fold_text(part) for part in str(mention.surface_text or "").split() if part}
+    return bool(tokens & _LOCATION_QUALIFIERS and len(tokens) >= 2)
+
+
 def use_mention_type_rank(mention: Mention) -> int:
     key = str(mention.mention_type or "unknown")
     if key == "module":
@@ -70,6 +80,9 @@ def select_subject_mention(mentions: list[Mention], *, predicate_idx: int | None
     ]
     if not candidates:
         return None
+    compound_locations = [mention for mention in candidates if _is_location_qualifier_compound(mention)]
+    if compound_locations:
+        return sorted(compound_locations, key=lambda item: (item.char_start, -(item.char_end - item.char_start)))[0]
     return sorted(candidates, key=mention_priority)[0]
 
 

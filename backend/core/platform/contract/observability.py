@@ -64,6 +64,18 @@ def log_structured_event(
     _log_structured_event(logger_name, event, level=level, **fields)
 
 
+def increment_metric(name: str, value: float = 1.0, *, unit: str = "count", tags: Mapping[str, Any] | None = None) -> None:
+    from core.kernel.logging.observability import increment_metric as _increment_metric
+
+    _increment_metric(name, value, unit=unit, tags=dict(tags or {}))
+
+
+def observe_metric(name: str, value: float, *, unit: str = "count", tags: Mapping[str, Any] | None = None) -> None:
+    from core.kernel.logging.observability import observe_metric as _observe_metric
+
+    _observe_metric(name, value, unit=unit, tags=dict(tags or {}))
+
+
 @contextmanager
 def observability_scope(**fields: Any):
     from core.kernel.logging.observability import observability_scope as _observability_scope
@@ -78,6 +90,8 @@ __all__ = [
     "AuditTarget",
     "MetricsSink",
     "ObservabilityContext",
+    "increment_metric",
     "log_structured_event",
+    "observe_metric",
     "observability_scope",
 ]

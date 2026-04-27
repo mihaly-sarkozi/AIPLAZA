@@ -5,7 +5,7 @@ from apps.knowledge.domain.decision_analysis import DECISION_ENGINE_VERSION, Dec
 from apps.knowledge.domain.search_profile import SearchProfile
 from apps.knowledge.domain.similarity_analysis import SimilarityAnalysis
 from apps.knowledge.domain.tension_analysis import TensionAnalysis
-from apps.knowledge.service.entity_key_normalization import normalize_entity_key
+from apps.knowledge.service.entity_key_normalization import canonicalize_entity_key, normalize_entity_key
 from apps.knowledge.service.language_rules import fold_text
 
 
@@ -23,6 +23,58 @@ def _candidate_entity_id(profile: SearchProfile) -> str:
         if value is not None:
             return str(value)
     return ""
+
+
+def _candidate_canonical_key(candidate: EntityCandidate | None) -> str:
+    if candidate is None:
+        return ""
+    explicit = canonicalize_entity_key(getattr(candidate, "candidate_canonical_key", "") or "")
+    if explicit:
+        return explicit
+    return canonicalize_entity_key(candidate.candidate_name) or normalize_entity_key(
+        candidate.candidate_name,
+        strip_accents=True,
+    )
+
+
+def _similarity_score(similarity: SimilarityAnalysis | None) -> float:
+    if similarity is None:
+        return 0.0
+    return float(getattr(similarity, "total_similarity_score", 0.0) or 0.0)
+
+
+def _candidate_score(candidate: EntityCandidate | None) -> float:
+    if candidate is None:
+        return 0.0
+    return float(getattr(candidate, "score", 0.0) or 0.0)
+
+
+def _merge_group(candidate: EntityCandidate | None) -> dict[str, object]:
+    group = dict(getattr(candidate, "merge_candidate_group", None) or {})
+    if group:
+        return group
+    canonical_key = _candidate_canonical_key(candidate)
+    return {
+        "canonical_key": canonical_key,
+        "group_size": 1 if candidate is not None else 0,
+        "duplicate_memory_profile_count": 0,
+        "candidate_entity_ids": [candidate.candidate_entity_id] if candidate is not None else [],
+        "candidate_names": [candidate.candidate_name] if candidate is not None else [],
+        "selected_candidate_entity_id": candidate.candidate_entity_id if candidate is not None else "",
+    }
+
+
+def _candidate_group_size(candidate: EntityCandidate | None) -> int:
+    group = _merge_group(candidate)
+    try:
+        return int(group.get("group_size") or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _global_profile_id(value: str) -> str:
+    cleaned = normalize_entity_key(value, strip_accents=True).replace(" ", "-")
+    return f"global-profile:{cleaned or 'unknown'}"
 
 
 def _candidate_evidence(candidate: EntityCandidate | None) -> dict[str, list[str]]:
@@ -105,7 +157,6 @@ class DecisionEngineV1:
         evidence = _merge_evidence(
             _profile_evidence(new_profile),
             _candidate_evidence(candidate),
-            dict((tension.evidence if tension is not None else {}) or {}),
         )
         affected_claim_ids = list(evidence.get("claim_ids") or [])
 
@@ -113,87 +164,49 @@ class DecisionEngineV1:
             return self._decision(
                 new_profile,
                 candidate,
-                decision="create_new",
+                decision="create_new_profile",
                 confidence=0.8,
-                reason="create_new:no_candidate",
+                reason="create_new_profile:no_candidate_above_threshold",
                 manual_review=False,
                 affected_claim_ids=affected_claim_ids,
                 evidence=evidence,
             )
 
-        tension_band = str(getattr(tension, "tension_band", "none") or "none")
-        tension_type = str(getattr(tension, "tension_type", "unrelated") or "unrelated")
-        similarity_band = str(similarity.similarity_band or "low")
+        score = _similarity_score(similarity)
+        group_size = _candidate_group_size(candidate)
 
-        if tension_band == "high":
+        if score >= 0.75 and group_size > 1:
             return self._decision(
                 new_profile,
                 candidate,
-                decision="mark_conflict",
-                confidence=0.9,
-                reason="mark_conflict:high_tension",
+                decision="merge_required",
+                confidence=0.8,
+                reason="merge_required:multiple_high_similarity_candidates_same_canonical_group",
                 manual_review=True,
                 affected_claim_ids=affected_claim_ids,
                 evidence=evidence,
             )
 
-        if _different_location_name(new_profile, candidate):
-            return self._decision(
-                new_profile,
-                candidate,
-                decision="keep_separate",
-                confidence=0.9,
-                reason="keep_separate:different_location_name",
-                manual_review=False,
-                affected_claim_ids=affected_claim_ids,
-                evidence=evidence,
-            )
-
-        if _same_entity_name(new_profile, candidate) and _same_type(new_profile, candidate) and tension_band in {"none", "low"}:
+        if score >= 0.75:
             return self._decision(
                 new_profile,
                 candidate,
                 decision="attach_existing",
-                confidence=0.95,
-                reason="attach_existing:same_entity_name_same_type_low_tension",
+                confidence=max(0.75, min(0.98, score)),
                 manual_review=False,
                 affected_claim_ids=affected_claim_ids,
+                reason="attach_existing:single_high_similarity_candidate",
                 evidence=evidence,
             )
 
-        if similarity_band == "high" and tension_band in {"none", "low"}:
+        if 0.4 <= score < 0.75:
             return self._decision(
                 new_profile,
                 candidate,
-                decision="attach_existing",
-                confidence=0.85,
-                reason="attach_existing:high_similarity_low_tension",
-                manual_review=False,
-                affected_claim_ids=affected_claim_ids,
-                evidence=evidence,
-            )
-
-        if similarity_band == "medium" and tension_band in {"none", "low"}:
-            return self._decision(
-                new_profile,
-                candidate,
-                decision="needs_review",
-                confidence=0.55,
-                reason="needs_review:medium_similarity_low_tension",
+                decision="uncertain_match",
+                confidence=max(0.4, min(0.74, score)),
+                reason="uncertain_match:medium_similarity",
                 manual_review=True,
-                affected_claim_ids=affected_claim_ids,
-                evidence=evidence,
-            )
-
-        if similarity_band == "low":
-            decision = "keep_separate" if tension_type == "unrelated" else "create_new"
-            return self._decision(
-                new_profile,
-                candidate,
-                decision=decision,
-                confidence=0.75,
-                reason=f"{decision}:low_similarity",
-                manual_review=False,
                 affected_claim_ids=affected_claim_ids,
                 evidence=evidence,
             )
@@ -201,10 +214,10 @@ class DecisionEngineV1:
         return self._decision(
             new_profile,
             candidate,
-            decision="needs_review",
-            confidence=0.45,
-            reason="needs_review:uncertain_similarity_tension",
-            manual_review=True,
+            decision="create_new_profile",
+            confidence=0.75,
+            reason="create_new_profile:no_candidate_above_threshold",
+            manual_review=False,
             affected_claim_ids=affected_claim_ids,
             evidence=evidence,
         )
@@ -220,24 +233,21 @@ class DecisionEngineV1:
             (str(candidate.search_profile_id), str(candidate.candidate_entity_id)): candidate
             for candidate in candidates
         }
-        similarities_by_pair = {
-            (str(item.search_profile_id), str(item.candidate_entity_id)): item
-            for item in similarities
-        }
-        tensions_by_pair = {
-            (str(item.search_profile_id_a), str(item.technical_entity_id_b)): item
-            for item in tensions
-        }
         decisions: list[DecisionAnalysis] = []
         seen_profiles: set[str] = set()
-        for key, similarity in similarities_by_pair.items():
-            profile_id, candidate_entity_id = key
+        best_similarity_by_profile: dict[str, SimilarityAnalysis] = {}
+        for similarity in similarities:
+            profile_id = str(similarity.search_profile_id)
+            current = best_similarity_by_profile.get(profile_id)
+            if current is None or _similarity_score(similarity) > _similarity_score(current):
+                best_similarity_by_profile[profile_id] = similarity
+        for profile_id, similarity in best_similarity_by_profile.items():
+            candidate_entity_id = str(similarity.candidate_entity_id)
             profile = next((item for item in new_profiles if str(item.search_profile_id) == profile_id), None)
             if profile is None:
                 continue
-            candidate = candidates_by_pair.get(key)
-            tension = tensions_by_pair.get((profile_id, candidate_entity_id))
-            decisions.append(self.decide(profile, candidate=candidate, similarity=similarity, tension=tension))
+            candidate = candidates_by_pair.get((profile_id, candidate_entity_id))
+            decisions.append(self.decide(profile, candidate=candidate, similarity=similarity, tension=None))
             seen_profiles.add(profile_id)
         for profile in new_profiles:
             if str(profile.search_profile_id) not in seen_profiles:
@@ -256,16 +266,33 @@ class DecisionEngineV1:
         affected_claim_ids: list[str],
         evidence: dict[str, list[str]],
     ) -> DecisionAnalysis:
+        candidate_id = str(candidate.candidate_entity_id if candidate is not None else "")
+        technical_entity_id = str(new_profile.technical_entity_id or "")
+        selected_profile_id = _global_profile_id(candidate_id) if decision == "attach_existing" and candidate_id else None
+        created_profile_id = (
+            _global_profile_id(technical_entity_id) if decision == "create_new_profile" and technical_entity_id else None
+        )
+        merge_group = _merge_group(candidate) if candidate is not None else {}
+        group_size = _candidate_group_size(candidate)
         return DecisionAnalysis(
             search_profile_id=new_profile.search_profile_id,
             technical_entity_id=new_profile.technical_entity_id,
             local_entity_id=new_profile.local_entity_id,
-            candidate_entity_id=str(candidate.candidate_entity_id if candidate is not None else ""),
+            candidate_entity_id=candidate_id,
             candidate_name=str(candidate.candidate_name if candidate is not None else ""),
             candidate_type=str(candidate.candidate_type if candidate is not None else "unknown"),
             decision=decision,
+            decision_type=decision,
+            selected_candidate_id=candidate_id or None,
+            selected_candidate_score=round(_candidate_score(candidate), 4),
+            attach_to=candidate_id if decision == "attach_existing" and candidate_id else None,
             decision_confidence=round(max(0.0, min(1.0, confidence)), 4),
+            selected_profile_id=selected_profile_id,
+            created_profile_id=created_profile_id,
             decision_reason=reason,
+            candidate_group_size=group_size,
+            competing_candidates_count=max(0, group_size - 1),
+            merge_candidate_group=merge_group if decision == "merge_required" else {},
             manual_review_required=manual_review,
             affected_claim_ids=affected_claim_ids,
             evidence=evidence,

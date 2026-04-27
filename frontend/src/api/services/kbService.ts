@@ -4,6 +4,7 @@
 import api from "../axiosClient";
 
 export type PersonalDataMode = "no_personal_data" | "with_confirmation" | "allowed_not_to_ai" | "no_pii_filter";
+export type KnowledgeTraceLogLevel = "SUMMARY" | "INSPECT" | "FULL_TRACE";
 
 export type KbItem = {
   uuid: string;
@@ -12,6 +13,8 @@ export type KbItem = {
   personal_data_mode: PersonalDataMode;
   /** Aktuális user taníthatja-e (backend listánál kitölti) */
   can_train?: boolean;
+  /** Van-e legalább egy tanítási/ingest bejegyzés ebben az elérhető tudástárban. */
+  has_training?: boolean;
   [key: string]: unknown;
 };
 
@@ -376,6 +379,46 @@ export type IngestRunTraceSimilarityAnalysis = {
   [key: string]: unknown;
 };
 
+export type IngestRunTraceTensionAnalysis = {
+  tension_analysis_id?: string;
+  candidate_name_a?: string;
+  candidate_name_b?: string;
+  tension_detected?: boolean;
+  tension_score?: number;
+  tension_band?: "high" | "medium" | "low" | string;
+  tension_type?: string;
+  tension_reason?: string;
+  tension_reasons?: string[];
+  conflicting_claim_ids?: string[];
+  evidence?: {
+    claim_ids?: string[];
+    sentence_ids?: string[];
+    profile_id?: string | null;
+    [key: string]: unknown;
+  };
+  [key: string]: unknown;
+};
+
+export type IngestRunTraceRetrievalChunk = {
+  profile_id?: string | null;
+  entity_name?: string;
+  canonical_key?: string;
+  retrieval_chunk_text?: string;
+  structured_facts?: {
+    active?: Record<string, unknown>[];
+    conflicts?: Record<string, unknown>[];
+    historical?: Record<string, unknown>[];
+    tension_types?: string[];
+    [key: string]: unknown;
+  };
+  evidence_ids?: string[];
+  confidence?: number;
+  conflicting?: boolean;
+  temporal_context_included?: boolean;
+  builder_version?: string;
+  [key: string]: unknown;
+};
+
 export type IngestRunTrace = {
   run_id: string;
   source_id?: string | null;
@@ -404,6 +447,12 @@ export type IngestRunTrace = {
     medium_similarity_count?: number;
     low_similarity_count?: number;
     similarity_without_evidence_count?: number;
+    tension_analysis_count?: number;
+    hard_conflict_count?: number;
+    temporal_change_count?: number;
+    retrieval_chunk_count?: number;
+    conflicting_chunk_count?: number;
+    temporal_context_included?: boolean;
     low_coherence_local_entity_count?: number;
     unknown_entity_type_count?: number;
     quality?: {
@@ -424,8 +473,15 @@ export type IngestRunTrace = {
   search_profiles?: IngestRunTraceSearchProfile[];
   candidate_selections?: IngestRunTraceCandidateSelection[];
   similarity_analyses?: IngestRunTraceSimilarityAnalysis[];
+  tension_analyses?: IngestRunTraceTensionAnalysis[];
+  retrieval_chunks?: IngestRunTraceRetrievalChunk[];
   local_entity_clusters?: Record<string, unknown>[];
   local_resolver_trace?: Record<string, unknown> | null;
+};
+
+export type KnowledgeTraceOptions = {
+  logLevel?: KnowledgeTraceLogLevel;
+  debug?: boolean;
 };
 
 export type ParagraphItem = {
@@ -589,18 +645,25 @@ export async function getSentenceInterpretation(sentenceId: string): Promise<Sen
   return res.data as SentenceInterpretationDetail;
 }
 
-export async function getIngestRunTrace(runId: string): Promise<IngestRunTrace> {
-  const res = await api.get(`/knowledge/dev/ingest-runs/${runId}/trace`);
+function traceParams(options?: KnowledgeTraceOptions): Record<string, string | boolean> {
+  return {
+    log_level: options?.logLevel ?? "FULL_TRACE",
+    ...(options?.debug ? { debug: true } : {}),
+  };
+}
+
+export async function getIngestRunTrace(runId: string, options?: KnowledgeTraceOptions): Promise<IngestRunTrace> {
+  const res = await api.get(`/knowledge/dev/ingest-runs/${runId}/trace`, { params: traceParams(options) });
   return res.data as IngestRunTrace;
 }
 
-export async function getKnowledgeTrace(runId: string): Promise<IngestRunTrace> {
-  const res = await api.get(`/knowledge/dev/ingest-runs/${runId}/trace`);
+export async function getKnowledgeTrace(runId: string, options?: KnowledgeTraceOptions): Promise<IngestRunTrace> {
+  const res = await api.get(`/knowledge/dev/ingest-runs/${runId}/trace`, { params: traceParams(options) });
   return res.data as IngestRunTrace;
 }
 
-export async function getLatestKnowledgeTrace(): Promise<IngestRunTrace> {
-  const res = await api.get("/knowledge/dev/latest-trace");
+export async function getLatestKnowledgeTrace(options?: KnowledgeTraceOptions): Promise<IngestRunTrace> {
+  const res = await api.get("/knowledge/dev/latest-trace", { params: traceParams(options) });
   return res.data as IngestRunTrace;
 }
 

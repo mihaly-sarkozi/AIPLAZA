@@ -631,6 +631,54 @@ export default function KnowledgeProcessingTrace({
       </div>
 
       <div className="app-surface p-5">
+        <h3 className="text-lg font-semibold">Tension / Retrieval Summary</h3>
+        <div className="mt-4 grid gap-3 text-sm md:grid-cols-2 xl:grid-cols-3">
+          <div>tension_analysis_count: {trace.summary.tension_analysis_count ?? trace.tension_analyses?.length ?? 0}</div>
+          <div>hard_conflict_count: {trace.summary.hard_conflict_count ?? 0}</div>
+          <div>temporal_change_count: {trace.summary.temporal_change_count ?? 0}</div>
+          <div>retrieval_chunk_count: {trace.summary.retrieval_chunk_count ?? trace.retrieval_chunks?.length ?? 0}</div>
+          <div>conflicting_chunk_count: {trace.summary.conflicting_chunk_count ?? 0}</div>
+          <div>temporal_context_included: {trace.summary.temporal_context_included ? "true" : "false"}</div>
+        </div>
+      </div>
+
+      <details open className="app-surface p-5">
+        <summary className="cursor-pointer text-lg font-semibold">TENSION ANALYSES</summary>
+        <div className="mt-4 grid gap-3">
+          {(trace.tension_analyses ?? []).length ? (
+            (trace.tension_analyses ?? []).map((item, index) => (
+              <pre
+                key={String(item.tension_analysis_id ?? index)}
+                className="overflow-x-auto rounded border border-[var(--color-border)] bg-[var(--color-background)] p-3 text-xs"
+              >
+                {JSON.stringify(item, null, 2)}
+              </pre>
+            ))
+          ) : (
+            <div className="text-sm text-[var(--color-muted)]">missing from report</div>
+          )}
+        </div>
+      </details>
+
+      <details open className="app-surface p-5">
+        <summary className="cursor-pointer text-lg font-semibold">RETRIEVAL CHUNKS</summary>
+        <div className="mt-4 grid gap-3">
+          {(trace.retrieval_chunks ?? []).length ? (
+            (trace.retrieval_chunks ?? []).map((item, index) => (
+              <div key={String(item.profile_id ?? index)} className="rounded border border-[var(--color-border)] bg-[var(--color-background)] p-3 text-xs">
+                <div className="mb-2 font-semibold">{item.entity_name ?? item.canonical_key ?? "retrieval chunk"}</div>
+                <pre className="whitespace-pre-wrap rounded border border-[var(--color-border)] bg-[var(--color-surface)] p-2 font-mono text-[11px]">
+                  {item.retrieval_chunk_text ?? "missing chunk text"}
+                </pre>
+              </div>
+            ))
+          ) : (
+            <div className="text-sm text-[var(--color-muted)]">missing from report</div>
+          )}
+        </div>
+      </details>
+
+      <div className="app-surface p-5">
         <h3 className="text-lg font-semibold">Local Entities</h3>
         <p className="mt-1 text-xs text-[var(--color-muted)]">
           Debug / validation view. Coherence threshold for “low”: &lt; {LOCAL_ENTITY_LOW_COHERENCE_THRESHOLD}.

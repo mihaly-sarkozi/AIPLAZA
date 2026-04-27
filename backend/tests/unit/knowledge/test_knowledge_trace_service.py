@@ -190,7 +190,32 @@ class _InterpretationStore:
 
 
 def test_build_trace_includes_local_resolver_from_interpretation_metadata() -> None:
-    run = SimpleNamespace(id="run-lr", status="completed", created_at=_ts())
+    run = SimpleNamespace(
+        id="run-lr",
+        status="completed",
+        created_at=_ts(),
+        metadata={
+            "quality_diagnostics": {
+                "noise_sentence_skipped_count": 2,
+                "skipped_sentences": ["This sentence should not create an important claim."],
+                "bad_subject_claim_count": 3,
+                "rejected_claims": [
+                    {
+                        "reason": "claim_bad_subject",
+                        "subject_text": "This sentence",
+                        "predicate": "should not create",
+                        "object_text": "important claim",
+                    },
+                    {
+                        "reason": "claim_bad_subject",
+                        "subject_text": "Random",
+                        "predicate": "note",
+                        "object_text": "Paris onboarding is smooth",
+                    },
+                ],
+            }
+        },
+    )
     item = SimpleNamespace(source_id="source-lr", display_name="Source item")
     source = SimpleNamespace(title="LR source", metadata={"language": "en"})
     document = SimpleNamespace(id="doc-lr", language="en")
@@ -240,6 +265,7 @@ def test_build_trace_includes_local_resolver_from_interpretation_metadata() -> N
                     "local_entity_id": "e1",
                     "canonical_name": "Acme",
                     "entity_type": "company",
+                    "canonical_key": "acme",
                     "coherence_state": "stable",
                     "descriptor_claims": [],
                     "state_claims": [
@@ -329,6 +355,7 @@ def test_build_trace_includes_local_resolver_from_interpretation_metadata() -> N
                     "entity_name": "Acme",
                     "entity_type": "company",
                     "normalized_key": "acme",
+                    "canonical_key": "acme",
                     "canonical_text": "Acme | company | active",
                     "search_text": "Acme company active",
                     "aliases": ["Acme", "acme"],
@@ -361,7 +388,85 @@ def test_build_trace_includes_local_resolver_from_interpretation_metadata() -> N
                     "created_at": "2026-01-01T00:00:00+00:00",
                 }
             ],
-            "local_resolver_trace": {"resolver_version": "local_resolver_v1", "steps": []},
+            "candidate_selections": [
+                {
+                    "search_profile_id": "sp1",
+                    "candidate_entity_id": "te-support",
+                    "candidate_name": "support modul",
+                    "score": 0.8,
+                    "reasons": ["canonical_name_match:0.42"],
+                    "evidence": {"claim_ids": ["c1"], "sentence_ids": ["s1"]},
+                },
+                {
+                    "search_profile_id": "sp1",
+                    "candidate_entity_id": "te-support",
+                    "candidate_name": "módulo de soporte",
+                    "score": 0.79,
+                    "reasons": ["canonical_name_match:0.42"],
+                    "evidence": {"claim_ids": ["c2"], "sentence_ids": ["s2"]},
+                },
+            ],
+            "similarity_analyses": [
+                {
+                    "search_profile_id": "sp1",
+                    "candidate_entity_id": "te-support",
+                    "similarity_band": "high",
+                    "total_similarity_score": 0.92,
+                    "similarity_reasons": ["name:canonical_exact", "same_type_strong_lexical_overlap_boost"],
+                    "evidence": {"claim_ids": ["c1"], "sentence_ids": ["s1"]},
+                },
+                {
+                    "search_profile_id": "sp1",
+                    "candidate_entity_id": "te-support",
+                    "similarity_band": "medium",
+                    "total_similarity_score": 0.71,
+                    "similarity_reasons": ["name:canonical_exact"],
+                    "evidence": {"claim_ids": ["c2"], "sentence_ids": ["s2"]},
+                },
+                {
+                    "search_profile_id": "sp-account",
+                    "candidate_entity_id": "te-account",
+                    "similarity_band": "medium",
+                    "total_similarity_score": 0.62,
+                    "similarity_reasons": ["name:canonical_exact"],
+                    "candidate_name_a": "account",
+                    "candidate_name_b": "cuenta",
+                    "evidence": {"claim_ids": ["c3"], "sentence_ids": ["s3"]},
+                }
+            ],
+            "tension_analyses": [
+                {
+                    "tension_band": "low",
+                    "tension_type": "temporal_change",
+                    "tension_reasons": ["temporal_change:different_time_values"],
+                    "evidence": {"claim_ids": ["c1", "c2"], "sentence_ids": ["s1", "s2"]},
+                }
+            ],
+            "decision_analyses": [
+                {
+                    "decision": "keep_separate",
+                    "decision_confidence": 0.75,
+                    "selected_profile_id": None,
+                    "created_profile_id": "global-profile:te1",
+                    "decision_reason": "create_new:low_similarity_low_tension",
+                    "manual_review_required": False,
+                }
+            ],
+            "global_profiles": [
+                {
+                    "profile_id": "global-profile:te1",
+                    "decision": "create_new",
+                    "created_profile_id": "global-profile:te1",
+                    "decision_confidence": 0.75,
+                    "decision_reason": "create_new:low_similarity_low_tension",
+                    "builder_version": "global_profile_builder_v0",
+                }
+            ],
+            "local_resolver_trace": {
+                "resolver_version": "local_resolver_v1",
+                "steps": [],
+                "entity_type_resolutions": [{"resolution": "conflict_split"}],
+            },
         },
     )
     service = KnowledgeTraceService(
@@ -417,6 +522,60 @@ def test_build_trace_includes_local_resolver_from_interpretation_metadata() -> N
     assert trace["search_profiles"][0]["entity_name"] == "Acme"
     assert trace["search_profiles"][0]["builder_version"] == "search_profile_builder_v1"
     assert trace["local_resolver_trace"]["resolver_version"] == "local_resolver_v1"
+    assert trace["summary"]["similarity_boost_reason_count"] == 2
+    assert "name:canonical_exact" in trace["summary"]["similarity_boost_reasons"]
+    assert trace["summary"]["candidate_selection_attempted_count"] == 0
+    assert trace["summary"]["candidate_pool_size"] == 1
+    assert trace["summary"]["similarity_score_distribution"]["count"] == 2
+    assert trace["summary"]["similarity_score_distribution"]["max"] == 0.92
+    assert trace["summary"]["timeline_compatibility_reason_count"] == 1
+    assert "temporal_change:different_time_values" in trace["summary"]["timeline_compatibility_reasons"]
+    assert trace["summary"]["near_duplicate_guard_trigger_count"] == 2
+    assert trace["summary"]["global_profile_count"] == 1
+    assert trace["global_profiles"][0]["created_profile_id"] == "global-profile:te1"
+    assert trace["summary"]["quality"]["rejected_noise_sentence_count"] == 2
+    assert trace["summary"]["quality"]["bad_subject_claim_count"] == 3
+    assert trace["summary"]["quality"]["bad_subject_claim_examples"][0]["subject_text"] == "This sentence"
+    assert trace["summary"]["rejected_noise_sentence_count"] == 2
+    assert trace["summary"]["bad_subject_claim_examples"][0]["reason"] == "claim_bad_subject"
+    assert trace["summary"]["multilingual_alias_match_count"] >= 1
+    assert trace["summary"]["candidate_duplicate_removed_count"] == 1
+    candidate_ids = [item["candidate_entity_id"] for item in trace["candidate_selections"]]
+    assert len(candidate_ids) == len(set(candidate_ids))
+    similarity_keys = [
+        (item.get("candidate_entity_id"), item.get("technical_entity_id") or item.get("search_profile_id"))
+        for item in trace["similarity_analyses"]
+    ]
+    assert len(similarity_keys) == len(set(similarity_keys))
+    assert trace["candidate_selections"][0]["candidate_name"] == "support modul"
+    assert trace["summary"]["canonical_entity_merge_suggestion_count"] == 2
+    assert trace["summary"]["unknown_entity_type_examples"] == ["Beta"]
+
+    summary_trace = service.build_trace("run-lr", log_level="SUMMARY")
+    assert summary_trace is not None
+    assert summary_trace["log_level"] == "SUMMARY"
+    assert summary_trace["sentences"] == []
+    assert summary_trace["local_entities"] == []
+    assert summary_trace["search_profiles"] == []
+    assert len(summary_trace["similarity_analyses"]) <= 5
+    assert len(summary_trace["candidate_selections"]) <= 5
+    assert summary_trace["top_entities"][0]["canonical_name"] == "Acme"
+    assert summary_trace["top_candidates"][0]["candidate_entity_id"] == "te-support"
+    assert summary_trace["top_problems"]
+    assert summary_trace["merge_events"]
+
+    inspect_trace = service.build_trace("run-lr", log_level="INSPECT")
+    assert inspect_trace is not None
+    assert inspect_trace["log_level"] == "INSPECT"
+    assert inspect_trace["search_profiles"] == []
+    assert all(row["claims"] == [] for row in inspect_trace["sentences"])
+    assert inspect_trace["local_entities"][0]["claim_ids"] == []
+    assert inspect_trace["inspect"]["bad_subject_claim_examples"][0]["subject_text"] == "This sentence"
+
+    debug_trace = service.build_trace("run-lr", log_level="SUMMARY", debug=True)
+    assert debug_trace is not None
+    assert debug_trace["log_level"] == "FULL_TRACE"
+    assert debug_trace["search_profiles"][0]["entity_name"] == "Acme"
 
 
 class _LocalClusterRepo:

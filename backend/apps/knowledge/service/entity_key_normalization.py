@@ -47,6 +47,31 @@ _CANONICAL_TOKEN_ALIASES: dict[str, str] = {
     "deprecated": "deprecated",
     "megszunt": "deprecated",
     "megszűnt": "deprecated",
+    "data": "data",
+    "adatvedelmi": "data",
+    "adatvédelmi": "data",
+    "proteccion": "protection",
+    "protección": "protection",
+    "datos": "data",
+    "de": "",
+    "protection": "protection",
+    "lead": "lead",
+    "felelos": "lead",
+    "felelős": "lead",
+    "responsable": "lead",
+    "support": "support",
+    "soporte": "support",
+    "module": "module",
+    "modul": "module",
+    "modulo": "module",
+    "módulo": "module",
+    "billing": "billing",
+    "facturacion": "billing",
+    "facturación": "billing",
+    "service": "service",
+    "servicio": "service",
+    "account": "account",
+    "cuenta": "account",
 }
 _CANONICAL_TOKEN_ORDER: dict[str, int] = {
     "admin": 10,
@@ -55,6 +80,14 @@ _CANONICAL_TOKEN_ORDER: dict[str, int] = {
     "helpdesk": 40,
     "import": 50,
     "deprecated": 60,
+    "data": 70,
+    "protection": 80,
+    "lead": 90,
+    "support": 100,
+    "module": 110,
+    "billing": 120,
+    "service": 130,
+    "account": 140,
 }
 
 
@@ -143,6 +176,7 @@ def _filter_year_tokens(tokens: list[str]) -> list[str]:
 
 def _canonicalize_tokens(tokens: list[str]) -> list[str]:
     canonical = [_CANONICAL_TOKEN_ALIASES.get(token, token) for token in tokens]
+    canonical = [token for token in canonical if token]
     deduped = list(dict.fromkeys(canonical))
     return sorted(deduped, key=lambda item: (_CANONICAL_TOKEN_ORDER.get(item, 1000), item))
 
@@ -196,7 +230,12 @@ def canonicalize_entity_key(
     normalized = normalize_entity_key(text, language=language, strip_accents=strip_accents)
     if not normalized:
         return ""
-    return " ".join(_canonicalize_tokens(_tokens(normalized)))
+    tokens = _tokens(normalized)
+    canonical_tokens = _canonicalize_tokens(tokens)
+    if {"adatvedelmi", "felelos"} <= set(tokens) and "protection" not in canonical_tokens:
+        canonical_tokens.append("protection")
+        canonical_tokens = sorted(canonical_tokens, key=lambda item: (_CANONICAL_TOKEN_ORDER.get(item, 1000), item))
+    return " ".join(canonical_tokens)
 
 
 __all__ = ["canonicalize_entity_key", "normalize_entity_key"]

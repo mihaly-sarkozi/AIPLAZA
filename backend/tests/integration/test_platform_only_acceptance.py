@@ -73,6 +73,7 @@ def test_platform_only_routes_are_available_without_business_modules():
     assert "/api/health" in routes
     assert "/api/health/live" in routes
     assert "/api/health/ready" in routes
+    assert "/api/metrics" in routes
     assert "/api/chat" not in routes
     assert "/api/kb" not in routes
 
@@ -95,6 +96,19 @@ def test_platform_only_tenant_middleware_resolves_platform_subdomain():
 
     assert response.status_code == 200
     assert response.json()["status"] == "alive"
+
+
+def test_platform_only_metrics_endpoint_is_tenant_optional():
+    app = _build_platform_only_app()
+    stack, tenant_repo, _demo_snapshot_unused = _tenant_repo_patch_stack()
+    with stack:
+        stack.enter_context(patch.object(tenant_repo, "get_by_domain", return_value=None))
+        client = TestClient(app, base_url=f"http://{settings.tenant_base_domain}")
+        response = client.get("/api/metrics")
+
+    assert response.status_code == 200
+    assert "text/plain" in response.headers["content-type"]
+    assert "# TYPE aiplaza_metric_count counter" in response.text
 
 
 def test_platform_only_tenant_middleware_rejects_unknown_platform_subdomain_for_api():

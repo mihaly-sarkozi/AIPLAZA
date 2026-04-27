@@ -206,6 +206,16 @@ class SQLAlchemyInterpretationRunStore:
             ).scalar_one_or_none()
             return _interpretation_run_to_domain(row) if row else None
 
+    def list_for_corpus(self, corpus_uuid: str, *, limit: int = 20) -> list[InterpretationRun]:
+        with self._sf() as session:
+            rows = session.execute(
+                select(KnowledgeInterpretationRunORM)
+                .where(KnowledgeInterpretationRunORM.corpus_uuid == corpus_uuid)
+                .order_by(KnowledgeInterpretationRunORM.created_at.desc())
+                .limit(limit)
+            ).scalars()
+            return [_interpretation_run_to_domain(row) for row in rows]
+
     def delete_for_document(self, document_id: str) -> int:
         with self._sf() as session:
             result = session.execute(delete(KnowledgeInterpretationRunORM).where(KnowledgeInterpretationRunORM.document_id == document_id))

@@ -195,6 +195,21 @@ def test_search_profile_canonical_text_for_software_rule() -> None:
     }
 
 
+def test_search_profile_uses_canonical_entity_key_for_normalized_key() -> None:
+    chunk = TechnicalMemoryChunk(
+        entity_name="módulo de soporte",
+        entity_type="module",
+        normalized_key="módulo de soporte",
+        summary_text="módulo de soporte relaciones.",
+        facts=[],
+    )
+
+    profile = SearchProfileBuilderV1().build(chunk)
+
+    assert profile.entity_name == "módulo de soporte"
+    assert profile.normalized_key == "support module"
+
+
 def test_search_profile_canonical_text_for_location_states() -> None:
     chunk = TechnicalMemoryChunk(
         entity_name="London office",

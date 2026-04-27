@@ -21,6 +21,7 @@ _TENANT_OPTIONAL_PATH_PREFIXES = (
     "/api/health",
     "/api/health/live",
     "/api/health/ready",
+    "/api/metrics",
     "/api/platform/lifecycle",
     "/api/installer/",
 )

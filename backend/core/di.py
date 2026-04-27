@@ -8,7 +8,7 @@ modulban van. Az alkalmazas bootstrap csak regisztralja a konkret
 szolgaltatasokat a kernel registry-be.
 """
 
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from core.extensions.tenant.context.tenant_context import current_tenant_schema
@@ -60,6 +60,19 @@ def run_with_tenant_schema(tenant_slug: str | None, callback: Callable[..., Any]
     finally:
         current_tenant_schema.reset(token)
 
+
+async def run_async_with_tenant_schema(
+    tenant_slug: str | None,
+    callback: Callable[..., Awaitable[Any]],
+    *args,
+    **kwargs,
+) -> Any:
+    token = current_tenant_schema.set((tenant_slug or "").strip() or None)
+    try:
+        return await callback(*args, **kwargs)
+    finally:
+        current_tenant_schema.reset(token)
+
 __all__ = [
     "configure_kernel_dependencies",
     "register_service",
@@ -78,6 +91,7 @@ __all__ = [
     "get_tenant_context",
     "require_tenant_context",
     "set_tenant_context_from_request",
+    "run_async_with_tenant_schema",
     "run_with_tenant_schema",
     "get_audit_service",
     "get_login_service",

@@ -88,6 +88,10 @@ class InMemoryQueryRunStore:
         self._items: list[QueryRun] = []
         self._lock = Lock()
 
+    def get(self, query_run_id: str) -> QueryRun | None:
+        with self._lock:
+            return next((item for item in self._items if item.id == query_run_id), None)
+
     def save(self, run: QueryRun) -> QueryRun:
         with self._lock:
             self._items.append(run)
@@ -146,17 +150,36 @@ class SimpleRetrievalEngine:
         query: str,
         builds: list[IndexBuild],
         retrieval_profile: RetrievalProfile,
+        query_profile: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
         hits: list[dict[str, Any]] = []
+        payload_filter = _payload_filter_from_query_profile(query_profile or {})
         for build in builds:
             vector_index = self._vector_index_factory()
             rows = await vector_index.search_points(
                 collection=build.collection_name,
                 query=query,
                 limit=retrieval_profile.top_k,
-                point_types=["sentence"],
+                point_types=["retrieval_chunk"],
+                payload_filter=payload_filter,
                 lexical_query=query,
             )
+            if not rows and payload_filter:
+                rows = await vector_index.search_points(
+                    collection=build.collection_name,
+                    query=query,
+                    limit=retrieval_profile.top_k,
+                    point_types=["retrieval_chunk"],
+                    lexical_query=query,
+                )
+            if not rows:
+                rows = await vector_index.search_points(
+                    collection=build.collection_name,
+                    query=query,
+                    limit=retrieval_profile.top_k,
+                    point_types=["sentence"],
+                    lexical_query=query,
+                )
             for row in rows:
                 payload = dict(row.get("payload") or {})
                 row["build_id"] = build.id
@@ -164,6 +187,20 @@ class SimpleRetrievalEngine:
                 row["payload"] = payload
                 hits.append(row)
         return hits
+
+
+def _payload_filter_from_query_profile(query_profile: dict[str, Any]) -> dict[str, Any]:
+    payload_filter: dict[str, Any] = {}
+    entity_type = str(query_profile.get("entity_type") or "").strip()
+    if entity_type:
+        payload_filter["entity_type"] = entity_type
+    state = str(query_profile.get("state") or "").strip()
+    if state:
+        payload_filter["states"] = [state]
+    time_filter = str(query_profile.get("time_filter") or "").strip()
+    if time_filter:
+        payload_filter["time_modes"] = [time_filter]
+    return payload_filter
 
 
 class SimpleContextBuilder:

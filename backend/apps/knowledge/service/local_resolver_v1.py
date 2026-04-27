@@ -24,7 +24,7 @@ from apps.knowledge.domain.local_entity_cluster import (
     LocalEntityType,
     local_entity_cluster_to_json_dict,
 )
-from apps.knowledge.service.entity_key_normalization import normalize_entity_key
+from apps.knowledge.service.entity_key_normalization import canonicalize_entity_key, normalize_entity_key
 from apps.knowledge.service.infer_entity_type_v1 import (
     ENTITY_TYPE_SOURCE_FALLBACK,
     ENTITY_TYPE_SOURCE_KEYWORD,
@@ -320,37 +320,54 @@ def _claim_evidence_ref(claim: Any) -> dict[str, Any]:
 @dataclass(frozen=True)
 class LocalEntityCandidate:
     key: str
+    canonical_key: str
     canonical_name: str
     claim_id: str
     sentence_id: str
     entity_type: str
     entity_type_source: str
+    alias_match_reason: str | None
     confidence_contribution: float
 
     def as_trace_dict(self) -> dict[str, Any]:
         return {
             "key": self.key,
+            "canonical_key": self.canonical_key,
             "canonical_name": self.canonical_name,
             "claim_id": self.claim_id,
             "sentence_id": self.sentence_id,
             "entity_type": self.entity_type,
             "entity_type_source": self.entity_type_source,
+            "alias_match_reason": self.alias_match_reason,
             "confidence_contribution": self.confidence_contribution,
         }
 
 
 def _build_candidate(claim: Any, mentions: list[Any], *, language: str | None) -> LocalEntityCandidate:
     canonical_name = str(getattr(claim, "subject_text", "") or "").strip()
-    key = normalize_entity_key(canonical_name, language)
     entity_type, type_source = infer_entity_type_and_source(claim, mentions)
+    normalized_key = normalize_entity_key(canonical_name, language)
+    canonical_key = normalized_key
+    alias_match_reason: str | None = None
+    if entity_type != LocalEntityType.PERSON.value:
+        candidate_key = canonicalize_entity_key(canonical_name, language)
+        if candidate_key:
+            canonical_key = candidate_key
+            if candidate_key != normalized_key:
+                alias_match_reason = "canonical_alias_match"
+            else:
+                alias_match_reason = "canonical_exact"
+    key = canonical_key or normalized_key
     conf = float(getattr(claim, "confidence", 0.0) or 0.0)
     return LocalEntityCandidate(
         key=key,
+        canonical_key=canonical_key,
         canonical_name=canonical_name,
         claim_id=str(getattr(claim, "claim_id", "") or getattr(claim, "id", "")),
         sentence_id=str(getattr(claim, "sentence_id", "") or ""),
         entity_type=entity_type,
         entity_type_source=type_source,
+        alias_match_reason=alias_match_reason,
         confidence_contribution=conf,
     )
 
@@ -583,6 +600,22 @@ class LocalResolverV1:
             str(getattr(c, "subject_text", "") or "").strip() for c in ordered_claims
         }
         unique_claim_subjects.discard("")
+        normalized_surface_keys = {
+            normalize_entity_key(surface)
+            for surface in unique_surfaces
+            if normalize_entity_key(surface)
+        }
+        canonical_surface_keys = {
+            canonicalize_entity_key(surface)
+            for surface in unique_surfaces
+            if canonicalize_entity_key(surface)
+        }
+        alias_match_reason: str | None = None
+        if entity_type != LocalEntityType.PERSON.value and normalized_key and len(unique_surfaces) > 1:
+            if len(canonical_surface_keys) == 1 and len(normalized_surface_keys) > 1:
+                alias_match_reason = "canonical_alias_match"
+            elif len(canonical_surface_keys) == 1:
+                alias_match_reason = "canonical_exact"
 
         confidence = sum(confidences) / len(confidences) if confidences else 0.0
         coherence = coherence_score_v1(
@@ -602,6 +635,8 @@ class LocalResolverV1:
         explanation: dict[str, Any] = {
             "grouping_rule": "normalized_subject_key",
             "normalized_key": normalized_key,
+            "canonical_key": normalized_key,
+            "alias_match_reason": alias_match_reason,
             "entity_type_source": agg_entity_source,
             "claim_count": n_claims,
             "surface_form_count": len(unique_surfaces),

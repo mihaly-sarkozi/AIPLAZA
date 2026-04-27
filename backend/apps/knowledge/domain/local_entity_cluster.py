@@ -23,6 +23,7 @@ class LocalEntityType(str, Enum):
     LOCATION = "location"
     ACCOUNT = "account"
     USER = "user"
+    CHECKLIST = "checklist"
     DOCUMENT = "document"
     OBJECT = "object"
     UNKNOWN = "unknown"
@@ -73,11 +74,15 @@ class LocalEntityCluster:
 
 
 def local_entity_cluster_to_json_dict(cluster: LocalEntityCluster) -> dict[str, Any]:
+    explanation = dict(cluster.explanation or {})
+    canonical_key = str(explanation.get("canonical_key") or cluster.normalized_key or "")
+    alias_match_reason = explanation.get("alias_match_reason")
     return {
         "local_entity_id": str(cluster.local_entity_id),
         "run_id": str(cluster.run_id) if cluster.run_id is not None else None,
         "source_id": str(cluster.source_id) if cluster.source_id is not None else None,
         "canonical_name": cluster.canonical_name,
+        "canonical_key": canonical_key,
         "entity_type": cluster.entity_type,
         "normalized_key": cluster.normalized_key,
         "mention_ids": [str(item) for item in cluster.mention_ids],
@@ -89,7 +94,8 @@ def local_entity_cluster_to_json_dict(cluster: LocalEntityCluster) -> dict[str, 
         "coherence_score": cluster.coherence_score,
         "resolver_version": cluster.resolver_version,
         "created_at": cluster.created_at.isoformat(),
-        "explanation": dict(cluster.explanation or {}),
+        "alias_match_reason": alias_match_reason,
+        "explanation": explanation,
     }
 
 

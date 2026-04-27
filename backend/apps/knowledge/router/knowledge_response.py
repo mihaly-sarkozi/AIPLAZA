@@ -17,6 +17,7 @@ class KBOut(BaseModel):
     created_at: datetime
     updated_at: datetime
     can_train: Optional[bool] = None  # aktuális user taníthatja-e (listánál kitöltve)
+    has_training: bool = False  # van-e legalább egy tanítási/ingest bejegyzés ebben a tudástárban
 
 
 class KBPermissionOut(BaseModel):

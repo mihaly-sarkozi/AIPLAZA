@@ -1,6 +1,8 @@
 """ClaimExtractorV1: predikátum előtti/utáni tárgy összeállítása."""
 from __future__ import annotations
 
+import re
+
 from apps.knowledge.domain.mention import Mention
 from apps.knowledge.service.claim_extract_constants import MODAL_PREDICATES, TRIM_CHARS, USE_PREDICATE_FOLDS
 from apps.knowledge.service.claim_extract_hu_use import hu_is_hasznal_purpose_tail_remainder
@@ -97,9 +99,23 @@ def build_object_text(
             subject_text=subject_text,
             clause_start_idx=clause_start_idx,
         )
+    if (
+        language == "en"
+        and pre_predicate_object
+        and normalize_predicate(predicate) in USE_PREDICATE_FOLDS.get(language, set())
+        and re.fullmatch(r"(?:does|do|did)\s+not", pre_predicate_object, flags=re.IGNORECASE)
+    ):
+        pre_predicate_object = None
     if predicate_end_idx is None:
         return None
     if remainder:
+        if language == "en" and normalize_predicate(predicate) in USE_PREDICATE_FOLDS.get(language, set()):
+            remainder = re.sub(
+                r"^(?:(?:does|do|did)\s+not\s+|not\s+)",
+                "",
+                remainder,
+                flags=re.IGNORECASE,
+            ).strip(TRIM_CHARS)
         remainder = clean_object_slice(remainder, language=language)
         remainder = trim_clause_break(remainder, language=language)
         if subject_text and fold_text(remainder) == fold_text(subject_text):

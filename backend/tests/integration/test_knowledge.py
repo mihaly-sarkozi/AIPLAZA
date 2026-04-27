@@ -87,6 +87,19 @@ def test_get_kb_success_returns_list(client_kb: TestClient, mock_kb_service):
     mock_kb_service.list_all.assert_called_once()
 
 
+def test_get_kb_list_marks_available_kb_training_entries(client_kb: TestClient, mock_kb_service):
+    mock_kb_service.list_all.return_value = [_KBOutLike(uuid="kb-trained", name="Trained KB")]
+    mock_kb_service.list_ingest_runs.return_value = [object()]
+
+    r = client_kb.get("/api/kb")
+
+    assert r.status_code == 200
+    data = r.json()
+    assert data[0]["uuid"] == "kb-trained"
+    assert data[0]["has_training"] is True
+    mock_kb_service.list_ingest_runs.assert_called_once_with("kb-trained", limit=1)
+
+
 def test_post_kb_without_auth_returns_401(client: TestClient):
     """POST /kb auth nélkül → 401."""
     r = client.post("/api/kb", json={"name": "My KB", "description": "Desc"})

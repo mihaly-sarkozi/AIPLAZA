@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Callable
 import logging
 import hashlib
@@ -28,6 +29,7 @@ from apps.knowledge.domain.mention import Mention
 from apps.knowledge.domain.paragraph import Paragraph
 from apps.knowledge.domain.parser_run import ParserRun
 from apps.knowledge.domain.query_run import Citation, QueryRun
+from apps.knowledge.domain.query_profile import query_profile_to_json_dict
 from apps.knowledge.domain.retrieval_profile import DEFAULT_RETRIEVAL_PROFILE, RetrievalProfile
 from apps.knowledge.domain.sentence import Sentence
 from apps.knowledge.domain.sentence_interpretation import SentenceInterpretation
@@ -39,7 +41,8 @@ from apps.knowledge.service.claim_extractor_v1 import ClaimExtractorV1
 from apps.knowledge.service.claim_quality_gate import ClaimQualityGate
 from apps.knowledge.service.claim_typing import debug_claim_type
 from apps.knowledge.service.knowledge_trace_service import KnowledgeTraceService
-from apps.knowledge.service.language_rules import detect_language, resolve_language
+from apps.knowledge.service.entity_key_normalization import canonicalize_entity_key
+from apps.knowledge.service.language_rules import detect_language, fold_text, resolve_language
 from apps.knowledge.service.mention_extractor import MentionExtractor, debug_print as debug_print_mentions
 from apps.knowledge.service.local_resolver_v1 import LocalResolverV1, attach_local_resolver_metadata
 from apps.knowledge.service.space_time_extractor_v1 import SpaceTimeExtractorV1
@@ -49,11 +52,24 @@ from apps.knowledge.domain.technical_entity import technical_entity_to_json_dict
 from apps.knowledge.service.technical_memory_chunk_builder_v1 import TechnicalMemoryChunkBuilderV1
 from apps.knowledge.domain.technical_memory_chunk import technical_memory_chunk_to_json_dict
 from apps.knowledge.service.search_profile_builder_v1 import SearchProfileBuilderV1
-from apps.knowledge.domain.search_profile import search_profile_to_json_dict
-from apps.knowledge.service.candidate_selection_v1 import CandidateSelectionV1
+from apps.knowledge.domain.search_profile import SearchProfile, search_profile_to_json_dict
+from apps.knowledge.service.candidate_selection_v1 import CandidateSelectionV1, candidate_selection_attempt_count
 from apps.knowledge.domain.candidate_selection import entity_candidate_to_json_dict
 from apps.knowledge.service.similarity_engine_v1 import SimilarityEngineV1
 from apps.knowledge.domain.similarity_analysis import similarity_analysis_to_json_dict
+from apps.knowledge.service.decision_engine_v1 import DecisionEngineV1
+from apps.knowledge.domain.decision_analysis import decision_analysis_to_json_dict
+from apps.knowledge.service.global_profile_builder_v0 import GlobalProfileBuilderV0
+from apps.knowledge.service.tension_engine_v1 import TensionEngineV1
+from apps.knowledge.domain.tension_analysis import tension_analysis_to_json_dict
+from apps.knowledge.service.retrieval_chunk_builder_v0 import RetrievalChunkBuilderV0
+from apps.knowledge.service.retrieval_chunk_index_v0 import build_retrieval_chunk_index_rows
+from apps.knowledge.service.query_resolver_v0 import QueryResolverV0
+from apps.knowledge.service.query_aware_retrieval_v0 import QueryAwareRetrievalV0
+from apps.knowledge.service.explanation_builder_v0 import ExplanationBuilderV0
+from apps.knowledge.service.lineage_builder_v0 import LineageBuilderV0
+from apps.knowledge.service.knowledge_quality_report_v0 import KnowledgeQualityReportV0
+from apps.knowledge.service.synthesis_engine_v0 import SynthesisEngineV0
 from apps.knowledge.service.ports import (
     ClaimStorePort,
     ChunkBuilderPort,
@@ -82,7 +98,12 @@ from apps.knowledge.service.ports import (
 from apps.knowledge.training_ingest import build_sentence_rows
 from core.capabilities.users.dto import User
 from core.platform.auth.auth_dependencies import has_permission
-from core.platform.contract.observability import log_structured_event, observability_scope
+from core.platform.contract.observability import (
+    increment_metric as increment_platform_metric,
+    log_structured_event,
+    observe_metric as observe_platform_metric,
+    observability_scope,
+)
 from core.kernel.config.config_loader import settings
 from shared.documents import ExtractedDocument, ExtractedParagraph, extract_document_from_upload, extract_text_from_upload
 from shared.object_storage.contracts import ObjectStoragePort
@@ -90,6 +111,10 @@ import requests
 from sqlalchemy.exc import ProgrammingError
 
 logger = logging.getLogger(__name__)
+
+_RETRIEVAL_TIMEOUT_SECONDS = 3.0
+_RETRIEVAL_RETRY_ATTEMPTS = 2
+_RETRIEVAL_RETRY_BACKOFF_SECONDS = 0.05
 
 
 @dataclass(frozen=True)
@@ -259,6 +284,53 @@ def _aggregate_ingest_item_quality(items: list[IngestItem]) -> dict[str, Any]:
     if not has_quality:
         summary["todo"] = "TODO: persist rejected claim diagnostics per ingest run."
     return summary
+
+
+def _uuid_from_trace_value(value: Any) -> uuid_lib.UUID:
+    text = str(value or "").strip()
+    if text:
+        try:
+            return uuid_lib.UUID(text)
+        except ValueError:
+            return uuid_lib.uuid5(uuid_lib.NAMESPACE_URL, text)
+    return uuid_lib.uuid4()
+
+
+def _optional_uuid_from_trace_value(value: Any) -> uuid_lib.UUID | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    return _uuid_from_trace_value(text)
+
+
+def _search_profile_from_trace_payload(payload: dict[str, Any]) -> SearchProfile | None:
+    if not isinstance(payload, dict):
+        return None
+    entity_name = str(payload.get("entity_name") or "").strip()
+    if not entity_name:
+        return None
+    return SearchProfile(
+        search_profile_id=_uuid_from_trace_value(payload.get("search_profile_id")),
+        run_id=_optional_uuid_from_trace_value(payload.get("run_id")),
+        source_id=_optional_uuid_from_trace_value(payload.get("source_id")),
+        technical_memory_chunk_id=_optional_uuid_from_trace_value(payload.get("technical_memory_chunk_id")),
+        technical_entity_id=_optional_uuid_from_trace_value(payload.get("technical_entity_id")),
+        local_entity_id=_optional_uuid_from_trace_value(payload.get("local_entity_id")),
+        entity_name=entity_name,
+        entity_type=str(payload.get("entity_type") or "unknown"),
+        normalized_key=str(payload.get("normalized_key") or ""),
+        canonical_key=str(payload.get("canonical_key") or payload.get("normalized_key") or ""),
+        canonical_text=str(payload.get("canonical_text") or ""),
+        search_text=str(payload.get("search_text") or ""),
+        aliases=[str(item) for item in payload.get("aliases") or []],
+        keywords=[str(item) for item in payload.get("keywords") or []],
+        claim_group_signals=dict(payload.get("claim_group_signals") or {}),
+        time_filters=dict(payload.get("time_filters") or {}),
+        space_filters=dict(payload.get("space_filters") or {}),
+        relation_filters=dict(payload.get("relation_filters") or {}),
+        evidence_refs=[dict(item) for item in payload.get("evidence_refs") or [] if isinstance(item, dict)],
+        builder_version=str(payload.get("builder_version") or "search_profile_builder_v1"),
+    )
 
 
 class KnowledgeFacade:
@@ -437,6 +509,8 @@ class KnowledgeFacade:
         self._vector_index_factory = vector_index_factory
         self._metrics_store = metrics_store
         self._object_storage = object_storage
+        self._feedback_events: list[dict[str, Any]] = []
+        self._source_withdrawal_events: list[dict[str, Any]] = []
 
     def _log_step(self, step: str, *, status: str, tenant: str | None = None, duration_ms: float | None = None, **counts: object) -> None:
         payload = {
@@ -489,6 +563,151 @@ class KnowledgeFacade:
         suffix = "... [truncated]"
         keep = max(0, max_length - len(suffix))
         return f"{text[:keep]}{suffix}"
+
+    def _load_existing_search_profiles(
+        self,
+        *,
+        corpus_uuid: str,
+        exclude_interpretation_run_id: str | None,
+        limit: int = 20,
+    ) -> list[SearchProfile]:
+        if self._interpretation_run_store is None:
+            return []
+        list_for_corpus = getattr(self._interpretation_run_store, "list_for_corpus", None)
+        if not callable(list_for_corpus):
+            return []
+        try:
+            runs = list_for_corpus(corpus_uuid, limit=limit)
+        except ProgrammingError as exc:
+            if self._is_missing_table_error(exc, "knowledge_interpretation_runs"):
+                return []
+            raise
+        profiles: list[SearchProfile] = []
+        for previous_run in runs:
+            if str(previous_run.id) == str(exclude_interpretation_run_id or ""):
+                continue
+            if previous_run.status != "completed":
+                continue
+            metadata = dict(previous_run.metadata or {})
+            for item in metadata.get("search_profiles") or []:
+                profile = _search_profile_from_trace_payload(item) if isinstance(item, dict) else None
+                if profile is not None:
+                    profiles.append(profile)
+        return profiles
+
+    def _load_existing_global_profiles(
+        self,
+        *,
+        corpus_uuid: str,
+        exclude_interpretation_run_id: str | None,
+        limit: int = 20,
+    ) -> list[dict[str, Any]]:
+        if self._interpretation_run_store is None:
+            return []
+        list_for_corpus = getattr(self._interpretation_run_store, "list_for_corpus", None)
+        if not callable(list_for_corpus):
+            return []
+        try:
+            runs = list_for_corpus(corpus_uuid, limit=limit)
+        except ProgrammingError as exc:
+            if self._is_missing_table_error(exc, "knowledge_interpretation_runs"):
+                return []
+            raise
+        profiles_by_id: dict[str, dict[str, Any]] = {}
+        for previous_run in reversed(runs):
+            if str(previous_run.id) == str(exclude_interpretation_run_id or ""):
+                continue
+            if previous_run.status != "completed":
+                continue
+            metadata = dict(previous_run.metadata or {})
+            for item in metadata.get("global_profiles") or []:
+                if not isinstance(item, dict):
+                    continue
+                profile_id = str(item.get("profile_id") or "")
+                if not profile_id:
+                    continue
+                profiles_by_id[profile_id] = dict(item)
+        return list(profiles_by_id.values())
+
+    def _load_existing_retrieval_chunks(
+        self,
+        *,
+        corpus_uuid: str,
+        exclude_interpretation_run_id: str | None,
+        limit: int = 20,
+    ) -> list[dict[str, Any]]:
+        if self._interpretation_run_store is None:
+            return []
+        list_for_corpus = getattr(self._interpretation_run_store, "list_for_corpus", None)
+        if not callable(list_for_corpus):
+            return []
+        try:
+            runs = list_for_corpus(corpus_uuid, limit=limit)
+        except ProgrammingError as exc:
+            if self._is_missing_table_error(exc, "knowledge_interpretation_runs"):
+                return []
+            raise
+        chunks_by_profile_id: dict[str, dict[str, Any]] = {}
+        for previous_run in reversed(runs):
+            if str(previous_run.id) == str(exclude_interpretation_run_id or ""):
+                continue
+            if previous_run.status != "completed":
+                continue
+            metadata = dict(previous_run.metadata or {})
+            for item in metadata.get("retrieval_chunks") or []:
+                if not isinstance(item, dict):
+                    continue
+                profile_id = str(item.get("profile_id") or "")
+                if not profile_id:
+                    continue
+                chunks_by_profile_id[profile_id] = dict(item)
+        return list(chunks_by_profile_id.values())
+
+    @staticmethod
+    def _retrieval_chunks_from_vector_hits(hits: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        chunks: list[dict[str, Any]] = []
+        for hit in hits:
+            payload = dict(hit.get("payload") or {})
+            if payload.get("point_type") != "retrieval_chunk":
+                continue
+            metadata = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}
+            profile_id = str(payload.get("profile_id") or metadata.get("profile_id") or "").strip()
+            if not profile_id:
+                continue
+            chunks.append(
+                {
+                    "retrieval_chunk_id": metadata.get("retrieval_chunk_id") or f"retrieval_chunk:{profile_id}",
+                    "profile_id": profile_id,
+                    "entity_name": payload.get("entity_name"),
+                    "entity_type": payload.get("entity_type"),
+                    "canonical_key": payload.get("canonical_key") or metadata.get("canonical_key"),
+                    "retrieval_chunk_text": payload.get("text") or metadata.get("retrieval_chunk_text"),
+                    "structured_facts": metadata.get("structured_facts") or {},
+                    "evidence_ids": list(metadata.get("evidence_ids") or []),
+                    "source_ids": list(metadata.get("source_ids") or []),
+                    "conflicting": bool(metadata.get("conflicting")),
+                    "temporal_context_included": bool(metadata.get("temporal_context_included")),
+                    "vector_score": hit.get("fusion_score") or hit.get("score"),
+                }
+            )
+        return chunks
+
+    @staticmethod
+    def _order_chunks_by_vector_hits(retrieval_chunks: list[dict[str, Any]], hits: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        vector_profile_ids = [
+            str((hit.get("payload") or {}).get("profile_id") or "").strip()
+            for hit in hits
+            if (hit.get("payload") or {}).get("point_type") == "retrieval_chunk"
+        ]
+        vector_profile_ids = [item for item in vector_profile_ids if item]
+        if not vector_profile_ids:
+            return retrieval_chunks
+        rank = {profile_id: index for index, profile_id in enumerate(vector_profile_ids)}
+        matched = [chunk for chunk in retrieval_chunks if str(chunk.get("profile_id") or "") in rank]
+        if not matched:
+            return KnowledgeFacade._retrieval_chunks_from_vector_hits(hits) or retrieval_chunks
+        remainder = [chunk for chunk in retrieval_chunks if str(chunk.get("profile_id") or "") not in rank]
+        return sorted(matched, key=lambda chunk: rank.get(str(chunk.get("profile_id") or ""), 9999)) + remainder
 
     @staticmethod
     def _compute_progress_percent(processed_parts: int | None, total_parts: int | None) -> int | None:
@@ -1772,14 +1991,57 @@ class KnowledgeFacade:
 
     @staticmethod
     def _merge_sentence_mentions(extracted_mentions: list[Mention], heuristic_mentions: list[Mention]) -> list[Mention]:
-        merged: dict[tuple[str, int, int], Mention] = {}
-        for item in extracted_mentions:
-            key = (item.text_content, item.char_start, item.char_end)
-            merged[key] = item
-        for item in heuristic_mentions:
-            key = (item.text_content, item.char_start, item.char_end)
-            merged[key] = item
-        return sorted(merged.values(), key=lambda item: (item.char_start, item.char_end, item.text_content))
+        merged: list[Mention] = []
+
+        def _priority(item: Mention) -> tuple[int, int, int]:
+            mention_type = str(item.mention_type or "")
+            type_rank = {
+                "location": 0,
+                "module": 1,
+                "software": 2,
+                "process": 3,
+                "organization": 4,
+                "company": 4,
+                "person": 5,
+                "unknown": 9,
+            }.get(mention_type, 8)
+            return (type_rank, -(item.char_end - item.char_start), item.char_start)
+
+        def _overlaps(left: Mention, right: Mention) -> bool:
+            return left.char_start < right.char_end and left.char_end > right.char_start
+
+        for item in [*extracted_mentions, *heuristic_mentions]:
+            duplicate_idx = next(
+                (
+                    index
+                    for index, existing in enumerate(merged)
+                    if existing.text_content == item.text_content
+                    and existing.char_start == item.char_start
+                    and existing.char_end == item.char_end
+                ),
+                None,
+            )
+            if duplicate_idx is not None:
+                if _priority(item) < _priority(merged[duplicate_idx]):
+                    merged[duplicate_idx] = item
+                continue
+            shadowed_by: int | None = None
+            should_skip = False
+            for index, existing in enumerate(merged):
+                if not _overlaps(item, existing):
+                    continue
+                if _priority(existing) <= _priority(item):
+                    should_skip = True
+                    break
+                shadowed_by = index
+                break
+            if should_skip:
+                continue
+            if shadowed_by is not None:
+                merged[shadowed_by] = item
+            else:
+                merged.append(item)
+        return sorted(merged, key=lambda item: (item.char_start, item.char_end, item.text_content))
 
     @staticmethod
     def _is_mention_debug_enabled(*, source: Source | None, document: Document | None, sentence: Sentence) -> bool:
@@ -2163,10 +2425,21 @@ class KnowledgeFacade:
         )
         return interpretation, claims, space_time_frames
 
-    def get_ingest_run_trace(self, run_id: str) -> dict[str, Any] | None:
-        return self._trace_service.build_trace(run_id)
+    def get_ingest_run_trace(
+        self,
+        run_id: str,
+        *,
+        log_level: str | None = "FULL_TRACE",
+        debug: bool = False,
+    ) -> dict[str, Any] | None:
+        return self._trace_service.build_trace(run_id, log_level=log_level, debug=debug)
 
-    def get_latest_ingest_run_trace(self) -> dict[str, Any] | None:
+    def get_latest_ingest_run_trace(
+        self,
+        *,
+        log_level: str | None = "FULL_TRACE",
+        debug: bool = False,
+    ) -> dict[str, Any] | None:
         recent_runs = self._ingest_run_store.list_recent(limit=20)
         for run in recent_runs:
             trace = self._trace_service.build_trace(
@@ -2174,6 +2447,8 @@ class KnowledgeFacade:
                 sentence_limit=50,
                 claim_limit=200,
                 mention_limit=200,
+                log_level=log_level,
+                debug=debug,
             )
             if trace is not None:
                 return trace
@@ -2791,14 +3066,58 @@ class KnowledgeFacade:
             ]
             search_profiles = SearchProfileBuilderV1().build_many(technical_memory_chunks)
             search_profile_payload = [search_profile_to_json_dict(item) for item in search_profiles]
-            candidate_selections = CandidateSelectionV1().select_many(search_profiles)
+            stored_search_profiles = self._load_existing_search_profiles(
+                corpus_uuid=source.corpus_uuid,
+                exclude_interpretation_run_id=run.id,
+            )
+            stored_global_profiles = self._load_existing_global_profiles(
+                corpus_uuid=source.corpus_uuid,
+                exclude_interpretation_run_id=run.id,
+            )
+            candidate_profile_pool = stored_search_profiles or search_profiles
+            candidate_selection_attempted_count = candidate_selection_attempt_count(
+                search_profiles,
+                existing_profiles=stored_search_profiles if stored_search_profiles else None,
+            )
+            candidate_pool_size = len(candidate_profile_pool)
+            candidate_selections = CandidateSelectionV1().select_many(
+                search_profiles,
+                existing_profiles=stored_search_profiles if stored_search_profiles else None,
+                limit_per_profile=3,
+            )
             candidate_selection_payload = [entity_candidate_to_json_dict(item) for item in candidate_selections]
             similarity_analyses = SimilarityEngineV1().analyze_many(
                 search_profiles,
                 candidate_selections,
-                search_profiles,
+                candidate_profile_pool,
             )
             similarity_analysis_payload = [similarity_analysis_to_json_dict(item) for item in similarity_analyses]
+            decision_analyses = DecisionEngineV1().decide_many(
+                search_profiles,
+                candidate_selections,
+                similarity_analyses,
+                tensions=[],
+            )
+            decision_analysis_payload = [decision_analysis_to_json_dict(item) for item in decision_analyses]
+            global_profiles = GlobalProfileBuilderV0().build_many(
+                decision_analyses,
+                search_profiles,
+                candidate_profiles=candidate_profile_pool,
+                existing_global_profiles=stored_global_profiles,
+            )
+            tension_analyses = [
+                *TensionEngineV1().analyze_many(
+                    search_profiles,
+                    similarity_analyses,
+                    candidate_profile_pool,
+                ),
+                *TensionEngineV1().analyze_global_profiles(global_profiles),
+            ]
+            tension_analysis_payload = [tension_analysis_to_json_dict(item) for item in tension_analyses]
+            retrieval_chunks = RetrievalChunkBuilderV0().build_many(
+                global_profiles,
+                tension_analysis_payload,
+            )
             completed_run = self._interpretation_run_store.update(
                 replace(
                     run,
@@ -2824,11 +3143,25 @@ class KnowledgeFacade:
                             "search_profile_count": len(search_profiles),
                             "search_profiles": search_profile_payload,
                             "candidate_selection_builder_version": CandidateSelectionV1.version,
+                            "candidate_selection_attempted_count": candidate_selection_attempted_count,
+                            "candidate_pool_size": candidate_pool_size,
                             "candidate_selection_count": len(candidate_selections),
                             "candidate_selections": candidate_selection_payload,
                             "similarity_engine_version": SimilarityEngineV1.version,
                             "similarity_analysis_count": len(similarity_analyses),
                             "similarity_analyses": similarity_analysis_payload,
+                            "tension_engine_version": TensionEngineV1.version,
+                            "tension_analysis_count": len(tension_analyses),
+                            "tension_analyses": tension_analysis_payload,
+                            "retrieval_chunk_builder_version": RetrievalChunkBuilderV0.version,
+                            "retrieval_chunk_count": len(retrieval_chunks),
+                            "retrieval_chunks": retrieval_chunks,
+                            "decision_engine_version": DecisionEngineV1.version,
+                            "decision_analysis_count": len(decision_analyses),
+                            "decision_analyses": decision_analysis_payload,
+                            "global_profile_builder_version": GlobalProfileBuilderV0.version,
+                            "global_profile_count": len(global_profiles),
+                            "global_profiles": global_profiles,
                         },
                         clusters=local_clusters,
                         trace=local_resolver_trace,
@@ -3442,6 +3775,123 @@ class KnowledgeFacade:
 
     def list_sources(self, corpus_uuid: str) -> list[Source]:
         return self._source_store.list_for_corpus(corpus_uuid)
+
+    def get_source(self, source_id: str) -> Source | None:
+        return self._source_store.get(source_id)
+
+    def get_source_content(self, source_id: str) -> dict[str, Any] | None:
+        source = self._source_store.get(source_id)
+        if source is None:
+            return None
+        document = self._document_store.get_for_source(source_id)
+        return {
+            "id": source.id,
+            "corpus_uuid": source.corpus_uuid,
+            "title": source.title,
+            "source_type": source.source_type,
+            "file_ref": source.file_ref,
+            "original_content": source.raw_content,
+            "extracted_text": document.text_content if document is not None else str(source.raw_content or ""),
+            "metadata": source.metadata,
+        }
+
+    @staticmethod
+    def _source_display_type(source: Source) -> str:
+        if source.source_type == "text":
+            return "Gépelés"
+        filename = str(source.file_ref or source.title or "").lower()
+        if filename.endswith(".pdf"):
+            return "PDF"
+        if filename.endswith(".docx"):
+            return "DOCX"
+        if filename.endswith(".doc"):
+            return "DOC"
+        if source.source_type == "url":
+            return "URL"
+        return "Fájl" if source.source_type == "file" else str(source.source_type or "")
+
+    def _source_created_by_label(self, source: Source) -> str:
+        if source.created_by is None:
+            return "Ismeretlen"
+        user = None
+        if self._user_repo is not None and hasattr(self._user_repo, "get_by_id"):
+            try:
+                user = self._user_repo.get_by_id(source.created_by)
+            except Exception:
+                user = None
+        for attr in ("full_name", "name", "email", "username"):
+            value = getattr(user, attr, None) if user is not None else None
+            if str(value or "").strip():
+                return str(value).strip()
+        return f"Felhasználó #{source.created_by}"
+
+    @staticmethod
+    def _download_filename(source: Source) -> str:
+        filename = str(source.file_ref or source.title or source.id).strip() or source.id
+        if source.source_type == "text" and "." not in filename.rsplit("/", 1)[-1]:
+            filename = f"{filename}.txt"
+        return filename
+
+    def get_source_download(self, source_id: str) -> dict[str, Any] | None:
+        source = self._source_store.get(source_id)
+        if source is None:
+            return None
+        filename = self._download_filename(source)
+        if source.source_type == "file":
+            bucket_name = str(source.metadata.get("bucket_name") or "")
+            object_key = str(source.metadata.get("object_key") or "")
+            if not bucket_name or not object_key:
+                return None
+            stored = self._object_storage.get_bytes(key=object_key, bucket=bucket_name)
+            return {
+                "filename": filename,
+                "content_type": stored.ref.content_type or source.metadata.get("mime_type") or "application/octet-stream",
+                "body": stored.body,
+            }
+        document = self._document_store.get_for_source(source_id) if hasattr(self._document_store, "get_for_source") else None
+        text = str(source.raw_content or (document.text_content if document is not None else "") or "")
+        return {
+            "filename": filename,
+            "content_type": "text/plain; charset=utf-8",
+            "body": text.encode("utf-8"),
+        }
+
+    def get_query_source_download(self, query_run_id: str, source_id: str) -> dict[str, Any] | None:
+        run = self._query_run_store.get(query_run_id)
+        if run is None:
+            return None
+        direct_download = self.get_source_download(source_id)
+        if direct_download is not None:
+            return direct_download
+
+        citation = next(
+            (
+                item
+                for item in run.citations
+                if item.source_id == source_id or item.chunk_id == source_id
+            ),
+            None,
+        )
+        snippet = citation.snippet if citation is not None else ""
+        if not snippet:
+            snippet = run.context_text or ""
+        answer_text = str(run.metadata.get("answer_text") or "")
+        parts = [
+            "AIPLAZA chat source context",
+            f"Query run: {run.id}",
+            f"Source id: {source_id}",
+            f"Question: {run.query}",
+            f"Answer: {answer_text}",
+            "",
+            "Context:",
+            snippet,
+        ]
+        return {
+            "filename": f"aiplaza-context-{source_id[:8] or run.id[:8]}.txt",
+            "content_type": "text/plain; charset=utf-8",
+            "body": "\n".join(parts).encode("utf-8"),
+            "corpus_uuid": run.corpus_uuid,
+        }
 
     def parse_source(
         self,
@@ -5039,12 +5489,31 @@ class KnowledgeFacade:
                 await vector_index.upsert_sentence_points(started.collection_name, rows)
                 self._source_store.update(replace(source, status="ingested"))
 
+            retrieval_chunks = self._load_existing_retrieval_chunks(
+                corpus_uuid=started.corpus_uuid,
+                exclude_interpretation_run_id=None,
+            )
+            retrieval_chunk_rows = build_retrieval_chunk_index_rows(
+                retrieval_chunks,
+                build_id=started.id,
+                index_profile_key=profile.key,
+            )
+            upsert_retrieval_chunks = getattr(vector_index, "upsert_retrieval_chunk_points", None)
+            if callable(upsert_retrieval_chunks) and retrieval_chunk_rows:
+                await upsert_retrieval_chunks(started.collection_name, retrieval_chunk_rows)
+
             finished = replace(
                 started,
                 status="ready",
                 chunk_count=total_chunks,
                 completed_at=_utcnow(),
-                metadata={**started.metadata, "source_count": len(sources), "profile_key": profile.key},
+                metadata={
+                    **started.metadata,
+                    "source_count": len(sources),
+                    "profile_key": profile.key,
+                    "retrieval_chunk_count": len(retrieval_chunk_rows),
+                    "retrieval_chunk_indexed": bool(retrieval_chunk_rows),
+                },
             )
             self._index_build_store.update(finished)
             self._metrics_store.increment("build_success_count", 1)
@@ -5075,6 +5544,498 @@ class KnowledgeFacade:
             builds = builds[:1]
         return [item for item in builds if item.status == "ready"]
 
+    async def _retrieve_hits_with_resilience(
+        self,
+        *,
+        tenant: str,
+        corpus_uuid: str,
+        query: str,
+        builds: list[IndexBuild],
+        retrieval_profile: RetrievalProfile,
+        query_profile: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        last_error: BaseException | None = None
+        for attempt in range(1, _RETRIEVAL_RETRY_ATTEMPTS + 1):
+            started = time.perf_counter()
+            try:
+                hits = await asyncio.wait_for(
+                    self._retrieval_engine.retrieve(
+                        query=query,
+                        builds=builds,
+                        retrieval_profile=retrieval_profile,
+                        query_profile=query_profile,
+                    ),
+                    timeout=_RETRIEVAL_TIMEOUT_SECONDS,
+                )
+                self._metrics_store.record_timing("query_retrieval_duration_ms", (time.perf_counter() - started) * 1000.0)
+                observe_platform_metric("knowledge.query.retrieval.duration_ms", (time.perf_counter() - started) * 1000.0, unit="ms")
+                return hits
+            except (TimeoutError, asyncio.TimeoutError) as exc:
+                last_error = exc
+                self._metrics_store.increment("query_retrieval_timeout_count", 1)
+                increment_platform_metric("knowledge.query.retrieval.timeout.count", 1.0)
+                log_structured_event(
+                    "apps.knowledge",
+                    "knowledge.query.retrieval_timeout",
+                    level=logging.WARNING,
+                    tenant=tenant,
+                    corpus_uuid=corpus_uuid,
+                    retry_count=attempt,
+                    timeout_sec=_RETRIEVAL_TIMEOUT_SECONDS,
+                )
+            except Exception as exc:
+                last_error = exc
+                self._metrics_store.increment("query_retrieval_error_count", 1)
+                increment_platform_metric("knowledge.query.retrieval.error.count", 1.0)
+                log_structured_event(
+                    "apps.knowledge",
+                    "knowledge.query.retrieval_error",
+                    level=logging.WARNING,
+                    tenant=tenant,
+                    corpus_uuid=corpus_uuid,
+                    retry_count=attempt,
+                    error_type=type(exc).__name__,
+                    error_message=str(exc),
+                )
+            if attempt < _RETRIEVAL_RETRY_ATTEMPTS:
+                await asyncio.sleep(_RETRIEVAL_RETRY_BACKOFF_SECONDS * attempt)
+        self._metrics_store.increment("query_retrieval_fallback_count", 1)
+        increment_platform_metric("knowledge.query.retrieval.fallback.count", 1.0)
+        if last_error is not None:
+            log_structured_event(
+                "apps.knowledge",
+                "knowledge.query.retrieval_profile_fallback",
+                level=logging.WARNING,
+                tenant=tenant,
+                corpus_uuid=corpus_uuid,
+                error_type=type(last_error).__name__,
+                error_message=str(last_error),
+            )
+        return []
+
+    @staticmethod
+    def _feedback_key(value: Any) -> str:
+        text = str(value or "").strip()
+        return canonicalize_entity_key(text) or fold_text(text)
+
+    @staticmethod
+    def _feedback_claim_text(claim: dict[str, Any]) -> str:
+        return " ".join(
+            part
+            for part in [
+                str(claim.get("claim_text") or claim.get("display_claim_text") or claim.get("canonical_claim_text") or "").strip(),
+                str(claim.get("subject") or "").strip(),
+                str(claim.get("predicate") or claim.get("predicate_text") or "").strip(),
+                str(claim.get("object") or claim.get("object_text") or "").strip(),
+            ]
+            if part
+        )
+
+    @classmethod
+    def _feedback_claim_matches(cls, claim: dict[str, Any], claim_text: str) -> bool:
+        target = fold_text(claim_text)
+        if not target:
+            return True
+        haystack = fold_text(cls._feedback_claim_text(claim))
+        if target in haystack or haystack in target:
+            return True
+        target_state = cls._feedback_state_object(claim_text)
+        claim_object = str(claim.get("object") or claim.get("object_text") or "").strip().lower()
+        claim_predicate = fold_text(claim.get("predicate") or claim.get("predicate_text"))
+        return bool(target_state and claim_predicate == "active" and claim_object == target_state)
+
+    @staticmethod
+    def _feedback_state_object(text: str) -> str | None:
+        folded = fold_text(text)
+        if re.search(r"\binactive\b|\binaktiv\b|\binaktív\b|\binactivo\b", folded):
+            return "false"
+        if re.search(r"\bactive\b|\baktiv\b|\baktív\b|\bactivo\b", folded):
+            return "true"
+        return None
+
+    @classmethod
+    def _feedback_new_claim(cls, *, event_id: str, target_entity: str, claim_text: str) -> dict[str, Any]:
+        text = str(claim_text or "").strip().rstrip(".")
+        folded = fold_text(text)
+        source_id = f"feedback-source:{event_id}"
+        sentence_id = f"feedback-sentence:{event_id}"
+        claim_id = f"feedback-claim:{event_id}"
+        state_object = cls._feedback_state_object(text)
+        if state_object is not None:
+            return {
+                "claim_id": claim_id,
+                "subject": target_entity,
+                "claim_text": text,
+                "predicate": "active",
+                "predicate_text": "active",
+                "object": state_object,
+                "object_text": state_object,
+                "claim_type": "state",
+                "claim_group": "state",
+                "status": "active",
+                "claim_status": "active",
+                "time_mode": "current",
+                "time_dominant": "current",
+                "time_values": [],
+                "sentence_ids": [sentence_id],
+                "sentence_text": text + ".",
+                "source_ids": [source_id],
+                "feedback_weight": 1.0,
+                "evidence": {"source_id": source_id, "source_ids": [source_id], "sentence_ids": [sentence_id]},
+            }
+        rule_match = re.search(r"\b(must|should|required to|kell|kötelező|debe)\b\s+(.+)$", text, flags=re.IGNORECASE)
+        if rule_match:
+            predicate = rule_match.group(1).strip()
+            obj = rule_match.group(2).strip()
+            return {
+                "claim_id": claim_id,
+                "subject": target_entity,
+                "claim_text": text,
+                "predicate": predicate,
+                "predicate_text": predicate,
+                "object": obj,
+                "object_text": obj,
+                "claim_type": "rule_procedure",
+                "claim_group": "rule",
+                "status": "active",
+                "claim_status": "active",
+                "time_mode": "timeless",
+                "sentence_ids": [sentence_id],
+                "sentence_text": text + ".",
+                "source_ids": [source_id],
+                "feedback_weight": 1.0,
+                "evidence": {"source_id": source_id, "source_ids": [source_id], "sentence_ids": [sentence_id]},
+            }
+        relation_match = re.search(r"\b(uses|use|integrates with|integrates|használ|utiliza|usa)\b\s+(.+)$", text, flags=re.IGNORECASE)
+        if relation_match:
+            predicate = relation_match.group(1).strip()
+            obj = relation_match.group(2).strip()
+            return {
+                "claim_id": claim_id,
+                "subject": target_entity,
+                "claim_text": text,
+                "predicate": predicate,
+                "predicate_text": predicate,
+                "object": obj,
+                "object_text": obj,
+                "claim_group": "relation",
+                "status": "active",
+                "claim_status": "active",
+                "time_mode": "timeless",
+                "sentence_ids": [sentence_id],
+                "sentence_text": text + ".",
+                "source_ids": [source_id],
+                "feedback_weight": 1.0,
+                "evidence": {"source_id": source_id, "source_ids": [source_id], "sentence_ids": [sentence_id]},
+            }
+        obj = text
+        if cls._feedback_key(target_entity) and folded.startswith(cls._feedback_key(target_entity)):
+            obj = text[len(target_entity):].strip()
+        return {
+            "claim_id": claim_id,
+            "subject": target_entity,
+            "claim_text": text,
+            "predicate": "states",
+            "predicate_text": "states",
+            "object": obj,
+            "object_text": obj,
+            "claim_group": "descriptor",
+            "status": "active",
+            "claim_status": "active",
+            "time_mode": "timeless",
+            "sentence_ids": [sentence_id],
+            "sentence_text": text + ".",
+            "source_ids": [source_id],
+            "feedback_weight": 1.0,
+            "evidence": {"source_id": source_id, "source_ids": [source_id], "sentence_ids": [sentence_id]},
+        }
+
+    @staticmethod
+    def _weaken_feedback_claim(claim: dict[str, Any]) -> dict[str, Any]:
+        updated = dict(claim)
+        updated["claim_status"] = "weakened"
+        updated["status"] = "weakened"
+        updated["feedback_weight"] = max(0.0, float(updated.get("feedback_weight") or 1.0) - 0.5)
+        return updated
+
+    @staticmethod
+    def _reinforce_feedback_claim(claim: dict[str, Any]) -> dict[str, Any]:
+        updated = dict(claim)
+        updated["claim_status"] = "active"
+        if str(updated.get("status") or "").strip().lower() in {"weakened", "disputed"}:
+            updated["status"] = "active"
+        updated["feedback_weight"] = min(2.0, float(updated.get("feedback_weight") or 1.0) + 0.25)
+        return updated
+
+    def _apply_feedback_to_global_profiles(self, *, corpus_uuid: str, global_profiles: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        events = [event for event in self._feedback_events if event.get("corpus_uuid") == corpus_uuid]
+        if not events:
+            return global_profiles, []
+        profiles = [dict(profile, claims=[dict(claim) for claim in profile.get("claims") or [] if isinstance(claim, dict)]) for profile in global_profiles]
+        applied_events: list[dict[str, Any]] = []
+        for event in events:
+            target_key = self._feedback_key(event.get("target_entity"))
+            if not target_key:
+                continue
+            for profile in profiles:
+                profile_key = self._feedback_key(profile.get("canonical_key") or profile.get("entity_name"))
+                if profile_key != target_key:
+                    continue
+                affected: list[str] = []
+                claims = []
+                for claim in profile.get("claims") or []:
+                    claim_id = str(claim.get("claim_id") or "").strip()
+                    if self._feedback_claim_matches(claim, str(event.get("claim_text") or "")):
+                        affected.append(claim_id)
+                        if event.get("feedback_type") in {"incorrect", "replace"}:
+                            claim = self._weaken_feedback_claim(claim)
+                        elif event.get("feedback_type") == "correct":
+                            claim = self._reinforce_feedback_claim(claim)
+                    claims.append(claim)
+                new_claim_ids: list[str] = []
+                if event.get("feedback_type") == "replace" and event.get("optional_new_claim"):
+                    new_claim = self._feedback_new_claim(
+                        event_id=str(event.get("feedback_event_id")),
+                        target_entity=str(event.get("target_entity") or profile.get("entity_name") or ""),
+                        claim_text=str(event.get("optional_new_claim") or ""),
+                    )
+                    claims.append(new_claim)
+                    new_claim_ids.append(str(new_claim.get("claim_id") or ""))
+                profile["claims"] = claims
+                applied = {**event, "affected_claim_ids": affected, "new_claim_ids": new_claim_ids}
+                applied_events.append(applied)
+        return profiles, applied_events
+
+    def apply_knowledge_feedback(
+        self,
+        *,
+        tenant: str,
+        corpus_uuid: str,
+        target_entity: str,
+        claim_text: str,
+        feedback_type: str,
+        optional_new_claim: str | None = None,
+        user_input: str | None = None,
+        user_id: int | None = None,
+    ) -> dict[str, Any]:
+        normalized_type = str(feedback_type or "").strip().lower()
+        if normalized_type not in {"correct", "incorrect", "replace"}:
+            raise ValueError("feedback_type must be one of: correct, incorrect, replace")
+        if normalized_type == "replace" and not str(optional_new_claim or "").strip():
+            raise ValueError("optional_new_claim is required for replace feedback")
+        event = {
+            "feedback_event_id": str(uuid_lib.uuid4()),
+            "tenant": tenant,
+            "corpus_uuid": corpus_uuid,
+            "target_entity": str(target_entity or "").strip(),
+            "claim_text": str(claim_text or "").strip(),
+            "feedback_type": normalized_type,
+            "optional_new_claim": str(optional_new_claim or "").strip() or None,
+            "user_input": user_input or str(optional_new_claim or claim_text or "").strip(),
+            "user_id": user_id,
+            "created_at": _utcnow().isoformat(),
+            "affected_claim_ids": [],
+            "new_claim_ids": [],
+        }
+        self._feedback_events.append(event)
+        global_profiles = self._load_existing_global_profiles(corpus_uuid=corpus_uuid, exclude_interpretation_run_id=None)
+        _, applied_events = self._apply_feedback_to_global_profiles(corpus_uuid=corpus_uuid, global_profiles=global_profiles)
+        applied = next((item for item in reversed(applied_events) if item.get("feedback_event_id") == event["feedback_event_id"]), event)
+        self._log_step("knowledge.feedback.apply", status="ok", tenant=tenant, corpus_uuid=corpus_uuid, feedback_type=normalized_type)
+        return {"feedback_event": applied}
+
+    @staticmethod
+    def _claim_source_ids_for_withdrawal(claim: dict[str, Any]) -> list[str]:
+        evidence = claim.get("evidence") if isinstance(claim.get("evidence"), dict) else {}
+        ids: list[str] = []
+        for value in [
+            claim.get("source_id"),
+            evidence.get("source_id"),
+            *(claim.get("source_ids") or []),
+            *(evidence.get("source_ids") or []),
+        ]:
+            text = str(value or "").strip()
+            if text and text not in ids:
+                ids.append(text)
+        return ids
+
+    @staticmethod
+    def _withdraw_claim(claim: dict[str, Any]) -> dict[str, Any]:
+        updated = dict(claim)
+        updated["claim_status"] = "withdrawn"
+        updated["status"] = "withdrawn"
+        updated["feedback_weight"] = 0.0
+        return updated
+
+    def _apply_source_withdrawals_to_global_profiles(
+        self,
+        *,
+        corpus_uuid: str,
+        global_profiles: list[dict[str, Any]],
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        events = [event for event in self._source_withdrawal_events if event.get("corpus_uuid") == corpus_uuid]
+        if not events:
+            return global_profiles, []
+        profiles = [dict(profile, claims=[dict(claim) for claim in profile.get("claims") or [] if isinstance(claim, dict)]) for profile in global_profiles]
+        applied_events: list[dict[str, Any]] = []
+        for event in events:
+            source_id = str(event.get("source_id") or "").strip()
+            if not source_id:
+                continue
+            affected_claim_ids: list[str] = []
+            affected_profile_ids: list[str] = []
+            for profile in profiles:
+                claims: list[dict[str, Any]] = []
+                profile_touched = False
+                for claim in profile.get("claims") or []:
+                    if source_id in self._claim_source_ids_for_withdrawal(claim):
+                        claim = self._withdraw_claim(claim)
+                        claim_id = str(claim.get("claim_id") or "").strip()
+                        if claim_id and claim_id not in affected_claim_ids:
+                            affected_claim_ids.append(claim_id)
+                        profile_touched = True
+                    claims.append(claim)
+                if profile_touched:
+                    profile_id = str(profile.get("profile_id") or "").strip()
+                    if profile_id and profile_id not in affected_profile_ids:
+                        affected_profile_ids.append(profile_id)
+                profile["claims"] = claims
+            applied_events.append(
+                {
+                    **event,
+                    "affected_claim_ids": affected_claim_ids,
+                    "affected_profile_ids": affected_profile_ids,
+                }
+            )
+        return profiles, applied_events
+
+    def withdraw_source(
+        self,
+        *,
+        tenant: str,
+        corpus_uuid: str,
+        source_id: str,
+        user_input: str | None = None,
+        user_id: int | None = None,
+    ) -> dict[str, Any]:
+        normalized_source_id = str(source_id or "").strip()
+        if not normalized_source_id:
+            raise ValueError("source_id is required")
+        event = {
+            "source_withdrawal_event_id": str(uuid_lib.uuid4()),
+            "tenant": tenant,
+            "corpus_uuid": corpus_uuid,
+            "source_id": normalized_source_id,
+            "user_input": user_input or f"withdraw_source({normalized_source_id})",
+            "user_id": user_id,
+            "created_at": _utcnow().isoformat(),
+            "affected_claim_ids": [],
+            "affected_profile_ids": [],
+        }
+        self._source_withdrawal_events.append(event)
+        source = self._source_store.get(normalized_source_id)
+        if source is not None:
+            metadata = dict(source.metadata or {})
+            metadata.update(
+                {
+                    "withdrawn": True,
+                    "withdrawn_at": event["created_at"],
+                    "withdrawn_by": user_id,
+                }
+            )
+            self._source_store.update(replace(source, metadata=metadata))
+        global_profiles = self._load_existing_global_profiles(corpus_uuid=corpus_uuid, exclude_interpretation_run_id=None)
+        _, applied_events = self._apply_source_withdrawals_to_global_profiles(corpus_uuid=corpus_uuid, global_profiles=global_profiles)
+        applied = next((item for item in reversed(applied_events) if item.get("source_withdrawal_event_id") == event["source_withdrawal_event_id"]), event)
+        self._log_step("knowledge.source.withdraw", status="ok", tenant=tenant, corpus_uuid=corpus_uuid, source_id=normalized_source_id)
+        return {"source_withdrawal_event": applied}
+
+    def _enrich_matched_claims_for_explanation(self, matched_claims: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        enriched: list[dict[str, Any]] = []
+        sentence_cache: dict[str, Any] = {}
+        for claim in matched_claims:
+            row = dict(claim)
+            sentence_ids = [str(item).strip() for item in row.get("sentence_ids") or [] if str(item or "").strip()]
+            sentence_texts: list[str] = []
+            source_ids = [str(item).strip() for item in row.get("source_ids") or [] if str(item or "").strip()]
+            for sentence_id in sentence_ids:
+                if sentence_id not in sentence_cache:
+                    sentence_cache[sentence_id] = self._sentence_store.get(sentence_id)
+                sentence = sentence_cache.get(sentence_id)
+                sentence_text = str(getattr(sentence, "text_content", "") or "").strip()
+                if sentence_text:
+                    sentence_texts.append(sentence_text)
+                source_id = str(getattr(sentence, "source_id", "") or "").strip()
+                if source_id and source_id not in source_ids:
+                    source_ids.append(source_id)
+            if sentence_texts:
+                row["sentence_text"] = sentence_texts[0]
+                row["sentence_texts"] = sentence_texts
+            if source_ids:
+                row["source_ids"] = source_ids
+            enriched.append(row)
+        return enriched
+
+    def _build_lineage_graph(self, *, corpus_uuid: str) -> dict[str, Any]:
+        global_profiles = self._load_existing_global_profiles(
+            corpus_uuid=corpus_uuid,
+            exclude_interpretation_run_id=None,
+        )
+        global_profiles, feedback_events = self._apply_feedback_to_global_profiles(
+            corpus_uuid=corpus_uuid,
+            global_profiles=global_profiles,
+        )
+        global_profiles, source_withdrawal_events = self._apply_source_withdrawals_to_global_profiles(
+            corpus_uuid=corpus_uuid,
+            global_profiles=global_profiles,
+        )
+        retrieval_chunks = (
+            RetrievalChunkBuilderV0().build_many(global_profiles, [])
+            if feedback_events or source_withdrawal_events
+            else self._load_existing_retrieval_chunks(
+                corpus_uuid=corpus_uuid,
+                exclude_interpretation_run_id=None,
+            )
+        )
+        graph = LineageBuilderV0().build(global_profiles=global_profiles, retrieval_chunks=retrieval_chunks)
+        graph["feedback_events"] = feedback_events
+        graph["source_withdrawal_events"] = source_withdrawal_events
+        return graph
+
+    def get_lineage(
+        self,
+        *,
+        corpus_uuid: str,
+        claim_id: str | None = None,
+        profile_id: str | None = None,
+    ) -> dict[str, Any]:
+        target_type = "claim" if claim_id else "global_profile"
+        target_id = str(claim_id or profile_id or "").strip()
+        if not target_id:
+            raise ValueError("claim_id or profile_id is required")
+        graph = self._build_lineage_graph(corpus_uuid=corpus_uuid)
+        focused = LineageBuilderV0().focus(graph, target_type=target_type, target_id=target_id)
+        focused["corpus_uuid"] = corpus_uuid
+        return focused
+
+    def get_quality_report(self, *, corpus_uuid: str) -> dict[str, Any]:
+        global_profiles = self._load_existing_global_profiles(
+            corpus_uuid=corpus_uuid,
+            exclude_interpretation_run_id=None,
+        )
+        global_profiles, feedback_events = self._apply_feedback_to_global_profiles(
+            corpus_uuid=corpus_uuid,
+            global_profiles=global_profiles,
+        )
+        global_profiles, source_withdrawal_events = self._apply_source_withdrawals_to_global_profiles(
+            corpus_uuid=corpus_uuid,
+            global_profiles=global_profiles,
+        )
+        report = KnowledgeQualityReportV0().build(corpus_uuid=corpus_uuid, global_profiles=global_profiles)
+        report["feedback_events"] = feedback_events
+        report["source_withdrawal_events"] = source_withdrawal_events
+        return report
+
     async def retrieve(
         self,
         *,
@@ -5089,15 +6050,107 @@ class KnowledgeFacade:
         started = time.perf_counter()
         retrieval = retrieval_profile or DEFAULT_RETRIEVAL_PROFILE
         context = context_profile or DEFAULT_CONTEXT_PROFILE
+        query_profile = query_profile_to_json_dict(QueryResolverV0().resolve(query))
         builds = self._resolve_builds(corpus_uuid=corpus_uuid, build_ids=build_ids)
-        if not builds:
-            raise ValueError("No ready index build available for retrieval")
-
-        hits = await self._retrieval_engine.retrieve(query=query, builds=builds, retrieval_profile=retrieval)
-        if retrieval.score_threshold is not None:
-            hits = [
-                item for item in hits if float(item.get("fusion_score") or item.get("score") or 0.0) >= retrieval.score_threshold
-            ]
+        no_ready_index_build = not builds
+        hits = []
+        if builds:
+            hits = await self._retrieve_hits_with_resilience(
+                tenant=tenant,
+                corpus_uuid=corpus_uuid,
+                query=query,
+                builds=builds,
+                retrieval_profile=retrieval,
+                query_profile=query_profile,
+            )
+            if retrieval.score_threshold is not None:
+                hits = [
+                    item for item in hits if float(item.get("fusion_score") or item.get("score") or 0.0) >= retrieval.score_threshold
+                ]
+        query_global_profiles = self._load_existing_global_profiles(
+            corpus_uuid=corpus_uuid,
+            exclude_interpretation_run_id=None,
+        )
+        query_global_profiles, feedback_events = self._apply_feedback_to_global_profiles(
+            corpus_uuid=corpus_uuid,
+            global_profiles=query_global_profiles,
+        )
+        query_global_profiles, source_withdrawal_events = self._apply_source_withdrawals_to_global_profiles(
+            corpus_uuid=corpus_uuid,
+            global_profiles=query_global_profiles,
+        )
+        query_retrieval_chunks = (
+            RetrievalChunkBuilderV0().build_many(query_global_profiles, [])
+            if feedback_events or source_withdrawal_events
+            else self._load_existing_retrieval_chunks(
+                corpus_uuid=corpus_uuid,
+                exclude_interpretation_run_id=None,
+            )
+        )
+        query_retrieval_chunks = self._order_chunks_by_vector_hits(query_retrieval_chunks, hits)
+        query_aware_result = QueryAwareRetrievalV0().match(
+            query_profile=query_profile,
+            retrieval_chunks=query_retrieval_chunks,
+            global_profiles=query_global_profiles,
+        )
+        matched_chunks = list(query_aware_result.get("matched_chunks") or [])
+        matched_claims = self._enrich_matched_claims_for_explanation(list(query_aware_result.get("matched_claims") or []))
+        query_aware_result["matched_claims"] = matched_claims
+        synthesis_result = SynthesisEngineV0().synthesize(
+            query_profile=query_profile,
+            matched_chunks=matched_chunks,
+            matched_claims=matched_claims,
+        )
+        answer_mode = str(synthesis_result.get("answer_mode") or "no_answer")
+        conflict_marker_included = (
+            bool(query_aware_result.get("conflict_marker_included"))
+            or answer_mode == "conflict"
+            or any(bool(item.get("conflict_marker")) for item in matched_claims)
+        )
+        evidence_summary = synthesis_result.get("evidence_summary") or (synthesis_result.get("synthesis_debug") or {}).get("evidence") or []
+        explanation_payload = ExplanationBuilderV0().build(
+            answer_text=str(synthesis_result.get("answer_text") or ""),
+            matched_claims=matched_claims,
+            cited_claim_ids=list(synthesis_result.get("cited_claim_ids") or []),
+            cited_sentence_ids=list(synthesis_result.get("cited_sentence_ids") or []),
+            cited_source_ids=list(synthesis_result.get("cited_source_ids") or synthesis_result.get("source_ids") or []),
+        )
+        explanation = explanation_payload.get("explanation") or {}
+        lineage_builder = LineageBuilderV0()
+        lineage_graph = lineage_builder.build(global_profiles=query_global_profiles, retrieval_chunks=query_retrieval_chunks)
+        lineage_debug = {
+            "cited_claims": [
+                lineage_builder.focus(lineage_graph, target_type="claim", target_id=str(claim_id))
+                for claim_id in synthesis_result.get("cited_claim_ids") or []
+            ],
+            "matched_profiles": [
+                lineage_builder.focus(lineage_graph, target_type="global_profile", target_id=str(chunk.get("profile_id") or ""))
+                for chunk in matched_chunks
+                if str(chunk.get("profile_id") or "").strip()
+            ],
+        }
+        query_debug = {
+            "endpoint_called": "facade.retrieve",
+            "query_text": query,
+            "query_profile": query_profile,
+            "matched_chunks_count": len(matched_chunks),
+            "matched_claims_count": len(matched_claims),
+            "conflict_marker_included": conflict_marker_included,
+            "temporal_context_used": bool(query_aware_result.get("temporal_context_used")),
+            "synthesis_called": True,
+            "answer_text": synthesis_result.get("answer_text") or "",
+            "answer_mode": answer_mode,
+            "cited_claim_ids": synthesis_result.get("cited_claim_ids") or [],
+            "cited_sentence_ids": synthesis_result.get("cited_sentence_ids") or [],
+            "cited_source_ids": synthesis_result.get("cited_source_ids") or synthesis_result.get("source_ids") or [],
+            "evidence": evidence_summary,
+            "explanation": explanation,
+            "lineage": lineage_debug,
+            "no_ready_index_build": no_ready_index_build,
+            "feedback_events": feedback_events,
+            "source_withdrawal_events": source_withdrawal_events,
+            "response_contains_answer_text": bool(synthesis_result.get("answer_text")),
+        }
 
         context_text, selected = self._context_builder.build_context(
             query=query,
@@ -5130,7 +6183,48 @@ class KnowledgeFacade:
             citations=citations,
             context_text=context_text,
             compare_mode=compare_mode,
-            metadata={"selected_citation_count": len(citations)},
+            metadata={
+                "selected_citation_count": len(citations),
+                "query_profile": query_profile,
+                "query_detected_entities": query_profile.get("detected_entities") or [],
+                "query_intent": query_profile.get("intent") or "unknown",
+                "query_filters": {
+                    "entity_type": query_profile.get("entity_type"),
+                    "entity": query_profile.get("entity"),
+                    "state": query_profile.get("state"),
+                    "time_filter": query_profile.get("time_filter"),
+                    "space_filter": query_profile.get("space_filter"),
+                    "keywords": query_profile.get("keywords") or [],
+                },
+                "query_resolution_confidence": query_profile.get("confidence") or 0.0,
+                "no_ready_index_build": no_ready_index_build,
+                "query_aware_retrieval": query_aware_result,
+                "feedback_events": feedback_events,
+                "source_withdrawal_events": source_withdrawal_events,
+                "matched_chunks": matched_chunks,
+                "matched_claims": matched_claims,
+                "filtered_out_reason": query_aware_result.get("filtered_out_reason") or [],
+                "retrieval_confidence": query_aware_result.get("retrieval_confidence") or 0.0,
+                "query_retrieval_match_count": query_aware_result.get("query_retrieval_match_count") or 0,
+                "query_retrieval_filtered_count": query_aware_result.get("query_retrieval_filtered_count") or 0,
+                "conflict_marker_included": conflict_marker_included,
+                "temporal_context_used": bool(query_aware_result.get("temporal_context_used")),
+                "synthesis": synthesis_result,
+                "synthesis_called": True,
+                "answer_text": synthesis_result.get("answer_text") or "",
+                "answer_mode": answer_mode,
+                "cited_claim_ids": synthesis_result.get("cited_claim_ids") or [],
+                "cited_evidence_ids": synthesis_result.get("cited_evidence_ids") or [],
+                "cited_sentence_ids": synthesis_result.get("cited_sentence_ids") or [],
+                "cited_source_ids": synthesis_result.get("cited_source_ids") or synthesis_result.get("source_ids") or [],
+                "source_ids": synthesis_result.get("source_ids") or [],
+                "evidence_summary": evidence_summary,
+                "explanation": explanation,
+                "explanation_payload": explanation_payload,
+                "lineage": lineage_debug,
+                "synthesis_confidence": synthesis_result.get("synthesis_confidence") or 0.0,
+                "query_debug": query_debug,
+            },
         )
         saved = self._query_run_store.save(query_run)
         self._metrics_store.increment("query_count", 1)
@@ -5179,20 +6273,71 @@ class KnowledgeFacade:
             context_profile=context_profile,
             compare_mode=len(build_ids or []) > 1,
         )
+        source_metadata_by_id: dict[str, Source] = {}
+        for source_id in run.metadata.get("cited_source_ids") or run.metadata.get("source_ids") or []:
+            source = self._source_store.get(str(source_id))
+            if source is not None:
+                source_metadata_by_id[source.id] = source
+        for citation in run.citations:
+            if citation.source_id and citation.source_id not in source_metadata_by_id:
+                source = self._source_store.get(citation.source_id)
+                if source is not None:
+                    source_metadata_by_id[source.id] = source
         source_chunks = [
             {
                 "id": citation.chunk_id or f"source-{index}",
                 "kb_uuid": effective_corpus_uuid,
                 "source_point_id": citation.source_id or citation.chunk_id or f"source-{index}",
+                "source_id": citation.source_id or "",
                 "source_document_title": citation.title or "",
                 "text": citation.snippet,
                 "score": citation.score,
                 "build_id": citation.build_id,
+                "source_type": getattr(source_metadata_by_id.get(citation.source_id), "source_type", ""),
+                "file_ref": getattr(source_metadata_by_id.get(citation.source_id), "file_ref", None),
+                "display_type": (
+                    self._source_display_type(source_metadata_by_id[citation.source_id])
+                    if citation.source_id in source_metadata_by_id
+                    else ""
+                ),
+                "created_by": getattr(source_metadata_by_id.get(citation.source_id), "created_by", None),
+                "created_by_label": (
+                    self._source_created_by_label(source_metadata_by_id[citation.source_id])
+                    if citation.source_id in source_metadata_by_id
+                    else ""
+                ),
             }
             for index, citation in enumerate(run.citations, start=1)
         ]
+        existing_source_chunk_ids = {
+            str(item.get("source_id") or item.get("source_point_id") or "").strip()
+            for item in source_chunks
+        }
+        for source_id, source in source_metadata_by_id.items():
+            if source_id in existing_source_chunk_ids:
+                continue
+            document = self._document_store.get_for_source(source_id)
+            source_chunks.append(
+                {
+                    "id": f"source-{source_id}",
+                    "kb_uuid": effective_corpus_uuid,
+                    "source_point_id": source_id,
+                    "source_id": source_id,
+                    "source_document_title": source.title,
+                    "text": (document.text_content if document is not None else str(source.raw_content or ""))[:400],
+                    "score": 0.0,
+                    "build_id": "",
+                    "source_type": source.source_type,
+                    "file_ref": source.file_ref,
+                    "display_type": self._source_display_type(source),
+                    "created_by": source.created_by,
+                    "created_by_label": self._source_created_by_label(source),
+                }
+            )
         return {
             "query_run_id": run.id,
+            "kb_uuid": effective_corpus_uuid,
+            "corpus_uuid": effective_corpus_uuid,
             "context_text": run.context_text,
             "citations": [
                 {
@@ -5208,6 +6353,33 @@ class KnowledgeFacade:
             "build_ids": run.build_ids,
             "retrieval_profile_key": run.retrieval_profile_key,
             "context_profile_key": run.context_profile_key,
+            "query_profile": run.metadata.get("query_profile"),
+            "query_detected_entities": run.metadata.get("query_detected_entities") or [],
+            "query_intent": run.metadata.get("query_intent"),
+            "query_filters": run.metadata.get("query_filters") or {},
+            "query_resolution_confidence": run.metadata.get("query_resolution_confidence") or 0.0,
+            "query_aware_retrieval": run.metadata.get("query_aware_retrieval") or {},
+            "matched_chunks": run.metadata.get("matched_chunks") or [],
+            "matched_claims": run.metadata.get("matched_claims") or [],
+            "filtered_out_reason": run.metadata.get("filtered_out_reason") or [],
+            "retrieval_confidence": run.metadata.get("retrieval_confidence") or 0.0,
+            "query_retrieval_match_count": run.metadata.get("query_retrieval_match_count") or 0,
+            "query_retrieval_filtered_count": run.metadata.get("query_retrieval_filtered_count") or 0,
+            "conflict_marker_included": bool(run.metadata.get("conflict_marker_included")),
+            "temporal_context_used": bool(run.metadata.get("temporal_context_used")),
+            "answer_text": run.metadata.get("answer_text") or "",
+            "answer_mode": run.metadata.get("answer_mode") or "no_answer",
+            "cited_claim_ids": run.metadata.get("cited_claim_ids") or [],
+            "cited_evidence_ids": run.metadata.get("cited_evidence_ids") or [],
+            "cited_sentence_ids": run.metadata.get("cited_sentence_ids") or [],
+            "cited_source_ids": run.metadata.get("cited_source_ids") or run.metadata.get("source_ids") or [],
+            "source_ids": run.metadata.get("source_ids") or [],
+            "evidence_summary": run.metadata.get("evidence_summary") or [],
+            "explanation": run.metadata.get("explanation") or {},
+            "lineage": run.metadata.get("lineage") or {},
+            "synthesis_confidence": run.metadata.get("synthesis_confidence") or 0.0,
+            "query_debug": run.metadata.get("query_debug") or {},
+            "no_ready_index_build": bool(run.metadata.get("no_ready_index_build")),
             "top_assertions": [],
             "evidence_sentences": [],
             "source_chunks": source_chunks,

@@ -201,6 +201,32 @@ def get_metrics_snapshot() -> dict[str, dict[str, Any]]:
     return _metrics.snapshot()
 
 
+def _prometheus_name(name: str) -> str:
+    normalized = "".join(ch if ch.isalnum() else "_" for ch in str(name or "").strip().lower())
+    normalized = "_".join(part for part in normalized.split("_") if part)
+    return normalized or "unnamed"
+
+
+def render_prometheus_metrics() -> str:
+    lines = [
+        "# HELP aiplaza_metric_count Observed metric sample count.",
+        "# TYPE aiplaza_metric_count counter",
+        "# HELP aiplaza_metric_sum Observed metric sample sum.",
+        "# TYPE aiplaza_metric_sum gauge",
+        "# HELP aiplaza_metric_last Last observed metric sample.",
+        "# TYPE aiplaza_metric_last gauge",
+    ]
+    for name, values in sorted(get_metrics_snapshot().items()):
+        metric = _prometheus_name(name)
+        labels = f'metric="{metric}"'
+        lines.append(f"aiplaza_metric_count{{{labels}}} {float(values.get('count') or 0.0)}")
+        lines.append(f"aiplaza_metric_sum{{{labels}}} {float(values.get('sum') or 0.0)}")
+        lines.append(f"aiplaza_metric_last{{{labels}}} {float(values.get('last') or 0.0)}")
+        if "max" in values:
+            lines.append(f"aiplaza_metric_max{{{labels}}} {float(values.get('max') or 0.0)}")
+    return "\n".join(lines) + "\n"
+
+
 def reset_metrics() -> None:
     _metrics.reset()
 
@@ -343,6 +369,7 @@ __all__ = [
     "observability_scope",
     "reset_observability_context",
     "reset_metrics",
+    "render_prometheus_metrics",
     "set_correlation_id",
     "set_request_id",
     "set_tenant_context",

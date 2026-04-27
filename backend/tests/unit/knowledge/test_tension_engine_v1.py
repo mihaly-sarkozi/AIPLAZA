@@ -151,6 +151,53 @@ def test_tension_billing_service_exclusive_current_use_is_medium_or_high() -> No
     assert analysis.conflicting_claim_ids
 
 
+def test_stress_support_module_multiple_tools_are_additive_not_overwrite() -> None:
+    profile_a = _profile(
+        "support module",
+        "module",
+        relation_predicates=["uses"],
+        relation_objects=["Zendesk"],
+        has_current=True,
+    )
+    profile_b = _profile(
+        "support module",
+        "module",
+        relation_predicates=["uses"],
+        relation_objects=["Freshdesk"],
+        has_current=True,
+    )
+
+    analysis = TensionEngineV1().analyze(profile_a, profile_b)
+
+    assert analysis.tension_type == "additive"
+    assert analysis.conflicting_claim_ids == []
+
+
+def test_stress_london_office_active_then_closed_is_temporal_change() -> None:
+    profile_a = _profile(
+        "London office",
+        "location",
+        keywords=["active"],
+        relation_predicates=["active"],
+        time_values=["before January 2025"],
+        has_current=False,
+    )
+    profile_b = _profile(
+        "London office",
+        "location",
+        keywords=["closed"],
+        relation_predicates=["closed"],
+        time_values=["February 2025"],
+        has_current=False,
+    )
+
+    analysis = TensionEngineV1().analyze(profile_a, profile_b)
+
+    assert analysis.tension_type == "temporal_change"
+    assert analysis.tension_band == "low"
+    assert "temporal_change:different_time_values" in analysis.tension_reasons
+
+
 def test_tension_london_vs_berlin_is_unrelated_or_low_not_contradiction() -> None:
     profile_a = _profile("London office", "location", keywords=["currently", "active"], relation_predicates=["active"])
     profile_b = _profile("Berlin office", "location", keywords=["currently", "inactive"], relation_predicates=["inactive"])
@@ -174,3 +221,93 @@ def test_tension_without_evidence_is_not_high() -> None:
     assert analysis.conflicting_claim_ids == []
     assert analysis.evidence["claim_ids"] == []
     assert analysis.evidence["sentence_ids"] == []
+
+
+def test_tension_global_profile_update_detects_hard_conflict() -> None:
+    profile_update = {
+        "profile_id": "global-profile:billing-service",
+        "operation": "update",
+        "entity_name": "billing service",
+        "new_claim_ids": ["new-c"],
+        "claims": [
+            {
+                "claim_id": "old-c",
+                "subject": "billing service",
+                "predicate": "uses",
+                "object": "Stripe",
+                "time_dominant": "current",
+            },
+            {
+                "claim_id": "new-c",
+                "subject": "billing service",
+                "predicate": "uses",
+                "object": "manual invoicing",
+                "time_dominant": "current",
+            },
+        ],
+    }
+
+    analyses = TensionEngineV1().analyze_global_profiles([profile_update])
+
+    assert len(analyses) == 1
+    assert analyses[0].tension_detected is True
+    assert analyses[0].tension_type == "hard_conflict"
+    assert analyses[0].conflicting_claim_ids == ["old-c", "new-c"]
+
+
+def test_tension_global_profile_update_detects_temporal_change() -> None:
+    profile_update = {
+        "profile_id": "global-profile:london-office",
+        "operation": "update",
+        "entity_name": "London office",
+        "new_claim_ids": ["new-c"],
+        "claims": [
+            {
+                "claim_id": "old-c",
+                "subject": "London office",
+                "predicate": "active",
+                "object": "",
+                "time_values": ["2024"],
+            },
+            {
+                "claim_id": "new-c",
+                "subject": "London office",
+                "predicate": "active",
+                "object": "",
+                "time_values": ["2025"],
+            },
+        ],
+    }
+
+    analyses = TensionEngineV1().analyze_global_profiles([profile_update])
+
+    assert analyses[0].tension_type == "temporal_change"
+    assert analyses[0].tension_score > 0
+
+
+def test_tension_global_profile_update_detects_soft_conflict() -> None:
+    profile_update = {
+        "profile_id": "global-profile:support-module",
+        "operation": "update",
+        "entity_name": "support module",
+        "new_claim_ids": ["new-c"],
+        "claims": [
+            {
+                "claim_id": "old-c",
+                "subject": "support module",
+                "predicate": "uses",
+                "object": "Freshdesk",
+            },
+            {
+                "claim_id": "new-c",
+                "subject": "support module",
+                "predicate": "integrates with",
+                "object": "Freshdesk",
+            },
+        ],
+    }
+
+    analyses = TensionEngineV1().analyze_global_profiles([profile_update])
+
+    assert analyses[0].tension_type == "soft_conflict"
+    assert analyses[0].tension_detected is True

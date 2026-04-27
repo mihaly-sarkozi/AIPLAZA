@@ -31,6 +31,7 @@ class TensionAnalysis:
     candidate_name_a: str = ""
     candidate_name_b: str = ""
 
+    tension_detected: bool = False
     tension_score: float = 0.0
     tension_band: str = "none"
     tension_type: str = "unrelated"
@@ -56,6 +57,7 @@ def tension_analysis_to_json_dict(analysis: TensionAnalysis) -> dict[str, Any]:
         ),
         "candidate_name_a": analysis.candidate_name_a,
         "candidate_name_b": analysis.candidate_name_b,
+        "tension_detected": analysis.tension_detected,
         "tension_score": analysis.tension_score,
         "tension_band": analysis.tension_band,
         "tension_type": analysis.tension_type,

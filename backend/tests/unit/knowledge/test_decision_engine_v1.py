@@ -8,13 +8,24 @@ from apps.knowledge.domain.candidate_selection import EntityCandidate
 from apps.knowledge.domain.search_profile import SearchProfile
 from apps.knowledge.domain.similarity_analysis import SimilarityAnalysis
 from apps.knowledge.domain.tension_analysis import TensionAnalysis
+from apps.knowledge.service.candidate_selection_v1 import CandidateSelectionV1
 from apps.knowledge.service.decision_engine_v1 import DecisionEngineV1
+from apps.knowledge.service.similarity_engine_v1 import SimilarityEngineV1
 
 
 pytestmark = [pytest.mark.unit, pytest.mark.must_pass]
 
 
-def _profile(name: str, entity_type: str, *, evidence: bool = True) -> SearchProfile:
+def _profile(
+    name: str,
+    entity_type: str,
+    *,
+    canonical_key: str = "",
+    keywords: list[str] | None = None,
+    relation_predicates: list[str] | None = None,
+    relation_objects: list[str] | None = None,
+    evidence: bool = True,
+) -> SearchProfile:
     claim_id = str(uuid4())
     sentence_id = str(uuid4())
     return SearchProfile(
@@ -25,9 +36,14 @@ def _profile(name: str, entity_type: str, *, evidence: bool = True) -> SearchPro
         entity_name=name,
         entity_type=entity_type,
         normalized_key=name.lower(),
+        canonical_key=canonical_key,
         canonical_text=f"{name} | {entity_type}",
-        search_text=f"{name} {entity_type}",
-        keywords=name.lower().split(),
+        search_text=f"{name} {entity_type} {' '.join(keywords or [])}",
+        keywords=keywords or name.lower().split(),
+        relation_filters={
+            "predicates": relation_predicates or [],
+            "objects": relation_objects or [],
+        },
         evidence_refs=[{"claim_ids": [claim_id], "sentence_ids": [sentence_id], "source_id": str(uuid4())}]
         if evidence
         else [],
@@ -69,6 +85,23 @@ def _similarity(new_profile: SearchProfile, candidate: EntityCandidate, band: st
     )
 
 
+def _decision_from_candidate_similarity(new: SearchProfile, existing: SearchProfile):
+    candidates = CandidateSelectionV1().select_many([new], existing_profiles=[existing], limit_per_profile=3)
+    similarities = SimilarityEngineV1().analyze_many([new], candidates, [existing])
+    decisions = DecisionEngineV1().decide_many([new], candidates, similarities, tensions=[])
+    assert decisions
+    return decisions[0]
+
+
+def _candidate_and_decision_from_similarity(new: SearchProfile, existing: SearchProfile):
+    candidates = CandidateSelectionV1().select_many([new], existing_profiles=[existing], limit_per_profile=3)
+    similarities = SimilarityEngineV1().analyze_many([new], candidates, [existing])
+    decisions = DecisionEngineV1().decide_many([new], candidates, similarities, tensions=[])
+    assert candidates
+    assert decisions
+    return candidates[0], decisions[0]
+
+
 def _tension(new_profile: SearchProfile, existing: SearchProfile, band: str, tension_type: str) -> TensionAnalysis:
     return TensionAnalysis(
         search_profile_id_a=new_profile.search_profile_id,
@@ -98,12 +131,17 @@ def test_decision_same_sarah_miller_existing_attach_existing() -> None:
     decision = DecisionEngineV1().decide(new, candidate=candidate, similarity=similarity, tension=tension)
 
     assert decision.decision == "attach_existing"
+    assert decision.decision_type == "attach_existing"
+    assert decision.selected_candidate_id == str(existing.technical_entity_id)
+    assert decision.attach_to == str(existing.technical_entity_id)
     assert decision.manual_review_required is False
     assert decision.candidate_entity_id == str(existing.technical_entity_id)
+    assert decision.selected_profile_id
+    assert decision.created_profile_id is None
     assert decision.affected_claim_ids
 
 
-def test_decision_london_office_berlin_office_keep_separate() -> None:
+def test_decision_london_office_berlin_office_create_new() -> None:
     new = _profile("London office", "location")
     existing = _profile("Berlin office", "location")
     candidate = _candidate(new, existing)
@@ -112,12 +150,13 @@ def test_decision_london_office_berlin_office_keep_separate() -> None:
 
     decision = DecisionEngineV1().decide(new, candidate=candidate, similarity=similarity, tension=tension)
 
-    assert decision.decision == "keep_separate"
+    assert decision.decision == "create_new_profile"
     assert decision.manual_review_required is False
-    assert decision.decision_reason == "keep_separate:different_location_name"
+    assert decision.created_profile_id
+    assert decision.decision_reason == "create_new_profile:no_candidate_above_threshold"
 
 
-def test_decision_london_current_active_inactive_mark_conflict() -> None:
+def test_decision_ignores_tension_and_uses_high_similarity_attach() -> None:
     new = _profile("London office", "location")
     existing = _profile("London office", "location")
     candidate = _candidate(new, existing)
@@ -126,9 +165,9 @@ def test_decision_london_current_active_inactive_mark_conflict() -> None:
 
     decision = DecisionEngineV1().decide(new, candidate=candidate, similarity=similarity, tension=tension)
 
-    assert decision.decision == "mark_conflict"
-    assert decision.manual_review_required is True
-    assert decision.decision_confidence >= 0.9
+    assert decision.decision == "attach_existing"
+    assert decision.manual_review_required is False
+    assert decision.decision_reason == "attach_existing:single_high_similarity_candidate"
 
 
 def test_decision_admin_multilingual_medium_similarity_needs_review() -> None:
@@ -140,9 +179,9 @@ def test_decision_admin_multilingual_medium_similarity_needs_review() -> None:
 
     decision = DecisionEngineV1().decide(new, candidate=candidate, similarity=similarity, tension=tension)
 
-    assert decision.decision in {"needs_review", "attach_existing"}
-    if decision.decision == "needs_review":
-        assert decision.manual_review_required is True
+    assert decision.decision == "uncertain_match"
+    assert decision.manual_review_required is True
+    assert decision.decision_reason == "uncertain_match:medium_similarity"
 
 
 def test_decision_no_candidate_create_new() -> None:
@@ -150,6 +189,107 @@ def test_decision_no_candidate_create_new() -> None:
 
     decision = DecisionEngineV1().decide(new)
 
-    assert decision.decision == "create_new"
+    assert decision.decision == "create_new_profile"
     assert decision.candidate_entity_id == ""
+    assert decision.created_profile_id
     assert decision.manual_review_required is False
+
+
+def test_decision_multiple_high_similarity_candidates_in_group_merge_required() -> None:
+    new = _profile("support module", "module")
+    existing = _profile("support module", "module")
+    candidate = _candidate(new, existing)
+    candidate = EntityCandidate(
+        **{
+            **candidate.__dict__,
+            "merge_candidate_group": {
+                "canonical_key": "support module",
+                "group_size": 2,
+                "duplicate_memory_profile_count": 1,
+                "candidate_entity_ids": [candidate.candidate_entity_id, "candidate-2"],
+                "selected_candidate_entity_id": candidate.candidate_entity_id,
+            },
+        }
+    )
+    similarity = _similarity(new, candidate, "high", 0.92)
+
+    decision = DecisionEngineV1().decide(new, candidate=candidate, similarity=similarity)
+
+    assert decision.decision == "merge_required"
+    assert decision.candidate_group_size == 2
+    assert decision.competing_candidates_count == 1
+    assert decision.merge_candidate_group["canonical_key"] == "support module"
+
+
+def test_decision_support_module_existing_memory_attach_existing() -> None:
+    existing = _profile(
+        "support module",
+        "module",
+        canonical_key="support module",
+        keywords=["support", "module", "freshdesk"],
+        relation_predicates=["uses"],
+        relation_objects=["Freshdesk"],
+    )
+    new = _profile(
+        "El módulo de soporte",
+        "module",
+        canonical_key="support module",
+        keywords=["soporte", "módulo", "freshdesk"],
+        relation_predicates=["utiliza"],
+        relation_objects=["Freshdesk"],
+    )
+
+    candidate, decision = _candidate_and_decision_from_similarity(new, existing)
+
+    assert decision.decision == "attach_existing"
+    assert decision.attach_to == str(existing.technical_entity_id)
+    assert decision.selected_candidate_score == candidate.score
+
+
+def test_decision_billing_service_existing_memory_attach_existing() -> None:
+    existing = _profile(
+        "billing service",
+        "software",
+        canonical_key="billing service",
+        keywords=["billing", "service", "stripe"],
+        relation_predicates=["uses"],
+        relation_objects=["Stripe"],
+    )
+    new = _profile(
+        "servicio de facturación",
+        "software",
+        canonical_key="billing service",
+        keywords=["servicio", "facturación", "stripe"],
+        relation_predicates=["utiliza"],
+        relation_objects=["Stripe"],
+    )
+
+    candidate, decision = _candidate_and_decision_from_similarity(new, existing)
+
+    assert decision.decision == "attach_existing"
+    assert decision.attach_to == str(existing.technical_entity_id)
+    assert decision.selected_candidate_score == candidate.score
+
+
+def test_decision_billing_service_does_not_false_attach_invoice_service() -> None:
+    invoice = _profile(
+        "invoice service",
+        "software",
+        canonical_key="invoice service",
+        keywords=["invoice", "service", "stripe"],
+        relation_predicates=["uses"],
+        relation_objects=["Stripe"],
+    )
+    billing = _profile(
+        "billing service",
+        "software",
+        canonical_key="billing service",
+        keywords=["billing", "service", "stripe"],
+        relation_predicates=["uses"],
+        relation_objects=["Stripe"],
+    )
+
+    decision = _decision_from_candidate_similarity(billing, invoice)
+
+    assert decision.decision != "attach_existing"
+    assert decision.attach_to is None

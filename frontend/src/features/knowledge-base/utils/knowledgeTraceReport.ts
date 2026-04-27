@@ -956,6 +956,12 @@ export function generateKnowledgeTraceReport(trace: IngestRunTrace): string {
   lines.push(`medium_similarity_count: ${trace.summary.medium_similarity_count ?? 0}`);
   lines.push(`low_similarity_count: ${trace.summary.low_similarity_count ?? 0}`);
   lines.push(`similarity_without_evidence_count: ${trace.summary.similarity_without_evidence_count ?? 0}`);
+  lines.push(`tension_analysis_count: ${trace.summary.tension_analysis_count ?? trace.tension_analyses?.length ?? 0}`);
+  lines.push(`hard_conflict_count: ${trace.summary.hard_conflict_count ?? 0}`);
+  lines.push(`temporal_change_count: ${trace.summary.temporal_change_count ?? 0}`);
+  lines.push(`retrieval_chunk_count: ${trace.summary.retrieval_chunk_count ?? trace.retrieval_chunks?.length ?? 0}`);
+  lines.push(`conflicting_chunk_count: ${trace.summary.conflicting_chunk_count ?? 0}`);
+  lines.push(`temporal_context_included: ${trace.summary.temporal_context_included === true ? "true" : "false"}`);
   lines.push("");
   const leQuality = deriveLocalEntityQuality(trace);
   lines.push("LOCAL ENTITY QUALITY:");
@@ -998,6 +1004,16 @@ export function generateKnowledgeTraceReport(trace: IngestRunTrace): string {
   lines.push(`medium_similarity_count: ${trace.summary.medium_similarity_count ?? 0}`);
   lines.push(`low_similarity_count: ${trace.summary.low_similarity_count ?? 0}`);
   lines.push(`similarity_without_evidence_count: ${trace.summary.similarity_without_evidence_count ?? 0}`);
+  lines.push("");
+  lines.push("TENSION QUALITY:");
+  lines.push(`tension_analysis_count: ${trace.summary.tension_analysis_count ?? trace.tension_analyses?.length ?? 0}`);
+  lines.push(`hard_conflict_count: ${trace.summary.hard_conflict_count ?? 0}`);
+  lines.push(`temporal_change_count: ${trace.summary.temporal_change_count ?? 0}`);
+  lines.push("");
+  lines.push("RETRIEVAL CHUNK QUALITY:");
+  lines.push(`retrieval_chunk_count: ${trace.summary.retrieval_chunk_count ?? trace.retrieval_chunks?.length ?? 0}`);
+  lines.push(`conflicting_chunk_count: ${trace.summary.conflicting_chunk_count ?? 0}`);
+  lines.push(`temporal_context_included: ${trace.summary.temporal_context_included === true ? "true" : "false"}`);
   lines.push("");
   lines.push("QUALITY GATE SUMMARY:");
   lines.push(`skipped_sentence_count: ${validation.skippedSentenceCount}`);
@@ -1264,6 +1280,55 @@ export function generateKnowledgeTraceReport(trace: IngestRunTrace): string {
       lines.push("evidence:");
       lines.push(`  claim_ids: ${formatStringList(analysis.evidence?.claim_ids)}`);
       lines.push(`  sentence_ids: ${formatStringList(analysis.evidence?.sentence_ids)}`);
+      lines.push("");
+    });
+  }
+  lines.push("TENSION ANALYSES:");
+  lines.push("");
+  const tensionAnalyses = [...(trace.tension_analyses ?? [])].sort(
+    (a, b) => Number(b.tension_score ?? 0) - Number(a.tension_score ?? 0)
+  );
+  if (tensionAnalyses.length === 0) {
+    lines.push("(none)");
+    lines.push("");
+  } else {
+    tensionAnalyses.forEach((analysis, index) => {
+      lines.push(`#${index + 1}`);
+      lines.push(`tension_type: ${analysis.tension_type || "-"}`);
+      lines.push(`tension_score: ${Number(analysis.tension_score ?? 0).toFixed(2)}`);
+      lines.push(`band: ${analysis.tension_band || "low"}`);
+      lines.push(`candidate_name_a: ${analysis.candidate_name_a || "-"}`);
+      lines.push(`candidate_name_b: ${analysis.candidate_name_b || "-"}`);
+      lines.push(`reason: ${analysis.tension_reason || analysis.tension_reasons?.join(", ") || "-"}`);
+      lines.push(`conflicting_claim_ids: ${formatStringList(analysis.conflicting_claim_ids)}`);
+      lines.push("evidence:");
+      lines.push(`  claim_ids: ${formatStringList(analysis.evidence?.claim_ids)}`);
+      lines.push(`  sentence_ids: ${formatStringList(analysis.evidence?.sentence_ids)}`);
+      lines.push("");
+    });
+  }
+  lines.push("RETRIEVAL CHUNKS:");
+  lines.push("");
+  const retrievalChunks = [...(trace.retrieval_chunks ?? [])].sort((a, b) =>
+    String(a.entity_name || "").localeCompare(String(b.entity_name || ""), undefined, { sensitivity: "base" })
+  );
+  if (retrievalChunks.length === 0) {
+    lines.push("(none)");
+    lines.push("");
+  } else {
+    retrievalChunks.forEach((chunk, index) => {
+      lines.push(`#${index + 1}`);
+      lines.push(`entity_name: ${chunk.entity_name || "-"}`);
+      lines.push(`profile_id: ${chunk.profile_id ?? "-"}`);
+      lines.push(`canonical_key: ${chunk.canonical_key || "-"}`);
+      lines.push(`confidence: ${Number(chunk.confidence ?? 0).toFixed(2)}`);
+      lines.push(`conflicting: ${chunk.conflicting === true ? "true" : "false"}`);
+      lines.push(`temporal_context_included: ${chunk.temporal_context_included === true ? "true" : "false"}`);
+      lines.push(`evidence_ids: ${formatStringList(chunk.evidence_ids)}`);
+      lines.push("retrieval_chunk_text:");
+      for (const chunkLine of String(chunk.retrieval_chunk_text || "-").split(/\r?\n/)) {
+        lines.push(`  ${chunkLine}`);
+      }
       lines.push("");
     });
   }

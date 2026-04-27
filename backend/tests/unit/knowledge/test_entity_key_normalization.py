@@ -43,3 +43,19 @@ def test_canonicalize_entity_key_maps_admin_user_cross_language() -> None:
 def test_canonicalize_entity_key_maps_legacy_helpdesk_import() -> None:
     assert canonicalize_entity_key("legacy helpdesk import", "en") == "legacy helpdesk import"
     assert canonicalize_entity_key("régi Helpdesk import", "hu") == "legacy helpdesk import"
+
+
+def test_canonicalize_entity_key_maps_data_protection_role_cross_language() -> None:
+    assert canonicalize_entity_key("data protection lead", "en") == "data protection lead"
+    assert canonicalize_entity_key("adatvédelmi felelős", "hu") == "data protection lead"
+    assert canonicalize_entity_key("responsable de protección de datos", "es") == "data protection lead"
+
+
+def test_canonicalize_entity_key_maps_trace_multilingual_aliases() -> None:
+    assert canonicalize_entity_key("support modul", "hu") == "support module"
+    assert canonicalize_entity_key("support module", "en") == "support module"
+    assert canonicalize_entity_key("módulo de soporte", "es") == "support module"
+    assert canonicalize_entity_key("billing service", "en") == "billing service"
+    assert canonicalize_entity_key("servicio de facturación", "es") == "billing service"
+    assert canonicalize_entity_key("account", "en") == "account"
+    assert canonicalize_entity_key("cuenta", "es") == "account"

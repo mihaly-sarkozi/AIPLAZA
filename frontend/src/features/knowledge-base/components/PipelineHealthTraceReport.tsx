@@ -236,6 +236,70 @@ function CandidateTable({ rows }: { rows: PipelineCandidateRow[] }) {
   );
 }
 
+function TensionTable({ rows }: { rows: PipelineHealthReport["tension_analyses"] }) {
+  if (!rows.length) return <div className="text-sm text-[var(--color-muted)]">missing from report</div>;
+  return (
+    <div className="overflow-x-auto">
+      <table className="min-w-full border-separate border-spacing-0 text-xs">
+        <thead>
+          <tr className="text-left text-[var(--color-muted)]">
+            {["type", "score", "entities", "reason", "claim ids"].map((head) => (
+              <th key={head} className="border-b border-[var(--color-border)] px-2 py-2 font-medium">
+                {head}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row, index) => (
+            <tr key={row.tension_analysis_id || `tension-${index}`} className="align-top">
+              <td className="border-b border-[var(--color-border)] px-2 py-2">
+                <Badge tone={row.tension_type === "hard_conflict" ? "danger" : row.tension_type === "temporal_change" ? "warning" : "neutral"}>
+                  {row.tension_type || "-"}
+                </Badge>
+              </td>
+              <td className="border-b border-[var(--color-border)] px-2 py-2">{Number(row.tension_score ?? 0).toFixed(2)}</td>
+              <td className="border-b border-[var(--color-border)] px-2 py-2">
+                {[row.candidate_name_a, row.candidate_name_b].filter(Boolean).join(" ↔ ") || "-"}
+              </td>
+              <td className="max-w-[420px] border-b border-[var(--color-border)] px-2 py-2">
+                {row.tension_reason || row.tension_reasons?.join(", ") || "-"}
+              </td>
+              <td className="max-w-[360px] border-b border-[var(--color-border)] px-2 py-2 font-mono">
+                {(row.conflicting_claim_ids ?? row.evidence?.claim_ids ?? []).join(", ") || "-"}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function RetrievalChunkList({ rows }: { rows: PipelineHealthReport["retrieval_chunks"] }) {
+  if (!rows.length) return <div className="text-sm text-[var(--color-muted)]">missing from report</div>;
+  return (
+    <div className="grid gap-3">
+      {rows.map((row, index) => (
+        <div key={row.profile_id || `retrieval-${index}`} className="rounded border border-[var(--color-border)] bg-[var(--color-background)] p-3 text-xs">
+          <div className="mb-2 flex flex-wrap items-center gap-2">
+            <span className="font-semibold">{row.entity_name || row.canonical_key || "retrieval chunk"}</span>
+            {row.conflicting ? <Badge tone="danger">conflicting</Badge> : <Badge tone="good">normal</Badge>}
+            {row.temporal_context_included ? <Badge tone="warning">temporal context</Badge> : null}
+            <Badge>confidence {Number(row.confidence ?? 0).toFixed(2)}</Badge>
+          </div>
+          <pre className="whitespace-pre-wrap rounded border border-[var(--color-border)] bg-[var(--color-surface)] p-2 font-mono text-[11px]">
+            {row.retrieval_chunk_text || "missing chunk text"}
+          </pre>
+          <div className="mt-2 break-all font-mono text-[11px] text-[var(--color-muted)]">
+            evidence_ids: {(row.evidence_ids ?? []).join(", ") || "missing from report"}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function ImportPanel({ onParsed }: { onParsed: (report: PipelineHealthReport | null) => void }) {
   const [text, setText] = useState("");
   const [parseError, setParseError] = useState<string | null>(null);
@@ -398,6 +462,20 @@ export default function PipelineHealthTraceReport({ trace, loading = false, erro
         </div>
         <div className="mt-3">
           <CandidateTable rows={combinedCandidates} />
+        </div>
+      </details>
+
+      <details open className="app-surface p-4">
+        <summary className="cursor-pointer text-sm font-semibold">TENSION ANALYSES</summary>
+        <div className="mt-3">
+          <TensionTable rows={report.tension_analyses} />
+        </div>
+      </details>
+
+      <details open className="app-surface p-4">
+        <summary className="cursor-pointer text-sm font-semibold">RETRIEVAL CHUNKS</summary>
+        <div className="mt-3">
+          <RetrievalChunkList rows={report.retrieval_chunks} />
         </div>
       </details>
 

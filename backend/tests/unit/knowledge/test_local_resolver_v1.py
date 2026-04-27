@@ -5,7 +5,7 @@ from uuid import uuid4
 import pytest
 
 from apps.knowledge.domain.claim import Claim, ClaimStatus, ClaimType
-from apps.knowledge.domain.local_entity_cluster import LocalEntityType
+from apps.knowledge.domain.local_entity_cluster import LocalEntityType, local_entity_cluster_to_json_dict
 from apps.knowledge.domain.sentence import Sentence
 from apps.knowledge.domain.mention import Mention, MentionType
 from apps.knowledge.service.entity_key_normalization import normalize_entity_key
@@ -122,6 +122,8 @@ def test_infer_entity_type_object_mention_overlap() -> None:
         ("The user", LocalEntityType.USER.value),
         ("Main account", LocalEntityType.ACCOUNT.value),
         ("Privacy policy", LocalEntityType.POLICY.value),
+        ("onboarding checklist", LocalEntityType.CHECKLIST.value),
+        ("audit workflow", LocalEntityType.PROCESS.value),
         ("This document", LocalEntityType.DOCUMENT.value),
         ("Insurance claim", LocalEntityType.OBJECT.value),
         ("random widget", LocalEntityType.UNKNOWN.value),
@@ -297,6 +299,87 @@ def test_carryover_sentence_trigger_phrase_does_not_become_entity_name() -> None
     assert clusters[0].canonical_name == "Nagy Eszter"
     assert clusters[0].entity_type == LocalEntityType.PERSON.value
     assert len(clusters[0].claim_ids) == 2
+
+
+def test_stress_near_duplicate_entities_remain_separate_clusters() -> None:
+    sid = str(uuid4())
+    sentences = [Sentence(id=sid, order_index=0)]
+    claims = [
+        Claim(subject_text="billing service", sentence_id=sid, claim_type="relation"),
+        Claim(subject_text="billing module", sentence_id=sid, claim_type="relation"),
+        Claim(subject_text="helpdesk system", sentence_id=sid, claim_type="event"),
+        Claim(subject_text="helpdesk import process", sentence_id=sid, claim_type="event"),
+        Claim(subject_text="onboarding process", sentence_id=sid, claim_type="stable_descriptor"),
+        Claim(subject_text="onboarding checklist", sentence_id=sid, claim_type="event"),
+        Claim(subject_text="Nagy Eszter", sentence_id=sid, claim_type="relation"),
+        Claim(subject_text="Eszter Nagy", sentence_id=sid, claim_type="relation"),
+    ]
+
+    clusters, trace = LocalResolverV1().resolve_with_trace(None, None, sentences, [], claims)
+
+    names = {cluster.canonical_name for cluster in clusters}
+    assert {
+        "billing service",
+        "billing module",
+        "helpdesk system",
+        "helpdesk import process",
+        "onboarding process",
+        "onboarding checklist",
+        "Nagy Eszter",
+        "Eszter Nagy",
+    } <= names
+    assert len(clusters) == len(claims)
+    assert trace["entity_type_resolutions"]
+
+
+def test_local_resolver_uses_multilingual_canonical_key_before_search_profile() -> None:
+    sid1 = str(uuid4())
+    sid2 = str(uuid4())
+    sid3 = str(uuid4())
+    claims = [
+        Claim(subject_text="support modul", sentence_id=sid1, claim_type="relation", confidence=0.8),
+        Claim(subject_text="support module", sentence_id=sid2, claim_type="relation", confidence=0.8),
+        Claim(subject_text="módulo de soporte", sentence_id=sid3, claim_type="relation", confidence=0.8),
+    ]
+    sentences = [
+        Sentence(id=sid1, order_index=0),
+        Sentence(id=sid2, order_index=1),
+        Sentence(id=sid3, order_index=2),
+    ]
+
+    clusters, trace = LocalResolverV1().resolve_with_trace(None, None, sentences, [], claims)
+
+    assert len(clusters) == 1
+    cluster = clusters[0]
+    assert cluster.normalized_key == "support module"
+    assert cluster.explanation["canonical_key"] == "support module"
+    assert cluster.explanation["alias_match_reason"] == "canonical_alias_match"
+    assert set(cluster.surface_forms) == {"support modul", "support module", "módulo de soporte"}
+    row_candidates = [row["candidate"] for row in trace["decisions"] if row["rule"] == "subject_text_candidate"]
+    assert {row["canonical_key"] for row in row_candidates} == {"support module"}
+
+
+def test_local_entity_json_exposes_canonical_key_and_alias_reason() -> None:
+    sid1 = str(uuid4())
+    sid2 = str(uuid4())
+    claims = [
+        Claim(subject_text="account", sentence_id=sid1, claim_type="relation", confidence=0.8),
+        Claim(subject_text="cuenta", sentence_id=sid2, claim_type="relation", confidence=0.8),
+    ]
+
+    clusters = LocalResolverV1().resolve(
+        None,
+        None,
+        [Sentence(id=sid1, order_index=0), Sentence(id=sid2, order_index=1)],
+        [],
+        claims,
+    )
+    payload = local_entity_cluster_to_json_dict(clusters[0])
+
+    assert payload["canonical_key"] == "account"
+    assert payload["normalized_key"] == "account"
+    assert payload["alias_match_reason"] == "canonical_alias_match"
+    assert set(payload["surface_forms"]) == {"account", "cuenta"}
 
 
 def test_coherence_penalty_multiple_claim_types_and_unknown_entity() -> None:

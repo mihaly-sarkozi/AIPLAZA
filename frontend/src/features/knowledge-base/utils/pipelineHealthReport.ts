@@ -7,6 +7,8 @@ import type {
   IngestRunTraceSimilarityAnalysis,
   IngestRunTraceSentence,
   IngestRunTraceTechnicalMemoryChunk,
+  IngestRunTraceTensionAnalysis,
+  IngestRunTraceRetrievalChunk,
 } from "../services";
 
 export type PipelineModuleStatus = "OK" | "Warning" | "Missing" | "Not implemented" | "Needs review";
@@ -27,7 +29,12 @@ export type PipelineSummaryKey =
   | "unknown_space_ratio"
   | "high_similarity_count"
   | "medium_similarity_count"
-  | "low_similarity_count";
+  | "low_similarity_count"
+  | "tension_analysis_count"
+  | "hard_conflict_count"
+  | "temporal_change_count"
+  | "retrieval_chunk_count"
+  | "conflicting_chunk_count";
 
 export type PipelineSummaryMetric = {
   key: PipelineSummaryKey;
@@ -128,6 +135,8 @@ export type PipelineHealthReport = {
   search_profiles: IngestRunTraceSearchProfile[];
   candidate_selection: PipelineCandidateRow[];
   similarity_analysis: PipelineCandidateRow[];
+  tension_analyses: IngestRunTraceTensionAnalysis[];
+  retrieval_chunks: IngestRunTraceRetrievalChunk[];
   claims: PipelineClaimRow[];
   nextActions: string[];
   missingFields: string[];
@@ -151,6 +160,11 @@ const SUMMARY_LABELS: Record<PipelineSummaryKey, string> = {
   high_similarity_count: "high_similarity_count",
   medium_similarity_count: "medium_similarity_count",
   low_similarity_count: "low_similarity_count",
+  tension_analysis_count: "tension_analysis_count",
+  hard_conflict_count: "hard_conflict_count",
+  temporal_change_count: "temporal_change_count",
+  retrieval_chunk_count: "retrieval_chunk_count",
+  conflicting_chunk_count: "conflicting_chunk_count",
 };
 
 const META_NOISE_PATTERN = /\b(todo|zaj|ellenőrizni|ellenorizni|majd később|majd kesobb|noise|meta)\b/i;
@@ -219,6 +233,10 @@ function metricTone(key: PipelineSummaryKey, value: number | string | null, miss
   }
   if (key === "unknown_space_ratio") return numeric > 0 ? "warning" : "good";
   if (key === "high_similarity_count") return numeric > 0 ? "good" : "warning";
+  if (key === "tension_analysis_count" || key === "retrieval_chunk_count") return numeric > 0 ? "good" : "warning";
+  if (key === "hard_conflict_count" || key === "temporal_change_count" || key === "conflicting_chunk_count") {
+    return numeric > 0 ? "warning" : "good";
+  }
   return "neutral";
 }
 
@@ -432,6 +450,11 @@ function makeSummary(trace: IngestRunTrace, claims: PipelineClaimRow[], missingF
     metric("high_similarity_count", summary.high_similarity_count ?? null, missingFields),
     metric("medium_similarity_count", summary.medium_similarity_count ?? null, missingFields),
     metric("low_similarity_count", summary.low_similarity_count ?? null, missingFields),
+    metric("tension_analysis_count", summary.tension_analysis_count ?? trace.tension_analyses?.length ?? null, missingFields),
+    metric("hard_conflict_count", summary.hard_conflict_count ?? null, missingFields),
+    metric("temporal_change_count", summary.temporal_change_count ?? null, missingFields),
+    metric("retrieval_chunk_count", summary.retrieval_chunk_count ?? trace.retrieval_chunks?.length ?? null, missingFields),
+    metric("conflicting_chunk_count", summary.conflicting_chunk_count ?? null, missingFields),
   ];
 }
 
@@ -451,6 +474,9 @@ function buildModules(report: {
   entities: PipelineEntityRow[];
   candidates: PipelineCandidateRow[];
   similarities: PipelineCandidateRow[];
+  tensionCount: number;
+  retrievalChunkCount: number;
+  conflictingChunkCount: number;
 }): PipelineModuleHealth[] {
   const value = (key: PipelineSummaryKey) => report.summary.find((item) => item.key === key);
   const count = (key: PipelineSummaryKey) => asNumber(value(key)?.value) ?? 0;
@@ -468,10 +494,18 @@ function buildModules(report: {
     module("Search Profile Builder", missing("search_profiles") ? "Missing" : count("search_profiles") > 0 ? "OK" : "Needs review", `${count("search_profiles")} profiles`),
     module("Candidate Selection", missing("candidate_selection_count") ? "Missing" : report.candidates.length > 0 ? "OK" : "Needs review", `${report.candidates.length} candidates`),
     module("Similarity Analysis", missing("similarity_analysis_count") ? "Missing" : report.similarities.length > 0 ? (count("high_similarity_count") === 0 ? "Warning" : "OK") : "Needs review", `${report.similarities.length} analyses`),
-    module("Tension Engine", "Not implemented", "missing from report"),
+    module(
+      "Tension Engine",
+      missing("tension_analysis_count") ? "Missing" : report.tensionCount > 0 ? "OK" : "Needs review",
+      `${report.tensionCount} analyses`
+    ),
     module("Decision Engine", "Not implemented", "missing from report"),
     module("Global Profile Builder", "Not implemented", "missing from report"),
-    module("Retrieval Chunk Builder", "Not implemented", "missing from report"),
+    module(
+      "Retrieval Chunk Builder",
+      missing("retrieval_chunk_count") ? "Missing" : report.retrievalChunkCount > 0 ? "OK" : "Needs review",
+      `${report.retrievalChunkCount} chunks · ${report.conflictingChunkCount} conflicting`
+    ),
   ];
 }
 
@@ -498,7 +532,7 @@ function buildNextActions(quality: InternalQuality): string[] {
   if (quality.highSimilarityCount === 0 || (quality.lowSimilarityCount ?? 0) > (quality.mediumSimilarityCount ?? 0)) {
     actions.push("Similarity threshold/scoring finomítandó");
   }
-  actions.push("Tension/Decision modul még nincs kész");
+  if (quality.highSimilarityCount === null) actions.push("Similarity summary hiányzik a reportból");
   return [...new Set(actions)];
 }
 
@@ -525,6 +559,8 @@ function parseJsonTrace(trace: IngestRunTrace): PipelineHealthReport {
   const technicalEntities = buildTechnicalEntityRows(trace);
   const candidateSelection = buildCandidateRows(trace.candidate_selections ?? []);
   const similarityAnalysis = buildSimilarityRows(trace.similarity_analyses ?? []);
+  const tensionAnalyses = trace.tension_analyses ?? [];
+  const retrievalChunks = trace.retrieval_chunks ?? [];
   const summary = makeSummary(trace, claims, missingFields);
   const highSimilarityCount = asNumber(summary.find((item) => item.key === "high_similarity_count")?.value);
   const mediumSimilarityCount = asNumber(summary.find((item) => item.key === "medium_similarity_count")?.value);
@@ -550,7 +586,17 @@ function parseJsonTrace(trace: IngestRunTrace): PipelineHealthReport {
     duplicateCandidateCount: countDuplicateCandidates([...candidateSelection, ...similarityAnalysis]),
     claimsHaveCarryoverWarning: claims.some((claim) => claim.warnings.includes("carryover")),
   };
-  const modules = buildModules({ summary, quality, claims, entities: localEntities, candidates: candidateSelection, similarities: similarityAnalysis });
+  const modules = buildModules({
+    summary,
+    quality,
+    claims,
+    entities: localEntities,
+    candidates: candidateSelection,
+    similarities: similarityAnalysis,
+    tensionCount: tensionAnalyses.length,
+    retrievalChunkCount: retrievalChunks.length,
+    conflictingChunkCount: retrievalChunks.filter((chunk) => chunk.conflicting).length,
+  });
   return {
     source: "json",
     runId: trace.run_id || "-",
@@ -567,6 +613,8 @@ function parseJsonTrace(trace: IngestRunTrace): PipelineHealthReport {
     search_profiles: trace.search_profiles ?? [],
     candidate_selection: candidateSelection,
     similarity_analysis: similarityAnalysis,
+    tension_analyses: tensionAnalyses,
+    retrieval_chunks: retrievalChunks,
     claims,
     nextActions: buildNextActions(quality),
     missingFields: [...new Set(missingFields)],
@@ -604,6 +652,11 @@ function parseTextReport(input: string, force = false): PipelineHealthReport | n
     textMetric("high_similarity_count"),
     textMetric("medium_similarity_count"),
     textMetric("low_similarity_count"),
+    textMetric("tension_analysis_count"),
+    textMetric("hard_conflict_count"),
+    textMetric("temporal_change_count"),
+    textMetric("retrieval_chunk_count"),
+    textMetric("conflicting_chunk_count"),
   ];
   const claims: PipelineClaimRow[] = [];
   const candidateSelection: PipelineCandidateRow[] = [];
@@ -729,7 +782,17 @@ function parseTextReport(input: string, force = false): PipelineHealthReport | n
     duplicateCandidateCount: countDuplicateCandidates([...candidateSelection, ...similarityAnalysis]),
     claimsHaveCarryoverWarning: claims.some((claim) => claim.warnings.includes("carryover")),
   };
-  const modules = buildModules({ summary, quality, claims, entities: [], candidates: candidateSelection, similarities: similarityAnalysis });
+  const modules = buildModules({
+    summary,
+    quality,
+    claims,
+    entities: [],
+    candidates: candidateSelection,
+    similarities: similarityAnalysis,
+    tensionCount: asNumber(keyValues.get("tension_analysis_count")) ?? 0,
+    retrievalChunkCount: asNumber(keyValues.get("retrieval_chunk_count")) ?? 0,
+    conflictingChunkCount: asNumber(keyValues.get("conflicting_chunk_count")) ?? 0,
+  });
   return {
     source: "text",
     runId: keyValues.get("run_id") || "-",
@@ -746,6 +809,8 @@ function parseTextReport(input: string, force = false): PipelineHealthReport | n
     search_profiles: [],
     candidate_selection: candidateSelection,
     similarity_analysis: similarityAnalysis,
+    tension_analyses: [],
+    retrieval_chunks: [],
     claims,
     nextActions: buildNextActions(quality),
     missingFields: [...new Set(missingFields)],

@@ -22,6 +22,7 @@ def _profile(
     space_values: list[str] | None = None,
     evidence: bool = True,
     technical_entity_id=None,
+    canonical_key: str = "",
 ) -> SearchProfile:
     claim_id = str(uuid4())
     sentence_id = str(uuid4())
@@ -33,6 +34,7 @@ def _profile(
         entity_name=name,
         entity_type=entity_type,
         normalized_key=name.lower(),
+        canonical_key=canonical_key,
         canonical_text=f"{name} | {entity_type}",
         search_text=f"{name} {' '.join(keywords or [])}",
         keywords=keywords or [],
@@ -248,3 +250,57 @@ def test_candidate_selection_legacy_helpdesk_import_matches_regi_helpdesk_import
     assert candidates[0].score >= 0.65
     assert any(reason.startswith("canonical_name_match") for reason in candidates[0].reasons)
     assert candidates[0].evidence["claim_ids"]
+
+
+def test_candidate_selection_dedupes_same_candidate_entity_id() -> None:
+    shared_entity_id = uuid4()
+    new = _profile("support module", "module", keywords=["support", "module"])
+    existing_hu = _profile(
+        "support modul",
+        "module",
+        keywords=["support", "modul"],
+        technical_entity_id=shared_entity_id,
+    )
+    existing_es = _profile(
+        "módulo de soporte",
+        "module",
+        keywords=["módulo", "soporte"],
+        technical_entity_id=shared_entity_id,
+    )
+
+    candidates = CandidateSelectionV1().select_for_profile(new, [existing_hu, existing_es])
+
+    assert len(candidates) == 1
+    assert str(candidates[0].candidate_entity_id) == str(shared_entity_id)
+    assert any(reason.startswith("canonical_name_match") for reason in candidates[0].reasons)
+
+
+def test_candidate_selection_groups_existing_memory_profiles_by_canonical_key() -> None:
+    new = _profile("El módulo de soporte", "module", keywords=["soporte", "freshdesk"], canonical_key="support module")
+    weaker = _profile(
+        "support module",
+        "module",
+        keywords=["support"],
+        relation_predicates=["mentions"],
+        relation_objects=["ticket queue"],
+        canonical_key="support module",
+    )
+    stronger = _profile(
+        "support module",
+        "module",
+        keywords=["support", "freshdesk"],
+        relation_predicates=["uses"],
+        relation_objects=["Freshdesk"],
+        canonical_key="support module",
+    )
+
+    candidates = CandidateSelectionV1().select_many([new], existing_profiles=[weaker, stronger], limit_per_profile=3)
+
+    assert len(candidates) == 1
+    assert candidates[0].candidate_source == "existing_memory"
+    assert candidates[0].candidate_canonical_key == "support module"
+    assert candidates[0].candidate_name == "support module"
+    assert candidates[0].best_candidate_selected is True
+    assert candidates[0].merge_candidate_group["canonical_key"] == "support module"
+    assert candidates[0].merge_candidate_group["group_size"] == 2
+    assert candidates[0].merge_candidate_group["duplicate_memory_profile_count"] == 1

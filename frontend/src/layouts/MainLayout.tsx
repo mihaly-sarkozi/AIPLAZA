@@ -9,6 +9,7 @@ const Footer = lazy(() => import("../components/Footer"));
 import { Outlet } from "react-router-dom";
 import { isDemoInitialPasswordMode, useAuthStore } from "../store/authStore";
 import { hasUserPermission } from "../platform/permissions";
+import { useKbList } from "../features/knowledge-base/hooks/useKb";
 
 export default function MainLayout() {
   const [showFooter, setShowFooter] = useState(false);
@@ -20,6 +21,15 @@ export default function MainLayout() {
   const user = useAuthStore((s) => s.user);
   const loadingUser = useAuthStore((s) => s.loadingUser);
   const isFullHeight = location.pathname === "/chat" || location.pathname === "/onboarding/train";
+  const shouldCheckOnboardingTraining =
+    user?.tenant_demo_mode === true &&
+    user.tenant_kb_has_training !== true &&
+    hasUserPermission(user, "knowledge.write");
+  const {
+    data: availableKbList = [],
+    isLoading: loadingAvailableKbList,
+    isError: availableKbListError,
+  } = useKbList({ enabled: shouldCheckOnboardingTraining });
 
   useEffect(() => {
     const id = requestAnimationFrame(() => {
@@ -44,18 +54,25 @@ export default function MainLayout() {
       }
       return;
     }
-    const needOnboarding =
-      user.tenant_demo_mode === true &&
-      user.tenant_kb_has_training !== true &&
-      hasUserPermission(user, "knowledge.write");
-    if (!needOnboarding) return;
+    if (!shouldCheckOnboardingTraining) return;
+    if (loadingAvailableKbList || availableKbListError) return;
+    if (availableKbList.some((kb) => kb.has_training === true)) return;
     if (path.startsWith("/onboarding")) return;
     if (path === "/profile" || path.startsWith("/profile/")) return;
     if (path === "/change-password") return;
     if (path.startsWith("/admin")) return;
     if (path.startsWith("/kb")) return;
     navigate("/onboarding/train", { replace: true });
-  }, [user, loadingUser, location.pathname, navigate]);
+  }, [
+    user,
+    loadingUser,
+    shouldCheckOnboardingTraining,
+    loadingAvailableKbList,
+    availableKbListError,
+    availableKbList,
+    location.pathname,
+    navigate,
+  ]);
 
   return (
     <div
