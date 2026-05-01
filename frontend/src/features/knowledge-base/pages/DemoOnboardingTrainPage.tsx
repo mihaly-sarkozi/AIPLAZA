@@ -39,7 +39,6 @@ export default function DemoOnboardingTrainPage() {
   const [showTrainingProgressModal, setShowTrainingProgressModal] = useState(false);
   const [showTrainingDoneModal, setShowTrainingDoneModal] = useState(false);
   const [activeTrainingRunId, setActiveTrainingRunId] = useState<string | undefined>(undefined);
-  const [lastCompletedTrainingTraceUrl, setLastCompletedTrainingTraceUrl] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const createTextMutation = useCreateTextIngestMutation();
   const createFileMutation = useCreateFileIngestMutation();
@@ -91,7 +90,6 @@ export default function DemoOnboardingTrainPage() {
 
     setShowTrainingProgressModal(false);
     if (activeTrainingRun.status === "completed") {
-      setLastCompletedTrainingTraceUrl(activeTrainingRun.trace_url || `/knowledge/trace/${activeTrainingRun.id}`);
       runAfterSuccess();
       setShowTrainingDoneModal(true);
     } else {
@@ -118,7 +116,6 @@ export default function DemoOnboardingTrainPage() {
       { kbUuid, files: [file] },
       {
         onSuccess: (run) => {
-          setLastCompletedTrainingTraceUrl(run.trace_url || `/knowledge/trace/${run.id}`);
           setActiveTrainingRunId(run.id);
           setShowTrainingProgressModal(true);
           setShowTrainModal(false);
@@ -146,7 +143,6 @@ export default function DemoOnboardingTrainPage() {
       },
       {
         onSuccess: (run) => {
-          setLastCompletedTrainingTraceUrl(run.trace_url || `/knowledge/trace/${run.id}`);
           setActiveTrainingRunId(run.id);
           setShowTrainingProgressModal(true);
           setShowTrainModal(false);
@@ -343,15 +339,6 @@ export default function DemoOnboardingTrainPage() {
           <div className="w-full max-w-sm rounded-xl bg-[var(--color-card)] border border-[var(--color-border)] p-5 text-center">
             <div className="text-base font-semibold text-[var(--color-foreground)]">A tanítás befejeződött.</div>
             <div className="mt-4 flex items-center justify-center gap-2">
-              {lastCompletedTrainingTraceUrl ? (
-                <button
-                  type="button"
-                  onClick={() => navigate(lastCompletedTrainingTraceUrl)}
-                  className="px-4 py-2 rounded border border-[var(--color-border)]"
-                >
-                  View Processing Trace
-                </button>
-              ) : null}
               <button
                 type="button"
                 onClick={onCloseTrainingDone}

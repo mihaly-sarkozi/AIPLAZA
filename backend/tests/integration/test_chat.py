@@ -128,6 +128,27 @@ def test_chat_source_download_returns_query_context_attachment(client_authentica
         app.dependency_overrides.pop(get_chat_service, None)
 
 
+def test_chat_context_download_returns_llm_context_attachment(client_authenticated: TestClient, mock_chat_service, app):
+    from apps.chat.dependencies import get_chat_service
+
+    mock_chat_service.download_answer_context.return_value = {
+        "filename": "aiplaza-llm-context-qr-1.txt",
+        "content_type": "text/plain; charset=utf-8",
+        "body": b"Question: Mi ujsag?\nContext sent to LLM:\nreszlet",
+        "corpus_uuid": "kb-1",
+    }
+    app.dependency_overrides[get_chat_service] = lambda: mock_chat_service
+    try:
+        r = client_authenticated.get("/api/chat/context/qr-1/download")
+        assert r.status_code == 200
+        assert r.headers["content-type"].startswith("text/plain")
+        assert "filename*=UTF-8''aiplaza-llm-context-qr-1.txt" in r.headers["content-disposition"]
+        assert b"Context sent to LLM" in r.content
+        mock_chat_service.download_answer_context.assert_called_once()
+    finally:
+        app.dependency_overrides.pop(get_chat_service, None)
+
+
 def test_chat_debug_true_returns_debug_payload(client_authenticated: TestClient, mock_chat_service, app):
     """POST /chat debug=true esetén a debug payload visszajön a válaszban."""
     from apps.chat.dependencies import get_chat_service

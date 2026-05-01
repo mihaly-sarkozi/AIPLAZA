@@ -80,7 +80,6 @@ class IngestRunResponse(BaseModel):
     completed_at: datetime | None = None
     updated_at: datetime
     metadata: dict[str, Any] = Field(default_factory=dict)
-    trace_url: str | None = None
     items: list[IngestItemResponse] = Field(default_factory=list)
     events: list[IngestEventResponse] = Field(default_factory=list)
 
@@ -300,6 +299,7 @@ class TraceSummaryResponse(BaseModel):
     mention_count: int = 0
     claim_count: int = 0
     space_time_frame_count: int = 0
+    semantic_block_count: int = 0
     local_entity_cluster_count: int = 0
     technical_entities: int = 0
     technical_memory_chunks: int = 0
@@ -399,6 +399,7 @@ class IngestRunTraceResponse(BaseModel):
     technical_entities: list[dict[str, Any]] = Field(default_factory=list)
     technical_memory_chunks: list[dict[str, Any]] = Field(default_factory=list)
     search_profiles: list[dict[str, Any]] = Field(default_factory=list)
+    semantic_blocks: list[dict[str, Any]] = Field(default_factory=list)
     candidate_selections: list[dict[str, Any]] = Field(default_factory=list)
     similarity_analyses: list[dict[str, Any]] = Field(default_factory=list)
     tension_analyses: list[dict[str, Any]] = Field(default_factory=list)
@@ -474,6 +475,17 @@ class SourceWithdrawalRequest(BaseModel):
 
 class SourceWithdrawalResponse(BaseModel):
     source_withdrawal_event: dict[str, Any] = Field(default_factory=dict)
+
+
+class SemanticBlockStatusRequest(BaseModel):
+    status: str = Field(..., pattern="^(draft|approved|rejected|withdrawn|outdated|disputed)$")
+
+
+class SemanticBlockStatusResponse(BaseModel):
+    block_id: str
+    status: str
+    interpretation_run_id: str
+    block: dict[str, Any] = Field(default_factory=dict)
 
 
 class LineageResponse(BaseModel):
@@ -609,6 +621,8 @@ __all__ = [
     "SentenceResponse",
     "SentenceInterpretationDetailResponse",
     "SentenceInterpretationResponse",
+    "SemanticBlockStatusRequest",
+    "SemanticBlockStatusResponse",
     "SourceWithdrawalRequest",
     "SourceWithdrawalResponse",
 ]

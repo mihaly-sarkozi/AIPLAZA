@@ -77,6 +77,55 @@ def test_tension_different_time_is_temporal_change() -> None:
     assert analysis.tension_band == "low"
 
 
+def test_temporal_change_is_not_direct_contradiction() -> None:
+    profile_a = _profile(
+        "billing system",
+        "software",
+        relation_predicates=["uses"],
+        relation_objects=["manual invoicing"],
+        time_values=["2023"],
+        has_current=False,
+    )
+    profile_b = _profile(
+        "billing system",
+        "software",
+        relation_predicates=["uses"],
+        relation_objects=["Stripe"],
+        time_values=["2025"],
+        has_current=False,
+    )
+
+    analysis = TensionEngineV1().analyze(profile_a, profile_b)
+
+    assert analysis.tension_type == "temporal_change"
+    assert analysis.conflict_type == "temporal_change"
+    assert analysis.conflict_type != "direct_contradiction"
+    assert analysis.conflicting_claim_ids == []
+
+
+def test_direct_negated_use_is_direct_contradiction() -> None:
+    profile_a = _profile(
+        "billing system",
+        "software",
+        relation_predicates=["használ"],
+        relation_objects=["Stripe"],
+        has_current=True,
+    )
+    profile_b = _profile(
+        "billing system",
+        "software",
+        relation_predicates=["nem használ"],
+        relation_objects=["Stripe"],
+        has_current=True,
+    )
+
+    analysis = TensionEngineV1().analyze(profile_a, profile_b)
+
+    assert analysis.tension_type == "contradiction"
+    assert analysis.conflict_type == "direct_contradiction"
+    assert analysis.conflicting_claim_ids
+
+
 def test_tension_same_profile_is_duplicate() -> None:
     profile_a = _profile("Sarah Miller", "person", keywords=["sarah", "miller", "compliance"])
     profile_b = _profile("Sarah Miller", "person", keywords=["sarah", "miller", "compliance"])

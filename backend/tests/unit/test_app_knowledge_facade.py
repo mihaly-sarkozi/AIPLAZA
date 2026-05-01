@@ -15,6 +15,7 @@ from apps.knowledge.domain.index_build import IndexBuild
 from apps.knowledge.domain.interpretation_run import InterpretationRun
 from apps.knowledge.domain.parser_run import ParserRun
 from apps.knowledge.domain.sentence import Sentence
+from apps.knowledge.domain.source import Source
 from apps.knowledge.domain.retrieval_profile import DEFAULT_RETRIEVAL_PROFILE
 from apps.knowledge.service.knowledge_facade import KnowledgeFacade
 from apps.knowledge.service.runtime_store import (
@@ -30,6 +31,49 @@ from apps.knowledge.service.runtime_store import (
 from shared.object_storage.models import StoredObjectData, StoredObjectRef
 
 pytestmark = [pytest.mark.unit, pytest.mark.must_pass]
+
+
+def test_select_semantic_blocks_boosts_overview_block_for_what_does_system_do_query() -> None:
+    blocks = [
+        {
+            "id": "single-claim",
+            "source_id": "src-1",
+            "claim_ids": ["c-1"],
+            "primary_subject": "SK MAX rendszer számos alapbeállítást",
+            "summary": "SK MAX rendszer számos alapbeállítást",
+            "text": "Az SK MAX rendszerben számos alapbeállítást kell megadnod.",
+            "sentence_ids": ["s-20"],
+            "metadata": {"sentence_count": 1},
+            "order_start": 20,
+        },
+        {
+            "id": "overview",
+            "source_id": "src-1",
+            "claim_ids": ["c-5", "c-6"],
+            "primary_subject": "SK MAX rendszer",
+            "summary": "SK MAX rendszer áttekintés",
+            "text": (
+                "Az SK MAX rendszer kezeli a szerződéseket, támogatja az ügyféladatok kezelését, "
+                "automatikusan felismer eseteket, és segíti a jutalékozási folyamatokat."
+            ),
+            "sentence_ids": [f"s-{idx}" for idx in range(5, 14)],
+            "metadata": {"sentence_count": 9},
+            "order_start": 5,
+        },
+    ]
+
+    selected = KnowledgeFacade._select_semantic_blocks_for_query(
+        semantic_blocks=blocks,
+        matched_claims=[{"claim_id": "c-1"}],
+        matched_chunks=[{"source_ids": ["src-1"]}],
+        query_profile={"expected_answer_type": "object", "detected_entities": ["sk", "max", "rendszer"]},
+        query="mit csinál az sk max rendszer?",
+        max_blocks=2,
+    )
+
+    assert selected[0]["id"] == "overview"
+    assert selected[0]["match_reason"]["exact_query_phrase"] is True
+    assert selected[0]["match_reason"]["broad_function_query"] is True
 
 
 class _FailingRetrievalEngine:
@@ -1828,6 +1872,7 @@ async def test_retrieve_synthesizes_status_answer_with_historical_context() -> N
     assert query_run.metadata["query_debug"]["matched_claims_count"] == 2
     assert query_run.metadata["query_debug"]["synthesis_called"] is True
     assert query_run.metadata["query_debug"]["answer_text"] == query_run.metadata["answer_text"]
+    assert "temporal_answer_context" not in query_run.metadata
 
 
 @pytest.mark.anyio

@@ -154,16 +154,36 @@ class SimpleRetrievalEngine:
     ) -> list[dict[str, Any]]:
         hits: list[dict[str, Any]] = []
         payload_filter = _payload_filter_from_query_profile(query_profile or {})
+        semantic_block_filter = _semantic_block_payload_filter_from_query_profile(query_profile or {})
         for build in builds:
             vector_index = self._vector_index_factory()
-            rows = await vector_index.search_points(
-                collection=build.collection_name,
-                query=query,
-                limit=retrieval_profile.top_k,
-                point_types=["retrieval_chunk"],
-                payload_filter=payload_filter,
-                lexical_query=query,
-            )
+            rows: list[dict[str, Any]] = []
+            if semantic_block_filter:
+                rows = await vector_index.search_points(
+                    collection=build.collection_name,
+                    query=query,
+                    limit=retrieval_profile.top_k,
+                    point_types=["semantic_block"],
+                    payload_filter=semantic_block_filter,
+                    lexical_query=query,
+                )
+            if not rows:
+                rows = await vector_index.search_points(
+                    collection=build.collection_name,
+                    query=query,
+                    limit=retrieval_profile.top_k,
+                    point_types=["semantic_block"],
+                    lexical_query=query,
+                )
+            if not rows:
+                rows = await vector_index.search_points(
+                    collection=build.collection_name,
+                    query=query,
+                    limit=retrieval_profile.top_k,
+                    point_types=["retrieval_chunk"],
+                    payload_filter=payload_filter,
+                    lexical_query=query,
+                )
             if not rows and payload_filter:
                 rows = await vector_index.search_points(
                     collection=build.collection_name,
@@ -180,6 +200,7 @@ class SimpleRetrievalEngine:
                     point_types=["sentence"],
                     lexical_query=query,
                 )
+            rows = _apply_block_quality_scores(rows)
             for row in rows:
                 payload = dict(row.get("payload") or {})
                 row["build_id"] = build.id
@@ -201,6 +222,46 @@ def _payload_filter_from_query_profile(query_profile: dict[str, Any]) -> dict[st
     if time_filter:
         payload_filter["time_modes"] = [time_filter]
     return payload_filter
+
+
+def _semantic_block_payload_filter_from_query_profile(query_profile: dict[str, Any]) -> dict[str, Any]:
+    payload_filter: dict[str, Any] = {}
+    time_filter = str(query_profile.get("time_filter") or "").strip()
+    if time_filter:
+        payload_filter["time_modes"] = [time_filter]
+    return payload_filter
+
+
+def _apply_block_quality_scores(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    adjusted: list[dict[str, Any]] = []
+    for row in rows:
+        payload = dict(row.get("payload") or {})
+        if payload.get("point_type") != "semantic_block":
+            adjusted.append(row)
+            continue
+        metadata = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}
+        status = str(payload.get("block_status") or metadata.get("block_status") or "").strip().lower()
+        quality = metadata.get("block_quality") if isinstance(metadata.get("block_quality"), dict) else {}
+        active = bool(quality.get("active_for_retrieval", status not in {"rejected", "withdrawn"}))
+        if status in {"rejected", "withdrawn"} or not active:
+            continue
+        retrieval_weight = float(payload.get("retrieval_weight") or metadata.get("retrieval_weight") or quality.get("retrieval_weight") or 1.0)
+        base_score = float(row.get("fusion_score") or row.get("score") or 0.0)
+        adjusted_score = max(0.0, min(1.0, base_score * max(0.0, retrieval_weight)))
+        next_row = dict(row)
+        next_payload = dict(payload)
+        next_payload["quality_score_explanation"] = {
+            "base_score": round(base_score, 4),
+            "retrieval_weight": round(retrieval_weight, 4),
+            "adjusted_score": round(adjusted_score, 4),
+            "block_status": status or "draft",
+            "source_reliability": payload.get("source_reliability") or metadata.get("source_reliability"),
+            "conflict_count": payload.get("conflict_count") or metadata.get("conflict_count") or 0,
+        }
+        next_row["payload"] = next_payload
+        next_row["fusion_score"] = adjusted_score
+        adjusted.append(next_row)
+    return sorted(adjusted, key=lambda item: float(item.get("fusion_score") or item.get("score") or 0.0), reverse=True)
 
 
 class SimpleContextBuilder:

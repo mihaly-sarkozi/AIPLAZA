@@ -101,7 +101,7 @@ class ClaimExtractorV1:
         }
 
     def debug_skip(self, sentence: Sentence, reason: str | None) -> None:
-        logger.info(
+        logger.debug(
             "[CLAIM EXTRACTOR SKIP] sentence_id=%s reason=%s text=%.200s",
             getattr(sentence, "id", ""),
             reason,

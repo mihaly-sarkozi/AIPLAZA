@@ -46,38 +46,6 @@ export function getModule(): FrontendModuleDefinition {
         loader: () => import("@frontend/features/knowledge-base/pages/KBIngestRunDetail"),
       },
       {
-        key: "knowledge.trace",
-        path: "/knowledge/trace/:runId",
-        layout: "main",
-        requiresAuth: true,
-        requiredPermission: "knowledge.write",
-        loader: () => import("@frontend/features/knowledge-base/pages/KnowledgeTracePage"),
-      },
-      {
-        key: "knowledge.traceLatest",
-        path: "/knowledge/trace/latest",
-        layout: "main",
-        requiresAuth: true,
-        requiredPermission: "knowledge.write",
-        loader: () => import("@frontend/features/knowledge-base/pages/KnowledgeLatestTracePage"),
-      },
-      {
-        key: "knowledge.pipelineHealth",
-        path: "/knowledge/pipeline-health/:runId",
-        layout: "main",
-        requiresAuth: true,
-        requiredPermission: "knowledge.write",
-        loader: () => import("@frontend/features/knowledge-base/pages/PipelineHealthTracePage"),
-      },
-      {
-        key: "knowledge.pipelineHealthLatest",
-        path: "/knowledge/pipeline-health/latest",
-        layout: "main",
-        requiresAuth: true,
-        requiredPermission: "knowledge.write",
-        loader: () => import("@frontend/features/knowledge-base/pages/PipelineHealthLatestTracePage"),
-      },
-      {
         key: "knowledge.onboardingTrain",
         path: "/onboarding/train",
         layout: "main",
@@ -102,8 +70,6 @@ export function getModule(): FrontendModuleDefinition {
       void import("@frontend/features/knowledge-base/pages/KBEdit");
       void import("@frontend/features/knowledge-base/pages/KBIngest");
       void import("@frontend/features/knowledge-base/pages/KBIngestRunDetail");
-      void import("@frontend/features/knowledge-base/pages/KnowledgeTracePage");
-      void import("@frontend/features/knowledge-base/pages/PipelineHealthTracePage");
     },
   };
 }

@@ -407,7 +407,7 @@ class SynthesisEngineV0:
             "historical_facts_count": len(historical_claims),
             "raw_matched_claims": matched_claims,
         }
-        logger.info("knowledge.synthesis.debug", extra={"knowledge_synthesis": synthesis_debug})
+        logger.debug("knowledge.synthesis.debug", extra={"knowledge_synthesis": synthesis_debug})
         citations = _citation_payload(matched_chunks, matched_claims)
         synthesis_debug["evidence"] = citations["evidence_debug"]
 

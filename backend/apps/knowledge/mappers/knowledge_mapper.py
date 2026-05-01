@@ -194,7 +194,6 @@ def build_ingest_run_response(run: IngestRun, *, items: list[IngestItem] | None 
         "completed_at": run.completed_at,
         "updated_at": run.updated_at,
         "metadata": run.metadata,
-        "trace_url": f"/knowledge/trace/{run.id}",
         "items": [build_ingest_item_response(item) for item in (items or [])],
         "events": [build_ingest_event_response(event) for event in (events or [])],
     }

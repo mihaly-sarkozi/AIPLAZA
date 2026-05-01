@@ -21,6 +21,10 @@ _CONTRADICTION_PAIRS = {
     frozenset({fold_text("enabled"), fold_text("disabled")}),
     frozenset({fold_text("required"), fold_text("not required")}),
     frozenset({fold_text("kötelező"), fold_text("nem kötelező")}),
+    frozenset({fold_text("uses"), fold_text("does not use")}),
+    frozenset({fold_text("uses"), fold_text("not uses")}),
+    frozenset({fold_text("használ"), fold_text("nem használ")}),
+    frozenset({fold_text("használja"), fold_text("nem használja")}),
 }
 _STATE_TOKENS = {
     fold_text("active"),
@@ -262,6 +266,22 @@ def _band(score: float) -> str:
     if score >= 0.4:
         return "medium"
     return "low"
+
+
+def _conflict_type_for_tension(tension_type: str, reasons: list[str]) -> str:
+    normalized = fold_text(tension_type)
+    reason_text = " ".join(reasons)
+    if normalized in {"contradiction", "hard_conflict"}:
+        return "direct_contradiction"
+    if normalized == "temporal_change":
+        return "temporal_change"
+    if normalized == "soft_conflict":
+        return "refinement"
+    if "source_disagreement" in reason_text:
+        return "source_disagreement"
+    if "scope_difference" in reason_text:
+        return "scope_difference"
+    return "unknown"
 
 
 class TensionEngineV1:
@@ -544,6 +564,7 @@ class TensionEngineV1:
             tension_score=clean_score,
             tension_band=_band(clean_score),
             tension_type=tension_type,
+            conflict_type=_conflict_type_for_tension(tension_type, [reason]),
             tension_reason=reason,
             tension_reasons=[reason],
             conflicting_claim_ids=conflicting_claim_ids,
@@ -576,6 +597,7 @@ class TensionEngineV1:
             tension_score=clean_score,
             tension_band=_band(clean_score),
             tension_type=tension_type,
+            conflict_type=_conflict_type_for_tension(tension_type, reasons),
             tension_reason=reasons[0] if reasons else "",
             tension_reasons=reasons,
             conflicting_claim_ids=conflicting_claim_ids or [],

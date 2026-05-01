@@ -29,6 +29,8 @@ from apps.knowledge.api.schemas import (
     RetrievalRequest,
     SentenceInterpretationDetailResponse,
     SentenceResponse,
+    SemanticBlockStatusRequest,
+    SemanticBlockStatusResponse,
     SourceContentResponse,
     SourceCreateTextRequest,
     SourceResponse,
@@ -374,25 +376,6 @@ def get_ingest_run_trace(
     return trace
 
 
-@router.get("/knowledge/dev/latest-trace", response_model=IngestRunTraceResponse)
-def get_latest_ingest_run_trace(
-    tenant: KnowledgeTenantDep,
-    facade: KnowledgeFacadeDep,
-    current_user: CurrentKnowledgeUserDep,
-    log_level: str = Query(default="SUMMARY", pattern="^(SUMMARY|INSPECT|FULL_TRACE|summary|inspect|full_trace)$"),
-    debug: bool = Query(default=False),
-):
-    trace = facade.get_latest_ingest_run_trace(log_level=log_level, debug=debug)
-    if trace is None:
-        raise HTTPException(status_code=404, detail="No ingest run trace found")
-    run = facade.get_ingest_run(trace["run_id"])
-    if run is None:
-        raise HTTPException(status_code=404, detail="Ingest run not found")
-    if not facade.user_can_train(run.corpus_uuid, current_user.id, current_user):
-        raise HTTPException(status_code=403, detail="No permission to view this ingest run")
-    return trace
-
-
 @router.get("/knowledge/ingest/items/{item_id}/raw")
 def get_ingest_item_raw(
     item_id: str,
@@ -613,6 +596,28 @@ def apply_knowledge_feedback(
             optional_new_claim=body.optional_new_claim,
             user_input=body.user_input,
             user_id=current_user.id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.patch("/knowledge/corpora/{corpus_uuid}/semantic-blocks/{block_id}/status", response_model=SemanticBlockStatusResponse)
+def update_semantic_block_status(
+    corpus_uuid: str,
+    block_id: str,
+    body: SemanticBlockStatusRequest,
+    tenant: KnowledgeTenantDep,
+    facade: KnowledgeFacadeDep,
+    current_user: CurrentKnowledgeUserDep,
+):
+    if not facade.user_can_train(corpus_uuid, current_user.id, current_user):
+        raise HTTPException(status_code=403, detail="No permission to update semantic blocks in this corpus")
+    try:
+        return facade.update_semantic_block_status(
+            corpus_uuid=corpus_uuid,
+            block_id=block_id,
+            status=body.status,
+            updated_by=current_user.id,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

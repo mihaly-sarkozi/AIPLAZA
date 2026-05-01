@@ -11,6 +11,14 @@ def _utcnow() -> datetime:
 
 
 TENSION_ENGINE_VERSION = "tension_engine_v1"
+CONFLICT_TYPES = {
+    "direct_contradiction",
+    "temporal_change",
+    "source_disagreement",
+    "refinement",
+    "scope_difference",
+    "unknown",
+}
 
 
 @dataclass(frozen=True)
@@ -35,6 +43,7 @@ class TensionAnalysis:
     tension_score: float = 0.0
     tension_band: str = "none"
     tension_type: str = "unrelated"
+    conflict_type: str = "unknown"
     tension_reason: str = ""
     tension_reasons: list[str] = field(default_factory=list)
     conflicting_claim_ids: list[str] = field(default_factory=list)
@@ -61,6 +70,7 @@ def tension_analysis_to_json_dict(analysis: TensionAnalysis) -> dict[str, Any]:
         "tension_score": analysis.tension_score,
         "tension_band": analysis.tension_band,
         "tension_type": analysis.tension_type,
+        "conflict_type": analysis.conflict_type,
         "tension_reason": analysis.tension_reason,
         "tension_reasons": list(analysis.tension_reasons),
         "conflicting_claim_ids": list(analysis.conflicting_claim_ids),
@@ -72,6 +82,7 @@ def tension_analysis_to_json_dict(analysis: TensionAnalysis) -> dict[str, Any]:
 
 __all__ = [
     "TENSION_ENGINE_VERSION",
+    "CONFLICT_TYPES",
     "TensionAnalysis",
     "tension_analysis_to_json_dict",
 ]

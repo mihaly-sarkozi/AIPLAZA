@@ -32,3 +32,4 @@ class AskResponse(BaseModel):
     query_profile: dict[str, Any] = Field(default_factory=dict)
     matched_chunks: list[dict[str, Any]] = Field(default_factory=list)
     claims: list[dict[str, Any]] = Field(default_factory=list)
+    context_blocks: list[dict[str, Any]] = Field(default_factory=list)

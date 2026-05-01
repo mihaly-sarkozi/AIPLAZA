@@ -258,7 +258,7 @@ def test_chat_with_sources_debug_payload_handles_empty_context():
     assert model.completions.calls == 0
 
 
-def test_chat_with_sources_returns_synthesized_answer_without_llm_call():
+def test_chat_with_sources_rewrites_weak_synthesized_answer_with_context_llm():
     model = _DummyOpenAI()
     svc = ChatService(
         chat_model=model,
@@ -278,11 +278,11 @@ def test_chat_with_sources_returns_synthesized_answer_without_llm_call():
         )
     )
 
-    assert result["answer"] == "The London office is currently inactive. Historically, it was inactive in 2024."
-    assert result["answer_source"] == "knowledge"
+    assert result["answer"] == "Teszt válasz"
+    assert result["answer_source"] == "knowledge_llm"
     assert result["sources"][0]["point_id"] == "p-1"
     assert result["debug"]["source_chunk_count"] == 1
-    assert model.completions.calls == 0
+    assert model.completions.calls == 1
 
 
 def test_chat_with_sources_uses_build_chat_context_facade_adapter():
@@ -322,6 +322,56 @@ def test_chat_with_sources_uses_build_chat_context_facade_adapter():
     assert result["sources"][0]["source_id"] == "src-london"
     assert result["sources"][0]["source_type"] == "text"
     assert model.completions.calls == 0
+
+
+def test_chat_with_sources_rewrites_english_direct_answer_for_hungarian_question():
+    model = _DummyOpenAI()
+    svc = ChatService(
+        chat_model=model,
+        kb_service=_BuildChatContextKbService(),
+        retrieval_service=None,
+        query_parser=None,
+        context_builder=None,
+    )
+
+    result = asyncio.run(
+        svc.chat_with_sources(
+            question="Mi a londoni iroda státusza?",
+            user_id=1,
+            user_role="owner",
+            kb_uuid="kb-1",
+            debug=True,
+        )
+    )
+
+    assert result["answer"] == "Teszt válasz"
+    assert result["answer_source"] == "knowledge_llm"
+    assert model.completions.calls == 1
+
+
+def test_build_messages_requires_answer_language_to_match_question():
+    messages = ChatService._build_messages(
+        question="Mi a londoni iroda státusza?",
+        context_text="Current facts:\n- The London office is inactive.",
+    )
+
+    assert "A válasz nyelve mindig egyezzen meg" in messages[1]["content"]
+    assert "magyar kérdésre magyarul" in messages[1]["content"]
+
+
+def test_build_messages_includes_conversation_history_before_knowledge_context():
+    messages = ChatService._build_messages(
+        question="És mit tud még?",
+        context_text="Knowledge block: SK MAX rendszer kezeli a szerződéseket.",
+        conversation_history=[
+            {"role": "user", "content": "Mit csinál az SK MAX rendszer?"},
+            {"role": "assistant", "content": "Az SK MAX szerződéseket kezel."},
+        ],
+    )
+
+    assert "Beszélgetési előzmény" in messages[1]["content"]
+    assert "Mit csinál az SK MAX rendszer?" in messages[1]["content"]
+    assert "Knowledge block" in messages[2]["content"]
 
 
 def test_chat_sources_skip_vector_profile_rows_without_downloadable_source_id():
@@ -382,6 +432,27 @@ def test_chat_sources_fallback_to_cited_source_ids_when_source_chunks_are_missin
     assert sources[0]["kb_uuid"] == "kb-1"
     assert sources[0]["source_id"] == "source-real"
     assert sources[0]["title"] == "Forrás source-r"
+
+
+def test_chat_sources_fallback_to_context_block_source_ids_when_citations_are_missing():
+    svc = ChatService(
+        chat_model=_DummyOpenAI(),
+        kb_service=None,
+        retrieval_service=None,
+        query_parser=None,
+        context_builder=None,
+    )
+
+    sources = svc._build_sources_from_packet(
+        {
+            "kb_uuid": "kb-1",
+            "context_blocks": [{"block_id": "block-2", "source_id": "source-second-doc"}],
+        }
+    )
+
+    assert len(sources) == 1
+    assert sources[0]["kb_uuid"] == "kb-1"
+    assert sources[0]["source_id"] == "source-second-doc"
 
 
 def test_chat_with_sources_reports_missing_ready_index_build():

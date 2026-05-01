@@ -419,6 +419,32 @@ export type IngestRunTraceRetrievalChunk = {
   [key: string]: unknown;
 };
 
+export type IngestRunTraceSemanticBlock = {
+  id?: string;
+  source_id?: string;
+  document_id?: string;
+  paragraph_ids?: string[];
+  sentence_ids?: string[];
+  claim_ids?: string[];
+  order_start?: number;
+  order_end?: number;
+  primary_subject?: string;
+  subject_key?: string;
+  primary_space?: string;
+  space_key?: string;
+  primary_time?: string;
+  time_key?: string;
+  topic_key?: string;
+  text?: string;
+  summary?: string;
+  predicates?: string[];
+  space_values?: string[];
+  time_values?: string[];
+  confidence?: number;
+  metadata?: Record<string, unknown>;
+  [key: string]: unknown;
+};
+
 export type IngestRunTrace = {
   run_id: string;
   source_id?: string | null;
@@ -431,6 +457,7 @@ export type IngestRunTrace = {
     mention_count: number;
     claim_count: number;
     space_time_frame_count: number;
+    semantic_block_count?: number;
     local_entity_cluster_count?: number;
     local_entity_count?: number;
     technical_entities?: number;
@@ -475,6 +502,7 @@ export type IngestRunTrace = {
   similarity_analyses?: IngestRunTraceSimilarityAnalysis[];
   tension_analyses?: IngestRunTraceTensionAnalysis[];
   retrieval_chunks?: IngestRunTraceRetrievalChunk[];
+  semantic_blocks?: IngestRunTraceSemanticBlock[];
   local_entity_clusters?: Record<string, unknown>[];
   local_resolver_trace?: Record<string, unknown> | null;
 };
@@ -517,7 +545,6 @@ export type IngestRun = {
   completed_at?: string | null;
   updated_at: string;
   metadata: Record<string, unknown>;
-  trace_url?: string | null;
   items: IngestItem[];
   events: IngestEventItem[];
 };
@@ -657,14 +684,13 @@ export async function getIngestRunTrace(runId: string, options?: KnowledgeTraceO
   return res.data as IngestRunTrace;
 }
 
-export async function getKnowledgeTrace(runId: string, options?: KnowledgeTraceOptions): Promise<IngestRunTrace> {
-  const res = await api.get(`/knowledge/dev/ingest-runs/${runId}/trace`, { params: traceParams(options) });
-  return res.data as IngestRunTrace;
-}
-
-export async function getLatestKnowledgeTrace(options?: KnowledgeTraceOptions): Promise<IngestRunTrace> {
-  const res = await api.get("/knowledge/dev/latest-trace", { params: traceParams(options) });
-  return res.data as IngestRunTrace;
+export async function updateSemanticBlockStatus(
+  kbUuid: string,
+  blockId: string,
+  status: "draft" | "approved" | "rejected" | "withdrawn" | "outdated" | "disputed"
+): Promise<{ block_id: string; status: string; interpretation_run_id: string; block: IngestRunTraceSemanticBlock }> {
+  const res = await api.patch(`/knowledge/corpora/${kbUuid}/semantic-blocks/${blockId}/status`, { status });
+  return res.data as { block_id: string; status: string; interpretation_run_id: string; block: IngestRunTraceSemanticBlock };
 }
 
 export async function listIngestItemParagraphs(itemId: string): Promise<ParagraphItem[]> {

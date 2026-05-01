@@ -36,7 +36,7 @@ def extract_claims_v1(sentence: Sentence, mentions: list[Mention], *, language: 
         filtered_predicates.append(predicate_match)
     predicates = filtered_predicates
     if not predicates:
-        logger.info("[CLAIM GATE] no predicate, no claim generated")
+        logger.debug("[CLAIM GATE] no predicate, no claim generated")
         return []
 
     base_subject = fallback_subject(text, predicates[0].start, language=language)

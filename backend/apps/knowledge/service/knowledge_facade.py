@@ -33,6 +33,7 @@ from apps.knowledge.domain.query_profile import query_profile_to_json_dict
 from apps.knowledge.domain.retrieval_profile import DEFAULT_RETRIEVAL_PROFILE, RetrievalProfile
 from apps.knowledge.domain.sentence import Sentence
 from apps.knowledge.domain.sentence_interpretation import SentenceInterpretation
+from apps.knowledge.domain.semantic_block import semantic_block_to_json_dict
 from apps.knowledge.domain.source import Source
 from apps.knowledge.domain.space_time_frame import SpaceTimeFrame
 from apps.knowledge.service.claim_split import ClaimFineSplitter
@@ -47,6 +48,7 @@ from apps.knowledge.service.mention_extractor import MentionExtractor, debug_pri
 from apps.knowledge.service.local_resolver_v1 import LocalResolverV1, attach_local_resolver_metadata
 from apps.knowledge.service.space_time_extractor_v1 import SpaceTimeExtractorV1
 from apps.knowledge.service.subject_context_resolver_v1 import SubjectContextResolverV1
+from apps.knowledge.service.semantic_block_builder_v1 import SemanticBlockBuilderV1
 from apps.knowledge.service.technical_entity_builder_v1 import TechnicalEntityBuilderV1
 from apps.knowledge.domain.technical_entity import technical_entity_to_json_dict
 from apps.knowledge.service.technical_memory_chunk_builder_v1 import TechnicalMemoryChunkBuilderV1
@@ -64,6 +66,9 @@ from apps.knowledge.service.tension_engine_v1 import TensionEngineV1
 from apps.knowledge.domain.tension_analysis import tension_analysis_to_json_dict
 from apps.knowledge.service.retrieval_chunk_builder_v0 import RetrievalChunkBuilderV0
 from apps.knowledge.service.retrieval_chunk_index_v0 import build_retrieval_chunk_index_rows
+from apps.knowledge.service.semantic_block_index_v0 import build_semantic_block_index_rows
+from apps.knowledge.service.semantic_block_quality_v0 import enrich_semantic_blocks_with_quality
+from apps.knowledge.service.answer_verifier import verify_answer
 from apps.knowledge.service.query_resolver_v0 import QueryResolverV0
 from apps.knowledge.service.query_aware_retrieval_v0 import QueryAwareRetrievalV0
 from apps.knowledge.service.explanation_builder_v0 import ExplanationBuilderV0
@@ -153,6 +158,18 @@ def _truncate_diagnostic_text(value: str | None, *, limit: int = 220) -> str:
     if len(text) <= limit:
         return text
     return text[: max(0, limit - 3)].rstrip() + "..."
+
+
+def _json_safe(value: Any) -> Any:
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, dict):
+        return {str(key): _json_safe(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_json_safe(item) for item in value]
+    if isinstance(value, tuple | set):
+        return [_json_safe(item) for item in value]
+    return value
 
 
 def _empty_claim_quality_summary() -> dict[str, Any]:
@@ -663,6 +680,201 @@ class KnowledgeFacade:
                 chunks_by_profile_id[profile_id] = dict(item)
         return list(chunks_by_profile_id.values())
 
+    def _load_existing_semantic_blocks(
+        self,
+        *,
+        corpus_uuid: str,
+        exclude_interpretation_run_id: str | None,
+        limit: int = 20,
+    ) -> list[dict[str, Any]]:
+        if self._interpretation_run_store is None:
+            return []
+        list_for_corpus = getattr(self._interpretation_run_store, "list_for_corpus", None)
+        if not callable(list_for_corpus):
+            return []
+        try:
+            runs = list_for_corpus(corpus_uuid, limit=limit)
+        except ProgrammingError as exc:
+            if self._is_missing_table_error(exc, "knowledge_interpretation_runs"):
+                return []
+            raise
+        blocks_by_id: dict[str, dict[str, Any]] = {}
+        for previous_run in reversed(runs):
+            if str(previous_run.id) == str(exclude_interpretation_run_id or ""):
+                continue
+            if previous_run.status != "completed":
+                continue
+            metadata = dict(previous_run.metadata or {})
+            for item in metadata.get("semantic_blocks") or []:
+                if not isinstance(item, dict):
+                    continue
+                block_id = str(item.get("id") or "")
+                if not block_id:
+                    continue
+                blocks_by_id[block_id] = dict(item)
+        return list(blocks_by_id.values())
+
+    @staticmethod
+    def _semantic_block_search_text(block: dict[str, Any]) -> str:
+        parts = [
+            block.get("summary"),
+            block.get("primary_subject"),
+            block.get("primary_space"),
+            block.get("primary_time"),
+            block.get("text"),
+            " ".join(str(item or "") for item in block.get("predicates") or []),
+            " ".join(str(item or "") for item in block.get("space_values") or []),
+            " ".join(str(item or "") for item in block.get("time_values") or []),
+        ]
+        return fold_text(" ".join(str(part or "") for part in parts))
+
+    @staticmethod
+    def _query_terms_for_blocks(query_profile: dict[str, Any] | None, query: str | None) -> set[str]:
+        values: list[str] = [str(query or "")]
+        profile = dict(query_profile or {})
+        for key in ("query", "subject", "object", "expected_answer_type", "temporal_scope", "intent"):
+            values.append(str(profile.get(key) or ""))
+        for key in ("detected_entities", "keywords", "entity_keys", "space_values", "time_values"):
+            raw = profile.get(key)
+            if isinstance(raw, list):
+                values.extend(str(item or "") for item in raw)
+        terms: set[str] = set()
+        stopwords = {"hogy", "mert", "amikor", "mikor", "mit", "milyen", "csinal", "csinál", "az", "egy", "the", "and"}
+        for value in values:
+            for token in fold_text(str(value or "")).replace("_", " ").split():
+                token = token.strip(".,:;!?()[]{}\"'")
+                if len(token) >= 2 and token not in stopwords:
+                    terms.add(token)
+        return terms
+
+    @staticmethod
+    def _query_phrase_for_blocks(query: str | None) -> str:
+        stopwords = {"a", "az", "egy", "mit", "miket", "milyen", "hogyan", "hogy", "csinal", "csinál", "rendszer?"}
+        tokens: list[str] = []
+        for token in fold_text(str(query or "")).replace("_", " ").split():
+            cleaned = token.strip(".,:;!?()[]{}\"'")
+            if cleaned and cleaned not in stopwords:
+                tokens.append(cleaned)
+        return " ".join(tokens)
+
+    @staticmethod
+    def _is_broad_function_query(query: str | None, query_profile: dict[str, Any] | None) -> bool:
+        text = fold_text(str(query or ""))
+        profile = dict(query_profile or {})
+        expected = fold_text(str(profile.get("expected_answer_type") or ""))
+        return "mit csinal" in text or "mire valo" in text or expected in {"object", "summary"}
+
+    @staticmethod
+    def _select_semantic_blocks_for_query(
+        *,
+        semantic_blocks: list[dict[str, Any]],
+        matched_claims: list[dict[str, Any]],
+        matched_chunks: list[dict[str, Any]],
+        query_profile: dict[str, Any] | None = None,
+        query: str | None = None,
+        max_blocks: int = 4,
+    ) -> list[dict[str, Any]]:
+        claim_ids = {
+            str(claim.get("claim_id") or "").strip()
+            for claim in matched_claims
+            if str(claim.get("claim_id") or "").strip()
+        }
+        profile_source_ids = {
+            str(source_id or "").strip()
+            for chunk in matched_chunks
+            for source_id in (chunk.get("source_ids") or [])
+            if str(source_id or "").strip()
+        }
+        query_terms = KnowledgeFacade._query_terms_for_blocks(query_profile, query)
+        query_phrase = KnowledgeFacade._query_phrase_for_blocks(query)
+        broad_function_query = KnowledgeFacade._is_broad_function_query(query, query_profile)
+        scored: list[tuple[float, dict[str, Any]]] = []
+        for block in semantic_blocks:
+            block_status = str(block.get("block_status") or (block.get("metadata") or {}).get("block_status") or "draft").lower()
+            if block_status in {"rejected", "withdrawn"}:
+                continue
+            score = 0.0
+            block_claim_ids = {str(item or "").strip() for item in block.get("claim_ids") or [] if str(item or "").strip()}
+            if claim_ids and block_claim_ids.intersection(claim_ids):
+                score += 3.0
+            source_id = str(block.get("source_id") or "").strip()
+            if source_id and source_id in profile_source_ids:
+                score += 0.25
+            search_text = KnowledgeFacade._semantic_block_search_text(block)
+            sentence_count = int((block.get("metadata") or {}).get("sentence_count") or len(block.get("sentence_ids") or []) or 0)
+            exact_phrase_match = bool(query_phrase and len(query_phrase) >= 4 and query_phrase in search_text)
+            if exact_phrase_match:
+                score += 4.0
+            if query_terms:
+                matched_terms = {term for term in query_terms if term in search_text}
+                coverage = len(matched_terms) / max(1, len(query_terms))
+                score += min(4.0, len(matched_terms) * 0.8)
+                if coverage >= 0.75:
+                    score += 1.0
+            else:
+                matched_terms = set()
+            if broad_function_query and exact_phrase_match and sentence_count >= 3:
+                score += 4.0
+            elif broad_function_query and sentence_count >= 3 and query_terms and len(matched_terms) >= 2:
+                score += 2.0
+            if broad_function_query and sentence_count <= 1 and not exact_phrase_match:
+                score -= 0.5
+            if score > 0:
+                retrieval_weight = float(block.get("retrieval_weight") or (block.get("metadata") or {}).get("retrieval_weight") or 1.0)
+                quality_adjusted_score = score * max(0.0, retrieval_weight)
+                enriched = dict(block)
+                enriched["match_score"] = round(quality_adjusted_score, 4)
+                enriched["match_reason"] = {
+                    "claim_overlap": bool(claim_ids and block_claim_ids.intersection(claim_ids)),
+                    "source_overlap": bool(source_id and source_id in profile_source_ids),
+                    "exact_query_phrase": exact_phrase_match,
+                    "broad_function_query": broad_function_query,
+                    "sentence_count": sentence_count,
+                    "query_terms": sorted(matched_terms)[:12],
+                    "base_score": round(score, 4),
+                    "retrieval_weight": round(retrieval_weight, 4),
+                    "block_status": block_status,
+                    "source_reliability": block.get("source_reliability") or (block.get("metadata") or {}).get("source_reliability"),
+                    "conflict_count": block.get("conflict_count") or (block.get("metadata") or {}).get("conflict_count") or 0,
+                }
+                scored.append((quality_adjusted_score, enriched))
+        deduped: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for _score, block in sorted(scored, key=lambda item: (-item[0], int(item[1].get("order_start") or 0))):
+            block_id = str(block.get("id") or "")
+            if block_id in seen:
+                continue
+            seen.add(block_id)
+            deduped.append(block)
+            if len(deduped) >= max_blocks:
+                break
+        return deduped
+
+    @staticmethod
+    def _semantic_blocks_context(blocks: list[dict[str, Any]], *, max_chars: int = 6000) -> str:
+        parts: list[str] = []
+        total = 0
+        for index, block in enumerate(blocks, start=1):
+            text = str(block.get("text") or "").strip()
+            if not text:
+                continue
+            heading = str(block.get("summary") or block.get("primary_subject") or f"Semantic block {index}").strip()
+            subject = str(block.get("primary_subject") or "-").strip() or "-"
+            space = str(block.get("primary_space") or ", ".join(block.get("space_values") or []) or "-").strip() or "-"
+            time = str(block.get("primary_time") or ", ".join(block.get("time_values") or []) or "-").strip() or "-"
+            source_id = str(block.get("source_id") or "-").strip() or "-"
+            block_id = str(block.get("id") or "-").strip() or "-"
+            part = (
+                f"[Tudásblokk {index}: {heading}]\n"
+                f"block_id={block_id}; source_id={source_id}; alany={subject}; hely={space}; idő={time}\n"
+                f"{text}"
+            )
+            if total + len(part) > max_chars:
+                break
+            parts.append(part)
+            total += len(part)
+        return "\n\n".join(parts)
+
     @staticmethod
     def _retrieval_chunks_from_vector_hits(hits: list[dict[str, Any]]) -> list[dict[str, Any]]:
         chunks: list[dict[str, Any]] = []
@@ -691,6 +903,65 @@ class KnowledgeFacade:
                 }
             )
         return chunks
+
+    @staticmethod
+    def _semantic_blocks_from_vector_hits(hits: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        blocks: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for hit in hits:
+            payload = dict(hit.get("payload") or {})
+            if payload.get("point_type") != "semantic_block":
+                continue
+            metadata = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}
+            block_id = str(payload.get("block_id") or metadata.get("block_id") or "").strip()
+            if not block_id or block_id in seen:
+                continue
+            seen.add(block_id)
+            block = {
+                "id": block_id,
+                "corpus_uuid": metadata.get("corpus_uuid"),
+                "source_id": payload.get("source_id") or metadata.get("source_id"),
+                "document_id": payload.get("document_id") or metadata.get("document_id"),
+                "paragraph_ids": list(metadata.get("paragraph_ids") or []),
+                "sentence_ids": list(payload.get("sentence_ids") or metadata.get("sentence_ids") or []),
+                "claim_ids": list(payload.get("claim_ids") or metadata.get("claim_ids") or []),
+                "order_start": metadata.get("order_start") or 0,
+                "order_end": metadata.get("order_end") or 0,
+                "primary_subject": payload.get("subject") or metadata.get("primary_subject") or "",
+                "subject_key": payload.get("subject_key") or metadata.get("subject_key") or "",
+                "primary_space": payload.get("space") or metadata.get("primary_space") or "",
+                "space_key": payload.get("space_key") or metadata.get("space_key") or "",
+                "primary_time": payload.get("time") or metadata.get("primary_time") or "",
+                "time_key": payload.get("time_key") or metadata.get("time_key") or "",
+                "block_type": metadata.get("block_type") or "semantic_unit",
+                "text": metadata.get("text") or payload.get("raw_block_text") or payload.get("text") or "",
+                "summary": metadata.get("summary") or "",
+                "predicates": list(metadata.get("predicates") or []),
+                "entity_keys": list(payload.get("entity_keys") or metadata.get("entity_keys") or []),
+                "space_modes": list(payload.get("space_modes") or metadata.get("space_modes") or []),
+                "space_values": list(metadata.get("space_values") or []),
+                "time_modes": list(payload.get("time_modes") or metadata.get("time_modes") or []),
+                "time_values": list(metadata.get("time_values") or []),
+                "confidence": metadata.get("confidence") or 0.0,
+                "block_status": payload.get("block_status") or metadata.get("block_status") or "draft",
+                "source_reliability": payload.get("source_reliability") or metadata.get("source_reliability") or 0.0,
+                "retrieval_weight": payload.get("retrieval_weight") or metadata.get("retrieval_weight") or 1.0,
+                "conflict_count": payload.get("conflict_count") or metadata.get("conflict_count") or 0,
+                "conflicts": list(metadata.get("conflicts") or []),
+                "builder_version": metadata.get("builder_version") or "",
+                "metadata": dict(metadata.get("metadata") or {}),
+                "match_score": round(float(hit.get("fusion_score") or hit.get("score") or 0.0), 4),
+                "match_reason": {
+                    "vector_hit": True,
+                    "semantic_score": hit.get("semantic_score"),
+                    "lexical_score": hit.get("lexical_score"),
+                    "fusion_score": hit.get("fusion_score"),
+                    "quality_score": payload.get("quality_score_explanation") or {},
+                    "point_type": "semantic_block",
+                },
+            }
+            blocks.append(block)
+        return blocks
 
     @staticmethod
     def _order_chunks_by_vector_hits(retrieval_chunks: list[dict[str, Any]], hits: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -2126,7 +2397,7 @@ class KnowledgeFacade:
             for item in heuristic_mentions
         ]
         sentence_mentions = self._merge_sentence_mentions(extracted_mentions, heuristic_mentions)
-        logger.info(
+        logger.debug(
             "[MENTION PIPELINE]\nsentence_id=%s\nmention_count=%s",
             sentence.id,
             len(sentence_mentions),
@@ -2190,7 +2461,7 @@ class KnowledgeFacade:
             },
         )
         if emit_logs:
-            logger.info(
+            logger.debug(
                 "[SPACE-TIME PIPELINE]\nsentence_id=%s\nclaim_id=%s\nframe_id=%s\ntime_mode=%s\nspace_mode=%s\nconfidence=%s",
                 sentence.id,
                 updated_claim.claim_id,
@@ -2216,7 +2487,7 @@ class KnowledgeFacade:
         language = self._resolve_sentence_language(sentence, source=source, document=document)
         version = self._claim_extractor_version()
         if version != "v1":
-            logger.info(
+            logger.debug(
                 "[CLAIM PIPELINE]\nsentence_id=%s\nmention_count=%s\nclaim_count=%s",
                 sentence.id,
                 len(mentions),
@@ -2242,7 +2513,7 @@ class KnowledgeFacade:
             extractor=self._claim_extractor_v1,
             quality_gate=self._claim_quality_gate,
         )
-        logger.info(
+        logger.debug(
             "[CLAIM QUALITY GATE]\nsentence_id=%s\nraw_claim_count=%s\naccepted_claim_count=%s\nrejected_claim_count=%s\nskipped=%s\nsentence_reason=%s",
             sentence.id,
             int(claim_quality.get("generated_claim_count") or 0),
@@ -2252,7 +2523,7 @@ class KnowledgeFacade:
             claim_quality.get("sentence_reason"),
         )
         for rejected in list(claim_quality.get("rejected_claims") or []):
-            logger.info(
+            logger.debug(
                 "[CLAIM REJECTED]\nsentence_id=%s\nreason=%s\nextraction_pattern=%s\nextraction_language=%s\nsubject=%s\npredicate=%s\nobject=%s",
                 sentence.id,
                 rejected.get("reason"),
@@ -2268,7 +2539,7 @@ class KnowledgeFacade:
                 debug_claim_type(claim)
 
         if not claims:
-            logger.info(
+            logger.debug(
                 "[CLAIM PIPELINE]\nsentence_id=%s\nmention_count=%s\nclaim_count=%s",
                 sentence.id,
                 len(mentions),
@@ -2346,7 +2617,7 @@ class KnowledgeFacade:
                 "information_value_reason": information_value_reason,
             },
         )
-        logger.info(
+        logger.debug(
             "[CLAIM PIPELINE]\nsentence_id=%s\nmention_count=%s\nclaim_count=%s",
             sentence.id,
             len(mentions),
@@ -2417,7 +2688,7 @@ class KnowledgeFacade:
                 "information_value_reason": information_value_reason,
             },
         )
-        logger.info(
+        logger.debug(
             "[CLAIM PIPELINE]\nsentence_id=%s\nmention_count=%s\nclaim_count=%s",
             sentence.id,
             len(mentions),
@@ -2434,32 +2705,12 @@ class KnowledgeFacade:
     ) -> dict[str, Any] | None:
         return self._trace_service.build_trace(run_id, log_level=log_level, debug=debug)
 
-    def get_latest_ingest_run_trace(
-        self,
-        *,
-        log_level: str | None = "FULL_TRACE",
-        debug: bool = False,
-    ) -> dict[str, Any] | None:
-        recent_runs = self._ingest_run_store.list_recent(limit=20)
-        for run in recent_runs:
-            trace = self._trace_service.build_trace(
-                run.id,
-                sentence_limit=50,
-                claim_limit=200,
-                mention_limit=200,
-                log_level=log_level,
-                debug=debug,
-            )
-            if trace is not None:
-                return trace
-        return None
-
     def _log_ingest_trace_summary(self, run_id: str) -> None:
         trace = self.get_ingest_run_trace(run_id)
         if trace is None:
             return
         summary = trace.get("summary") or {}
-        logger.info(
+        logger.debug(
             "[KNOWLEDGE TRACE SUMMARY]\nrun_id=%s\nsource_id=%s\nlanguage=%s\nsentence_count=%s\nmention_count=%s\nclaim_count=%s\nspace_time_frame_count=%s\nlocal_entity_cluster_count=%s\nlocal_entity_count=%s\nlow_coherence_local_entity_count=%s\nunknown_entity_type_count=%s",
             trace["run_id"],
             trace.get("source_id"),
@@ -2867,7 +3118,7 @@ class KnowledgeFacade:
             claims,
             language=source_language,
         )
-        logger.info(
+        logger.debug(
             "[LOCAL RESOLVER V1]\ninterpretation_run_id=%s\ncluster_count=%s\nclaim_count=%s",
             run.id,
             len(local_clusters),
@@ -3058,6 +3309,16 @@ class KnowledgeFacade:
                 mentions=mentions,
                 claims=claims,
             )
+            semantic_blocks = SemanticBlockBuilderV1().build(sentences=sentences, claims=claims)
+            semantic_block_payload = [semantic_block_to_json_dict(item) for item in semantic_blocks]
+            semantic_block_payload = enrich_semantic_blocks_with_quality(
+                semantic_block_payload,
+                existing_blocks=self._load_existing_semantic_blocks(
+                    corpus_uuid=source.corpus_uuid,
+                    exclude_interpretation_run_id=run.id,
+                ),
+                source_type=source.source_type,
+            )
             technical_entities = TechnicalEntityBuilderV1().build(local_clusters, claims=claims)
             technical_entity_payload = [technical_entity_to_json_dict(item) for item in technical_entities]
             technical_memory_chunks = TechnicalMemoryChunkBuilderV1().build_many(technical_entities)
@@ -3133,6 +3394,11 @@ class KnowledgeFacade:
                             "claim_count": len(claims),
                             "space_time_frame_count": len(space_time_frames),
                             "quality_summary": quality_summary,
+                            "semantic_block_builder_version": SemanticBlockBuilderV1.version,
+                            "semantic_block_count": len(semantic_blocks),
+                            "semantic_blocks": semantic_block_payload,
+                            "semantic_block_conflict_count": sum(int(item.get("conflict_count") or 0) for item in semantic_block_payload),
+                            "semantic_block_disputed_count": sum(1 for item in semantic_block_payload if item.get("block_status") == "disputed"),
                             "technical_entity_builder_version": TechnicalEntityBuilderV1.version,
                             "technical_entity_count": len(technical_entities),
                             "technical_entities": technical_entity_payload,
@@ -3888,6 +4154,34 @@ class KnowledgeFacade:
         ]
         return {
             "filename": f"aiplaza-context-{source_id[:8] or run.id[:8]}.txt",
+            "content_type": "text/plain; charset=utf-8",
+            "body": "\n".join(parts).encode("utf-8"),
+            "corpus_uuid": run.corpus_uuid,
+        }
+
+    def get_query_context_download(self, query_run_id: str) -> dict[str, Any] | None:
+        run = self._query_run_store.get(query_run_id)
+        if run is None:
+            return None
+        answer_text = str(run.metadata.get("answer_text") or "")
+        parts = [
+            "AIPLAZA LLM context audit",
+            f"Query run: {run.id}",
+            f"Corpus UUID: {run.corpus_uuid}",
+            f"Question: {run.query}",
+            f"Answer: {answer_text}",
+            "",
+            "LLM instructions:",
+            (
+                "A kovetkezo tudastar-context alapjan valaszolj tomoren, es csak akkor allits tenyt, "
+                "ha a context alatamasztja. A valasz nyelve mindig egyezzen meg a felhasznalo kerdesenek nyelvevel."
+            ),
+            "",
+            "Context sent to LLM:",
+            run.context_text or "",
+        ]
+        return {
+            "filename": f"aiplaza-llm-context-{run.id[:8]}.txt",
             "content_type": "text/plain; charset=utf-8",
             "body": "\n".join(parts).encode("utf-8"),
             "corpus_uuid": run.corpus_uuid,
@@ -5411,6 +5705,8 @@ class KnowledgeFacade:
                 finally:
                     started_run = self._refresh_ingest_run(run_id)
         final_run = self._refresh_ingest_run(run_id)
+        self._auto_refresh_semantic_block_index_after_ingest(final_run)
+        final_run = self._refresh_ingest_run(run_id)
         self._log_ingest_trace_summary(run_id)
         return final_run
 
@@ -5435,8 +5731,124 @@ class KnowledgeFacade:
             finally:
                 self._refresh_ingest_run(run.id)
         final_run = self._refresh_ingest_run(run.id)
+        self._auto_refresh_semantic_block_index_after_ingest(final_run)
+        final_run = self._refresh_ingest_run(run.id)
         self._log_ingest_trace_summary(run.id)
         return final_run
+
+    def _auto_refresh_semantic_block_index_after_ingest(self, run: IngestRun) -> None:
+        if run.status not in {"completed", "partial_success"}:
+            return
+        semantic_blocks = self._load_existing_semantic_blocks(corpus_uuid=run.corpus_uuid, exclude_interpretation_run_id=None)
+        if not semantic_blocks:
+            return
+        metadata = dict(run.metadata or {})
+        if metadata.get("semantic_block_auto_index_status") in {"completed", "scheduled"}:
+            return
+        try:
+            build = self.schedule_index_build(
+                tenant=run.tenant,
+                corpus_uuid=run.corpus_uuid,
+                index_profile_key=DEFAULT_INDEX_PROFILE.key,
+                created_by=run.created_by,
+            )
+            metadata.update(
+                {
+                    "semantic_block_auto_index_status": "scheduled",
+                    "semantic_block_auto_index_build_id": build.id,
+                }
+            )
+            self._ingest_run_store.update(replace(run, metadata=metadata, updated_at=_utcnow()))
+
+            async def _run() -> None:
+                finished = await self.run_index_build(build.id)
+                latest = self._ingest_run_store.get(run.id)
+                if latest is not None:
+                    latest_metadata = dict(latest.metadata or {})
+                    latest_metadata.update(
+                        {
+                            "semantic_block_auto_index_status": finished.status,
+                            "semantic_block_auto_index_build_id": finished.id,
+                        }
+                    )
+                    self._ingest_run_store.update(replace(latest, metadata=latest_metadata, updated_at=_utcnow()))
+
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                asyncio.run(_run())
+            else:
+                loop.create_task(_run())
+        except Exception as exc:
+            logger.warning("semantic block auto index refresh failed: %s", exc, exc_info=True)
+            latest = self._ingest_run_store.get(run.id)
+            if latest is not None:
+                latest_metadata = dict(latest.metadata or {})
+                latest_metadata.update(
+                    {
+                        "semantic_block_auto_index_status": "failed",
+                        "semantic_block_auto_index_error": str(exc),
+                    }
+                )
+                self._ingest_run_store.update(replace(latest, metadata=latest_metadata, updated_at=_utcnow()))
+
+    def update_semantic_block_status(
+        self,
+        *,
+        corpus_uuid: str,
+        block_id: str,
+        status: str,
+        updated_by: int | None = None,
+    ) -> dict[str, Any]:
+        allowed = {"draft", "approved", "rejected", "withdrawn", "outdated", "disputed"}
+        normalized_status = str(status or "").strip().lower()
+        if normalized_status not in allowed:
+            raise ValueError(f"Invalid semantic block status: {status}")
+        if self._interpretation_run_store is None:
+            raise ValueError("Interpretation run store is not available")
+        list_for_corpus = getattr(self._interpretation_run_store, "list_for_corpus", None)
+        if not callable(list_for_corpus):
+            raise ValueError("Interpretation run listing is not available")
+        runs = list_for_corpus(corpus_uuid, limit=50)
+        for run in runs:
+            metadata = dict(run.metadata or {})
+            blocks = list(metadata.get("semantic_blocks") or [])
+            changed = False
+            updated_block: dict[str, Any] | None = None
+            next_blocks: list[dict[str, Any]] = []
+            for block in blocks:
+                if not isinstance(block, dict):
+                    next_blocks.append(block)
+                    continue
+                if str(block.get("id") or "") != str(block_id):
+                    next_blocks.append(block)
+                    continue
+                updated_block = dict(block)
+                block_metadata = dict(updated_block.get("metadata") or {})
+                block_metadata["block_status"] = normalized_status
+                block_metadata["status_updated_by"] = updated_by
+                block_metadata["status_updated_at"] = _utcnow().isoformat()
+                updated_block["metadata"] = block_metadata
+                updated_block["block_status"] = normalized_status
+                changed = True
+                next_blocks.append(updated_block)
+            if not changed:
+                continue
+            refreshed_blocks = enrich_semantic_blocks_with_quality(
+                [dict(item) for item in next_blocks if isinstance(item, dict)],
+                existing_blocks=[],
+                source_type=None,
+            )
+            refreshed_by_id = {str(item.get("id") or ""): item for item in refreshed_blocks}
+            metadata["semantic_blocks"] = [refreshed_by_id.get(str(item.get("id") or ""), item) if isinstance(item, dict) else item for item in next_blocks]
+            self._interpretation_run_store.update(replace(run, metadata=metadata, updated_at=_utcnow()))
+            return {
+                "block_id": block_id,
+                "status": normalized_status,
+                "interpretation_run_id": run.id,
+                "block": refreshed_by_id.get(str(block_id), updated_block or {}),
+            }
+        raise ValueError(f"Semantic block not found: {block_id}")
 
     def schedule_index_build(self, *, tenant: str, corpus_uuid: str, index_profile_key: str, created_by: int | None) -> IndexBuild:
         profile = self._default_index_profile(index_profile_key)
@@ -5502,6 +5914,19 @@ class KnowledgeFacade:
             if callable(upsert_retrieval_chunks) and retrieval_chunk_rows:
                 await upsert_retrieval_chunks(started.collection_name, retrieval_chunk_rows)
 
+            semantic_blocks = self._load_existing_semantic_blocks(
+                corpus_uuid=started.corpus_uuid,
+                exclude_interpretation_run_id=None,
+            )
+            semantic_block_rows = build_semantic_block_index_rows(
+                semantic_blocks,
+                build_id=started.id,
+                index_profile_key=profile.key,
+            )
+            upsert_semantic_blocks = getattr(vector_index, "upsert_semantic_block_points", None)
+            if callable(upsert_semantic_blocks) and semantic_block_rows:
+                await upsert_semantic_blocks(started.collection_name, semantic_block_rows)
+
             finished = replace(
                 started,
                 status="ready",
@@ -5513,6 +5938,8 @@ class KnowledgeFacade:
                     "profile_key": profile.key,
                     "retrieval_chunk_count": len(retrieval_chunk_rows),
                     "retrieval_chunk_indexed": bool(retrieval_chunk_rows),
+                    "semantic_block_count": len(semantic_block_rows),
+                    "semantic_block_indexed": bool(semantic_block_rows),
                 },
             )
             self._index_build_store.update(finished)
@@ -6096,6 +6523,28 @@ class KnowledgeFacade:
         matched_chunks = list(query_aware_result.get("matched_chunks") or [])
         matched_claims = self._enrich_matched_claims_for_explanation(list(query_aware_result.get("matched_claims") or []))
         query_aware_result["matched_claims"] = matched_claims
+        semantic_blocks = self._load_existing_semantic_blocks(
+            corpus_uuid=corpus_uuid,
+            exclude_interpretation_run_id=None,
+        )
+        vector_matched_semantic_blocks = self._semantic_blocks_from_vector_hits(hits)
+        lexical_matched_semantic_blocks = self._select_semantic_blocks_for_query(
+            semantic_blocks=semantic_blocks,
+            matched_claims=matched_claims,
+            matched_chunks=matched_chunks,
+            query_profile=query_profile,
+            query=query,
+        )
+        matched_semantic_blocks: list[dict[str, Any]] = []
+        seen_block_ids: set[str] = set()
+        for block in [*vector_matched_semantic_blocks, *lexical_matched_semantic_blocks]:
+            block_id = str(block.get("id") or "").strip()
+            if not block_id or block_id in seen_block_ids:
+                continue
+            seen_block_ids.add(block_id)
+            matched_semantic_blocks.append(block)
+            if len(matched_semantic_blocks) >= 4:
+                break
         synthesis_result = SynthesisEngineV0().synthesize(
             query_profile=query_profile,
             matched_chunks=matched_chunks,
@@ -6108,6 +6557,28 @@ class KnowledgeFacade:
             or any(bool(item.get("conflict_marker")) for item in matched_claims)
         )
         evidence_summary = synthesis_result.get("evidence_summary") or (synthesis_result.get("synthesis_debug") or {}).get("evidence") or []
+        block_evidence_summary = [
+            {
+                "block_id": str(block.get("id") or ""),
+                "source_id": str(block.get("source_id") or ""),
+                "document_id": str(block.get("document_id") or ""),
+                "subject": str(block.get("primary_subject") or ""),
+                "space": str(block.get("primary_space") or ", ".join(block.get("space_values") or []) or ""),
+                "time": str(block.get("primary_time") or ", ".join(block.get("time_values") or []) or ""),
+                "sentence_ids": list(block.get("sentence_ids") or []),
+                "claim_ids": list(block.get("claim_ids") or []),
+                "summary": str(block.get("summary") or ""),
+                "snippet": str(block.get("text") or "")[:500],
+                "match_score": block.get("match_score") or 0.0,
+                "match_reason": block.get("match_reason") or {},
+                "block_status": block.get("block_status") or (block.get("metadata") or {}).get("block_status") or "draft",
+                "source_reliability": block.get("source_reliability") or (block.get("metadata") or {}).get("source_reliability") or 0.0,
+                "retrieval_weight": block.get("retrieval_weight") or (block.get("metadata") or {}).get("retrieval_weight") or 1.0,
+                "conflict_count": block.get("conflict_count") or (block.get("metadata") or {}).get("conflict_count") or 0,
+                "conflicts": list(block.get("conflicts") or (block.get("metadata") or {}).get("conflicts") or []),
+            }
+            for block in matched_semantic_blocks
+        ]
         explanation_payload = ExplanationBuilderV0().build(
             answer_text=str(synthesis_result.get("answer_text") or ""),
             matched_claims=matched_claims,
@@ -6116,6 +6587,17 @@ class KnowledgeFacade:
             cited_source_ids=list(synthesis_result.get("cited_source_ids") or synthesis_result.get("source_ids") or []),
         )
         explanation = explanation_payload.get("explanation") or {}
+        verification = verify_answer(str(synthesis_result.get("answer_text") or ""), block_evidence_summary)
+        answer_verification = {
+            "is_grounded": verification.is_grounded,
+            "has_evidence": verification.has_evidence,
+            "mentions_conflict": verification.mentions_conflict,
+            "invented_terms": list(verification.invented_terms),
+            "context_block_count": len(matched_semantic_blocks),
+            "warning": None
+            if verification.is_grounded or matched_semantic_blocks
+            else "A válaszhoz nincs elég erős, visszakövethető bizonyíték.",
+        }
         lineage_builder = LineageBuilderV0()
         lineage_graph = lineage_builder.build(global_profiles=query_global_profiles, retrieval_chunks=query_retrieval_chunks)
         lineage_debug = {
@@ -6135,6 +6617,8 @@ class KnowledgeFacade:
             "query_profile": query_profile,
             "matched_chunks_count": len(matched_chunks),
             "matched_claims_count": len(matched_claims),
+            "matched_semantic_blocks_count": len(matched_semantic_blocks),
+            "vector_matched_semantic_blocks_count": len(vector_matched_semantic_blocks),
             "conflict_marker_included": conflict_marker_included,
             "temporal_context_used": bool(query_aware_result.get("temporal_context_used")),
             "synthesis_called": True,
@@ -6144,7 +6628,10 @@ class KnowledgeFacade:
             "cited_sentence_ids": synthesis_result.get("cited_sentence_ids") or [],
             "cited_source_ids": synthesis_result.get("cited_source_ids") or synthesis_result.get("source_ids") or [],
             "evidence": evidence_summary,
+            "context_blocks": block_evidence_summary,
             "explanation": explanation,
+            "answer_verification": answer_verification,
+            "matched_semantic_blocks": matched_semantic_blocks,
             "lineage": lineage_debug,
             "no_ready_index_build": no_ready_index_build,
             "feedback_events": feedback_events,
@@ -6158,6 +6645,9 @@ class KnowledgeFacade:
             context_profile=context,
             query_run_id="pending",
         )
+        semantic_context_text = self._semantic_blocks_context(matched_semantic_blocks)
+        if semantic_context_text:
+            context_text = f"{semantic_context_text}\n\n[Vectoros találatok]\n{context_text}" if context_text else semantic_context_text
         citations = [
             Citation(
                 source_id=str((item.get("payload") or {}).get("source_id") or ""),
@@ -6165,8 +6655,11 @@ class KnowledgeFacade:
                 snippet=str((item.get("payload") or {}).get("text") or "")[:400],
                 score=float(item.get("fusion_score") or item.get("score") or 0.0),
                 title=(item.get("payload") or {}).get("source_title"),
-                chunk_id=str(item.get("id") or ""),
-                metadata={"profile": item.get("build_key")},
+                chunk_id=str((item.get("payload") or {}).get("block_id") or item.get("id") or ""),
+                metadata={
+                    "profile": item.get("build_key"),
+                    "point_type": (item.get("payload") or {}).get("point_type"),
+                },
             )
             for item in selected
         ]
@@ -6183,7 +6676,7 @@ class KnowledgeFacade:
             citations=citations,
             context_text=context_text,
             compare_mode=compare_mode,
-            metadata={
+            metadata=_json_safe({
                 "selected_citation_count": len(citations),
                 "query_profile": query_profile,
                 "query_detected_entities": query_profile.get("detected_entities") or [],
@@ -6203,6 +6696,8 @@ class KnowledgeFacade:
                 "source_withdrawal_events": source_withdrawal_events,
                 "matched_chunks": matched_chunks,
                 "matched_claims": matched_claims,
+                "matched_semantic_blocks": matched_semantic_blocks,
+                "vector_matched_semantic_blocks": vector_matched_semantic_blocks,
                 "filtered_out_reason": query_aware_result.get("filtered_out_reason") or [],
                 "retrieval_confidence": query_aware_result.get("retrieval_confidence") or 0.0,
                 "query_retrieval_match_count": query_aware_result.get("query_retrieval_match_count") or 0,
@@ -6219,12 +6714,14 @@ class KnowledgeFacade:
                 "cited_source_ids": synthesis_result.get("cited_source_ids") or synthesis_result.get("source_ids") or [],
                 "source_ids": synthesis_result.get("source_ids") or [],
                 "evidence_summary": evidence_summary,
+                "context_blocks": block_evidence_summary,
                 "explanation": explanation,
+                "answer_verification": answer_verification,
                 "explanation_payload": explanation_payload,
                 "lineage": lineage_debug,
                 "synthesis_confidence": synthesis_result.get("synthesis_confidence") or 0.0,
                 "query_debug": query_debug,
-            },
+            }),
         )
         saved = self._query_run_store.save(query_run)
         self._metrics_store.increment("query_count", 1)
@@ -6276,6 +6773,15 @@ class KnowledgeFacade:
         source_metadata_by_id: dict[str, Source] = {}
         for source_id in run.metadata.get("cited_source_ids") or run.metadata.get("source_ids") or []:
             source = self._source_store.get(str(source_id))
+            if source is not None:
+                source_metadata_by_id[source.id] = source
+        for block in run.metadata.get("context_blocks") or run.metadata.get("matched_semantic_blocks") or []:
+            if not isinstance(block, dict):
+                continue
+            source_id = str(block.get("source_id") or "").strip()
+            if not source_id or source_id in source_metadata_by_id:
+                continue
+            source = self._source_store.get(source_id)
             if source is not None:
                 source_metadata_by_id[source.id] = source
         for citation in run.citations:
@@ -6361,6 +6867,7 @@ class KnowledgeFacade:
             "query_aware_retrieval": run.metadata.get("query_aware_retrieval") or {},
             "matched_chunks": run.metadata.get("matched_chunks") or [],
             "matched_claims": run.metadata.get("matched_claims") or [],
+            "matched_semantic_blocks": run.metadata.get("matched_semantic_blocks") or [],
             "filtered_out_reason": run.metadata.get("filtered_out_reason") or [],
             "retrieval_confidence": run.metadata.get("retrieval_confidence") or 0.0,
             "query_retrieval_match_count": run.metadata.get("query_retrieval_match_count") or 0,

@@ -24,6 +24,8 @@ class _PermissionSubject:
 
 class ChatService:
     _INSUFFICIENT_CONTEXT_ANSWER = "Nincs elegendő információ a válaszhoz a kiválasztott tudástár alapján."
+    _MAX_CONVERSATION_HISTORY_MESSAGES = 20
+    _MAX_CONVERSATION_HISTORY_CHARS = 6000
     _YEAR_RE = re.compile(r"\b(19\d{2}|20\d{2}|21\d{2})\b")
     _DATE_RE = re.compile(r"\b(19\d{2}|20\d{2}|21\d{2})-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])\b")
     _YEAR_MONTH_RE = re.compile(r"\b(19\d{2}|20\d{2}|21\d{2})-(0[1-9]|1[0-2])\b")
@@ -114,6 +116,25 @@ class ChatService:
                 raise PermissionError("Nincs jogosultság a megadott tudástár használatához.")
         return download
 
+    def download_answer_context(
+        self,
+        *,
+        query_run_id: str,
+        user_id: int | None = None,
+        user_role: str | None = None,
+    ) -> dict | None:
+        if self.kb_service is None or not hasattr(self.kb_service, "get_query_context_download"):
+            return None
+        download = self.kb_service.get_query_context_download(query_run_id)
+        if download is None:
+            return None
+        corpus_uuid = str(download.get("corpus_uuid") or "").strip()
+        if corpus_uuid and user_id is not None and hasattr(self.kb_service, "user_can_use"):
+            subject = _PermissionSubject(id=user_id, role=user_role, is_active=True)
+            if not self.kb_service.user_can_use(corpus_uuid, user_id, subject):
+                raise PermissionError("Nincs jogosultság a megadott tudástár használatához.")
+        return download
+
     # Ez a metódus a(z) utcnow_naive logikáját valósítja meg.
     @staticmethod
     def _utcnow_naive() -> datetime:
@@ -160,6 +181,30 @@ class ChatService:
         if isinstance(value, str):
             return cls._sanitize_debug_text(value)
         return value
+
+    @classmethod
+    def _conversation_history_context(cls, conversation_history: list[dict[str, str]] | None) -> str:
+        if not conversation_history:
+            return ""
+        rows: list[str] = []
+        total = 0
+        for item in reversed(conversation_history[-cls._MAX_CONVERSATION_HISTORY_MESSAGES :]):
+            if not isinstance(item, dict):
+                continue
+            role = str(item.get("role") or "").strip().lower()
+            if role not in {"user", "assistant"}:
+                continue
+            text = " ".join(str(item.get("content") or item.get("text") or "").strip().split())
+            if not text:
+                continue
+            prefix = "Felhasználó" if role == "user" else "Asszisztens"
+            line = f"{prefix}: {text[:1200]}"
+            if total + len(line) > cls._MAX_CONVERSATION_HISTORY_CHARS:
+                break
+            rows.append(line)
+            total += len(line)
+        rows.reverse()
+        return "\n".join(rows)
 
     # Ez a metódus normalizálja a(z) place surface logikáját.
     @classmethod
@@ -548,6 +593,19 @@ class ChatService:
 
     def _context_text_from_packet(self, packet: dict) -> str:
         """Tömör szöveges context építése packetből."""
+        context_blocks = packet.get("context_blocks") or packet.get("matched_semantic_blocks") or []
+        block_lines = []
+        for index, block in enumerate(context_blocks[:4], start=1):
+            text = str(block.get("snippet") or block.get("text") or "").strip()
+            if not text:
+                continue
+            subject = str(block.get("subject") or block.get("primary_subject") or "-").strip() or "-"
+            space = str(block.get("space") or block.get("primary_space") or "-").strip() or "-"
+            time = str(block.get("time") or block.get("primary_time") or "-").strip() or "-"
+            block_id = str(block.get("block_id") or block.get("id") or "").strip()
+            block_lines.append(
+                f"- [B{index}] block_id={block_id}; alany={subject}; hely={space}; idő={time}\n{text}"
+            )
         primary = packet.get("primary_assertions") or packet.get("seed_assertions") or packet.get("summary_assertions") or packet.get("top_assertions") or []
         supporting = packet.get("supporting_assertions") or packet.get("expanded_assertions") or []
         primary_lines = []
@@ -569,7 +627,7 @@ class ChatService:
                 text = row.get("text") or row.get("payload", {}).get("text") or ""
                 if text and not any(t in "\n".join(primary_lines) for t in [text[:50]]):
                     primary_lines.append(f"- [S] {text}")
-        if not primary_lines:
+        if not primary_lines and not block_lines:
             return ""
         related_entities = packet.get("related_entities") or []
         related_places = packet.get("related_places") or []
@@ -631,8 +689,8 @@ class ChatService:
         base = (
             f"Intent: {intent}\n"
             f"Retrieval mode: {query_focus.get('retrieval_mode', 'assertion_first')}\n"
-            "Primary assertions:\n"
-            + "\n".join(primary_lines)
+            + ("Knowledge blocks:\n" + "\n".join(block_lines) + "\n" if block_lines else "")
+            + ("Primary assertions:\n" + "\n".join(primary_lines) if primary_lines else "")
             + ("\nSupporting assertions:\n" + "\n".join(supporting_lines) if supporting_lines else "")
             + ("\nEvidence sentences:\n" + "\n".join(evidence_lines) if evidence_lines else "")
             + ("\nContext chunks:\n" + "\n".join(chunk_text_lines) if chunk_text_lines else "")
@@ -661,7 +719,12 @@ class ChatService:
     def _build_sources_from_packet(self, packet: dict) -> list[dict]:
         """Forráslista összeállítása a context packetből."""
         rows = []
-        for key in ["top_assertions", "evidence_sentences", "source_chunks"]:
+        context_source_ids = {
+            str(block.get("source_id") or "").strip()
+            for block in (packet.get("context_blocks") or packet.get("matched_semantic_blocks") or [])
+            if isinstance(block, dict) and str(block.get("source_id") or "").strip()
+        }
+        for key in ["source_chunks", "evidence_sentences", "top_assertions"]:
             rows.extend(packet.get(key) or [])
         fallback_kb_uuid = str(packet.get("kb_uuid") or packet.get("corpus_uuid") or "").strip()
         fallback_source_ids: list[str] = []
@@ -673,6 +736,12 @@ class ChatService:
             if not isinstance(item, dict):
                 continue
             text = str(item.get("source_id") or "").strip()
+            if text and text not in fallback_source_ids:
+                fallback_source_ids.append(text)
+        for block in packet.get("context_blocks") or packet.get("matched_semantic_blocks") or []:
+            if not isinstance(block, dict):
+                continue
+            text = str(block.get("source_id") or "").strip()
             if text and text not in fallback_source_ids:
                 fallback_source_ids.append(text)
         seen: set[tuple[str, str]] = set()
@@ -694,6 +763,8 @@ class ChatService:
             if not source_id:
                 source_id = point_id
             if not kb_uuid or not point_id or not source_id:
+                continue
+            if context_source_ids and source_id not in context_source_ids and point_id not in context_source_ids:
                 continue
             item_key = (kb_uuid, source_id)
             if item_key in seen:
@@ -760,12 +831,45 @@ class ChatService:
         except (TypeError, ValueError):
             return 0.0
 
+    @staticmethod
+    def _looks_hungarian_question(question: str) -> bool:
+        lowered = question.lower()
+        return any(token in lowered for token in ("á", "é", "í", "ó", "ö", "ő", "ú", "ü", "ű", " mi ", " mit ", "milyen", "hogyan", "hol", "mennyi", "kérlek"))
+
+    @staticmethod
+    def _looks_english_template_answer(answer: str) -> bool:
+        lowered = f" {answer.lower()} "
+        return any(
+            marker in lowered
+            for marker in (
+                " the ",
+                " currently ",
+                " historically ",
+                " i found ",
+                " direct answer ",
+                " related information ",
+            )
+        )
+
+    @classmethod
+    def _should_return_direct_knowledge_answer(cls, packet: dict, *, question: str = "") -> bool:
+        if not cls._is_knowledge_answer(packet):
+            return False
+        answer_text = str(packet.get("answer_text") or "")
+        if cls._looks_hungarian_question(question) and cls._looks_english_template_answer(answer_text):
+            return False
+        answer_mode = str(packet.get("answer_mode") or "no_answer").strip()
+        if answer_mode == "summary":
+            return False
+        return cls._chat_confidence(packet) >= 0.75
+
     def _knowledge_payload(self, *, packet: dict, debug: bool) -> dict:
         sources = self._build_sources_from_packet(packet)
         context_preview = self._context_text_from_packet(packet)
         query_profile = packet.get("query_profile") or (packet.get("query_debug") or {}).get("query_profile") or packet.get("query_focus") or {}
         matched_chunks = packet.get("matched_chunks") or []
         matched_claims = packet.get("matched_claims") or []
+        context_blocks = packet.get("context_blocks") or packet.get("matched_semantic_blocks") or []
         return {
             "answer": str(packet.get("answer_text") or "").strip(),
             "query_run_id": str(packet.get("query_run_id") or "").strip() or None,
@@ -779,6 +883,7 @@ class ChatService:
             "query_profile": query_profile,
             "matched_chunks": matched_chunks,
             "claims": matched_claims,
+            "context_blocks": context_blocks,
             "sources": sources,
             "debug": (
                 self._build_debug_payload(packet=packet or {}, context_text=context_preview, sources=sources)
@@ -816,6 +921,10 @@ class ChatService:
             "query_profile": self._sanitize_debug_value(packet.get("query_profile") or (packet.get("query_debug") or {}).get("query_profile") or {}),
             "matched_chunks": self._sanitize_debug_value(packet.get("matched_chunks") or []),
             "claims": self._sanitize_debug_value(packet.get("matched_claims") or []),
+            "context_blocks": self._sanitize_debug_value(packet.get("context_blocks") or packet.get("matched_semantic_blocks") or []),
+            "answer_verification": self._sanitize_debug_value(
+                packet.get("answer_verification") or (packet.get("query_debug") or {}).get("answer_verification") or {}
+            ),
             "scoring_summary": self._sanitize_debug_value(packet.get("scoring_summary") or {}),
             "top_assertion_count": len(top_assertions),
             "evidence_sentence_count": len(evidence_sentences),
@@ -827,16 +936,36 @@ class ChatService:
         }
 
     # Ez a metódus felépíti a(z) messages logikáját.
-    @staticmethod
-    def _build_messages(question: str, context_text: str = "") -> list[dict[str, str]]:
+    @classmethod
+    def _build_messages(
+        cls,
+        question: str,
+        context_text: str = "",
+        conversation_history: list[dict[str, str]] | None = None,
+    ) -> list[dict[str, str]]:
         messages = [{"role": "system", "content": "Te egy segítőkész asszisztens vagy az AIPLAZA rendszerben."}]
+        history_context = cls._conversation_history_context(conversation_history)
+        if history_context:
+            messages.append(
+                {
+                    "role": "system",
+                    "content": (
+                        "Beszélgetési előzmény. Ezt használd a kérdés kontextusának megértéséhez, "
+                        "de a tudástári tényeket továbbra is csak a tudástár-context alapján állítsd.\n\n"
+                        f"{history_context}"
+                    ),
+                }
+            )
         if context_text:
             messages.append(
                 {
                     "role": "system",
                     "content": (
                         "A következő tudástár-context alapján válaszolj tömören, "
-                        "és csak akkor állíts tényt, ha a context alátámasztja.\n\n"
+                        "és csak akkor állíts tényt, ha a context alátámasztja. "
+                        "A válasz nyelve mindig egyezzen meg a felhasználó kérdésének nyelvével; "
+                        "magyar kérdésre magyarul válaszolj akkor is, ha a context belső címkéi angolul vannak. "
+                        "A belső címkéket, például Current facts, Historical vagy Vectoros találatok, ne idézd vissza.\n\n"
                         f"{context_text}"
                     ),
                 }
@@ -856,6 +985,7 @@ class ChatService:
         user_role: str | None = None,
         kb_uuid: str | None = None,
         debug: bool = False,
+        conversation_history: list[dict[str, str]] | None = None,
     ) -> str:
         """Chat üzenet küldése OpenAI API-nak (egyszeri válasz)."""
         try:
@@ -868,7 +998,11 @@ class ChatService:
             )
             if context_failed or not context_text.strip():
                 return ""
-            messages = self._build_messages(question=question, context_text="" if context_failed else context_text)
+            messages = self._build_messages(
+                question=question,
+                context_text="" if context_failed else context_text,
+                conversation_history=conversation_history,
+            )
             response = await self.client.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=messages,
@@ -903,6 +1037,7 @@ class ChatService:
         user_role: str | None = None,
         kb_uuid: str | None = None,
         debug: bool = False,
+        conversation_history: list[dict[str, str]] | None = None,
     ) -> dict:
         """Chat válasz forráslistával együtt."""
         packet: dict = {}
@@ -916,7 +1051,7 @@ class ChatService:
                 debug=debug,
             )
             synthesized_answer = str(packet.get("answer_text") or "").strip()
-            if synthesized_answer and self._is_knowledge_answer(packet):
+            if synthesized_answer and self._should_return_direct_knowledge_answer(packet, question=question):
                 return self._knowledge_payload(packet=packet, debug=debug)
             context_text = self._context_text_from_packet(packet)
         except PermissionError:
@@ -935,7 +1070,11 @@ class ChatService:
                 else ""
             )
         else:
-            messages = self._build_messages(question=question, context_text=context_text)
+            messages = self._build_messages(
+                question=question,
+                context_text=context_text,
+                conversation_history=conversation_history,
+            )
             response = await self.client.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=messages,
@@ -949,15 +1088,16 @@ class ChatService:
             "answer": answer,
             "query_run_id": str(packet.get("query_run_id") or "").strip() or None,
             "answer_mode": str(packet.get("answer_mode") or "no_answer"),
-            "answer_source": "llm_fallback" if answer else "none",
-            "confidence": 0.0,
-            "evidence": [],
-            "cited_claim_ids": [],
-            "cited_sentence_ids": [],
-            "cited_source_ids": [],
+            "answer_source": "knowledge_llm" if packet.get("answer_text") and answer else "llm_fallback" if answer else "none",
+            "confidence": self._chat_confidence(packet) if answer else 0.0,
+            "evidence": self._chat_evidence(packet) if answer else [],
+            "cited_claim_ids": packet.get("cited_claim_ids") or [],
+            "cited_sentence_ids": packet.get("cited_sentence_ids") or [],
+            "cited_source_ids": packet.get("cited_source_ids") or packet.get("source_ids") or [],
             "query_profile": packet.get("query_profile") or packet.get("query_focus") or {},
             "matched_chunks": packet.get("matched_chunks") or [],
             "claims": packet.get("matched_claims") or [],
+            "context_blocks": packet.get("context_blocks") or packet.get("matched_semantic_blocks") or [],
             "sources": self._build_sources_from_packet(packet) if context_text and not context_failed else [],
         }
         if context_text and not context_failed and packet.get("is_followup") and self.kb_service is not None:

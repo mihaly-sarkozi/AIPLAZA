@@ -1,5 +1,4 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
-import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { sanitizeMessage } from "../../../utils/sanitize";
 import ChatMessage from "../components/ChatMessage";
@@ -24,6 +23,7 @@ import { useTranslation } from "../../../i18n";
 const MAX_CHAT_MESSAGES = 100;
 const CHAT_CONTEXT_STORAGE_KEY = "aiplaza_chat_context_notice";
 const CHAT_PERSIST_PREFIX = "aiplaza_chat_persist_v2:";
+const MAX_CONVERSATION_CONTEXT_MESSAGES = 30;
 /** Régi sessionStorage kulcs – egyszer átmásoljuk localStorage-ba */
 const CHAT_SESSION_LEGACY_PREFIX = "aiplaza_chat_session_v1:";
 function chatPersistKey(userId: number | string): string {
@@ -52,6 +52,7 @@ type ChatApiResponse = {
   query_profile?: Record<string, unknown>;
   matched_chunks?: Array<Record<string, unknown>>;
   claims?: Array<Record<string, unknown>>;
+  context_blocks?: Array<Record<string, unknown>>;
   sources?: ChatSourceItem[];
   debug?: Record<string, unknown> | null;
 };
@@ -59,6 +60,7 @@ type ChatApiRequest = {
   question: string;
   kb_uuid?: string;
   debug?: boolean;
+  conversation_history?: Array<{ role: "user" | "assistant"; content: string }>;
 };
 
 type ChatEvidenceItem = {
@@ -98,6 +100,7 @@ export type ChatMessageType = {
   queryProfile?: Record<string, unknown>;
   matchedChunks?: Array<Record<string, unknown>>;
   claims?: Array<Record<string, unknown>>;
+  contextBlocks?: Array<Record<string, unknown>>;
   sources?: ChatSourceItem[];
   debug?: Record<string, unknown> | null;
 };
@@ -107,11 +110,29 @@ function trimToLastN(messages: ChatMessageType[], n: number): ChatMessageType[] 
   return messages.slice(-n);
 }
 
+function isClearHistoryCommand(value: string): boolean {
+  const normalized = value
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+  return normalized === "elozmeny torlese" || normalized === "torold az elozmenyt" || normalized === "elozmenyek torlese";
+}
+
+function buildConversationHistory(messages: ChatMessageType[]): Array<{ role: "user" | "assistant"; content: string }> {
+  return messages
+    .filter((message) => (message.role === "user" || message.role === "assistant") && message.text.trim())
+    .slice(-MAX_CONVERSATION_CONTEXT_MESSAGES)
+    .map((message) => ({
+      role: message.role === "user" ? "user" : "assistant",
+      content: message.text.trim(),
+    }));
+}
+
 /** Üres tömb = Mind (minden tudástár); nem üres = csak a kiválasztott uuid-k. */
 
 export default function ChatPage() {
   const { t } = useTranslation();
-  const navigate = useNavigate();
   const user = useAuthStore((s) => s.user);
   const setUser = useAuthStore((s) => s.setUser);
   const { data: kbList = [] } = useKbList();
@@ -128,7 +149,6 @@ export default function ChatPage() {
   const [contextNotice, setContextNotice] = useState<string | null>(null);
   const [inputDraft, setInputDraft] = useState("");
   const [activeTrainingRunId, setActiveTrainingRunId] = useState<string | undefined>(undefined);
-  const [lastCompletedTrainingTraceUrl, setLastCompletedTrainingTraceUrl] = useState<string | null>(null);
   const [showTrainingProgressModal, setShowTrainingProgressModal] = useState(false);
   const [showTrainingDoneModal, setShowTrainingDoneModal] = useState(false);
   const messageScrollRef = useRef<HTMLDivElement | null>(null);
@@ -282,7 +302,6 @@ export default function ChatPage() {
 
     setShowTrainingProgressModal(false);
     if (activeTrainingRun.status === "completed") {
-      setLastCompletedTrainingTraceUrl(activeTrainingRun.trace_url || `/knowledge/trace/${activeTrainingRun.id}`);
       const u = useAuthStore.getState().user;
       if (u && u.tenant_kb_has_training !== true) {
         setUser({ ...u, tenant_kb_has_training: true });
@@ -326,11 +345,19 @@ export default function ChatPage() {
     const question = sanitizeMessage(raw);
     setInputDraft("");
 
+    if (isClearHistoryCommand(question)) {
+      clearHistory();
+      appendMessage({ role: "assistant", text: "Az előzményeket töröltem." });
+      requestAnimationFrame(() => flushPersistToDisk());
+      return;
+    }
+
+    const conversationHistory = buildConversationHistory(messagesRef.current);
     appendMessage({ role: "user", text: question });
     setTimeout(() => inputRef.current?.focus(), 50);
     setLoading(true);
     try {
-      const payload: ChatApiRequest = { question, debug: true };
+      const payload: ChatApiRequest = { question, conversation_history: conversationHistory };
       if (effectiveChatKbUuid) payload.kb_uuid = effectiveChatKbUuid;
       const res = await api.post<ChatApiResponse>("/chat", payload);
       const data = res.data;
@@ -350,6 +377,7 @@ export default function ChatPage() {
         queryProfile: data?.query_profile,
         matchedChunks: Array.isArray(data?.matched_chunks) ? data.matched_chunks : [],
         claims: Array.isArray(data?.claims) ? data.claims : [],
+        contextBlocks: Array.isArray(data?.context_blocks) ? data.context_blocks : [],
         sources: Array.isArray(data?.sources) ? data.sources : [],
         debug: data?.debug ?? null,
       });
@@ -362,7 +390,7 @@ export default function ChatPage() {
       setLoading(false);
       requestAnimationFrame(() => flushPersistToDisk());
     }
-  }, [appendMessage, loading, inputDraft, flushPersistToDisk, effectiveChatKbUuid]);
+  }, [appendMessage, clearHistory, loading, inputDraft, flushPersistToDisk, effectiveChatKbUuid]);
 
   const onUploadTraining = () => {
     if (simTrainingRunning || !canTrainAnyKb) return;
@@ -387,7 +415,6 @@ export default function ChatPage() {
       { kbUuid: effectiveTrainKbUuid, files: [file] },
       {
         onSuccess: (run) => {
-          setLastCompletedTrainingTraceUrl(run.trace_url || `/knowledge/trace/${run.id}`);
           setActiveTrainingRunId(run.id);
           setShowTrainingProgressModal(true);
           setSelectedTrainFile(null);
@@ -419,7 +446,6 @@ export default function ChatPage() {
       },
       {
         onSuccess: (run) => {
-          setLastCompletedTrainingTraceUrl(run.trace_url || `/knowledge/trace/${run.id}`);
           setActiveTrainingRunId(run.id);
           setShowTrainingProgressModal(true);
           setTextTrainValue("");
@@ -469,6 +495,7 @@ export default function ChatPage() {
                           queryProfile={msg.queryProfile}
                           matchedChunks={msg.matchedChunks}
                           claims={msg.claims}
+                          contextBlocks={msg.contextBlocks}
                           sources={msg.sources}
                           debug={msg.debug}
                         />
@@ -752,15 +779,6 @@ export default function ChatPage() {
               A tanítás befejeződött.
             </div>
             <div className="mt-4 flex items-center justify-center gap-2">
-              {lastCompletedTrainingTraceUrl ? (
-                <button
-                  type="button"
-                  onClick={() => navigate(lastCompletedTrainingTraceUrl)}
-                  className="px-4 py-2 rounded border border-[var(--color-border)]"
-                >
-                  View Processing Trace
-                </button>
-              ) : null}
               <button
                 type="button"
                 onClick={() => setShowTrainingDoneModal(false)}

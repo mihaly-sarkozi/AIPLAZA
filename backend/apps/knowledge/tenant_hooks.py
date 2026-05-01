@@ -82,7 +82,7 @@ def register_knowledge_tenant_hooks() -> None:
         [
             TenantSchemaHook(
                 name="knowledge",
-                revision="knowledge.interpretation.v4",
+                revision="knowledge.block_memory.v1",
                 install=_install_knowledge_schema,
                 table_names=(
                     "knowledge_bases",

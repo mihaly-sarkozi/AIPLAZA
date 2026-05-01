@@ -8,7 +8,6 @@ import Button from "../../../components/ui/Button";
 import Modal, { ModalFooter, ModalHeader } from "../../../components/ui/Modal";
 import PageHeader from "../../../components/ui/PageHeader";
 import { getApiErrorMessage } from "../../../utils/getApiErrorMessage";
-import KnowledgeProcessingTrace from "../components/KnowledgeProcessingTrace";
 import { useIngestRun, useKbList, useReprocessIngestItemMutation } from "../hooks/useKb";
 import {
   ACTIVE_RUN_STATUSES,
@@ -29,7 +28,9 @@ import {
   getSentenceInterpretation,
   listIngestItemParagraphs,
   listIngestItemSentences,
+  updateSemanticBlockStatus,
   type IngestRunTrace,
+  type IngestRunTraceClaim,
 } from "../services";
 
 type SentenceRow = {
@@ -110,6 +111,12 @@ type SentenceInterpretationDetail = {
   }>;
 };
 
+type StructureDbDetail = {
+  title: string;
+  description?: string;
+  data: Record<string, unknown>;
+};
+
 function getBlockTypeLabel(value: unknown) {
   switch (value) {
     case "heading":
@@ -127,6 +134,28 @@ function getBlockTypeLabel(value: unknown) {
     default:
       return typeof value === "string" && value ? value : "Paragraph-like blokk";
   }
+}
+
+function getSemanticBlockContextLabel(block: Record<string, unknown>) {
+  const subject = String(block.primary_subject || "-");
+  const spaceValues = Array.isArray(block.space_values) ? block.space_values : [];
+  const timeValues = Array.isArray(block.time_values) ? block.time_values : [];
+  const space = String(block.primary_space || spaceValues[0] || "-");
+  const time = String(block.primary_time || timeValues[0] || "-");
+  return `Alany: ${subject} | Hely: ${space} | Idő: ${time}`;
+}
+
+function sourceLabelForBlock(block: Record<string, unknown>, trace: IngestRunTrace | null) {
+  return trace?.source_name || String(block.source_name || block.source_title || block.source_id || "Forrás");
+}
+
+function claimTextForBlockClaim(claim: IngestRunTraceClaim | undefined, fallbackId: unknown) {
+  if (claim?.claim_text) return claim.claim_text;
+  const subject = claim?.subject_text || "";
+  const predicate = claim?.predicate || "";
+  const objectText = claim?.object_text || "";
+  const text = [subject, predicate, objectText].filter(Boolean).join(" ");
+  return text || String(fallbackId || "Állítás");
 }
 
 function getTableRoleLabel(value: unknown) {
@@ -422,6 +451,7 @@ export default function KBIngestRunDetail() {
   const [showSentenceInterpretationModal, setShowSentenceInterpretationModal] = useState(false);
   const [isLoadingSentenceInterpretation, setIsLoadingSentenceInterpretation] = useState(false);
   const [selectedSentenceInterpretation, setSelectedSentenceInterpretation] = useState<SentenceInterpretationDetail | null>(null);
+  const [showBlockUnitsModal, setShowBlockUnitsModal] = useState(false);
   const [showStructureModal, setShowStructureModal] = useState(false);
   const [isLoadingStructure, setIsLoadingStructure] = useState(false);
   const [paragraphRows, setParagraphRows] = useState<ParagraphRow[]>([]);
@@ -431,6 +461,8 @@ export default function KBIngestRunDetail() {
   const [isLoadingStructureSentences, setIsLoadingStructureSentences] = useState(false);
   const [traceDetail, setTraceDetail] = useState<IngestRunTrace | null>(null);
   const [isLoadingTrace, setIsLoadingTrace] = useState(false);
+  const [updatingBlockId, setUpdatingBlockId] = useState<string | null>(null);
+  const [structureDbDetail, setStructureDbDetail] = useState<StructureDbDetail | null>(null);
   const reprocessMutation = useReprocessIngestItemMutation({
     onSuccess: () => {
       setSentenceRows([]);
@@ -505,6 +537,47 @@ export default function KBIngestRunDetail() {
     structureSentenceRows
       .filter((sentence) => sentence.paragraph_id === paragraphId)
       .sort((a, b) => a.order_index - b.order_index);
+  const traceClaimLookup = useMemo(() => {
+    const lookup = new Map<string, IngestRunTraceClaim>();
+    for (const sentence of traceDetail?.sentences ?? []) {
+      for (const claim of sentence.claims ?? []) {
+        if (claim.claim_id) lookup.set(String(claim.claim_id), claim);
+      }
+    }
+    return lookup;
+  }, [traceDetail]);
+  const traceSentenceLookup = useMemo(() => {
+    const lookup = new Map<string, NonNullable<IngestRunTrace["sentences"]>[number]>();
+    for (const sentence of traceDetail?.sentences ?? []) {
+      if (sentence.sentence_id) lookup.set(String(sentence.sentence_id), sentence);
+    }
+    return lookup;
+  }, [traceDetail]);
+
+  const setBlockStatus = async (
+    blockId: string | undefined,
+    status: "draft" | "approved" | "rejected" | "withdrawn" | "outdated" | "disputed"
+  ) => {
+    if (!uuid || !blockId) return;
+    setUpdatingBlockId(blockId);
+    try {
+      const result = await updateSemanticBlockStatus(uuid, blockId, status);
+      setTraceDetail((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          semantic_blocks: (prev.semantic_blocks ?? []).map((block) =>
+            String(block.id ?? "") === blockId ? { ...block, ...result.block } : block
+          ),
+        };
+      });
+      toast.success(`A blokk státusza frissült: ${status}`);
+    } catch (error) {
+      toast.error(getApiErrorMessage(error) ?? "A blokk státusz frissítése sikertelen.");
+    } finally {
+      setUpdatingBlockId(null);
+    }
+  };
 
   const openSentences = async () => {
     if (!selectedItem || isLoadingSentences) return;
@@ -640,6 +713,11 @@ export default function KBIngestRunDetail() {
                 </Button>
               ) : null}
               {selectedItem ? (
+                <Button variant="secondary" onClick={() => setShowBlockUnitsModal(true)} disabled={isLoadingTrace}>
+                  {isLoadingTrace ? "Betöltés..." : "Mondat egységek / blokkok"}
+                </Button>
+              ) : null}
+              {selectedItem ? (
                 <Button variant="secondary" onClick={openSentences} disabled={isLoadingSentences}>
                   {isLoadingSentences ? "Betöltés..." : "Mondatok"}
                 </Button>
@@ -735,26 +813,6 @@ export default function KBIngestRunDetail() {
                 <DetailField label="Frissítve" value={formatTimestamp(selectedItem?.updated_at ?? run.updated_at)} />
                 <DetailField label="Hiba" value={parserErrorMessage || "Nincs"} />
               </div>
-            </div>
-
-            <div className="app-surface p-5">
-              <div className="mb-4 flex items-center justify-between gap-3">
-                <h2 className="text-xl font-semibold">Knowledge Processing Trace</h2>
-                <div className="flex gap-2">
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    onClick={() => navigate(run.trace_url || `/knowledge/trace/${run.id}`)}
-                  >
-                    View Processing Trace
-                  </Button>
-                </div>
-              </div>
-              <KnowledgeProcessingTrace
-                trace={traceDetail}
-                loading={isLoadingTrace}
-                emptyMessage="A trace jelenleg nem érhető el ehhez a runhoz."
-              />
             </div>
 
             <div className="app-surface p-5">
@@ -899,6 +957,151 @@ export default function KBIngestRunDetail() {
         </div>
         <ModalFooter>
           <Button variant="secondary" onClick={() => setShowStructureModal(false)}>
+            Bezárás
+          </Button>
+        </ModalFooter>
+      </Modal>
+      <Modal open={showBlockUnitsModal} onClose={() => setShowBlockUnitsModal(false)} panelClassName="max-w-6xl">
+        <ModalHeader
+          title="Mondat egységek / blokkok"
+          description="A tanításból képzett alany-hely-idő tudásblokkok, olvasható forrással és állításokkal."
+        />
+        <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-card-muted)] p-4">
+          <div className="font-semibold">Tanított tudásblokkok</div>
+          <div className="mt-1 text-xs text-[var(--color-muted)]">
+            Ezek azok a block-first egységek, amelyekhez állítások, mondatok és források tartoznak.
+          </div>
+          <div className="mt-3 grid gap-3">
+            {(traceDetail?.semantic_blocks ?? []).length ? (
+              (traceDetail?.semantic_blocks ?? []).map((block, index) => {
+                const claimIds = Array.isArray(block.claim_ids) ? block.claim_ids : [];
+                const sentenceIds = Array.isArray(block.sentence_ids) ? block.sentence_ids : [];
+                return (
+                  <div key={String(block.id ?? index)} className="rounded border border-[var(--color-border)] bg-[var(--color-background)] p-3 text-xs">
+                    <div className="flex flex-wrap items-start justify-between gap-2">
+                      <div>
+                        <div className="font-medium">{String(block.summary || block.primary_subject || `Tudásblokk ${index + 1}`)}</div>
+                        <div className="mt-1 text-[var(--color-muted)]">{getSemanticBlockContextLabel(block)}</div>
+                      </div>
+                      <div className="font-mono text-[var(--color-muted)]">
+                        #{String(block.order_start ?? "-")}-{String(block.order_end ?? "-")}
+                      </div>
+                    </div>
+                    <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px]">
+                      <span className="rounded bg-[var(--color-card-muted)] px-2 py-1">Mondatok: {sentenceIds.length}</span>
+                      <span className="rounded bg-[var(--color-card-muted)] px-2 py-1">Státusz: {String(block.block_status ?? "draft")}</span>
+                      <span className="rounded bg-[var(--color-card-muted)] px-2 py-1">
+                        Retrieval súly: {Number(block.retrieval_weight ?? 1).toFixed(2)}
+                      </span>
+                      {Number(block.conflict_count ?? 0) > 0 ? (
+                        <span className="rounded bg-red-500/10 px-2 py-1 text-red-700">
+                          Konfliktus: {Number(block.conflict_count ?? 0)}
+                        </span>
+                      ) : null}
+                      <button
+                        type="button"
+                        disabled={updatingBlockId === String(block.id ?? "")}
+                        className="rounded bg-emerald-500/10 px-2 py-1 text-emerald-700 hover:bg-emerald-500/20 disabled:opacity-50"
+                        onClick={() => void setBlockStatus(String(block.id ?? ""), "approved")}
+                      >
+                        Jóváhagyás
+                      </button>
+                      <button
+                        type="button"
+                        disabled={updatingBlockId === String(block.id ?? "")}
+                        className="rounded bg-amber-500/10 px-2 py-1 text-amber-700 hover:bg-amber-500/20 disabled:opacity-50"
+                        onClick={() => void setBlockStatus(String(block.id ?? ""), "outdated")}
+                      >
+                        Elavult
+                      </button>
+                      <button
+                        type="button"
+                        disabled={updatingBlockId === String(block.id ?? "")}
+                        className="rounded bg-red-500/10 px-2 py-1 text-red-700 hover:bg-red-500/20 disabled:opacity-50"
+                        onClick={() => void setBlockStatus(String(block.id ?? ""), "withdrawn")}
+                      >
+                        Visszavonás
+                      </button>
+                      <button
+                        type="button"
+                        className="rounded bg-[var(--color-card-muted)] px-2 py-1 underline hover:text-[var(--color-primary)]"
+                        onClick={() =>
+                          setStructureDbDetail({
+                            title: "Forrás részletei",
+                            description: sourceLabelForBlock(block, traceDetail),
+                            data: {
+                              source_name: traceDetail?.source_name ?? null,
+                              source_id: traceDetail?.source_id ?? block.source_id ?? null,
+                              document_id: block.document_id ?? null,
+                              block_id: block.id ?? null,
+                              paragraph_ids: block.paragraph_ids ?? [],
+                              sentences: sentenceIds.map((sentenceId) => traceSentenceLookup.get(String(sentenceId)) ?? { sentence_id: sentenceId }),
+                              block,
+                            },
+                          })
+                        }
+                      >
+                        Forrás: {sourceLabelForBlock(block, traceDetail)}
+                      </button>
+                    </div>
+                    <div className="mt-2 space-y-1">
+                      <div className="font-medium">Állítások</div>
+                      {claimIds.length ? (
+                        claimIds.map((claimId) => {
+                          const claim = traceClaimLookup.get(String(claimId));
+                          return (
+                            <button
+                              key={String(claimId)}
+                              type="button"
+                              className="block w-full rounded border border-[var(--color-border)] bg-[var(--color-surface)] p-2 text-left text-[11px] hover:border-[var(--color-primary)]"
+                              onClick={() =>
+                                setStructureDbDetail({
+                                  title: "Állítás részletei",
+                                  description: claimTextForBlockClaim(claim, claimId),
+                                  data: {
+                                    block_id: block.id ?? null,
+                                    source_name: traceDetail?.source_name ?? null,
+                                    source_id: traceDetail?.source_id ?? block.source_id ?? null,
+                                    claim_id: claimId,
+                                    claim: claim ?? null,
+                                    source_sentence: claim?.claim_id ? traceDetail?.sentences.find((sentence) => sentence.claims.some((item) => item.claim_id === claim.claim_id)) ?? null : null,
+                                  },
+                                })
+                              }
+                            >
+                              {claimTextForBlockClaim(claim, claimId)}
+                            </button>
+                          );
+                        })
+                      ) : (
+                        <div className="text-[var(--color-muted)]">Nincs külön állítás ehhez a blokkhoz.</div>
+                      )}
+                    </div>
+                    <div className="mt-2 whitespace-pre-wrap text-[11px]">{String(block.text || "")}</div>
+                  </div>
+                );
+              })
+            ) : (
+              <div className="text-sm text-[var(--color-muted)]">Ehhez a tanításhoz még nincs semantic block adat.</div>
+            )}
+          </div>
+        </div>
+        <ModalFooter>
+          <Button variant="secondary" onClick={() => setShowBlockUnitsModal(false)}>
+            Bezárás
+          </Button>
+        </ModalFooter>
+      </Modal>
+      <Modal open={Boolean(structureDbDetail)} onClose={() => setStructureDbDetail(null)} panelClassName="max-w-4xl">
+        <ModalHeader
+          title={structureDbDetail?.title ?? "Részletek"}
+          description={structureDbDetail?.description ?? "A kiválasztott rekord teljes trace / DB részletei."}
+        />
+        <pre className="max-h-[65vh] overflow-auto rounded-lg border border-[var(--color-border)] bg-[var(--color-background)] p-4 text-xs">
+          {JSON.stringify(structureDbDetail?.data ?? {}, null, 2)}
+        </pre>
+        <ModalFooter>
+          <Button variant="secondary" onClick={() => setStructureDbDetail(null)}>
             Bezárás
           </Button>
         </ModalFooter>

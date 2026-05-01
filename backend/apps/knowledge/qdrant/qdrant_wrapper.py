@@ -381,6 +381,10 @@ class QdrantClientWrapper:
         """RetrievalChunk pointok upsertje."""
         await self._upsert_typed_points(collection, "retrieval_chunk", rows)
 
+    async def upsert_semantic_block_points(self, collection: str, rows: list[dict[str, Any]]) -> None:
+        """SemanticBlock pointok upsertje."""
+        await self._upsert_typed_points(collection, "semantic_block", rows)
+
     # Ez a metódus felépíti a(z) filter logikáját.
     def _build_filter(self, payload_filter: dict[str, Any] | None = None) -> qm.Filter | None:
         if not payload_filter:

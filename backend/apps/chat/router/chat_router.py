@@ -67,13 +67,27 @@ async def chat(
         if hasattr(svc, "chat_with_sources"):
             chat_with_sources = getattr(svc, "chat_with_sources")
             if inspect.iscoroutinefunction(chat_with_sources):
-                payload = await chat_with_sources(
-                    req.question,
-                    user_id=current_user.id,
-                    user_role=current_user.role,
-                    kb_uuid=req.kb_uuid,
-                    debug=req.debug,
-                )
+                try:
+                    payload = await chat_with_sources(
+                        req.question,
+                        user_id=current_user.id,
+                        user_role=current_user.role,
+                        kb_uuid=req.kb_uuid,
+                        debug=req.debug,
+                        conversation_history=req.conversation_history,
+                    )
+                except TypeError:
+                    # Backward compatibility régi ChatService mock/signature esetére.
+                    try:
+                        payload = await chat_with_sources(
+                            req.question,
+                            user_id=current_user.id,
+                            user_role=current_user.role,
+                            kb_uuid=req.kb_uuid,
+                            debug=req.debug,
+                        )
+                    except TypeError:
+                        payload = await chat_with_sources(req.question)
                 usage_service.record_question(tenant, current_user.id)
                 return AskResponse(
                     answer=str(payload.get("answer") or ""),
@@ -90,6 +104,7 @@ async def chat(
                     query_profile=payload.get("query_profile") or {},
                     matched_chunks=payload.get("matched_chunks") or [],
                     claims=payload.get("claims") or [],
+                    context_blocks=payload.get("context_blocks") or [],
                 )
         try:
             answer = await svc.chat(
@@ -98,10 +113,20 @@ async def chat(
                 user_role=current_user.role,
                 kb_uuid=req.kb_uuid,
                 debug=req.debug,
+                conversation_history=req.conversation_history,
             )
         except TypeError:
             # Backward compatibility régi ChatService mock/signature esetére.
-            answer = await svc.chat(req.question)
+            try:
+                answer = await svc.chat(
+                    req.question,
+                    user_id=current_user.id,
+                    user_role=current_user.role,
+                    kb_uuid=req.kb_uuid,
+                    debug=req.debug,
+                )
+            except TypeError:
+                answer = await svc.chat(req.question)
     except PermissionError as e:
         raise HTTPException(status_code=403, detail=str(e))
     usage_service.record_question(tenant, current_user.id)
@@ -150,6 +175,35 @@ async def chat_source_download(
     if download is None:
         raise HTTPException(status_code=404, detail="Source not found")
     filename = str(download.get("filename") or f"aiplaza-context-{source_id[:8]}.txt")
+    return Response(
+        content=download.get("body") or b"",
+        media_type=str(download.get("content_type") or "text/plain; charset=utf-8"),
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(filename)}"},
+    )
+
+
+@router.get("/chat/context/{query_run_id}/download")
+@limiter.limit("60/minute")
+async def chat_context_download(
+    request: Request,
+    query_run_id: str,
+    tenant: RequiredTenantContextDep,
+    current_user: User = Depends(get_current_user),
+    svc=Depends(get_chat_service),
+):
+    if not hasattr(svc, "download_answer_context"):
+        raise HTTPException(status_code=404, detail="Context not found")
+    try:
+        download = svc.download_answer_context(
+            query_run_id=query_run_id,
+            user_id=current_user.id,
+            user_role=current_user.role,
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    if download is None:
+        raise HTTPException(status_code=404, detail="Context not found")
+    filename = str(download.get("filename") or f"aiplaza-llm-context-{query_run_id[:8]}.txt")
     return Response(
         content=download.get("body") or b"",
         media_type=str(download.get("content_type") or "text/plain; charset=utf-8"),

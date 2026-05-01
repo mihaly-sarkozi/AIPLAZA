@@ -1234,6 +1234,7 @@ class KnowledgeTraceService:
         technical_entities = interpretation_meta.get("technical_entities")
         technical_memory_chunks = interpretation_meta.get("technical_memory_chunks")
         search_profiles = interpretation_meta.get("search_profiles")
+        semantic_blocks = interpretation_meta.get("semantic_blocks")
         candidate_selections = interpretation_meta.get("candidate_selections")
         similarity_analyses = interpretation_meta.get("similarity_analyses")
         tension_analyses = interpretation_meta.get("tension_analyses")
@@ -1251,6 +1252,8 @@ class KnowledgeTraceService:
             technical_memory_chunks = []
         if not isinstance(search_profiles, list):
             search_profiles = []
+        if not isinstance(semantic_blocks, list):
+            semantic_blocks = []
         if not isinstance(candidate_selections, list):
             candidate_selections = []
         if not isinstance(similarity_analyses, list):
@@ -1270,6 +1273,7 @@ class KnowledgeTraceService:
         ]
         technical_memory_chunks = [item for item in technical_memory_chunks if isinstance(item, dict)]
         search_profiles = [item for item in search_profiles if isinstance(item, dict)]
+        semantic_blocks = [item for item in semantic_blocks if isinstance(item, dict)]
         candidate_selections = [item for item in candidate_selections if isinstance(item, dict)]
         similarity_analyses = [item for item in similarity_analyses if isinstance(item, dict)]
         tension_analyses = [item for item in tension_analyses if isinstance(item, dict)]
@@ -1416,6 +1420,7 @@ class KnowledgeTraceService:
                 "mention_count": total_mentions,
                 "claim_count": total_claims,
                 "space_time_frame_count": total_space_time_frames,
+                "semantic_block_count": len(semantic_blocks),
                 "local_entity_cluster_count": effective_cluster_count,
                 "technical_entities": len(technical_entities),
                 "technical_memory_chunks": len(technical_memory_chunks),
@@ -1531,6 +1536,7 @@ class KnowledgeTraceService:
             "technical_entities": technical_entities,
             "technical_memory_chunks": technical_memory_chunks,
             "search_profiles": search_profiles,
+            "semantic_blocks": semantic_blocks,
             "candidate_selections": candidate_selections,
             "similarity_analyses": similarity_analyses,
             "tension_analyses": tension_analyses,
@@ -1539,12 +1545,12 @@ class KnowledgeTraceService:
             "retrieval_chunks": retrieval_chunks,
             "local_resolver_trace": local_resolver_trace,
         }
-        logger.info(
+        logger.debug(
             "[CLAIM QUALITY DIAGNOSTICS]\nrun_id=%s\nquality_summary=%s",
             trace["run_id"],
             trace["summary"]["quality"],
         )
-        logger.info(
+        logger.debug(
             "[KNOWLEDGE TRACE SERVICE]\nrun_id=%s\nsentence_count=%s\nmention_count=%s\nclaim_count=%s\nspace_time_frame_count=%s\nlocal_entity_cluster_count=%s\nlocal_entity_count=%s\nlow_coherence_local_entity_count=%s\nunknown_entity_type_count=%s",
             trace["run_id"],
             trace["summary"]["sentence_count"],
