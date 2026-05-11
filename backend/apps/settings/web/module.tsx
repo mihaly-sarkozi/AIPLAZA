@@ -16,11 +16,11 @@ export function getModule(): FrontendModuleDefinition {
     menuItems: () => [
       {
         key: "settings.system",
-        path: "/admin/settings?section=system",
-        labelKey: "nav.systemSettings",
+        path: "/admin/settings",
+        labelKey: "nav.settings",
         requiresAuth: true,
         requiredPermission: "settings.read",
-        order: 70,
+        order: 60,
       },
     ],
   };

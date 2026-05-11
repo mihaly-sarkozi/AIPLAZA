@@ -12,6 +12,7 @@ import {
   planResourceBlock,
   readBillingResourceUsage,
 } from "../planEligibility";
+import { useAuthenticatorStatus } from "../../settings/hooks/useAuthenticator";
 import Alert from "../../../components/ui/Alert";
 import Button from "../../../components/ui/Button";
 import PageHeader from "../../../components/ui/PageHeader";
@@ -19,9 +20,18 @@ import PageHeader from "../../../components/ui/PageHeader";
 const PLAN_ORDER = ["free", "starter", "growth", "business"] as const;
 
 const PLAN_RANK: Record<string, number> = { free: 0, starter: 1, growth: 2, business: 3 };
+const BILLING_PERIOD_RANK: Record<string, number> = { monthly: 1, quarterly: 2, yearly: 3 };
 
 function isPlanDowngrade(fromCode: string, toCode: string): boolean {
   return (PLAN_RANK[toCode] ?? 0) < (PLAN_RANK[fromCode] ?? 0);
+}
+
+function isBillingPeriodDowngrade(fromPeriod: string, toPeriod: string): boolean {
+  return (BILLING_PERIOD_RANK[toPeriod] ?? 1) < (BILLING_PERIOD_RANK[fromPeriod] ?? 1);
+}
+
+function isScheduledChange(fromCode: string, toCode: string, fromPeriod: string, toPeriod: string): boolean {
+  return isPlanDowngrade(fromCode, toCode) || (fromCode === toCode && isBillingPeriodDowngrade(fromPeriod, toPeriod));
 }
 
 function sortPlans(entries: BillingCatalogEntry[]): BillingCatalogEntry[] {
@@ -78,25 +88,18 @@ function getStoragePerGbCents(catalog: BillingCatalogEntry[]): number {
   return row ? Number(row.price_cents) : 500;
 }
 
-function getQuestionPackInfo(catalog: BillingCatalogEntry[], code: string): { questions: number; priceCents: number } {
-  const row = catalog.find((e) => e.entry_type === "addon" && e.code === code);
-  const priceCents = row ? Number(row.price_cents) : code === "question_pack_100" ? 120 : 500;
-  const inc = row?.included && typeof row.included === "object" ? (row.included as Record<string, unknown>) : {};
-  const q = inc.questions != null ? Number(inc.questions) : code === "question_pack_100" ? 100 : 500;
-  return { questions: Number.isFinite(q) ? q : 100, priceCents };
+function addonEntry(catalog: BillingCatalogEntry[], code: string): BillingCatalogEntry | null {
+  return catalog.find((item) => item.entry_type === "addon" && item.code === code) ?? null;
+}
+
+function includedNumber(entry: BillingCatalogEntry | null, key: string, fallback: number): number {
+  const value = entry?.included?.[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
 }
 
 function getTrainingInitialAddonInfo(catalog: BillingCatalogEntry[]): { euro: number; chars: number } {
   const row = catalog.find((e) => e.entry_type === "addon" && e.code === "training_initial_500k");
   const euro = row ? Math.floor(Number(row.price_cents) / 100) : 49;
-  const raw = row?.included && typeof row.included === "object" ? (row.included as Record<string, unknown>).training_chars : null;
-  const chars = raw != null && raw !== "" ? Number(raw) : 500000;
-  return { euro, chars: Number.isFinite(chars) ? chars : 500000 };
-}
-
-function getTrainingExtraAddonInfo(catalog: BillingCatalogEntry[]): { euro: number; chars: number } {
-  const row = catalog.find((e) => e.entry_type === "addon" && e.code === "training_extra_500k");
-  const euro = row ? Math.floor(Number(row.price_cents) / 100) : 29;
   const raw = row?.included && typeof row.included === "object" ? (row.included as Record<string, unknown>).training_chars : null;
   const chars = raw != null && raw !== "" ? Number(raw) : 500000;
   return { euro, chars: Number.isFinite(chars) ? chars : 500000 };
@@ -145,22 +148,32 @@ function planCardFeatureSections(entry: BillingCatalogEntry, t: (key: string) =>
     afterUsers.push(t("packages.lineTrial").replace("{{count}}", String(trial)));
   }
 
-  const tagline = typeof meta.description === "string" && meta.description.trim() ? meta.description.trim() : null;
+  const translatedTagline = t(`packages.planTagline_${entry.code}`);
+  const tagline =
+    translatedTagline !== `packages.planTagline_${entry.code}`
+      ? translatedTagline
+      : typeof meta.description === "string" && meta.description.trim()
+        ? meta.description.trim()
+        : null;
 
   return { beforeUsers, usersLine, afterUsers, tagline };
 }
 
-function paidPriceDisplay(plan: BillingCatalogEntry, period: string, t: (key: string) => string): { monthEuro: number; subline: string | null } {
+function paidPriceDisplay(
+  plan: BillingCatalogEntry,
+  period: string,
+  t: (key: string) => string
+): { monthEuro: number; listPeriodEuro: number | null; subline: string | null } {
   const listM = Math.floor(Number(plan.price_cents) / 100);
   const effM = flooredMonthlyEuroAfterDiscount(plan.price_cents, period);
   const monthEuro = period === "monthly" ? listM : effM;
   if (period === "monthly") {
-    return { monthEuro, subline: t("packages.billedMonthlyShort") };
+    return { monthEuro, listPeriodEuro: null, subline: t("packages.billedMonthlyShort") };
   }
   if (period === "quarterly") {
-    return { monthEuro, subline: t("packages.billedQuarterly").replace("{{total}}", String(effM * 3)) };
+    return { monthEuro, listPeriodEuro: listM * 3, subline: t("packages.billedQuarterly").replace("{{total}}", String(effM * 3)) };
   }
-  return { monthEuro, subline: t("packages.billedYearly").replace("{{total}}", String(effM * 12)) };
+  return { monthEuro, listPeriodEuro: listM * 12, subline: t("packages.billedYearly").replace("{{total}}", String(effM * 12)) };
 }
 
 function isFreePlan(plan: BillingCatalogEntry): boolean {
@@ -214,10 +227,16 @@ export default function PackagesPage() {
   const { data: billingOverview, isLoading: billingLoading, error: billingError } = useBillingOverview();
   const updateSubscriptionMutation = useUpdateSubscriptionMutation();
   const [bannerExpandModalOpen, setBannerExpandModalOpen] = useState(false);
+  const [trainingQuantity, setTrainingQuantity] = useState(0);
+  const [storageQuantity, setStorageQuantity] = useState(0);
+  const [question100Quantity, setQuestion100Quantity] = useState(0);
+  const [question500Quantity, setQuestion500Quantity] = useState(0);
   const [selectedBillingPeriod, setSelectedBillingPeriod] = useState<BillingPeriod>("quarterly");
   const [planChangePending, setPlanChangePending] = useState<{ planCode: string; billingPeriod: BillingPeriod } | null>(null);
   const [planChangeSuccess, setPlanChangeSuccess] = useState<{ message: string; status: string } | null>(null);
   const [resourceBlockMessage, setResourceBlockMessage] = useState<string | null>(null);
+  const [showAuthenticatorRequiredModal, setShowAuthenticatorRequiredModal] = useState(false);
+  const authenticatorStatusQuery = useAuthenticatorStatus();
 
   const billingErrMsg =
     billingError && typeof (billingError as { response?: { data?: { detail?: string } } })?.response?.data?.detail === "string"
@@ -228,7 +247,7 @@ export default function PackagesPage() {
   const billingMutationError = updateSubscriptionMutation.error ? t("common.errorGeneric") : null;
   const displayError = billingErrMsg ?? billingMutationError;
 
-  const catalog = billingOverview?.catalog ?? [];
+  const catalog = useMemo(() => billingOverview?.catalog ?? [], [billingOverview?.catalog]);
   const planEntries = useMemo(() => catalog.filter((item) => item.entry_type === "plan"), [catalog]);
   const paidPlans = useMemo(() => sortPlans(planEntries.filter((p) => !isFreePlan(p))), [planEntries]);
 
@@ -249,49 +268,71 @@ export default function PackagesPage() {
     return t("packages.trainingInitialSubline").replace("{{euro}}", String(a.euro));
   }, [catalog, t]);
 
-  const expandBannerAddonRows = useMemo(() => {
+  const expansionOptions = useMemo(() => {
     const tag = localeTagForNumbers(locale);
-    const train = getTrainingExtraAddonInfo(catalog);
+    const trainingAddon = addonEntry(catalog, "training_extra_500k");
+    const question100Addon = addonEntry(catalog, "question_pack_100");
+    const question500Addon = addonEntry(catalog, "question_pack_500");
+    const trainChars = includedNumber(trainingAddon, "training_chars", 500000);
     const perGbCents = getStoragePerGbCents(catalog);
     const storageBundleCents = FLEX_STORAGE_GB_BUNDLE * perGbCents;
-    const pq100 = getQuestionPackInfo(catalog, "question_pack_100");
-    const pq500 = getQuestionPackInfo(catalog, "question_pack_500");
-    const monthUnit = t("packages.perMonthSuffix");
+    const question100Count = includedNumber(question100Addon, "questions", 100);
+    const question500Count = includedNumber(question500Addon, "questions", 500);
+    const trainingUnitPriceCents = trainingAddon ? Number(trainingAddon.price_cents) : 2900;
+    const question100PriceCents = question100Addon ? Number(question100Addon.price_cents) : 120;
+    const question500PriceCents = question500Addon ? Number(question500Addon.price_cents) : 500;
     return [
       {
         addonCode: "training_extra_500k",
-        quantity: 1,
-        title: t("packages.expandTrainingTitle").replace("{{chars}}", train.chars.toLocaleString(tag)),
-        price: t("packages.expandPriceOneTime").replace("{{euro}}", String(train.euro)),
+        checkoutQuantity: trainingQuantity,
+        title: t("packages.expandTrainingTitle").replace("{{chars}}", trainChars.toLocaleString(tag)),
+        unitLabel: `${trainChars.toLocaleString(tag)} ${t("traffic.expandCharactersUnit")}`,
+        unitPriceCents: trainingUnitPriceCents,
+        quantity: trainingQuantity,
+        setQuantity: setTrainingQuantity,
+        totalCents: trainingUnitPriceCents * trainingQuantity,
       },
       {
         addonCode: "extra_storage_gb",
-        quantity: FLEX_STORAGE_GB_BUNDLE,
+        checkoutQuantity: storageQuantity * FLEX_STORAGE_GB_BUNDLE,
         title: t("packages.expandStorageTitle").replace("{{gb}}", String(FLEX_STORAGE_GB_BUNDLE)),
-        price: t("packages.expandPriceMonthly")
-          .replace("{{euro}}", formatEuroLocaleFromCents(storageBundleCents, locale))
-          .replace("{{monthUnit}}", monthUnit),
+        unitLabel: `${FLEX_STORAGE_GB_BUNDLE.toLocaleString(tag)} GB`,
+        unitPriceCents: storageBundleCents,
+        priceSuffix: `/ ${t("packages.perMonthSuffix")}`,
+        quantity: storageQuantity,
+        setQuantity: setStorageQuantity,
+        totalCents: storageBundleCents * storageQuantity,
       },
       {
         addonCode: "question_pack_100",
-        quantity: 1,
-        title: t("packages.expandQuestionsTitle").replace("{{count}}", String(pq100.questions)),
-        price: t("packages.expandPriceQuestions").replace(
-          "{{amount}}",
-          formatEuroLocaleFromCents(pq100.priceCents, locale)
-        ),
+        checkoutQuantity: question100Quantity,
+        title: t("packages.expandQuestionsTitle").replace("{{count}}", String(question100Count)),
+        unitLabel: t("packages.expandQuestionsTitle").replace("{{count}}", String(question100Count)).toLowerCase(),
+        unitPriceCents: question100PriceCents,
+        quantity: question100Quantity,
+        setQuantity: setQuestion100Quantity,
+        totalCents: question100PriceCents * question100Quantity,
       },
       {
         addonCode: "question_pack_500",
-        quantity: 1,
-        title: t("packages.expandQuestionsTitle").replace("{{count}}", String(pq500.questions)),
-        price: t("packages.expandPriceQuestions").replace(
-          "{{amount}}",
-          formatEuroLocaleFromCents(pq500.priceCents, locale)
-        ),
+        checkoutQuantity: question500Quantity,
+        title: t("packages.expandQuestionsTitle").replace("{{count}}", String(question500Count)),
+        unitLabel: t("packages.expandQuestionsTitle").replace("{{count}}", String(question500Count)).toLowerCase(),
+        unitPriceCents: question500PriceCents,
+        quantity: question500Quantity,
+        setQuantity: setQuestion500Quantity,
+        totalCents: question500PriceCents * question500Quantity,
       },
-    ] as const;
-  }, [catalog, locale, t]);
+    ];
+  }, [catalog, locale, question100Quantity, question500Quantity, storageQuantity, t, trainingQuantity]);
+  const selectedExpansionItems = expansionOptions.filter((item) => item.checkoutQuantity > 0);
+  const expansionTotalPriceCents = expansionOptions.reduce((sum, item) => sum + item.totalCents, 0);
+  const checkoutItemsParam = selectedExpansionItems
+    .map((item) => `${item.addonCode}:${item.checkoutQuantity}`)
+    .join(",");
+  const changeQuantity = (setter: (value: number) => void, current: number, delta: number) => {
+    setter(Math.max(0, Math.min(99, current + delta)));
+  };
 
   useEffect(() => {
     if (!bannerExpandModalOpen) return;
@@ -343,10 +384,14 @@ export default function PackagesPage() {
       return;
     }
     if (currentPlanCode === "free") {
+      if (!authenticatorStatusQuery.data?.enabled) {
+        setShowAuthenticatorRequiredModal(true);
+        return;
+      }
       navigate(`/admin/csomagok/fizetes?plan=${encodeURIComponent(planCode)}&period=${selectedBillingPeriod}`);
       return;
     }
-    if (isPlanDowngrade(currentPlanCode, planCode)) {
+    if (isScheduledChange(currentPlanCode, planCode, currentBillingPeriod, selectedBillingPeriod)) {
       setPlanChangePending({ planCode, billingPeriod: selectedBillingPeriod });
       return;
     }
@@ -396,9 +441,11 @@ export default function PackagesPage() {
   const pendingBilledPhrase =
     planChangePending != null ? tBannerBilledPeriod(planChangePending.billingPeriod, t) : "";
   const pendingIsDowngrade =
-    planChangePending != null ? isPlanDowngrade(currentPlanCode, planChangePending.planCode) : false;
+    planChangePending != null
+      ? isScheduledChange(currentPlanCode, planChangePending.planCode, currentBillingPeriod, planChangePending.billingPeriod)
+      : false;
 
-  const showBannerExpandButton = !(currentPlanCode === "free" && Boolean(billingOverview?.demo_mode));
+  const showBannerExpandButton = currentPlanCode !== "free";
 
   if (!user || user.role !== "owner") {
     return (
@@ -504,7 +551,7 @@ export default function PackagesPage() {
 
         <div className="mb-4">
           {(() => {
-            const { monthEuro, subline } = paidPriceDisplay(plan, selectedBillingPeriod, t);
+            const { monthEuro, listPeriodEuro, subline } = paidPriceDisplay(plan, selectedBillingPeriod, t);
             return (
               <>
                 <div className="flex items-baseline gap-1 flex-wrap">
@@ -516,7 +563,16 @@ export default function PackagesPage() {
                     / {t("packages.perMonthSuffix")}
                   </span>
                 </div>
-                {subline ? <p className="text-xs text-[var(--color-muted)] mt-1.5 leading-snug">{subline}</p> : null}
+                {subline ? (
+                  <p className="text-xs text-[var(--color-muted)] mt-1.5 leading-snug">
+                    {subline}
+                    {listPeriodEuro != null ? (
+                      <span className="ml-2 font-semibold text-red-600 line-through decoration-red-600 dark:text-red-400 dark:decoration-red-400">
+                        {listPeriodEuro} {t("packages.euroSymbol")}
+                      </span>
+                    ) : null}
+                  </p>
+                ) : null}
                 <p className="text-sm font-medium text-[var(--color-foreground)] mt-1.5 leading-snug rounded-md px-2 py-1.5 bg-neutral-400/55 dark:bg-neutral-600">
                   {trainingInitialSubline}
                 </p>
@@ -575,31 +631,12 @@ export default function PackagesPage() {
         <PageHeader
           eyebrow={t("nav.packages")}
           title={t("nav.packages")}
-          description={
-            <>
-              {t("packages.yourPlanBannerLabel")} <span className="font-medium text-[var(--color-foreground)]">{currentPlanName}</span>
-              {currentPlanCode === "free" ? (
-                <span className="text-[var(--color-muted)]"> {t("packages.planBillingParenFree")}</span>
-              ) : (
-                <span className="text-[var(--color-muted)]"> {tPlanBillingParen(currentBillingPeriod, t)}</span>
-              )}
-              {bannerValidityDate != null ? (
-                <>
-                  {" "}
-                  {t("packages.yourPlanBannerValidityPrefix")}
-                  <span className="font-medium text-[var(--color-foreground)]">{bannerValidityDate}</span>
-                  {t("packages.yourPlanBannerValiditySuffix")}
-                </>
-              ) : null}
-            </>
-          }
         />
       </div>
 
-      <div className="w-full max-w-6xl mx-auto mb-6 px-2">
+      <div className="w-full max-w-6xl mx-auto mb-6 grid gap-4 px-2 md:grid-cols-2">
         <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-card)] p-4 text-sm leading-relaxed">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-            <div className="space-y-1.5 min-w-0 flex-1">
+          <div className="space-y-1.5 min-w-0">
               <p className="font-normal text-[var(--color-foreground)]">
                 <span className="text-[var(--color-muted)]">{t("packages.yourPlanBannerLabel")}</span>{" "}
                 <span className="font-semibold text-[var(--color-foreground)]">{currentPlanName}</span>
@@ -623,34 +660,12 @@ export default function PackagesPage() {
                   <span> {tPlanBillingParen(scheduledBillingPeriod, t)}</span>
                 </p>
               ) : null}
-              <p className="text-xs text-[var(--color-muted)] leading-relaxed pt-2">
-                A következő számlázási ciklustól szabadon válthatsz csomagot, azonban kisebb csomagra váltás
-                esetén a tudástár méretét az új csomag korlátaihoz kell igazítani.
-              </p>
-            </div>
-            {showBannerExpandButton ? (
-              <Button
-                type="button"
-                onClick={() => setBannerExpandModalOpen(true)}
-                className="shrink-0 self-start sm:self-center"
-              >
-                {t("packages.bannerExpandCta")}
-              </Button>
-            ) : null}
           </div>
         </div>
-      </div>
 
-      {displayError && (
-        <Alert tone="error" className="mb-4">
-          {displayError}
-        </Alert>
-      )}
-
-      <div className="w-full max-w-6xl mx-auto space-y-10">
-        <div className="flex w-full flex-col gap-3 px-2 md:flex-row md:items-center md:justify-between">
-          <div>
-            <p className="text-sm font-medium text-[var(--color-muted)]">{t("packages.billingLabel")}</p>
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-end">
+          <div className="md:text-right">
+            <p className="text-sm font-normal text-[var(--color-muted)]">{t("packages.billingLabel")}</p>
           </div>
           <div
             role="group"
@@ -662,10 +677,40 @@ export default function PackagesPage() {
             {segmentBtn("yearly", t("packages.segmentYearly"), t("packages.segmentSaveYearly"))}
           </div>
         </div>
+      </div>
 
+      {displayError && (
+        <Alert tone="error" className="mb-4">
+          {displayError}
+        </Alert>
+      )}
+
+      <div className="w-full max-w-6xl mx-auto space-y-10">
         <div className="grid gap-4 md:grid-cols-3 md:items-stretch">
           {paidPlans.map((plan) => renderPlanCard(plan, { featured: plan.code === "growth" }))}
         </div>
+
+        {showBannerExpandButton ? (
+          <div className="mx-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-card)] p-4 text-sm leading-relaxed">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="min-w-0">
+                <p className="font-semibold text-[var(--color-foreground)]">{t("packages.bannerExpandModalTitle")}</p>
+                <p className="mt-1 text-xs text-[var(--color-muted)]">{t("packages.planChangeTimingNotice")}</p>
+                <p className="mt-2 text-xs leading-relaxed text-[var(--color-muted)]">
+                  {expansionOptions
+                    .map((item) => {
+                      const price = `${formatEuroLocaleFromCents(item.unitPriceCents, locale)} € ${t("packages.taxSuffix")}`;
+                      return `${item.title}: ${price}${item.priceSuffix ? ` ${item.priceSuffix}` : ""}`;
+                    })
+                    .join(" · ")}
+                </p>
+              </div>
+              <Button type="button" onClick={() => setBannerExpandModalOpen(true)} className="shrink-0 self-start sm:self-center">
+                {t("packages.bannerExpandCta")}
+              </Button>
+            </div>
+          </div>
+        ) : null}
 
         {planChangePending ? (
           <div
@@ -788,6 +833,52 @@ export default function PackagesPage() {
           </div>
         ) : null}
 
+        {showAuthenticatorRequiredModal ? (
+          <div
+            className="fixed inset-0 z-[87] flex items-center justify-center p-4 bg-black/40"
+            role="presentation"
+            onClick={() => setShowAuthenticatorRequiredModal(false)}
+          >
+            <div
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="packages-authenticator-required-title"
+              className="bg-[var(--color-card)] border border-[var(--color-border)] rounded-xl max-w-md w-full shadow-xl"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="px-4 py-4 border-b border-[var(--color-border)]">
+                <h2 id="packages-authenticator-required-title" className="text-base font-semibold text-[var(--color-foreground)]">
+                  Authenticator szükséges az előfizetéshez
+                </h2>
+              </div>
+              <div className="px-4 py-4 text-sm text-[var(--color-foreground)] leading-relaxed">
+                <p>
+                  A próbaidőszak alatt a kétfaktoros hitelesítés opcionális, de előfizetés indításához kötelező a Google
+                  Authenticator aktiválása.
+                </p>
+              </div>
+              <div className="px-4 pb-4 flex flex-wrap justify-end gap-2">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => setShowAuthenticatorRequiredModal(false)}
+                >
+                  Később
+                </Button>
+                <Button
+                  type="button"
+                  onClick={() => {
+                    setShowAuthenticatorRequiredModal(false);
+                    navigate("/admin/settings");
+                  }}
+                >
+                  Authenticator beállítása
+                </Button>
+              </div>
+            </div>
+          </div>
+        ) : null}
+
         {bannerExpandModalOpen ? (
           <div
             className="fixed inset-0 z-[83] flex items-center justify-center p-4 bg-black/40"
@@ -798,48 +889,78 @@ export default function PackagesPage() {
               role="dialog"
               aria-modal="true"
               aria-labelledby="packages-banner-expand-title"
-              className="bg-[var(--color-card)] border border-[var(--color-border)] rounded-xl max-w-md w-full max-h-[min(90vh,40rem)] overflow-y-auto shadow-xl"
+              className="w-full max-w-2xl rounded-2xl border border-[var(--color-border)] bg-[var(--color-card)] p-5 shadow-xl"
               onClick={(e) => e.stopPropagation()}
             >
-              <div className="sticky top-0 flex justify-end gap-2 border-b border-[var(--color-border)] bg-[var(--color-card)] px-4 py-2">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <p className="text-sm font-medium text-[var(--color-muted)]">{t("packages.bannerExpandCta")}</p>
+                  <h2 id="packages-banner-expand-title" className="mt-1 text-xl font-semibold text-[var(--color-foreground)]">
+                    {t("traffic.expandModalTitle")}
+                  </h2>
+                </div>
                 <button
                   type="button"
-                  className="text-xs font-medium text-[var(--color-muted)] hover:text-[var(--color-foreground)] px-2 py-1 rounded"
+                  className="rounded-lg px-2 py-1 text-sm text-[var(--color-muted)] hover:bg-[var(--color-card-muted)] hover:text-[var(--color-foreground)]"
                   onClick={() => setBannerExpandModalOpen(false)}
                 >
                   {t("common.close")}
                 </button>
               </div>
-              <div className="px-4 pb-5 pt-3">
-                <h2 id="packages-banner-expand-title" className="text-base font-semibold text-[var(--color-foreground)] mb-4">
-                  {t("packages.bannerExpandModalTitle")}
-                </h2>
-                <div className="flex flex-col gap-3">
-                  {expandBannerAddonRows.map((row) => (
-                    <div
-                      key={row.addonCode}
-                      className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between rounded-lg border border-[var(--color-border)] bg-[var(--color-background)] px-4 py-3 text-sm"
-                    >
-                      <div className="min-w-0 flex-1">
-                        <p className="font-medium text-[var(--color-foreground)] leading-snug">{row.title}</p>
-                        <p className="mt-1.5 text-sm text-[var(--color-muted)] tabular-nums">{row.price}</p>
+
+              <div className="mt-5 grid gap-2">
+                {expansionOptions.map((item) => (
+                  <div key={item.addonCode} className="rounded-xl border border-[var(--color-border)] bg-[var(--color-background)] px-3 py-2.5">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="font-medium text-[var(--color-foreground)]">{item.title}</p>
+                        <p className="mt-0.5 text-xs text-[var(--color-muted)]">
+                          {t("traffic.expandUnitPrice")
+                            .replace("{{unit}}", item.unitLabel)
+                            .replace("{{price}}", `${formatEuroLocaleFromCents(item.unitPriceCents, locale)} €`)}
+                          {item.priceSuffix ? ` ${item.priceSuffix}` : ""}
+                        </p>
                       </div>
-                      <button
-                        type="button"
-                        className="shrink-0 rounded-lg px-4 py-2 text-sm font-semibold bg-[var(--color-primary)] text-[var(--color-on-primary)] hover:opacity-90"
-                        onClick={() => {
-                          setBannerExpandModalOpen(false);
-                          navigate(
-                            `/admin/csomagok/bovites-fizetes?addon=${encodeURIComponent(row.addonCode)}&qty=${String(row.quantity)}`
-                          );
-                        }}
-                      >
-                        {t("packages.expandBuyCta")}
-                      </button>
+                      <div className="flex shrink-0 items-center gap-4">
+                        <div className="flex items-center rounded-lg border border-[var(--color-border)]">
+                          <button type="button" className="px-2 py-1 text-sm" onClick={() => changeQuantity(item.setQuantity, item.quantity, -1)}>
+                            -
+                          </button>
+                          <span className="min-w-8 px-2 text-center text-sm tabular-nums">{item.quantity}</span>
+                          <button type="button" className="px-2 py-1 text-sm" onClick={() => changeQuantity(item.setQuantity, item.quantity, 1)}>
+                            +
+                          </button>
+                        </div>
+                        <span className="min-w-24 text-right text-sm font-medium text-[var(--color-foreground)]">
+                          {formatEuroLocaleFromCents(item.totalCents, locale)} € {t("packages.taxSuffix")}
+                        </span>
+                      </div>
                     </div>
-                  ))}
+                  </div>
+                ))}
+
+                <p className="px-1 text-xs text-[var(--color-muted)]">{t("traffic.expandOtherOptionsHint")}</p>
+
+                <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-card-muted)] px-3 py-2.5">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-sm font-medium text-[var(--color-muted)]">{t("traffic.expandTotal")}</span>
+                    <span className="text-lg font-semibold text-[var(--color-foreground)]">
+                      {formatEuroLocaleFromCents(expansionTotalPriceCents, locale)} € {t("packages.taxSuffix")}
+                    </span>
+                  </div>
+                  <Button
+                    type="button"
+                    fullWidth
+                    className="mt-3"
+                    disabled={selectedExpansionItems.length === 0}
+                    onClick={() => {
+                      setBannerExpandModalOpen(false);
+                      navigate(`/admin/csomagok/bovites-fizetes?items=${encodeURIComponent(checkoutItemsParam)}`);
+                    }}
+                  >
+                    {t("traffic.expandPay")}
+                  </Button>
                 </div>
-                <p className="mt-5 text-sm text-[var(--color-muted)] leading-relaxed">{t("packages.flexNoteFinePrint")}</p>
               </div>
             </div>
           </div>

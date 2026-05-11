@@ -1,9 +1,14 @@
-import { useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useTranslation } from "../../../i18n";
 import { useAuthStore } from "../../../store/authStore";
 import { useBillingOverview, useUpdateSubscriptionMutation, type BillingCatalogEntry } from "../../billing/hooks/useBilling";
 import { formatPlanResourceBlockMessage, planResourceBlock, readBillingResourceUsage } from "../planEligibility";
+import api from "../../../api/axiosClient";
+import { EU_COUNTRIES, isValidEuVatId, isValidPostalCode, normalizeEuVatId, normalizePostalCode } from "./checkoutOptions";
+import { checkoutCustomerTypeFromSettings, hasSavedCheckoutBillingDetails, type BillingCustomerType } from "./checkoutBillingDetails";
+import { SavedBillingDetailsSummary } from "./SavedBillingDetailsSummary";
+import { useSettings } from "../../settings/hooks/useSettings";
 
 const VALID_PERIODS = ["monthly", "quarterly", "yearly"] as const;
 type BillingPeriod = (typeof VALID_PERIODS)[number];
@@ -36,6 +41,7 @@ export default function PackagesCheckoutPage() {
   const [searchParams] = useSearchParams();
   const { user } = useAuthStore();
   const { data: billingOverview, isLoading } = useBillingOverview();
+  const { data: settings } = useSettings();
   const updateSubscriptionMutation = useUpdateSubscriptionMutation();
 
   const planCode = (searchParams.get("plan") ?? "").toLowerCase();
@@ -46,13 +52,18 @@ export default function PackagesCheckoutPage() {
   const [cardExpiry, setCardExpiry] = useState("");
   const [cardCvc, setCardCvc] = useState("");
   const [fullName, setFullName] = useState("");
+  const [customerType, setCustomerType] = useState<BillingCustomerType>("company");
   const [company, setCompany] = useState("");
   const [addressLine, setAddressLine] = useState("");
+  const [postalCode, setPostalCode] = useState("");
+  const [city, setCity] = useState("");
   const [country, setCountry] = useState("");
   const [taxId, setTaxId] = useState("");
   const [acceptTerms, setAcceptTerms] = useState(false);
+  const [billingDetailsEditing, setBillingDetailsEditing] = useState(true);
+  const [billingDetailsPrefilled, setBillingDetailsPrefilled] = useState(false);
 
-  const catalog = billingOverview?.catalog ?? [];
+  const catalog = useMemo(() => billingOverview?.catalog ?? [], [billingOverview?.catalog]);
   const plan = useMemo(
     () => catalog.find((e) => e.entry_type === "plan" && e.code === planCode && !isFreePlan(e)),
     [catalog, planCode]
@@ -85,14 +96,40 @@ export default function PackagesCheckoutPage() {
       : billingPeriod === "yearly"
         ? t("packages.checkoutTotalAdverbYearly")
         : "";
+  const hasSavedBillingDetails = hasSavedCheckoutBillingDetails(settings);
+  const billingDetailsLocked = hasSavedBillingDetails && !billingDetailsEditing;
+
+  useEffect(() => {
+    if (!settings || billingDetailsPrefilled) return;
+    const savedCustomerType = checkoutCustomerTypeFromSettings(settings);
+    setCustomerType(savedCustomerType);
+    setCompany(savedCustomerType === "company" ? settings.billing_company_name ?? "" : "");
+    setFullName(savedCustomerType === "private" ? settings.billing_company_name ?? "" : user?.name ?? "");
+    setAddressLine(settings.billing_address_line ?? "");
+    setPostalCode(normalizePostalCode(settings.billing_postal_code ?? ""));
+    setCity(settings.billing_city ?? "");
+    setCountry(settings.billing_country ?? "");
+    setTaxId(normalizeEuVatId(settings.billing_tax_id ?? ""));
+    setBillingDetailsEditing(!hasSavedCheckoutBillingDetails(settings));
+    setBillingDetailsPrefilled(true);
+  }, [billingDetailsPrefilled, settings, user?.name]);
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     if (!plan || !acceptTerms || currentPlanCode !== "free") return;
+    if (!isValidPostalCode(postalCode) || (customerType === "company" && !isValidEuVatId(country, taxId))) return;
     const { usedGb, usedKbCount } = readBillingResourceUsage(billingOverview?.usage as Record<string, unknown> | undefined);
     const block = planResourceBlock(plan, usedGb, usedKbCount, false);
     if (block.blocked) return;
     try {
+      await api.patch("/settings", {
+        billing_company_name: customerType === "company" ? company : fullName,
+        billing_tax_id: customerType === "company" ? normalizeEuVatId(taxId) : "",
+        billing_address_line: addressLine,
+        billing_postal_code: postalCode,
+        billing_city: city,
+        billing_country: country,
+      });
       const res = await updateSubscriptionMutation.mutateAsync({ plan_code: plan.code, billing_period: billingPeriod });
       navigate("/admin/csomagok", { state: { checkoutComplete: true, message: res.message, status: res.status } });
     } catch {
@@ -162,7 +199,13 @@ export default function PackagesCheckoutPage() {
   const submitDisabled =
     !acceptTerms ||
     updateSubscriptionMutation.isPending ||
-    !fullName.trim() ||
+    (!billingDetailsLocked &&
+      (!fullName.trim() ||
+        !country.trim() ||
+        !isValidPostalCode(postalCode) ||
+        !city.trim() ||
+        !addressLine.trim() ||
+        (customerType === "company" && (!company.trim() || !isValidEuVatId(country, taxId))))) ||
     !cardNumber.trim() ||
     !cardExpiry.trim() ||
     !cardCvc.trim() ||
@@ -210,7 +253,121 @@ export default function PackagesCheckoutPage() {
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4 rounded-xl border border-[var(--color-border)] bg-[var(--color-card)] p-4">
-          <h2 className="text-sm font-semibold">{t("packages.checkoutPaymentSection")}</h2>
+          <h2 className="text-sm font-semibold">{t("packages.checkoutBillingSection")}</h2>
+          {billingDetailsLocked && settings ? (
+            <SavedBillingDetailsSummary settings={settings} onEdit={() => setBillingDetailsEditing(true)} />
+          ) : (
+          <div className="space-y-3">
+            <fieldset className="rounded-xl border border-[var(--color-border)] p-3">
+              <legend className="px-1 text-xs font-medium text-[var(--color-muted)]">{t("packages.checkoutCustomerType")}</legend>
+              <div className="grid gap-2 sm:grid-cols-2">
+                <label className="flex cursor-pointer items-center gap-2 text-sm">
+                  <input
+                    type="radio"
+                    name="billing_customer_type"
+                    checked={customerType === "company"}
+                    onChange={() => setCustomerType("company")}
+                    className="mr-1 shrink-0"
+                    style={{ width: "auto" }}
+                  />
+                  <span className="relative -top-[3px]">{t("packages.checkoutCustomerTypeCompany")}</span>
+                </label>
+                <label className="flex cursor-pointer items-center gap-2 text-sm">
+                  <input
+                    type="radio"
+                    name="billing_customer_type"
+                    checked={customerType === "private"}
+                    onChange={() => setCustomerType("private")}
+                    className="mr-1 shrink-0"
+                    style={{ width: "auto" }}
+                  />
+                  <span className="relative -top-[3px]">{t("packages.checkoutCustomerTypePrivate")}</span>
+                </label>
+              </div>
+            </fieldset>
+            <label className="block text-xs text-[var(--color-muted)]">
+              {customerType === "company" ? t("packages.checkoutRepresentativeName") : t("packages.checkoutFullName")}
+              <input
+                value={fullName}
+                onChange={(e) => setFullName(e.target.value)}
+                className="mt-1 w-full rounded-md border border-[var(--color-border)] bg-[var(--color-background)] px-3 py-2 text-sm"
+                autoComplete="name"
+              />
+            </label>
+            {customerType === "company" ? (
+              <label className="block text-xs text-[var(--color-muted)]">
+                {t("packages.checkoutCompanyRequired")}
+                <input
+                  value={company}
+                  onChange={(e) => setCompany(e.target.value)}
+                  className="mt-1 w-full rounded-md border border-[var(--color-border)] bg-[var(--color-background)] px-3 py-2 text-sm"
+                  autoComplete="organization"
+                />
+              </label>
+            ) : null}
+            <label className="block text-xs text-[var(--color-muted)]">
+              {t("packages.checkoutCountry")}
+              <select
+                value={country}
+                onChange={(e) => setCountry(e.target.value)}
+                className="mt-1 w-full rounded-md border border-[var(--color-border)] bg-[var(--color-background)] px-3 py-2 text-sm"
+                autoComplete="country-name"
+              >
+                <option value="">{t("packages.checkoutCountrySelectPlaceholder")}</option>
+                {EU_COUNTRIES.map((item) => (
+                  <option key={item} value={item}>
+                    {item}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <div className="grid grid-cols-2 gap-3">
+              <label className="block text-xs text-[var(--color-muted)]">
+                {t("packages.checkoutPostalCode")}
+                <input
+                  value={postalCode}
+                  onChange={(e) => setPostalCode(normalizePostalCode(e.target.value))}
+                  className="mt-1 w-full rounded-md border border-[var(--color-border)] bg-[var(--color-background)] px-3 py-2 text-sm"
+                  autoComplete="postal-code"
+                  inputMode="numeric"
+                  maxLength={5}
+                />
+                <span className="mt-1 block text-[11px] text-[var(--color-muted)]">{t("packages.checkoutPostalCodeHint")}</span>
+              </label>
+              <label className="block text-xs text-[var(--color-muted)]">
+                {t("packages.checkoutCity")}
+                <input
+                  value={city}
+                  onChange={(e) => setCity(e.target.value)}
+                  className="mt-1 w-full rounded-md border border-[var(--color-border)] bg-[var(--color-background)] px-3 py-2 text-sm"
+                  autoComplete="address-level2"
+                />
+              </label>
+            </div>
+            <label className="block text-xs text-[var(--color-muted)]">
+              {t("packages.checkoutLocality")}
+              <input
+                value={addressLine}
+                onChange={(e) => setAddressLine(e.target.value)}
+                className="mt-1 w-full rounded-md border border-[var(--color-border)] bg-[var(--color-background)] px-3 py-2 text-sm"
+                autoComplete="street-address"
+              />
+            </label>
+            {customerType === "company" ? (
+              <label className="block text-xs text-[var(--color-muted)]">
+                {t("packages.checkoutTaxIdRequired")}
+                <input
+                  value={taxId}
+                  onChange={(e) => setTaxId(normalizeEuVatId(e.target.value))}
+                  className="mt-1 w-full rounded-md border border-[var(--color-border)] bg-[var(--color-background)] px-3 py-2 text-sm"
+                />
+                <span className="mt-1 block text-[11px] text-[var(--color-muted)]">{t("packages.checkoutTaxIdFormatHint")}</span>
+              </label>
+            ) : null}
+          </div>
+          )}
+
+          <h2 className="text-sm font-semibold pt-2">{t("packages.checkoutPaymentSection")}</h2>
           <div className="space-y-3">
             <label className="block text-xs text-[var(--color-muted)]">
               {t("packages.checkoutCardNumber")}
@@ -246,59 +403,9 @@ export default function PackagesCheckoutPage() {
             </div>
           </div>
 
-          <h2 className="text-sm font-semibold pt-2">{t("packages.checkoutBillingSection")}</h2>
-          <div className="space-y-3">
-            <label className="block text-xs text-[var(--color-muted)]">
-              {t("packages.checkoutFullName")}
-              <input
-                value={fullName}
-                onChange={(e) => setFullName(e.target.value)}
-                className="mt-1 w-full rounded-md border border-[var(--color-border)] bg-[var(--color-background)] px-3 py-2 text-sm"
-                autoComplete="name"
-              />
-            </label>
-            <label className="block text-xs text-[var(--color-muted)]">
-              {t("packages.checkoutCompany")}
-              <input
-                value={company}
-                onChange={(e) => setCompany(e.target.value)}
-                className="mt-1 w-full rounded-md border border-[var(--color-border)] bg-[var(--color-background)] px-3 py-2 text-sm"
-                autoComplete="organization"
-              />
-            </label>
-            <label className="block text-xs text-[var(--color-muted)]">
-              {t("packages.checkoutAddress")}
-              <input
-                value={addressLine}
-                onChange={(e) => setAddressLine(e.target.value)}
-                className="mt-1 w-full rounded-md border border-[var(--color-border)] bg-[var(--color-background)] px-3 py-2 text-sm"
-                autoComplete="street-address"
-              />
-            </label>
-            <div className="grid grid-cols-2 gap-3">
-              <label className="block text-xs text-[var(--color-muted)]">
-                {t("packages.checkoutCountry")}
-                <input
-                  value={country}
-                  onChange={(e) => setCountry(e.target.value)}
-                  className="mt-1 w-full rounded-md border border-[var(--color-border)] bg-[var(--color-background)] px-3 py-2 text-sm"
-                  autoComplete="country-name"
-                />
-              </label>
-              <label className="block text-xs text-[var(--color-muted)]">
-                {t("packages.checkoutTaxId")}
-                <input
-                  value={taxId}
-                  onChange={(e) => setTaxId(e.target.value)}
-                  className="mt-1 w-full rounded-md border border-[var(--color-border)] bg-[var(--color-background)] px-3 py-2 text-sm"
-                />
-              </label>
-            </div>
-          </div>
-
-          <label className="flex gap-2 items-start text-sm pt-2 cursor-pointer">
-            <input type="checkbox" checked={acceptTerms} onChange={(e) => setAcceptTerms(e.target.checked)} className="mt-1" />
-            <span>{t("packages.checkoutAcceptSimulated")}</span>
+          <label className="flex items-start gap-3 text-sm pt-2 cursor-pointer text-left">
+            <input type="checkbox" checked={acceptTerms} onChange={(e) => setAcceptTerms(e.target.checked)} className="mt-1 shrink-0" style={{ width: "auto" }} />
+            <span className="relative top-px ml-[3px]">{t("packages.checkoutAcceptSimulated")}</span>
           </label>
 
           {updateSubscriptionMutation.isError ? (

@@ -11,6 +11,18 @@ export type KbItem = {
   name: string;
   description?: string;
   personal_data_mode: PersonalDataMode;
+  pii_depersonalization_enabled?: boolean;
+  storage_metrics?: {
+    file_bytes?: number;
+    database_bytes?: number;
+    qdrant_bytes?: number;
+    total_bytes?: number;
+    qdrant_points?: number;
+    qdrant_vectors?: number;
+    training_char_count?: number;
+  };
+  status?: "active" | "deleted" | string;
+  deleted_at?: string | null;
   /** Aktuális user taníthatja-e (backend listánál kitölti) */
   can_train?: boolean;
   /** Van-e legalább egy tanítási/ingest bejegyzés ebben az elérhető tudástárban. */
@@ -59,6 +71,8 @@ export type IngestItem = {
   started_at?: string | null;
   completed_at?: string | null;
   updated_at: string;
+  created_by?: number | null;
+  created_by_label?: string | null;
   metadata: Record<string, unknown>;
 };
 
@@ -544,9 +558,41 @@ export type IngestRun = {
   started_at?: string | null;
   completed_at?: string | null;
   updated_at: string;
+  created_by?: number | null;
+  created_by_label?: string | null;
   metadata: Record<string, unknown>;
   items: IngestItem[];
   events: IngestEventItem[];
+};
+
+export type IngestRunListSummary = {
+  total_run_count: number;
+  total_item_count: number;
+  total_char_count: number;
+  total_sentence_count: number;
+};
+
+export type FileIngestEstimate = {
+  file_count: number;
+  total_char_count: number;
+  total_storage_bytes: number;
+  can_start: boolean;
+  reason?: string | null;
+  items: Array<{
+    filename: string;
+    mime_type?: string | null;
+    char_count: number;
+    storage_bytes: number;
+  }>;
+};
+
+export type IngestRunListResponse = {
+  items: IngestRun[];
+  total_count: number;
+  limit: number;
+  offset: number;
+  has_more: boolean;
+  summary: IngestRunListSummary;
 };
 
 export type CreateKbPayload = {
@@ -560,10 +606,10 @@ export type UpdateKbPayload = {
   name: string;
   description?: string;
   personal_data_mode?: PersonalDataMode;
+  pii_depersonalization_enabled?: boolean;
 };
 
 export type DeleteKbPayload = { uuid: string; confirm_name: string };
-export type ClearKbPayload = { uuid: string; confirm_name: string };
 
 export async function getKbList(): Promise<KbItem[]> {
   const res = await api.get("/kb");
@@ -602,6 +648,7 @@ export async function updateKb({
   name,
   description,
   personal_data_mode,
+  pii_depersonalization_enabled,
 }: UpdateKbPayload): Promise<KbItem> {
   const body: Record<string, unknown> = {
     name,
@@ -610,17 +657,15 @@ export async function updateKb({
   if (personal_data_mode) {
     body.personal_data_mode = personal_data_mode;
   }
+  if (typeof pii_depersonalization_enabled === "boolean") {
+    body.pii_depersonalization_enabled = pii_depersonalization_enabled;
+  }
   const res = await api.put(`/kb/${uuid}`, body);
   return res.data as KbItem;
 }
 
 export async function deleteKb({ uuid, confirm_name }: DeleteKbPayload): Promise<unknown> {
   const res = await api.delete(`/kb/${uuid}`, { data: { confirm_name } });
-  return res.data;
-}
-
-export async function clearKb({ uuid, confirm_name }: ClearKbPayload): Promise<unknown> {
-  const res = await api.post(`/kb/${uuid}/clear`, { confirm_name });
   return res.data;
 }
 
@@ -632,11 +677,22 @@ export async function createTextIngestRun(
   return res.data as IngestRun;
 }
 
-export async function createFileIngestRun(kbUuid: string, files: File[]): Promise<IngestRun> {
+export async function createFileIngestRun(kbUuid: string, files: File[], characterCounts?: number[]): Promise<IngestRun> {
   const form = new FormData();
-  files.forEach((file) => form.append("files", file));
+  files.forEach((file, index) => {
+    form.append("files", file);
+    const count = Math.max(0, Math.round(Number(characterCounts?.[index] ?? 0)));
+    if (count > 0) form.append("character_counts", String(count));
+  });
   const res = await api.post(`/knowledge/corpora/${kbUuid}/ingest/files`, form);
   return res.data as IngestRun;
+}
+
+export async function estimateFileIngestRun(kbUuid: string, files: File[]): Promise<FileIngestEstimate> {
+  const form = new FormData();
+  files.forEach((file) => form.append("files", file));
+  const res = await api.post(`/knowledge/corpora/${kbUuid}/ingest/files/estimate`, form);
+  return res.data as FileIngestEstimate;
 }
 
 export async function createUrlIngestRun(
@@ -647,9 +703,12 @@ export async function createUrlIngestRun(
   return res.data as IngestRun;
 }
 
-export async function listIngestRuns(kbUuid: string): Promise<IngestRun[]> {
-  const res = await api.get(`/knowledge/corpora/${kbUuid}/ingest/runs`);
-  return res.data as IngestRun[];
+export async function listIngestRuns(
+  kbUuid: string,
+  params?: { limit?: number; offset?: number }
+): Promise<IngestRunListResponse> {
+  const res = await api.get(`/knowledge/corpora/${kbUuid}/ingest/runs`, { params });
+  return res.data as IngestRunListResponse;
 }
 
 export async function getIngestRun(runId: string): Promise<IngestRun> {

@@ -6,10 +6,19 @@ from pathlib import Path
 import re
 from typing import Any
 
-import spacy
-import stanza
-from spacy.language import Language as SpacyLanguage
-from spacy.tokens import Doc
+try:
+    import spacy  # type: ignore[import]
+    from spacy.language import Language as SpacyLanguage
+    from spacy.tokens import Doc
+except ImportError:  # pragma: no cover - optional dependency
+    spacy = None
+    SpacyLanguage = Any  # type: ignore[misc, assignment]
+    Doc = Any  # type: ignore[misc, assignment]
+
+try:
+    import stanza  # type: ignore[import]
+except ImportError:  # pragma: no cover - optional dependency
+    stanza = None
 
 try:
     import huspacy  # type: ignore[import]
@@ -123,6 +132,8 @@ class HuSpaCyPipeline(SpaCyPipeline):
 
 class StanzaPipeline(NlpPipeline):
     def __init__(self, lang: str, *, processors: str = "tokenize,pos,lemma,depparse") -> None:
+        if stanza is None:
+            raise ImportError("stanza is not installed")
         stanza_dir = _ensure_stanza_dir()
         self._lang = lang
         self._nlp = stanza.Pipeline(lang=lang, processors=processors, dir=str(stanza_dir), use_gpu=False, verbose=False)

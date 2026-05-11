@@ -8,6 +8,7 @@ from __future__ import annotations
 from apps.contracts import module_key
 from apps.billing.runtime import BillingRepository, BillingService, BillingWorker, router as billing_router
 from apps.billing.tenant_hooks import register_billing_tenant_signup_hook
+from core.kernel.config.instance_role import should_run_background_workers
 from core.platform.contract import AppModule, ModuleContext, RouteRegistration
 from core.platform.service_keys import PLATFORM_CLOCK, PLATFORM_TENANT_USAGE_SERVICE
 from core.platform.settings.sections import SettingsSection, register_settings_section
@@ -54,13 +55,15 @@ class BillingAppModule(AppModule):
         async def _startup(app) -> None:
             self._billing_service.ensure_storage()
             self._billing_service.process_due_cycles()
-            self._billing_worker.start()
+            if should_run_background_workers():
+                self._billing_worker.start()
 
         return (_startup,)
 
     def shutdown_hooks(self) -> tuple:
         async def _shutdown(app) -> None:
-            self._billing_worker.stop()
+            if should_run_background_workers():
+                self._billing_worker.stop()
 
         return (_shutdown,)
 

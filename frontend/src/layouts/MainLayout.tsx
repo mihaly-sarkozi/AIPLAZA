@@ -3,7 +3,9 @@ import { useLocation, useNavigate } from "react-router-dom";
 import Navbar from "../components/Navbar";
 import ProfileModal from "../features/profile/components/ProfileModal";
 import ChangePasswordModal from "../features/profile/components/ChangePasswordModal";
-import SettingsModal from "../features/settings/components/SettingsModal";
+import { useBillingAccessStatus } from "../features/billing/hooks/useBilling";
+import { formatInvoiceDate } from "../features/billing/billingInvoiceUtils";
+import { useTranslation } from "../i18n";
 
 const Footer = lazy(() => import("../components/Footer"));
 import { Outlet } from "react-router-dom";
@@ -12,10 +14,10 @@ import { hasUserPermission } from "../platform/permissions";
 import { useKbList } from "../features/knowledge-base/hooks/useKb";
 
 export default function MainLayout() {
+  const { t, locale } = useTranslation();
   const [showFooter, setShowFooter] = useState(false);
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [showChangePasswordModal, setShowChangePasswordModal] = useState(false);
-  const [showSettingsModal, setShowSettingsModal] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
   const user = useAuthStore((s) => s.user);
@@ -30,7 +32,21 @@ export default function MainLayout() {
     isLoading: loadingAvailableKbList,
     isError: availableKbListError,
   } = useKbList({ enabled: shouldCheckOnboardingTraining });
-
+  const { data: billingAccessStatus } = useBillingAccessStatus({
+    enabled: Boolean(user),
+    refetchOnMount: "always",
+    refetchOnWindowFocus: false,
+  });
+  const paymentWarning = billingAccessStatus?.payment_warning ?? null;
+  const billingRestricted = billingAccessStatus?.restricted === true || paymentWarning?.is_expired === true;
+  const graceUntilLabel = paymentWarning?.grace_until_iso
+    ? formatInvoiceDate(paymentWarning.grace_until_iso, locale)
+    : "—";
+  const paymentWarningText =
+    paymentWarning?.is_expired === true
+      ? t("billing.paymentStoppedBanner").replace("{{date}}", graceUntilLabel)
+      : t("billing.paymentFailedBanner").replace("{{date}}", graceUntilLabel);
+  const hasPaymentWarning = Boolean(paymentWarning);
   useEffect(() => {
     const id = requestAnimationFrame(() => {
       requestAnimationFrame(() => setShowFooter(true));
@@ -47,6 +63,7 @@ export default function MainLayout() {
 
   useEffect(() => {
     if (loadingUser || !user) return;
+    if (billingRestricted) return;
     const path = location.pathname;
     if (isDemoInitialPasswordMode(user)) {
       if (path !== "/change-password") {
@@ -72,6 +89,7 @@ export default function MainLayout() {
     availableKbList,
     location.pathname,
     navigate,
+    billingRestricted,
   ]);
 
   return (
@@ -83,11 +101,21 @@ export default function MainLayout() {
       <Navbar
         onOpenProfile={() => setShowProfileModal(true)}
         onOpenChangePassword={() => setShowChangePasswordModal(true)}
-        onOpenSystemSettings={() => setShowSettingsModal(true)}
+        topOffsetClassName={hasPaymentWarning ? "top-10" : "top-0"}
       />
 
+      {paymentWarning ? (
+        <div className="fixed left-0 right-0 top-0 z-[60] flex h-10 items-center justify-center bg-red-700 px-4 text-center text-white shadow-sm">
+          <span className="block text-sm font-semibold leading-10">
+            {paymentWarningText}
+          </span>
+        </div>
+      ) : null}
+
       <main
-        className={`pt-20 flex-1 min-h-0 flex flex-col ${isFullHeight ? "overflow-hidden" : ""}`}
+        className={`${hasPaymentWarning ? "pt-32" : "pt-20"} flex-1 min-h-0 flex flex-col ${
+          isFullHeight ? "overflow-hidden" : ""
+        }`}
         aria-label="Fő tartalom"
       >
         <Outlet />
@@ -95,12 +123,11 @@ export default function MainLayout() {
 
       {showFooter && (
         <Suspense fallback={null}>
-          <Footer />
+          <Footer suppressChatWarning={billingRestricted} />
         </Suspense>
       )}
       <ProfileModal isOpen={showProfileModal} onClose={() => setShowProfileModal(false)} />
       <ChangePasswordModal isOpen={showChangePasswordModal} onClose={() => setShowChangePasswordModal(false)} />
-      <SettingsModal isOpen={showSettingsModal} onClose={() => setShowSettingsModal(false)} />
     </div>
   );
 }

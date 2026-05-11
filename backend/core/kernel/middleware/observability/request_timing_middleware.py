@@ -25,6 +25,15 @@ class RequestTimingMiddleware:
         self.app = app
         self._debug_headers_enabled = (os.getenv("APP_ENV", "dev").strip().lower() != "prod")
 
+    @staticmethod
+    def _path_group(path: str) -> str:
+        parts = [item for item in str(path or "").split("/") if item]
+        if len(parts) >= 2 and parts[0] == "api":
+            return parts[1]
+        if parts:
+            return parts[0]
+        return "root"
+
     # Ez az aszinkron metódus a Python-specifikus speciális működést valósítja meg.
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http":
@@ -46,7 +55,12 @@ class RequestTimingMiddleware:
                 response_started = True
                 elapsed_ms = int((time.monotonic() - t0) * 1000)
                 status_code = message.get("status")
-                record_request_metric(status_code, elapsed_ms)
+                record_request_metric(
+                    status_code,
+                    elapsed_ms,
+                    method=method,
+                    path_group=self._path_group(path),
+                )
                 message.setdefault("headers", [])
                 spans = get_spans()
                 db_query_count, db_query_total_ms = get_db_stats()

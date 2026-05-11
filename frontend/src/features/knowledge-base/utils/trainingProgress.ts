@@ -1,6 +1,7 @@
 import type { IngestRun } from "../services";
 
 const ACTIVE_TRAINING_STATUSES = new Set(["received", "queued", "processing"]);
+type Translate = (key: string) => string;
 
 export type RunProgressSummary = {
   total_items?: number;
@@ -28,29 +29,31 @@ export function getRunProgressSummary(run: IngestRun | undefined): RunProgressSu
 
 export function getTrainingProgress(run: IngestRun | undefined): number {
   if (!run) return 0;
-  if (run.status === "completed") return 100;
+  if (run.status === "completed" || run.status === "partial_success") return 100;
   const summary = getRunProgressSummary(run);
   if (typeof summary.overall_percent === "number") {
-    return Math.max(0, Math.min(100, Math.round(summary.overall_percent)));
+    const cap = isTrainingActive(run.status) ? 99 : 100;
+    return Math.max(0, Math.min(cap, Math.round(summary.overall_percent)));
   }
   const total = Math.max(run.batch_size || 0, 1);
   const done = run.completed_count + run.failed_count + run.duplicate_count + run.rejected_count;
-  return Math.max(0, Math.min(99, Math.round((done / total) * 100)));
+  const cap = isTrainingActive(run.status) ? 99 : 100;
+  return Math.max(0, Math.min(cap, Math.round((done / total) * 100)));
 }
 
-export function getTrainingStatusLabel(run: IngestRun | undefined): string {
+export function getTrainingStatusLabel(run: IngestRun | undefined, t?: Translate): string {
   const status = run?.status ?? "";
   if (!status) return "";
-  if (status === "received") return "Fogadva";
-  if (status === "queued") return "Sorban";
-  if (status === "processing") return "Feldolgozás";
-  if (status === "completed") return "Kész";
-  if (status === "failed") return "Hiba";
-  if (status === "partial_success") return "Részben kész";
+  if (status === "received") return t ? t("chat.trainingStatusReceived") : "received";
+  if (status === "queued") return t ? t("chat.trainingStatusQueued") : "queued";
+  if (status === "processing") return t ? t("chat.trainingStatusProcessing") : "processing";
+  if (status === "completed") return t ? t("chat.trainingStatusCompleted") : "completed";
+  if (status === "failed") return t ? t("chat.trainingStatusFailed") : "failed";
+  if (status === "partial_success") return t ? t("chat.trainingStatusPartialSuccess") : "partial_success";
   return status;
 }
 
-export function getTrainingStatusDetail(run: IngestRun | undefined): string {
+export function getTrainingStatusDetail(run: IngestRun | undefined, t?: Translate): string {
   if (!run) return "";
   const summary = getRunProgressSummary(run);
   if (typeof summary.active_message === "string" && summary.active_message.trim()) {
@@ -59,15 +62,15 @@ export function getTrainingStatusDetail(run: IngestRun | undefined): string {
   if (typeof summary.active_module_label === "string" && summary.active_module_label.trim()) {
     return summary.active_module_label;
   }
-  return getTrainingStatusLabel(run);
+  return getTrainingStatusLabel(run, t);
 }
 
-export function getTrainingFailureMessage(run: IngestRun | undefined): string | null {
+export function getTrainingFailureMessage(run: IngestRun | undefined, t?: Translate): string | null {
   if (!run) return null;
   const summary = getRunProgressSummary(run);
   if (typeof summary.last_error_message === "string" && summary.last_error_message.trim()) {
     if (typeof summary.stopped_at === "string" && summary.stopped_at.trim()) {
-      return `${summary.last_error_message} (megállt itt: ${summary.stopped_at})`;
+      return `${summary.last_error_message} (${t ? t("chat.stoppedAt") : "stopped at"}: ${summary.stopped_at})`;
     }
     return summary.last_error_message;
   }

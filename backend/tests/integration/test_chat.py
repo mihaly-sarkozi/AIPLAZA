@@ -81,6 +81,45 @@ def test_chat_returns_sources_when_available(client_authenticated: TestClient, m
         app.dependency_overrides.pop(get_chat_service, None)
 
 
+def test_chat_returns_pii_contract_fields(client_authenticated: TestClient, mock_chat_service, app, allow_chat_usage, monkeypatch):
+    from apps.chat.dependencies import get_chat_service
+    from core.platform.service_keys import PLATFORM_TENANT_USAGE_SERVICE
+    import apps.chat.router.chat_router as chat_router
+
+    allow_chat_usage.can_consume_question.return_value = (True, None)
+    original_get_service = chat_router.get_service
+    monkeypatch.setattr(
+        chat_router,
+        "get_service",
+        lambda key: allow_chat_usage if str(key) == str(PLATFORM_TENANT_USAGE_SERVICE) else original_get_service(key),
+    )
+
+    mock_chat_service.chat_with_sources = AsyncMock(
+        return_value={
+            "answer": "John Smith aktív.",
+            "sources": [],
+            "encoded_prompt_context": "Entity: [person_1]",
+            "restored_pii_spans": [
+                {"start": 0, "end": 10, "token": "[person_1]", "value": "John Smith", "entity_type": "person"}
+            ],
+            "prompt_context": {
+                "llm_context_text": "Entity: John Smith",
+                "encoded_llm_context_text": "Entity: [person_1]",
+            },
+        }
+    )
+    app.dependency_overrides[get_chat_service] = lambda: mock_chat_service
+    try:
+        r = client_authenticated.post("/api/chat", json={"question": "Ki aktív?"})
+        assert r.status_code == 200
+        data = r.json()
+        assert data["encoded_prompt_context"] == ""
+        assert data["restored_pii_spans"][0]["token"] == "[person_1]"
+        assert data["restored_pii_spans"][0]["value"] == "John Smith"
+    finally:
+        app.dependency_overrides.pop(get_chat_service, None)
+
+
 def test_chat_debug_false_omits_debug_field(client_authenticated: TestClient, mock_chat_service, app):
     """POST /chat debug nélkül maradjon backward compatible."""
     from apps.chat.dependencies import get_chat_service

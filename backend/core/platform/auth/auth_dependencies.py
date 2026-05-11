@@ -13,6 +13,7 @@ from fastapi import Depends, HTTPException, Request
 
 from core.capabilities.users.dto import User
 from core.di import get_permission_service, get_token_service
+from core.kernel.logging.observability import increment_metric, log_structured_event
 from core.kernel.middleware.security.user_cache import minimal_user_from_payload
 from core.platform.auth.authorization_policy import AuthorizationPolicy, normalize_values
 from core.platform.auth.token_allowlist import is_allowed as allowlist_is_allowed
@@ -54,6 +55,15 @@ def require_permission(permission: str) -> Callable[[User], User]:
     def _dependency(user: User = Depends(get_current_user)) -> User:
         decision = _authorization_policy().ensure_permission(user, permission)
         if not decision.allowed:
+            increment_metric("platform.auth.permission_denied.count", 1.0)
+            log_structured_event(
+                "core.authz",
+                "permission_denied",
+                level=30,
+                permission=permission,
+                user_id=getattr(user, "id", None),
+                role=getattr(user, "role", None),
+            )
             raise HTTPException(status_code=403, detail=f"Missing permission: {permission}")
         return user
 
@@ -67,6 +77,15 @@ def require_any_permission(permissions: str | Iterable[str]) -> Callable[[User],
     def _dependency(user: User = Depends(get_current_user)) -> User:
         decision = _authorization_policy().ensure_any_permission(user, normalized)
         if not decision.allowed:
+            increment_metric("platform.auth.permission_denied.count", 1.0)
+            log_structured_event(
+                "core.authz",
+                "permission_denied",
+                level=30,
+                required_permissions=list(normalized),
+                user_id=getattr(user, "id", None),
+                role=getattr(user, "role", None),
+            )
             raise HTTPException(status_code=403, detail=f"Missing any permission: {', '.join(normalized)}")
         return user
 
@@ -80,6 +99,15 @@ def require_all_permissions(permissions: str | Iterable[str]) -> Callable[[User]
     def _dependency(user: User = Depends(get_current_user)) -> User:
         decision = _authorization_policy().ensure_all_permissions(user, normalized)
         if not decision.allowed:
+            increment_metric("platform.auth.permission_denied.count", 1.0)
+            log_structured_event(
+                "core.authz",
+                "permission_denied",
+                level=30,
+                required_permissions=list(normalized),
+                user_id=getattr(user, "id", None),
+                role=getattr(user, "role", None),
+            )
             raise HTTPException(status_code=403, detail=f"Missing required permissions: {', '.join(normalized)}")
         return user
 
@@ -93,6 +121,15 @@ def require_role(roles: str | Iterable[str]) -> Callable[[User], User]:
     def _dependency(user: User = Depends(get_current_user)) -> User:
         decision = _authorization_policy().ensure_role(user, normalized)
         if not decision.allowed:
+            increment_metric("platform.auth.permission_denied.count", 1.0)
+            log_structured_event(
+                "core.authz",
+                "permission_denied",
+                level=30,
+                required_roles=list(normalized),
+                user_id=getattr(user, "id", None),
+                role=getattr(user, "role", None),
+            )
             raise HTTPException(status_code=403, detail=f"Missing required role: {', '.join(normalized)}")
         return user
 

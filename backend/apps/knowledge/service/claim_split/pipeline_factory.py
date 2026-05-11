@@ -5,7 +5,11 @@ from .pipeline import HuSpaCyPipeline, RegexNlpPipeline, SpaCyPipeline, StanzaPi
 from .splitter import ClaimFineSplitter
 from .types import NlpPipeline
 import logging
-import spacy
+
+try:
+    import spacy  # type: ignore[import]
+except ImportError:  # pragma: no cover - optional dependency
+    spacy = None
 
 try:
     import huspacy  # type: ignore[import]
@@ -24,6 +28,9 @@ def _build_stanza_pipeline(lang: str) -> NlpPipeline:
 
 
 def _build_spacy_pipeline(model_name: str, lang: str) -> NlpPipeline:
+    if spacy is None:
+        LOGGER.warning("spaCy is not installed; falling back to Stanza")
+        return _build_stanza_pipeline(lang)
     try:
         return SpaCyPipeline(spacy.load(model_name), language_tag=lang)
     except Exception as exc:

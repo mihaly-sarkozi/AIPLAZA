@@ -20,7 +20,7 @@ from core.capabilities.users.router.requests.set_initial_password_request import
 from core.capabilities.users.router.requests.update_me_request import UpdateMeRequest
 from core.capabilities.users.service import UserService
 from core.capabilities.users.service.profile_service import UserProfileService
-from core.di import RequiredTenantContextDep, get_login_service, get_service
+from core.di import OptionalTenantContextDep, RequiredTenantContextDep, get_login_service, get_service
 from core.extensions.tenant.dependencies import get_tenant_signup_service
 from core.extensions.tenant.helpers.tenant_frontend_url_helper import tenant_frontend_base_url_from_request
 from core.extensions.tenant.service import TenantSignupService
@@ -52,7 +52,7 @@ def me(
 
 @router.get("/auth/default-settings")
 def default_settings(
-    tenant: RequiredTenantContextDep,
+    _tenant: OptionalTenantContextDep,
     profile_service: UserProfileService = Depends(get_user_profile_service),
 ):
     return profile_service.get_default_settings()

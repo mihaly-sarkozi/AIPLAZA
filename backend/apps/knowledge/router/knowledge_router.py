@@ -4,7 +4,8 @@ from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from apps.di import get_factory
 from apps.knowledge.dependencies import CurrentKnowledgeUserDep, KnowledgeFacadeDep, KnowledgeTenantDep
 from apps.knowledge.training_ingest import build_sentence_rows
-from core.di import get_service
+from core.di import get_login_service, get_service
+from core.kernel.config import app_settings
 from core.kernel.config.environment import get_app_env
 from core.kernel.security.rate_limit import limiter
 from shared.documents.text_extraction import extract_text_from_upload
@@ -12,7 +13,6 @@ from shared.text.chunking import chunk_text_for_training
 
 from apps.knowledge.router.knowledge_requests import (
     KBCreate,
-    KBClear,
     KBUpdate,
     KBDelete,
     KBPermissionsUpdate,
@@ -41,6 +41,18 @@ def _permissions_from_create(data: KBCreate) -> list[KbPermissionItem]:
     ]
 
 
+def _ensure_training_mfa(user: User) -> None:
+    if not bool(getattr(app_settings, "training_mfa_required", True)):
+        return
+    login_service = get_login_service()
+    status = login_service.authenticator_status(int(getattr(user, "id", 0) or 0))
+    if not bool(status.get("enabled")):
+        raise HTTPException(
+            status_code=403,
+            detail="MFA kötelező a tanítási műveletekhez. Aktiváld az authenticator MFA-t.",
+        )
+
+
 @router.get("/kb", response_model=list[KBOut])
 def list_kb(
     request: Request,
@@ -57,21 +69,48 @@ def list_kb(
         except Exception:
             return False
 
-    return [
-        KBOut(
-            uuid=kb.uuid,
-            name=kb.name,
-            description=kb.description,
-            qdrant_collection_name=kb.qdrant_collection_name,
-            personal_data_mode=getattr(kb, "personal_data_mode", None) or "no_personal_data",
-            personal_data_sensitivity=getattr(kb, "personal_data_sensitivity", None) or "medium",
-            created_at=kb.created_at,
-            updated_at=kb.updated_at,
-            can_train=bool(getattr(kb, "id", None) is not None and getattr(kb, "id", None) in trainable_ids),
-            has_training=_has_training(kb.uuid),
+    def _storage_metrics(kb) -> dict:
+        try:
+            value = svc.storage_metrics_for_corpus(kb)
+        except Exception:
+            return {}
+        return value if isinstance(value, dict) else {}
+
+    rows: list[KBOut] = []
+    for kb in kbs:
+        deleted_at = getattr(kb, "deleted_at", None)
+        is_deleted = deleted_at is not None
+        storage_metrics = _storage_metrics(kb)
+        training_char_count = int(
+            storage_metrics.get("training_char_count")
+            or getattr(kb, "deleted_training_char_count", 0)
+            or 0
         )
-        for kb in kbs
-    ]
+        if is_deleted and training_char_count <= 0:
+            continue
+        rows.append(
+            KBOut(
+                uuid=kb.uuid,
+                name=kb.name,
+                description=kb.description,
+                qdrant_collection_name=kb.qdrant_collection_name,
+                personal_data_mode=getattr(kb, "personal_data_mode", None) or "no_personal_data",
+                personal_data_sensitivity=getattr(kb, "personal_data_sensitivity", None) or "medium",
+                pii_depersonalization_enabled=bool(getattr(kb, "pii_depersonalization_enabled", True)),
+                created_at=kb.created_at,
+                updated_at=kb.updated_at,
+                deleted_at=deleted_at,
+                status="deleted" if is_deleted else "active",
+                can_train=bool(
+                    not is_deleted
+                    and getattr(kb, "id", None) is not None
+                    and getattr(kb, "id", None) in trainable_ids
+                ),
+                has_training=training_char_count > 0 if is_deleted else _has_training(kb.uuid),
+                storage_metrics=storage_metrics,
+            )
+        )
+    return sorted(rows, key=lambda row: row.deleted_at is not None)
 
 
 # Ez a függvény létrehozza a(z) KB logikáját.
@@ -193,6 +232,7 @@ def update_kb(
             data.name,
             data.description,
             personal_data_mode=data.personal_data_mode,
+            pii_depersonalization_enabled=data.pii_depersonalization_enabled,
             current_user_id=user.id,
         )
     except ValueError as e:
@@ -201,6 +241,33 @@ def update_kb(
 
 # Ez a függvény törli a(z) KB logikáját.
 _MAX_TRAINING_UPLOAD_BYTES = 20 * 1024 * 1024
+_UPLOAD_READ_CHUNK_BYTES = 1024 * 1024
+
+
+def _ensure_legacy_ingest_enabled() -> None:
+    if bool(getattr(app_settings, "legacy_knowledge_ingest_enabled", False)):
+        return
+    raise HTTPException(
+        status_code=410,
+        detail=(
+            "A legacy ingest útvonal le van tiltva. "
+            "Használd az új /knowledge/corpora/{corpus_uuid}/ingest/... API-t."
+        ),
+    )
+
+
+async def _read_upload_with_limit(upload: UploadFile, *, max_bytes: int) -> bytes:
+    total = 0
+    chunks: list[bytes] = []
+    while True:
+        chunk = await upload.read(_UPLOAD_READ_CHUNK_BYTES)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > max_bytes:
+            raise HTTPException(status_code=400, detail="File too large (max 20 MB).")
+        chunks.append(chunk)
+    return b"".join(chunks)
 
 
 @router.post("/kb/{uuid}/ingest-training")
@@ -214,8 +281,10 @@ async def ingest_training_text(
     user: CurrentKnowledgeUserDep,
 ):
     """Egyszerű szöveges tanítás: mondat chunkok Qdrant sentence pontokként."""
+    _ensure_legacy_ingest_enabled()
     if not svc.user_can_train(uuid, user.id, user):
         raise HTTPException(status_code=403, detail="No permission to train this knowledge base")
+    _ensure_training_mfa(user)
     collection = svc.qdrant_collection_for_uuid(uuid)
     if not collection:
         raise HTTPException(status_code=404, detail="Knowledge base not found")
@@ -251,14 +320,14 @@ async def ingest_training_file(
     user: CurrentKnowledgeUserDep,
     file: UploadFile = File(...),
 ):
+    _ensure_legacy_ingest_enabled()
     if not svc.user_can_train(uuid, user.id, user):
         raise HTTPException(status_code=403, detail="No permission to train this knowledge base")
+    _ensure_training_mfa(user)
     collection = svc.qdrant_collection_for_uuid(uuid)
     if not collection:
         raise HTTPException(status_code=404, detail="Knowledge base not found")
-    raw = await file.read()
-    if len(raw) > _MAX_TRAINING_UPLOAD_BYTES:
-        raise HTTPException(status_code=400, detail="File too large (max 20 MB).")
+    raw = await _read_upload_with_limit(file, max_bytes=_MAX_TRAINING_UPLOAD_BYTES)
     try:
         text = extract_text_from_upload(file.filename or "upload.txt", raw)
     except ValueError:
@@ -298,45 +367,17 @@ def delete_kb(
     svc: KnowledgeFacadeDep,
     user: User = Depends(require_permission("knowledge.write")),
 ):
-    if get_app_env() != "dev":
-        raise HTTPException(status_code=403, detail="Knowledge base deletion is available only in dev mode")
     try:
         demo_mode = bool(
             tenant.config
             and tenant.config.feature_flags
             and bool(tenant.config.feature_flags.get("demo_mode"))
         )
+        if get_app_env() != "dev" and not demo_mode:
+            raise HTTPException(status_code=403, detail="Knowledge base deletion is available only in dev mode or free test mode")
         svc.delete(uuid, data.confirm_name, demo_mode=demo_mode)
         return {"status": "ok"}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@router.post("/kb/{uuid}/clear")
-def clear_kb_contents(
-    request: Request,
-    uuid: str,
-    data: KBClear,
-    tenant: KnowledgeTenantDep,
-    svc: KnowledgeFacadeDep,
-    user: User = Depends(require_permission("knowledge.write")),
-):
-    demo_mode = bool(
-        tenant.config
-        and tenant.config.feature_flags
-        and bool(tenant.config.feature_flags.get("demo_mode"))
-    )
-    if get_app_env() != "dev" and not demo_mode:
-        raise HTTPException(
-            status_code=403,
-            detail="Knowledge base clearing is available only in dev mode or free test mode",
-        )
-    try:
-        result = svc.clear_contents(
-            uuid,
-            confirm_name=data.confirm_name,
-            current_user_id=user.id if getattr(user, "id", None) is not None else None,
-        )
-        return {"status": "ok", "cleared": result}
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))

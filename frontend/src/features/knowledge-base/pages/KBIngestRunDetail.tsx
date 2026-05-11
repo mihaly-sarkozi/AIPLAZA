@@ -8,10 +8,12 @@ import Button from "../../../components/ui/Button";
 import Modal, { ModalFooter, ModalHeader } from "../../../components/ui/Modal";
 import PageHeader from "../../../components/ui/PageHeader";
 import { getApiErrorMessage } from "../../../utils/getApiErrorMessage";
-import { useIngestRun, useKbList, useReprocessIngestItemMutation } from "../hooks/useKb";
+import { useIngestRun, useKbList } from "../hooks/useKb";
 import {
   ACTIVE_RUN_STATUSES,
+  formatInteger,
   formatModuleProgress,
+  getItemProgressPercent,
   getRunProgressLabel,
   getRunProgressPercent,
   getRunProgressSummary,
@@ -463,19 +465,6 @@ export default function KBIngestRunDetail() {
   const [isLoadingTrace, setIsLoadingTrace] = useState(false);
   const [updatingBlockId, setUpdatingBlockId] = useState<string | null>(null);
   const [structureDbDetail, setStructureDbDetail] = useState<StructureDbDetail | null>(null);
-  const reprocessMutation = useReprocessIngestItemMutation({
-    onSuccess: () => {
-      setSentenceRows([]);
-      setParagraphRows([]);
-      setStructureSentenceRows([]);
-      setSelectedStructureParagraphId(null);
-      toast.success("Az újrafeldolgozás elindult. A státusz automatikusan frissül.");
-      void runQuery.refetch();
-    },
-    onError: (error) => {
-      toast.error(getApiErrorMessage(error) ?? "Az újrafeldolgozás indítása sikertelen.");
-    },
-  });
 
   const runQuery = useIngestRun(runId, {
     refetchInterval: ({ state }) => (ACTIVE_RUN_STATUSES.has(state.data?.status ?? "") ? 1500 : 4000),
@@ -528,6 +517,14 @@ export default function KBIngestRunDetail() {
   const runProgressSummary = useMemo(() => getRunProgressSummary(run), [run]);
   const runProgressPercent = useMemo(() => getRunProgressPercent(run), [run]);
   const runProgressLabel = useMemo(() => getRunProgressLabel(run), [run]);
+  const selectedItemProgressPercent = useMemo(() => getItemProgressPercent(selectedItem), [selectedItem]);
+  const selectedItemCharCount =
+    typeof selectedItem?.metadata?.char_count === "number" ? selectedItem.metadata.char_count : 0;
+  const selectedItemSentenceCount =
+    typeof selectedItem?.metadata?.sentence_count === "number" ? selectedItem.metadata.sentence_count : 0;
+  const runCharCount = typeof run?.metadata?.total_char_count === "number" ? run.metadata.total_char_count : selectedItemCharCount;
+  const runSentenceCount =
+    typeof run?.metadata?.total_sentence_count === "number" ? run.metadata.total_sentence_count : selectedItemSentenceCount;
   const parserErrorMessage =
     (typeof parserModule?.error_message === "string" && parserModule.error_message.trim()) ||
     (typeof selectedItem?.error_message === "string" && selectedItem.error_message.trim()) ||
@@ -691,18 +688,6 @@ export default function KBIngestRunDetail() {
           actions={
             <div className="flex gap-2">
               {selectedItem ? (
-                <Button
-                  variant="secondary"
-                  onClick={() => {
-                    if (!uuid || !selectedItem) return;
-                    reprocessMutation.mutate({ itemId: selectedItem.id, kbUuid: uuid });
-                  }}
-                  disabled={reprocessMutation.isPending}
-                >
-                  {reprocessMutation.isPending ? "Újrafeldolgozás..." : "Újrafeldolgozás"}
-                </Button>
-              ) : null}
-              {selectedItem ? (
                 <Button variant="primary" onClick={openSource} disabled={isOpeningSource}>
                   {isOpeningSource ? "Megnyitás..." : openLabel}
                 </Button>
@@ -724,9 +709,6 @@ export default function KBIngestRunDetail() {
               ) : null}
               <Button variant="secondary" onClick={() => navigate(`/kb/ingest/${uuid}`)}>
                 Vissza a naplóhoz
-              </Button>
-              <Button variant="ghost" onClick={() => runQuery.refetch()}>
-                Frissítés
               </Button>
             </div>
           }
@@ -754,8 +736,25 @@ export default function KBIngestRunDetail() {
                 <div className="mt-2 text-lg font-semibold">{getItemKindLabel(selectedItem)}</div>
               </div>
               <div className="app-surface p-4">
-                <div className="text-sm text-[var(--color-muted)]">Batch méret</div>
-                <div className="mt-2 text-lg font-semibold">{run.batch_size}</div>
+                <div className="text-sm text-[var(--color-muted)]">Tanító</div>
+                <div className="mt-2 text-lg font-semibold">{selectedItem?.created_by_label || run.created_by_label || "Ismeretlen"}</div>
+              </div>
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-3">
+              <div className="app-surface p-4">
+                <div className="text-sm text-[var(--color-muted)]">Beolvasott karakterek</div>
+                <div className="mt-2 text-2xl font-semibold">{formatInteger(runCharCount)}</div>
+              </div>
+              <div className="app-surface p-4">
+                <div className="text-sm text-[var(--color-muted)]">Mondatok száma</div>
+                <div className="mt-2 text-2xl font-semibold">{formatInteger(runSentenceCount)}</div>
+              </div>
+              <div className="app-surface p-4">
+                <div className="text-sm text-[var(--color-muted)]">Feldolgozás</div>
+                <div className="mt-2 text-2xl font-semibold">
+                  Feldolgozva {selectedItem ? selectedItemProgressPercent : runProgressPercent}%
+                </div>
               </div>
             </div>
 
@@ -804,8 +803,13 @@ export default function KBIngestRunDetail() {
                 />
                 <DetailField
                   label="Mondatszám"
-                  value={String(selectedItem?.metadata?.sentence_count ?? "0")}
+                  value={formatInteger(selectedItemSentenceCount)}
                 />
+                <DetailField
+                  label="Karakterszám"
+                  value={formatInteger(selectedItemCharCount)}
+                />
+                <DetailField label="Tanító" value={selectedItem?.created_by_label || run.created_by_label || "Ismeretlen"} />
                 <DetailField label="Megnevezés" value={selectedItem?.display_name || selectedItem?.title || run.id} />
                 <DetailField label="Tartalom / forrás" value={selectedItem ? getItemPreview(selectedItem) : "n/a"} />
                 <DetailField label="Origin" value={selectedItem?.origin || "n/a"} />

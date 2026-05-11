@@ -18,6 +18,10 @@ class DomainRecordResponse(BaseModel):
     state: str = "custom_pending"
     verified_at: str | None = None
     is_primary: bool = False
+    cname_target: str | None = None
+    dns_record_type: str | None = None
+    dns_record_name: str | None = None
+    dns_record_value: str | None = None
 
     @classmethod
     def from_domain(cls, domain: TenantDomain, *, is_primary: bool = False) -> "DomainRecordResponse":

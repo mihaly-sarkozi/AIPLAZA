@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import importlib
 
-__all__ = ["AuthBase", "Pending2FAORM", "SessionORM", "TwoFactorAttemptORM", "TwoFactorCodeORM"]
+__all__ = ["AuthBase", "Pending2FAORM", "SessionORM", "TwoFactorAttemptORM", "TwoFactorCodeORM", "UserAuthenticatorORM"]
 
 _LAZY: dict[str, tuple[str, str]] = {
     "AuthBase": ("core.kernel.db.model_bases", "AuthBase"),
@@ -10,6 +10,7 @@ _LAZY: dict[str, tuple[str, str]] = {
     "SessionORM": ("core.capabilities.auth.models.session_orm", "SessionORM"),
     "TwoFactorAttemptORM": ("core.capabilities.auth.models.two_factor_attempt_orm", "TwoFactorAttemptORM"),
     "TwoFactorCodeORM": ("core.capabilities.auth.models.two_factor_code_orm", "TwoFactorCodeORM"),
+    "UserAuthenticatorORM": ("core.capabilities.auth.models.user_authenticator_orm", "UserAuthenticatorORM"),
 }
 
 

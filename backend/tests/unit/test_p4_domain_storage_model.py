@@ -22,10 +22,12 @@ def test_domain_exports_minimal_knowledge_base():
     )
     assert kb.uuid == "kb-1"
     assert kb.personal_data_mode == "no_personal_data"
+    assert kb.pii_depersonalization_enabled is True
 
 
 def test_models_include_only_current_kb_storage_columns():
     assert hasattr(KBORM, "uuid")
     assert hasattr(KBORM, "name")
+    assert hasattr(KBORM, "pii_depersonalization_enabled")
     assert hasattr(KbUserPermissionORM, "kb_id")
     assert hasattr(KbUserPermissionORM, "permission")

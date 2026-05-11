@@ -24,10 +24,30 @@ def _iso_ts() -> str:
     return utc_now().isoformat()
 
 
+def _level_for_payload(severity: str) -> str:
+    normalized = str(severity or "").upper()
+    if normalized == SEV_ERROR:
+        return "error"
+    if normalized == SEV_WARNING:
+        return "warn"
+    return "info"
+
+
+def _sanitize_security_event(payload: dict[str, Any]) -> dict[str, Any]:
+    sanitized = sanitize_log_data(payload) or {}
+    # A monitoring use-case miatt ezeknél a mezőknél nyers értéket tartunk meg.
+    for key in ("email", "ip", "userAgent", "requestId", "userId", "service", "event", "message", "country", "deviceId", "riskScore", "reason"):
+        if key in payload and payload.get(key) is not None:
+            sanitized[key] = payload.get(key)
+    return sanitized
+
+
 def _log_event(
     event_id: str,
     severity: str,
     *,
+    service: str = "auth",
+    message: str | None = None,
     tenant_slug: Optional[str] = None,
     user_id: Optional[int] = None,
     ip: Optional[str] = None,
@@ -38,22 +58,30 @@ def _log_event(
     """Egy soros JSON esemény a security loggerre; üres mezők kihagyva."""
     context = get_observability_context()
     event: dict[str, Any] = {
+        "timestamp": _iso_ts(),
+        "level": _level_for_payload(severity),
+        "event": event_id,
+        "service": service,
+        "requestId": context.get("request_id"),
+        "userId": user_id if user_id is not None else context.get("user_id"),
+        "ip": ip,
+        "userAgent": ua,
+        "message": message or event_id.replace("_", " ").capitalize(),
+        # Backward compatibility fields
         "event_name": event_id,
         "severity": severity,
-        "timestamp": _iso_ts(),
         "request_id": context.get("request_id"),
+        "user_id": user_id if user_id is not None else context.get("user_id"),
+        "ua": ua,
         "tenant_id": context.get("tenant_id"),
         "tenant_slug": tenant_slug if tenant_slug is not None else context.get("tenant_slug"),
-        "user_id": user_id if user_id is not None else context.get("user_id"),
         "correlation_id": correlation_id if correlation_id is not None else context.get("correlation_id"),
         "instance_role": context.get("instance_role"),
     }
-    if ip is not None:
-        event["ip"] = ip
-    if ua is not None:
-        event["ua"] = ua
-    event.update(extra)
-    event = sanitize_log_data(event) or {}
+    for key, value in extra.items():
+        if value is not None:
+            event[key] = value
+    event = _sanitize_security_event(event)
     msg = json.dumps(event, ensure_ascii=False)
     if severity == SEV_ERROR:
         _log.error("%s", msg)
@@ -70,6 +98,33 @@ class SecurityLogger:
     a router/middleware állítja be, így SIEM/Grafana/ELK könnyen szűrhet kérésre.
     """
 
+    def emit_security_event(
+        self,
+        *,
+        event: str,
+        level: str = SEV_INFO,
+        service: str = "auth",
+        message: str,
+        tenant_slug: Optional[str] = None,
+        user_id: Optional[int] = None,
+        ip: Optional[str] = None,
+        ua: Optional[str] = None,
+        correlation_id: Optional[str] = None,
+        **extra: Any,
+    ) -> None:
+        _log_event(
+            event,
+            level,
+            service=service,
+            message=message,
+            tenant_slug=tenant_slug,
+            user_id=user_id,
+            ip=ip,
+            ua=ua,
+            correlation_id=correlation_id,
+            **extra,
+        )
+
     # --- LOGIN (érvénytelen / gyanús = WARNING, sikeres = INFO) ---
     def login_invalid_user_attempt(
         self,
@@ -81,13 +136,15 @@ class SecurityLogger:
         correlation_id: Optional[str] = None,
     ) -> None:
         _log_event(
-            "login_invalid_user_attempt",
+            "login_failed",
             SEV_WARNING,
+            message="Failed login attempt",
             tenant_slug=tenant_slug,
             ip=ip,
             ua=ua,
             correlation_id=correlation_id,
             email=email,
+            reason="invalid_user",
         )
 
     # Ez a metódus a(z) login_inactive_user_attempt logikáját valósítja meg.
@@ -101,13 +158,15 @@ class SecurityLogger:
         correlation_id: Optional[str] = None,
     ) -> None:
         _log_event(
-            "login_inactive_user_attempt",
+            "login_failed",
             SEV_WARNING,
+            message="Failed login attempt",
             tenant_slug=tenant_slug,
             user_id=user_id,
             ip=ip,
             ua=ua,
             correlation_id=correlation_id,
+            reason="inactive_user",
         )
 
     # Ez a metódus a(z) login_bad_password_attempt logikáját valósítja meg.
@@ -121,13 +180,15 @@ class SecurityLogger:
         correlation_id: Optional[str] = None,
     ) -> None:
         _log_event(
-            "login_bad_password_attempt",
+            "login_failed",
             SEV_WARNING,
+            message="Failed login attempt",
             tenant_slug=tenant_slug,
             user_id=user_id,
             ip=ip,
             ua=ua,
             correlation_id=correlation_id,
+            reason="bad_password",
         )
 
     # Ez a metódus a(z) login_successful_login logikáját valósítja meg.
@@ -143,6 +204,7 @@ class SecurityLogger:
         _log_event(
             "login_success",
             SEV_INFO,
+            message="Successful login",
             tenant_slug=tenant_slug,
             user_id=user_id,
             ip=ip,
@@ -160,7 +222,7 @@ class SecurityLogger:
         correlation_id: Optional[str] = None,
     ) -> None:
         _log_event(
-            "logout_expired_token",
+            "expired_token",
             SEV_WARNING,
             tenant_slug=tenant_slug,
             ip=ip,
@@ -178,7 +240,7 @@ class SecurityLogger:
         correlation_id: Optional[str] = None,
     ) -> None:
         _log_event(
-            "logout_invalid_token",
+            "invalid_token",
             SEV_ERROR,
             tenant_slug=tenant_slug,
             ip=ip,
@@ -196,7 +258,7 @@ class SecurityLogger:
         correlation_id: Optional[str] = None,
     ) -> None:
         _log_event(
-            "logout_wrong_type",
+            "invalid_token",
             SEV_WARNING,
             tenant_slug=tenant_slug,
             ip=ip,
@@ -215,7 +277,7 @@ class SecurityLogger:
         correlation_id: Optional[str] = None,
     ) -> None:
         _log_event(
-            "logout_unknown_jti",
+            "invalid_token",
             SEV_WARNING,
             tenant_slug=tenant_slug,
             user_id=user_id,
@@ -235,7 +297,7 @@ class SecurityLogger:
         correlation_id: Optional[str] = None,
     ) -> None:
         _log_event(
-            "logout_replay_detected",
+            "suspicious_request",
             SEV_ERROR,
             tenant_slug=tenant_slug,
             user_id=user_id,
@@ -255,7 +317,7 @@ class SecurityLogger:
         correlation_id: Optional[str] = None,
     ) -> None:
         _log_event(
-            "logout_success",
+            "logout",
             SEV_INFO,
             tenant_slug=tenant_slug,
             user_id=user_id,
@@ -274,7 +336,7 @@ class SecurityLogger:
         correlation_id: Optional[str] = None,
     ) -> None:
         _log_event(
-            "refresh_expired_token",
+            "expired_token",
             SEV_WARNING,
             tenant_slug=tenant_slug,
             ip=ip,
@@ -292,7 +354,7 @@ class SecurityLogger:
         correlation_id: Optional[str] = None,
     ) -> None:
         _log_event(
-            "refresh_invalid_token",
+            "invalid_token",
             SEV_ERROR,
             tenant_slug=tenant_slug,
             ip=ip,
@@ -310,7 +372,7 @@ class SecurityLogger:
         correlation_id: Optional[str] = None,
     ) -> None:
         _log_event(
-            "refresh_wrong_type",
+            "invalid_token",
             SEV_WARNING,
             tenant_slug=tenant_slug,
             ip=ip,
@@ -329,7 +391,7 @@ class SecurityLogger:
         correlation_id: Optional[str] = None,
     ) -> None:
         _log_event(
-            "refresh_unknown_jti",
+            "invalid_token",
             SEV_WARNING,
             tenant_slug=tenant_slug,
             user_id=user_id,
@@ -349,7 +411,7 @@ class SecurityLogger:
         correlation_id: Optional[str] = None,
     ) -> None:
         _log_event(
-            "refresh_reuse_detected",
+            "suspicious_request",
             SEV_ERROR,
             tenant_slug=tenant_slug,
             user_id=user_id,
@@ -369,7 +431,7 @@ class SecurityLogger:
         correlation_id: Optional[str] = None,
     ) -> None:
         _log_event(
-            "refresh_session_expired",
+            "expired_token",
             SEV_WARNING,
             tenant_slug=tenant_slug,
             user_id=user_id,

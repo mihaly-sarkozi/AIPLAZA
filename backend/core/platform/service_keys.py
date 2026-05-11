@@ -8,6 +8,7 @@ from __future__ import annotations
 from core.platform.contract.keys import (
     PLATFORM_AUTH_SESSION_REPOSITORY,
     PLATFORM_AUTH_TWO_FACTOR_SERVICE,
+    PLATFORM_ADMIN_SERVICE,
     PLATFORM_BRAND,
     PLATFORM_BRAND_REPOSITORY,
     PLATFORM_BRAND_SERVICE,
@@ -50,6 +51,7 @@ from core.platform.contract.keys import (
 __all__ = [
     "PLATFORM_AUTH_SESSION_REPOSITORY",
     "PLATFORM_AUTH_TWO_FACTOR_SERVICE",
+    "PLATFORM_ADMIN_SERVICE",
     "PLATFORM_BRAND",
     "PLATFORM_BRAND_REPOSITORY",
     "PLATFORM_BRAND_SERVICE",

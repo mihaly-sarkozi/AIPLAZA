@@ -61,6 +61,7 @@ export default function Login() {
   });
   const [error, setError] = useState("");
   const [pendingToken, setPendingToken] = useState<string | null>(null);
+  const [pendingChallengeType, setPendingChallengeType] = useState<"email" | "authenticator">("email");
   const [cooldownSecondsRemaining, setCooldownSecondsRemaining] = useState(0);
   const loginMutation = useLoginMutation();
   const submitting = loginMutation.isPending;
@@ -86,6 +87,7 @@ export default function Login() {
       const data = await loginMutation.mutateAsync(payload);
       if (data.pending_token) {
         setPendingToken(data.pending_token);
+        setPendingChallengeType(data.challenge_type === "authenticator" ? "authenticator" : "email");
         setTwoFactorCode("");
         setError("");
         return;
@@ -98,7 +100,9 @@ export default function Login() {
         } else {
           localStorage.removeItem(LOGIN_REMEMBER_EMAIL_KEY);
         }
-      } catch (_) {}
+      } catch {
+        void 0;
+      }
       await handleLoginSuccess(access_token);
     };
 
@@ -205,7 +209,7 @@ export default function Login() {
           {pendingToken && (
             <div>
               <label className="block mb-1 text-[var(--color-label)]">
-                {t("login.twoFactorLabel")}
+                {pendingChallengeType === "authenticator" ? "Authenticator kód" : t("login.twoFactorLabel")}
               </label>
               <input
                 type="text"
@@ -219,7 +223,9 @@ export default function Login() {
                 disabled={cooldownSecondsRemaining > 0}
               />
               <p className="text-sm text-[var(--color-muted)] mt-1">
-                {t("login.twoFactorHint")}
+                {pendingChallengeType === "authenticator"
+                  ? "Nyisd meg a Google Authenticator alkalmazást, és írd be az aktuális 6 jegyű kódot."
+                  : t("login.twoFactorHint")}
               </p>
             </div>
           )}
@@ -237,7 +243,9 @@ export default function Login() {
                     if (!checked) {
                       try {
                         localStorage.removeItem(LOGIN_REMEMBER_EMAIL_KEY);
-                      } catch (_) {}
+                      } catch {
+                        void 0;
+                      }
                     }
                   }}
                   className="h-4 w-4 shrink-0 accent-[var(--color-primary)] cursor-pointer rounded border border-[var(--color-border)] bg-[var(--color-input-bg)]"

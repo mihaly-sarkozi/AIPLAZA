@@ -10,6 +10,7 @@ from passlib.hash import bcrypt_sha256 as pwd_hasher
 
 from core.capabilities.audit.const.audit_log_action_const import AuditLogAction
 from core.capabilities.auth.dto import LoginInput, LoginTwoFactorRequired
+from core.capabilities.auth.exceptions import TwoFactorTooManyAttemptsError
 from core.capabilities.auth.service.login_service import LoginService
 from core.capabilities.auth.service.logout_service import LogoutService
 from core.capabilities.auth.service.refresh_service import RefreshService
@@ -231,6 +232,81 @@ def test_login_step2_invalid_code_writes_login_2fa_failed_audit():
     assert result is None
     assert _audit_action(audit) == AuditLogAction.LOGIN_2FA_FAILED
     assert _audit_reason(audit) == "invalid_code"
+
+
+def test_login_step2_authenticator_invalid_code_rate_limited_and_consumes_pending():
+    class _AttemptRepo:
+        def __init__(self) -> None:
+            self.counts: dict[tuple[str, str], int] = {}
+
+        def is_blocked(self, scope: str, scope_key: str, max_attempts: int, window_minutes: int) -> bool:
+            return int(self.counts.get((scope, scope_key), 0)) >= int(max_attempts)
+
+        def record_failed(self, scope: str, scope_key: str, window_minutes: int, *, actor_user_id: int) -> int:
+            key = (scope, scope_key)
+            next_count = int(self.counts.get(key, 0)) + 1
+            self.counts[key] = next_count
+            return next_count
+
+        def reset_for_success(self, pending_token_key: str, user_id: int, ip: str | None, *, actor_user_id: int) -> None:
+            return None
+
+    class _AuthenticatorRepo:
+        def get_enabled_secret(self, user_id: int):
+            return "JBSWY3DPEHPK3PXP"
+
+    user = User(
+        id=11,
+        email="totp@example.com",
+        password_hash=pwd_hasher.hash("secret"),
+        is_active=True,
+        role="user",
+        created_at=datetime.now(timezone.utc),
+    )
+    audit = MagicMock()
+    pending = _PendingRepo(user_id=11)
+    two_factor = _TwoFactorService(verify_result=False)
+    two_factor.attempt_repo = _AttemptRepo()
+    two_factor.max_attempts = 5
+    two_factor.attempt_window_minutes = 15
+    svc = LoginService(
+        user_repository=_UserRepo(user),
+        session_repository=_SessionRepo(),
+        pending_2fa_repository=pending,
+        tokens=_Tokens(),
+        logger=_NoopLogger(),
+        two_factor_service=two_factor,
+        audit_service=audit,
+        two_factor_settings=_Settings2FAEnabled(),
+        user_authenticator_repository=_AuthenticatorRepo(),
+    )
+
+    for _ in range(4):
+        result = svc.login(
+            LoginInput(
+                email=None,
+                password=None,
+                pending_token="pending-totp",
+                two_factor_code="000000",
+                ip="127.0.0.1",
+                ua="pytest",
+            )
+        )
+        assert result is None
+    with pytest.raises(TwoFactorTooManyAttemptsError):
+        svc.login(
+            LoginInput(
+                email=None,
+                password=None,
+                pending_token="pending-totp",
+                two_factor_code="000000",
+                ip="127.0.0.1",
+                ua="pytest",
+            )
+        )
+    assert pending.consumed[-1] == "pending-totp"
+    assert _audit_action(audit) == AuditLogAction.LOGIN_2FA_RATE_LIMITED
+    assert _audit_reason(audit) == "too_many_attempts"
 
 
 def test_refresh_invalid_token_writes_refresh_failed_audit():

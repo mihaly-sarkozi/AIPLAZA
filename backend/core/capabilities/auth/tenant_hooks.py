@@ -5,6 +5,7 @@ from core.capabilities.auth.models.pending_2fa_orm import Pending2FAORM
 from core.capabilities.auth.models.session_orm import SessionORM
 from core.capabilities.auth.models.two_factor_attempt_orm import TwoFactorAttemptORM
 from core.capabilities.auth.models.two_factor_code_orm import TwoFactorCodeORM
+from core.capabilities.auth.models.user_authenticator_orm import UserAuthenticatorORM
 from core.extensions.tenant.service import (
     TenantSchemaHook,
     install_schema_tables,
@@ -23,6 +24,7 @@ def _install_auth_schema(engine, slug: str) -> None:
             TwoFactorCodeORM.__table__,
             TwoFactorAttemptORM.__table__,
             Pending2FAORM.__table__,
+            UserAuthenticatorORM.__table__,
         ),
     )
     run_schema_statements(
@@ -43,6 +45,11 @@ def _install_auth_schema(engine, slug: str) -> None:
             'ALTER TABLE "{schema}".two_factor_attempts ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()',
             'ALTER TABLE "{schema}".two_factor_attempts ADD COLUMN IF NOT EXISTS updated_by INTEGER',
             'ALTER TABLE "{schema}".pending_2fa_logins ADD COLUMN IF NOT EXISTS created_by INTEGER',
+            'ALTER TABLE "{schema}".user_authenticators ADD COLUMN IF NOT EXISTS created_by INTEGER',
+            'ALTER TABLE "{schema}".user_authenticators ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()',
+            'ALTER TABLE "{schema}".user_authenticators ADD COLUMN IF NOT EXISTS updated_by INTEGER',
+            'ALTER TABLE "{schema}".user_authenticators ADD COLUMN IF NOT EXISTS pending_secret_base32 VARCHAR(128)',
+            'ALTER TABLE "{schema}".user_authenticators ADD COLUMN IF NOT EXISTS pending_expires_at TIMESTAMP WITH TIME ZONE',
         ),
     )
 
@@ -59,6 +66,7 @@ def register_auth_tenant_hooks() -> None:
                     "two_factor_codes",
                     "two_factor_attempts",
                     "pending_2fa_logins",
+                    "user_authenticators",
                 ),
             )
         ]

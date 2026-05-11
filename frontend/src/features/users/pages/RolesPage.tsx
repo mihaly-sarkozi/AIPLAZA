@@ -1,8 +1,7 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useTranslation } from "../../../i18n";
 import { SavedModal } from "../../../components/SavedModal";
-import { useLocaleStore } from "../../../i18n";
 import { useAuthStore } from "../../../store/authStore";
 import {
   useUsers,
@@ -21,11 +20,17 @@ import Modal, { ModalFooter, ModalHeader } from "../../../components/ui/Modal";
 import PageHeader from "../../../components/ui/PageHeader";
 
 type User = UserListItem & { pending_registration?: boolean };
+const LIST_PAGE_SIZE = 10;
+
+function isDeletedUser(user: User): boolean {
+  return Boolean(user.deleted_at);
+}
 
 function getStatusClasses(user: User): string {
-  if (user.is_active) return "bg-emerald-100 text-emerald-700";
-  if (user.pending_registration) return "bg-amber-100 text-amber-800";
-  return "bg-slate-200 text-slate-700";
+  if (isDeletedUser(user)) return "bg-[var(--color-danger-text)] text-white";
+  if (user.is_active) return "bg-[var(--color-success-text)] text-white";
+  if (user.pending_registration) return "bg-amber-500 text-white";
+  return "bg-slate-500 text-white";
 }
 
 export default function RolesPage() {
@@ -33,7 +38,7 @@ export default function RolesPage() {
   const { user: currentUser, setUser: setCurrentUser } = useAuthStore();
   const canManage = currentUser?.role === "admin" || currentUser?.role === "owner";
   const { data: usersData, isLoading: loading, error: usersError } = useUsers({ enabled: canManage });
-  const users = (usersData ?? []) as User[];
+  const users = useMemo(() => (usersData ?? []) as User[], [usersData]);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [createFormError, setCreateFormError] = useState<string | null>(null);
   const [editFormError, setEditFormError] = useState<string | null>(null);
@@ -42,6 +47,8 @@ export default function RolesPage() {
   const [resendConfirmUser, setResendConfirmUser] = useState<User | null>(null);
   const [userForKbModal, setUserForKbModal] = useState<User | null>(null);
   const [savedModalOpen, setSavedModalOpen] = useState(false);
+  const [visibleCount, setVisibleCount] = useState(LIST_PAGE_SIZE);
+  const loadMoreRef = useRef<HTMLDivElement | null>(null);
 
   const { data: kbListData } = useKbList({ enabled: canManage });
   const kbList = useMemo(() => (kbListData ?? []).filter((kb) => kb.can_train), [kbListData]);
@@ -77,6 +84,26 @@ export default function RolesPage() {
       return nameKey(a).localeCompare(nameKey(b));
     });
   }, [users]);
+  const displayedUsers = useMemo(() => sortedUsers.slice(0, visibleCount), [sortedUsers, visibleCount]);
+
+  useEffect(() => {
+    setVisibleCount(LIST_PAGE_SIZE);
+  }, [sortedUsers.length]);
+
+  useEffect(() => {
+    const node = loadMoreRef.current;
+    if (!node || visibleCount >= sortedUsers.length) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          setVisibleCount((count) => Math.min(count + LIST_PAGE_SIZE, sortedUsers.length));
+        }
+      },
+      { rootMargin: "320px" }
+    );
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [visibleCount, sortedUsers.length]);
   const handleCreate = () => {
     const nameTrim = formData.name?.trim() ?? "";
     const emailTrim = formData.email?.trim() ?? "";
@@ -213,8 +240,6 @@ export default function RolesPage() {
     });
   };
 
-  const localeMap = { hu: "hu-HU", en: "en-GB", es: "es-ES" } as const;
-  const dateLocale = localeMap[useLocaleStore((s) => s.locale)] ?? "hu-HU";
   if (!canManage) {
     return (
       <div className="p-6 min-h-full bg-[var(--color-background)]">
@@ -227,7 +252,7 @@ export default function RolesPage() {
 
   return (
     <div className="app-page">
-      <div className="app-page-container-narrow">
+      <div className="app-page-container">
         <PageHeader
           eyebrow={t("roles.teamLabel")}
           title={t("roles.title")}
@@ -252,35 +277,36 @@ export default function RolesPage() {
         {loading ? (
           <div className="text-[var(--color-foreground)]">{t("common.loading")}</div>
         ) : (
-          <section className="app-surface overflow-hidden rounded-2xl">
-            <div className="app-table-head hidden grid-cols-[1.5fr_1fr_1.5fr_1fr_1.4fr] gap-4 border-b border-[var(--color-border)] px-5 py-3 text-sm md:grid">
-              <div>{t("roles.tableName")}</div>
-              <div>{t("roles.tableRole")}</div>
-              <div>{t("roles.tableEmail")}</div>
-              <div>{t("roles.tableCreated")}</div>
-              <div>{t("roles.tableActions")}</div>
-            </div>
+          <section>
+            <div className="app-table-wrap">
+              <div className="app-table-head hidden grid-cols-[1.3fr_0.9fr_1.6fr_1.5fr] gap-4 !bg-[#efefef] px-5 py-3 text-sm font-medium !text-[var(--color-foreground)] md:grid">
+                <div>{t("roles.tableName")}</div>
+                <div>{t("roles.tableRole")}</div>
+                <div>{t("roles.tableEmail")}</div>
+                <div>{t("roles.tableActions")}</div>
+              </div>
 
-            <div className="divide-y divide-[var(--color-border)]">
-              {sortedUsers.map((user) => {
-                const statusLabel = user.is_active
-                  ? t("roles.statusActive")
-                  : user.pending_registration
-                    ? t("roles.statusPending")
-                    : t("roles.statusInactive");
+              <div className="divide-y divide-[var(--color-border)]">
+                {displayedUsers.map((user) => {
+                const statusLabel = isDeletedUser(user)
+                  ? t("roles.statusDeleted")
+                  : user.is_active
+                    ? t("roles.statusActive")
+                    : user.pending_registration
+                      ? t("roles.statusPending")
+                      : t("roles.statusInactive");
                 const roleLabel =
                   user.role === "owner" ? t("roles.roleOwner") : user.role === "admin" ? t("roles.roleAdmin") : t("roles.roleUser");
-                const createdLabel = user.created_at ? new Date(user.created_at).toLocaleDateString(dateLocale) : "—";
                 const displayName = user.name || "—";
 
                 return (
                   <div
                     key={user.id}
-                    className="grid gap-3 px-5 py-4 md:grid-cols-[1.5fr_1fr_1.5fr_1fr_1.4fr] md:items-center md:gap-4"
+                    className="grid gap-3 px-5 py-4 md:grid-cols-[1.3fr_0.9fr_1.6fr_1.5fr] md:items-center md:gap-4"
                   >
                     <div>
                       <p className="text-sm font-medium text-[var(--color-foreground)]">{displayName}</p>
-                      <span className={`mt-1 inline-block rounded-md px-2 py-0.5 text-xs font-medium ${getStatusClasses(user)}`}>
+                      <span className={`mt-1 inline-block rounded-lg px-2 py-0.5 text-xs font-medium ${getStatusClasses(user)}`}>
                         {statusLabel}
                       </span>
                     </div>
@@ -289,9 +315,7 @@ export default function RolesPage() {
 
                     <div className="break-all text-sm text-[var(--color-muted)]">{user.email}</div>
 
-                    <div className="text-sm text-[var(--color-muted)]">{createdLabel}</div>
-
-                    <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+                    <div className="grid grid-cols-3 gap-2">
                       {user.id !== currentUser?.id && user.role !== "owner" && (
                         <Button
                           type="button"
@@ -300,6 +324,7 @@ export default function RolesPage() {
                           variant="danger"
                           title={t("common.delete")}
                           aria-label={t("common.delete")}
+                          className="w-full"
                         >
                           {t("common.delete")}
                         </Button>
@@ -309,29 +334,16 @@ export default function RolesPage() {
                           type="button"
                           onClick={() => setUserForKbModal(user)}
                           disabled={actionLoading}
-                          variant="ghost"
-                          className="px-0 py-0 hover:bg-transparent"
+                          variant="secondary"
                           title={t("kb.actionPermissions")}
                           aria-label={t("kb.actionPermissions")}
+                          className="w-full"
                         >
                           {t("kb.actionPermissions")}
                         </Button>
                       )}
-                      {user.pending_registration && user.role !== "owner" && (
-                        <Button
-                          type="button"
-                          onClick={() => setResendConfirmUser(user)}
-                          disabled={actionLoading}
-                          variant="ghost"
-                          className="px-0 py-0 hover:bg-transparent"
-                          title={t("roles.resendInvite")}
-                          aria-label={t("roles.resendInvite")}
-                        >
-                          {t("roles.resendInvite")}
-                        </Button>
-                      )}
                       {user.role === "owner" && currentUser?.role !== "owner" ? (
-                        <span className="text-xs text-slate-400" title={t("roles.ownerOnlyEdit")}>
+                        <span className="col-span-3 text-xs text-slate-400" title={t("roles.ownerOnlyEdit")}>
                           {t("roles.ownerOnlyEdit")}
                         </span>
                       ) : (
@@ -339,18 +351,33 @@ export default function RolesPage() {
                           type="button"
                           onClick={() => openEditModal(user)}
                           disabled={actionLoading}
-                          variant="ghost"
-                          className="px-0 py-0 hover:bg-transparent"
+                          variant="secondary"
                           title={t("roles.actionSettings")}
                           aria-label={t("roles.actionSettings")}
+                          className="w-full"
                         >
                           {t("roles.actionSettings")}
+                        </Button>
+                      )}
+                      {user.pending_registration && user.role !== "owner" && (
+                        <Button
+                          type="button"
+                          onClick={() => setResendConfirmUser(user)}
+                          disabled={actionLoading}
+                          variant="secondary"
+                          title={t("roles.resendInvite")}
+                          aria-label={t("roles.resendInvite")}
+                          className="col-span-3 w-full !bg-[#efefef] !text-[var(--color-foreground)] hover:!bg-[#e5e5e5]"
+                        >
+                          {t("roles.resendInvite")}
                         </Button>
                       )}
                     </div>
                   </div>
                 );
-              })}
+                })}
+              </div>
+              <div ref={loadMoreRef} className="h-8" />
             </div>
           </section>
         )}

@@ -46,10 +46,23 @@ def record_span(name: str, ms: float) -> None:
         observe_metric(metric_name, ms, unit="ms")
 
 
-def record_request_metric(status_code: int | None, elapsed_ms: float) -> None:
+def record_request_metric(
+    status_code: int | None,
+    elapsed_ms: float,
+    *,
+    method: str | None = None,
+    path_group: str | None = None,
+) -> None:
     status_family = f"{int(status_code) // 100}xx" if status_code is not None else "unknown"
-    increment_metric("platform.request.count", 1.0, tags={"status_family": status_family})
-    observe_metric("platform.request.latency.ms", elapsed_ms, unit="ms", tags={"status_family": status_family})
+    tags = {
+        "status_family": status_family,
+        "method": (method or "").upper() or "UNKNOWN",
+        "path_group": path_group or "api",
+    }
+    increment_metric("platform.request.count", 1.0, tags=tags)
+    if status_family in {"2xx", "4xx", "5xx"}:
+        increment_metric(f"platform.request.status.{status_family}.count", 1.0)
+    observe_metric("platform.request.latency.ms", elapsed_ms, unit="ms", tags=tags)
 
 
 # Ez a függvény a(z) record_db_query logikáját valósítja meg.

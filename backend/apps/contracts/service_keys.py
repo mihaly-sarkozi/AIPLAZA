@@ -17,6 +17,7 @@ MODULE_KNOWLEDGE_SERVICE = module_service_key("knowledge")
 MODULE_KNOWLEDGE_REPOSITORY = module_service_key("knowledge", "repository")
 MODULE_KNOWLEDGE_EMBEDDING_SERVICE_FACTORY = module_service_key("knowledge", "embedding_service.factory")
 MODULE_KNOWLEDGE_QDRANT_FACTORY = module_service_key("knowledge", "qdrant.factory")
+MODULE_KNOWLEDGE_EVENT_CHANNEL = module_service_key("knowledge", "event_channel")
 
 MODULE_CHAT_SERVICE = module_service_key("chat")
 MODULE_CHAT_LLM_CLIENT_FACTORY = module_service_key("chat", "llm_client.factory")
@@ -33,6 +34,7 @@ __all__ = [
     "MODULE_CHAT_SERVICE",
     "MODULE_DEMO_SERVICE",
     "MODULE_KNOWLEDGE_EMBEDDING_SERVICE_FACTORY",
+    "MODULE_KNOWLEDGE_EVENT_CHANNEL",
     "MODULE_KNOWLEDGE_QDRANT_FACTORY",
     "MODULE_KNOWLEDGE_REPOSITORY",
     "MODULE_KNOWLEDGE_SERVICE",

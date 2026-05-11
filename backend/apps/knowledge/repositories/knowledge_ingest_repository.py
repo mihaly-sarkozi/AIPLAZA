@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 
 from apps.knowledge.domain.ingest_event import IngestEvent
 from apps.knowledge.domain.ingest_input import IngestInput
@@ -168,12 +168,13 @@ class SQLAlchemyIngestRunStore:
             row = session.get(KnowledgeIngestRunORM, run_id)
             return _run_to_domain(row) if row else None
 
-    def list_for_corpus(self, corpus_uuid: str, *, limit: int = 20) -> list[IngestRun]:
+    def list_for_corpus(self, corpus_uuid: str, *, limit: int = 20, offset: int = 0) -> list[IngestRun]:
         with self._sf() as session:
             rows = session.execute(
                 select(KnowledgeIngestRunORM)
                 .where(KnowledgeIngestRunORM.corpus_uuid == corpus_uuid)
                 .order_by(KnowledgeIngestRunORM.created_at.desc())
+                .offset(max(0, offset))
                 .limit(limit)
             ).scalars().all()
             return [_run_to_domain(row) for row in rows]
@@ -186,6 +187,13 @@ class SQLAlchemyIngestRunStore:
                 .limit(limit)
             ).scalars().all()
             return [_run_to_domain(row) for row in rows]
+
+    def count_for_corpus(self, corpus_uuid: str) -> int:
+        with self._sf() as session:
+            value = session.execute(
+                select(func.count()).select_from(KnowledgeIngestRunORM).where(KnowledgeIngestRunORM.corpus_uuid == corpus_uuid)
+            ).scalar_one()
+            return int(value or 0)
 
     def delete_for_corpus(self, corpus_uuid: str) -> int:
         with self._sf() as session:
@@ -276,6 +284,15 @@ class SQLAlchemyIngestItemStore:
             ).scalars().all()
             return [_item_to_domain(row) for row in rows]
 
+    def list_for_corpus(self, corpus_uuid: str) -> list[IngestItem]:
+        with self._sf() as session:
+            rows = session.execute(
+                select(KnowledgeIngestItemORM)
+                .where(KnowledgeIngestItemORM.corpus_uuid == corpus_uuid)
+                .order_by(KnowledgeIngestItemORM.created_at.desc())
+            ).scalars().all()
+            return [_item_to_domain(row) for row in rows]
+
     def find_by_hash(self, *, corpus_uuid: str, content_hash: str, exclude_item_id: str | None = None) -> IngestItem | None:
         with self._sf() as session:
             stmt = select(KnowledgeIngestItemORM).where(
@@ -358,6 +375,18 @@ class SQLAlchemyIngestInputStore:
                 for bucket_name, object_key in rows
                 if str(bucket_name or "").strip() and str(object_key or "").strip()
             ]
+
+    def uploaded_file_size_bytes_for_corpus(self, corpus_uuid: str) -> int:
+        with self._sf() as session:
+            value = session.execute(
+                select(func.coalesce(func.sum(KnowledgeIngestInputORM.size_bytes), 0))
+                .join(KnowledgeIngestItemORM, KnowledgeIngestItemORM.id == KnowledgeIngestInputORM.ingest_item_id)
+                .where(
+                    KnowledgeIngestItemORM.corpus_uuid == corpus_uuid,
+                    KnowledgeIngestInputORM.input_type == "file",
+                )
+            ).scalar_one()
+            return max(0, int(value or 0))
 
     def delete_for_corpus(self, corpus_uuid: str) -> int:
         with self._sf() as session:

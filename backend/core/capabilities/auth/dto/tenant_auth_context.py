@@ -10,3 +10,4 @@ class TenantAuthContext:
     slug: str | None
     correlation_id: str | None
     security_version: int
+    trial_active: bool = False

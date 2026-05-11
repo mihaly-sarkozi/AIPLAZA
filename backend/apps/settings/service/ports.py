@@ -14,6 +14,13 @@ class CoreSettingsServicePort(Protocol):
         timezone: str | None = None,
         date_format: str | None = None,
         time_format: str | None = None,
+        billing_company_name: str | None = None,
+        billing_tax_id: str | None = None,
+        billing_address_line: str | None = None,
+        billing_postal_code: str | None = None,
+        billing_city: str | None = None,
+        billing_region: str | None = None,
+        billing_country: str | None = None,
         updated_by: int | None = None,
     ) -> dict[str, object]:
         ...
@@ -31,6 +38,13 @@ class SettingsFacadePort(Protocol):
         timezone: str | None = None,
         date_format: str | None = None,
         time_format: str | None = None,
+        billing_company_name: str | None = None,
+        billing_tax_id: str | None = None,
+        billing_address_line: str | None = None,
+        billing_postal_code: str | None = None,
+        billing_city: str | None = None,
+        billing_region: str | None = None,
+        billing_country: str | None = None,
         updated_by: int | None = None,
     ) -> dict[str, object]:
         ...

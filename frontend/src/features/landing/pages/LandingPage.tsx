@@ -21,7 +21,7 @@ export default function LandingPage() {
       <header className="border-b border-[var(--color-border)] px-4 py-4 flex justify-between items-center">
         <span className="font-semibold text-lg">AIPLAZA</span>
         <Link
-          to="/login"
+          to="/platform-admin/login"
           className="text-sm text-[var(--color-muted-foreground)] hover:underline"
         >
           Bejelentkezés
@@ -115,7 +115,7 @@ export default function LandingPage() {
                     <span className="block text-base mb-1" aria-hidden>
                       🔵
                     </span>
-                    <span className="block">Growth</span>
+                    <span className="block">Pro</span>
                     <span className="block text-[var(--color-muted)] font-normal mt-0.5">
                       59 € / hó
                     </span>

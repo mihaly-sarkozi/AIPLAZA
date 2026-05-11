@@ -6,6 +6,7 @@ import logging
 import hashlib
 import re
 import time
+import threading
 import unicodedata
 import uuid as uuid_lib
 from html import unescape
@@ -100,6 +101,8 @@ from apps.knowledge.service.ports import (
     SourceStorePort,
     VectorIndexFactory,
 )
+from apps.knowledge.repositories.pii_mapping_repository import KnowledgePiiMappingRepository
+from apps.knowledge.pii.pipeline import filter_pii
 from apps.knowledge.training_ingest import build_sentence_rows
 from core.capabilities.users.dto import User
 from core.platform.auth.auth_dependencies import has_permission
@@ -351,12 +354,6 @@ def _search_profile_from_trace_payload(payload: dict[str, Any]) -> SearchProfile
 
 
 class KnowledgeFacade:
-    _DEMO_PROTECTED_KB_NAMES = {
-        "teszt tudástár",
-        "test knowledge base",
-        "base de conocimiento de prueba",
-        "test kb",
-    }
     _SENTENCE_ABBREVIATIONS = {
         "dr",
         "mr",
@@ -432,7 +429,9 @@ class KnowledgeFacade:
     _PARSER_ERROR_MESSAGE_MAX = 1000
     _INTERPRETATION_ERROR_MESSAGE_MAX = 480
     _CLAIM_STRONG_CONFIDENCE = 0.6
-    _STALE_PARSER_RESTART_AFTER_SEC = 30
+    _STALE_PARSER_RESTART_AFTER_SEC = 120
+    _STALE_INGEST_RUN_FAIL_AFTER_SEC = 900
+    _STALE_INDEX_BUILD_FAIL_AFTER_SEC = 1200
     _ENABLE_CLAIM_FINE_SPLIT_DURING_PARSING = True
     _CLAIM_FINE_SPLIT_ALLOWED_BLOCK_TYPES = {"paragraph", "list_item"}
     _CLAIM_FINE_SPLIT_MIN_WORDS = 12
@@ -441,6 +440,8 @@ class KnowledgeFacade:
     _CLAIM_FINE_SPLIT_MAX_BLOCK_RATIO = 0.15
     _CLAIM_FINE_SPLIT_EARLY_STOP_AFTER_BLOCKS = 24
     _CLAIM_FINE_SPLIT_MIN_HIT_BLOCKS_TO_CONTINUE = 2
+    _INDEX_BUILD_RETRY_COUNT = 2
+    _INDEX_BUILD_RETRY_BACKOFF_SEC = 2.0
     _CLAIM_FINE_SPLIT_CONNECTOR_PATTERN = re.compile(
         r"\b(?:és|vagy|illetve|valamint|továbbá|azonban|viszont|ha|amennyiben|kivéve|feltéve)\b",
         flags=re.IGNORECASE,
@@ -528,6 +529,19 @@ class KnowledgeFacade:
         self._object_storage = object_storage
         self._feedback_events: list[dict[str, Any]] = []
         self._source_withdrawal_events: list[dict[str, Any]] = []
+        self._index_build_locks: dict[str, threading.Lock] = {}
+        self._index_build_locks_guard = threading.Lock()
+        self._pii_mapping_store = self._init_pii_mapping_store(corpus_store)
+
+    @staticmethod
+    def _init_pii_mapping_store(corpus_store: CorpusStorePort) -> KnowledgePiiMappingRepository | None:
+        session_factory = getattr(corpus_store, "_sf", None)
+        if session_factory is None:
+            return None
+        try:
+            return KnowledgePiiMappingRepository(session_factory)
+        except Exception:
+            return None
 
     def _log_step(self, step: str, *, status: str, tenant: str | None = None, duration_ms: float | None = None, **counts: object) -> None:
         payload = {
@@ -876,6 +890,33 @@ class KnowledgeFacade:
         return "\n\n".join(parts)
 
     @staticmethod
+    def _filter_relevant_semantic_blocks(
+        blocks: list[dict[str, Any]],
+        *,
+        max_blocks: int = 4,
+        score_floor: float = 0.25,
+        relative_floor_ratio: float = 0.8,
+    ) -> list[dict[str, Any]]:
+        if not blocks:
+            return []
+        ordered = sorted(
+            blocks,
+            key=lambda item: float(item.get("match_score") or 0.0),
+            reverse=True,
+        )
+        top_score = float(ordered[0].get("match_score") or 0.0)
+        dynamic_floor = max(score_floor, top_score * relative_floor_ratio)
+        selected: list[dict[str, Any]] = []
+        for block in ordered:
+            score = float(block.get("match_score") or 0.0)
+            if score < dynamic_floor and selected:
+                continue
+            selected.append(block)
+            if len(selected) >= max_blocks:
+                break
+        return selected[:max_blocks]
+
+    @staticmethod
     def _retrieval_chunks_from_vector_hits(hits: list[dict[str, Any]]) -> list[dict[str, Any]]:
         chunks: list[dict[str, Any]] = []
         for hit in hits:
@@ -986,6 +1027,21 @@ class KnowledgeFacade:
             return None
         return max(0, min(100, int(round((processed_parts / total_parts) * 100))))
 
+    @staticmethod
+    def _estimate_file_character_count_from_size(size_bytes: int | None) -> int:
+        if size_bytes is None or size_bytes <= 0:
+            return 0
+        return max(1, int(round(size_bytes * 0.1)))
+
+    @staticmethod
+    def _format_size_label(size_bytes: int | None) -> str:
+        value = max(0, int(size_bytes or 0))
+        if value >= 1024 * 1024:
+            return f"{value / (1024 * 1024):.1f} MB"
+        if value >= 1024:
+            return f"{value / 1024:.1f} KB"
+        return f"{value} B"
+
     @classmethod
     def _build_processing_module(
         cls,
@@ -1023,14 +1079,18 @@ class KnowledgeFacade:
         processed_parts: int | None,
         total_parts: int | None,
         label: str,
+        extra: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        return {
+        payload = {
             "phase": phase,
             "processed_parts": processed_parts,
             "total_parts": total_parts,
             "progress_percent": cls._compute_progress_percent(processed_parts, total_parts),
             "label": label,
         }
+        if extra:
+            payload.update(extra)
+        return payload
 
     @classmethod
     def _compute_item_progress_percent(cls, item: IngestItem) -> int | None:
@@ -1071,6 +1131,10 @@ class KnowledgeFacade:
         if parser_status == "processing":
             if isinstance(document_progress, dict):
                 phase = str(document_progress.get("phase") or "")
+                if phase == "file_character_count":
+                    progress_percent = document_progress.get("progress_percent")
+                    if isinstance(progress_percent, (int, float)) and progress_percent > 0:
+                        return max(8, min(20, int(round(progress_percent * 0.2))))
                 if phase == "parser":
                     progress_percent = document_progress.get("progress_percent")
                     if isinstance(progress_percent, (int, float)) and progress_percent > 0:
@@ -1093,6 +1157,8 @@ class KnowledgeFacade:
         terminal_items = sum(1 for item in items if item.status in {"completed", "failed", "duplicate", "rejected"})
         item_progress_total = sum(cls._compute_item_progress_percent(item) or 0 for item in items)
         overall_percent = max(0, min(100, int(round(item_progress_total / total_items)))) if items else 0
+        if run.status in {"received", "queued", "processing"}:
+            overall_percent = min(overall_percent, 99)
 
         active_item = next((item for item in items if item.status == "processing"), None)
         queued_item = next((item for item in items if item.status in {"received", "validated", "queued"}), None)
@@ -1150,6 +1216,7 @@ class KnowledgeFacade:
             "active_message": active_module_message or (focus_item.progress_message if focus_item is not None else None),
             "stopped_at": stopped_at,
             "last_error_message": last_error_message,
+            "index_progress_state": str((run.metadata or {}).get("index_progress_state") or ""),
         }
 
     def _update_item_processing_summary(
@@ -1183,7 +1250,7 @@ class KnowledgeFacade:
         metadata["processing_summary"] = summary
         if extra_metadata:
             metadata.update(extra_metadata)
-        return self._ingest_item_store.update(
+        updated = self._ingest_item_store.update(
             replace(
                 item,
                 progress_message=progress_message if progress_message is not None else item.progress_message,
@@ -1191,6 +1258,11 @@ class KnowledgeFacade:
                 metadata=metadata,
             )
         )
+        try:
+            self._refresh_ingest_run(updated.ingest_run_id)
+        except Exception:
+            logger.debug("ingest run progress refresh failed", exc_info=True)
+        return updated
 
     @staticmethod
     def _to_corpus(item: Any, *, tenant: str = "") -> Corpus:
@@ -1205,6 +1277,10 @@ class KnowledgeFacade:
             updated_at=getattr(item, "updated_at", None),
             personal_data_mode=str(getattr(item, "personal_data_mode", "no_personal_data")),
             personal_data_sensitivity=str(getattr(item, "personal_data_sensitivity", "medium")),
+            pii_depersonalization_enabled=bool(getattr(item, "pii_depersonalization_enabled", True)),
+            deleted_at=getattr(item, "deleted_at", None),
+            deleted_display_name=getattr(item, "deleted_display_name", None),
+            deleted_training_char_count=max(0, int(getattr(item, "deleted_training_char_count", 0) or 0)),
         )
 
     def _user_repo_list_all(self) -> list[Any]:
@@ -1218,6 +1294,32 @@ class KnowledgeFacade:
             if profile is not None:
                 return profile
         return DEFAULT_INDEX_PROFILE
+
+    @staticmethod
+    def _vector_size_for_profile(profile: IndexProfile, vector_index: Any) -> int | None:
+        config = dict(profile.config or {})
+        configured = config.get("vector_size")
+        if configured is not None:
+            try:
+                value = int(configured)
+                if value > 0:
+                    return value
+            except (TypeError, ValueError):
+                pass
+        runtime_size = getattr(vector_index, "vector_size", None)
+        try:
+            value = int(runtime_size)
+            return value if value > 0 else None
+        except (TypeError, ValueError):
+            return None
+
+    def _index_build_lock(self, build_id: str) -> threading.Lock:
+        with self._index_build_locks_guard:
+            lock = self._index_build_locks.get(build_id)
+            if lock is None:
+                lock = threading.Lock()
+                self._index_build_locks[build_id] = lock
+            return lock
 
     @staticmethod
     def _sha256_bytes(content: bytes) -> str:
@@ -3494,7 +3596,12 @@ class KnowledgeFacade:
                 )
             return failed_run
 
-    def _extract_parser_document_from_source(self, source: Source) -> ExtractedDocument:
+    def _extract_parser_document_from_source(
+        self,
+        source: Source,
+        *,
+        progress_callback: Callable[[str, dict[str, Any]], None] | None = None,
+    ) -> ExtractedDocument:
         if source.source_type == "text":
             text = self._normalize_parser_text(source.raw_content)
             paragraphs = [ExtractedParagraph(text=text)] if text else []
@@ -3507,9 +3614,35 @@ class KnowledgeFacade:
             bucket_name = str(source.metadata.get("bucket_name") or "")
             object_key = str(source.metadata.get("object_key") or "")
             filename = str(source.file_ref or source.title or "upload.txt")
+            size_bytes = int(source.metadata.get("size_bytes") or 0)
+            estimated_char_count = int(
+                source.metadata.get("estimated_char_count")
+                or self._estimate_file_character_count_from_size(size_bytes)
+            )
             if not bucket_name or not object_key:
                 raise ValueError("A fájlforráshoz hiányzik az object storage referencia.")
+            if progress_callback is not None:
+                progress_callback(
+                    "file_character_count_started",
+                    {
+                        "filename": filename,
+                        "size_bytes": size_bytes,
+                        "estimated_char_count": estimated_char_count,
+                        "processed_bytes": 0,
+                    },
+                )
             stored = self._object_storage.get_bytes(key=object_key, bucket=bucket_name)
+            loaded_size_bytes = len(stored.body)
+            if progress_callback is not None:
+                progress_callback(
+                    "file_bytes_loaded",
+                    {
+                        "filename": filename,
+                        "size_bytes": size_bytes or loaded_size_bytes,
+                        "estimated_char_count": estimated_char_count,
+                        "processed_bytes": loaded_size_bytes,
+                    },
+                )
             extracted = extract_document_from_upload(filename, stored.body)
             normalized_text = self._normalize_parser_text(extracted.text_content)
             normalized_paragraphs = [
@@ -3519,6 +3652,17 @@ class KnowledgeFacade:
             ]
             if not normalized_paragraphs and normalized_text:
                 normalized_paragraphs = [ExtractedParagraph(text=normalized_text)]
+            if progress_callback is not None:
+                progress_callback(
+                    "file_character_count_completed",
+                    {
+                        "filename": filename,
+                        "size_bytes": size_bytes or loaded_size_bytes,
+                        "estimated_char_count": estimated_char_count,
+                        "char_count": len(normalized_text),
+                        "paragraph_count": len(normalized_paragraphs),
+                    },
+                )
             return ExtractedDocument(
                 text_content=normalized_text,
                 paragraphs=normalized_paragraphs,
@@ -3594,12 +3738,14 @@ class KnowledgeFacade:
         parser_run = self._parser_run_store.get_for_source(source_id)
         if document is None or parser_run is None or parser_run.status != "processing":
             return False
-        if self._paragraph_store.list_for_document(document.id):
-            return False
-        if self._sentence_store.list_for_document(document.id):
-            return False
         reference_time = updated_at or parser_run.updated_at or document.updated_at
         return (_utcnow() - reference_time).total_seconds() >= self._STALE_PARSER_RESTART_AFTER_SEC
+
+    def is_ingest_item_stale_processing(self, item: IngestItem) -> bool:
+        if item.status != "processing":
+            return False
+        source_id = str(item.source_id or (item.metadata or {}).get("source_id") or "").strip()
+        return bool(source_id) and self._is_stale_parser_processing(source_id, updated_at=item.updated_at)
 
     def _refresh_ingest_run(self, run_id: str) -> IngestRun:
         run = self._ingest_run_store.get(run_id)
@@ -3622,6 +3768,7 @@ class KnowledgeFacade:
             status = "queued"
         else:
             status = "completed"
+        summary_run = replace(run, status=status)  # type: ignore[arg-type]
         refreshed = replace(
             run,
             status=status,  # type: ignore[arg-type]
@@ -3636,7 +3783,7 @@ class KnowledgeFacade:
             completed_at=_utcnow() if status in {"completed", "partial_success", "failed"} and not queued and not processing else None,
             metadata={
                 **dict(run.metadata or {}),
-                "progress_summary": self._build_run_progress_summary(run, items),
+                "progress_summary": self._build_run_progress_summary(summary_run, items),
                 "quality_diagnostics": _aggregate_ingest_item_quality(items),
             },
         )
@@ -3712,6 +3859,11 @@ class KnowledgeFacade:
                     "object_key": ingest_input.object_key,
                     "mime_type": ingest_input.mime_type,
                     "size_bytes": ingest_input.size_bytes,
+                    "estimated_char_count": (
+                        ingest_input.metadata.get("estimated_char_count")
+                        if isinstance(ingest_input.metadata, dict)
+                        else None
+                    ),
                     "checksum_sha256": ingest_input.checksum_sha256,
                 },
             )
@@ -3741,9 +3893,10 @@ class KnowledgeFacade:
     def list_all(self, current_user_id: int | None = None, current_user: User | None = None) -> list[Corpus]:
         if current_user_id is None:
             return []
-        all_kbs = [self._to_corpus(item) for item in self._corpus_store.list_all()]
         if has_permission(current_user, "knowledge.write"):
+            all_kbs = [self._to_corpus(item) for item in self._corpus_store.list_all(include_deleted=True)]
             return all_kbs
+        all_kbs = [self._to_corpus(item) for item in self._corpus_store.list_all()]
         permission = "train" if has_permission(current_user, "knowledge.permissions.manage") else "use"
         allowed_ids = set(self._corpus_store.get_kb_ids_with_permission(current_user_id, permission))
         return [kb for kb in all_kbs if kb.id is not None and kb.id in allowed_ids]
@@ -3751,11 +3904,92 @@ class KnowledgeFacade:
     def list_all_unfiltered(self) -> list[Corpus]:
         return [self._to_corpus(item) for item in self._corpus_store.list_all()]
 
+    def storage_metrics_for_corpus(self, corpus: Corpus) -> dict[str, Any]:
+        file_bytes = 0
+        database_bytes = 0
+        qdrant_bytes = 0
+        qdrant_points = 0
+        qdrant_vectors = 0
+        training_char_count = 0
+        if getattr(corpus, "deleted_at", None) is not None:
+            training_char_count = int(getattr(corpus, "deleted_training_char_count", 0) or 0)
+            return {
+                "file_bytes": 0,
+                "database_bytes": 0,
+                "qdrant_bytes": 0,
+                "total_bytes": 0,
+                "qdrant_points": 0,
+                "qdrant_vectors": 0,
+                "training_char_count": max(0, training_char_count),
+            }
+        if hasattr(self._ingest_input_store, "uploaded_file_size_bytes_for_corpus"):
+            try:
+                file_bytes = int(self._ingest_input_store.uploaded_file_size_bytes_for_corpus(corpus.uuid))
+            except Exception:
+                logger.debug("knowledge.storage_metrics.file_bytes_failed", exc_info=True)
+        if hasattr(self._corpus_store, "database_size_bytes_for_corpus"):
+            try:
+                database_bytes = int(self._corpus_store.database_size_bytes_for_corpus(corpus.uuid))
+            except Exception:
+                logger.debug("knowledge.storage_metrics.database_bytes_failed", exc_info=True)
+        collection_names = {
+            str(corpus.qdrant_collection_name or "").strip(),
+            *{
+                str(build.collection_name or "").strip()
+                for build in self._index_build_store.list_for_corpus(corpus.uuid)
+                if str(build.collection_name or "").strip()
+            },
+        }
+        collection_names.discard("")
+        if collection_names:
+            try:
+                vector_index = self._vector_index_factory()
+                stats_fn = getattr(vector_index, "collection_storage_stats", None)
+                if callable(stats_fn):
+                    for collection_name in collection_names:
+                        stats = stats_fn(collection_name)
+                        qdrant_bytes += int(stats.get("estimated_bytes") or 0)
+                        qdrant_points += int(stats.get("points_count") or 0)
+                        qdrant_vectors += int(stats.get("vectors_count") or 0)
+            except Exception:
+                logger.debug("knowledge.storage_metrics.qdrant_bytes_failed", exc_info=True)
+        try:
+            training_char_count = int(self.ingest_run_list_summary(corpus.uuid).get("total_char_count") or 0)
+        except Exception:
+            logger.debug("knowledge.storage_metrics.training_chars_failed", exc_info=True)
+        total_bytes = file_bytes + database_bytes + qdrant_bytes
+        return {
+            "file_bytes": max(0, file_bytes),
+            "database_bytes": max(0, database_bytes),
+            "qdrant_bytes": max(0, qdrant_bytes),
+            "total_bytes": max(0, total_bytes),
+            "qdrant_points": max(0, qdrant_points),
+            "qdrant_vectors": max(0, qdrant_vectors),
+            "training_char_count": max(0, training_char_count),
+        }
+
     def qdrant_collection_for_uuid(self, kb_uuid: str) -> str | None:
         kb = self._corpus_store.get_by_uuid(kb_uuid)
         if not kb:
             return None
         return str(getattr(kb, "qdrant_collection_name"))
+
+    def detect_pii_matches(self, *, text: str, sensitivity: str = "medium") -> list[tuple[int, int, str, str]]:
+        return list(filter_pii(str(text or ""), str(sensitivity or "medium")))
+
+    def resolve_or_create_pii_token(self, *, corpus_uuid: str, entity_type: str, original_value: str) -> str:
+        if self._pii_mapping_store is None:
+            return ""
+        return self._pii_mapping_store.resolve_or_create_token(
+            corpus_uuid=corpus_uuid,
+            entity_type=entity_type,
+            original_value=original_value,
+        )
+
+    def resolve_pii_tokens(self, *, corpus_uuid: str, tokens: list[str]) -> dict[str, str]:
+        if self._pii_mapping_store is None:
+            return {}
+        return self._pii_mapping_store.resolve_tokens(corpus_uuid=corpus_uuid, tokens=tokens)
 
     def get_trainable_kb_ids(self, user_id: int, user: User | None) -> set[int]:
         if has_permission(user, "knowledge.write"):
@@ -3767,6 +4001,7 @@ class KnowledgeFacade:
         name: str,
         description: str | None = None,
         permissions: list[tuple[int, str]] | None = None,
+        pii_depersonalization_enabled: bool = True,
         current_user_id: int | None = None,
     ) -> Corpus:
         if self._corpus_store.get_by_name(name):
@@ -3781,6 +4016,7 @@ class KnowledgeFacade:
             name=name,
             description=description,
             qdrant_collection_name=f"kb_{corpus_uuid}",
+            pii_depersonalization_enabled=bool(pii_depersonalization_enabled),
             created_at=None,
             updated_at=None,
         )
@@ -3800,6 +4036,7 @@ class KnowledgeFacade:
         name: str,
         description: str | None,
         personal_data_mode: str | None = None,
+        pii_depersonalization_enabled: bool | None = None,
         current_user_id: int | None = None,
     ) -> Corpus:
         kb = self._corpus_store.get_by_uuid(uuid)
@@ -3813,6 +4050,11 @@ class KnowledgeFacade:
             name=name,
             description=description,
             personal_data_mode=personal_data_mode or corpus.personal_data_mode,
+            pii_depersonalization_enabled=(
+                bool(pii_depersonalization_enabled)
+                if pii_depersonalization_enabled is not None
+                else corpus.pii_depersonalization_enabled
+            ),
         )
         return self._to_corpus(self._corpus_store.update(updated, actor_user_id=current_user_id))
 
@@ -3821,12 +4063,13 @@ class KnowledgeFacade:
         if not kb:
             raise ValueError("KB not found")
         kb_name = str(getattr(kb, "name", "") or "")
-        if demo_mode and kb_name.strip().lower() in self._DEMO_PROTECTED_KB_NAMES:
-            raise ValueError("A teszt tudástár tesztüzemmódban nem törölhető.")
         if confirm_name and confirm_name != kb_name:
             raise ValueError("Confirmation name does not match")
-        self._corpus_store.delete(uuid)
-        self._log_step("corpus.delete", status="ok", corpus_uuid=uuid)
+        summary = self.ingest_run_list_summary(uuid)
+        training_char_count = int(summary.get("total_char_count") or 0)
+        self.clear_contents(uuid, confirm_name=confirm_name)
+        self._corpus_store.delete(uuid, training_char_count=training_char_count)
+        self._log_step("corpus.delete", status="ok", corpus_uuid=uuid, training_char_count=training_char_count)
 
     def clear_contents(
         self,
@@ -4077,19 +4320,25 @@ class KnowledgeFacade:
         return "Fájl" if source.source_type == "file" else str(source.source_type or "")
 
     def _source_created_by_label(self, source: Source) -> str:
-        if source.created_by is None:
+        return self._user_label(source.created_by)
+
+    def user_label(self, user_id: int | None) -> str:
+        return self._user_label(user_id)
+
+    def _user_label(self, user_id: int | None) -> str:
+        if user_id is None:
             return "Ismeretlen"
         user = None
         if self._user_repo is not None and hasattr(self._user_repo, "get_by_id"):
             try:
-                user = self._user_repo.get_by_id(source.created_by)
+                user = self._user_repo.get_by_id(user_id)
             except Exception:
                 user = None
         for attr in ("full_name", "name", "email", "username"):
             value = getattr(user, attr, None) if user is not None else None
             if str(value or "").strip():
                 return str(value).strip()
-        return f"Felhasználó #{source.created_by}"
+        return f"Felhasználó #{user_id}"
 
     @staticmethod
     def _download_filename(source: Source) -> str:
@@ -4230,7 +4479,10 @@ class KnowledgeFacade:
             progress_callback("parser_started", {"parser_run_id": parser_run.id})
 
         try:
-            extracted_document = self._extract_parser_document_from_source(source)
+            extracted_document = self._extract_parser_document_from_source(
+                source,
+                progress_callback=progress_callback,
+            )
             raw_text = extracted_document.text_content
             if not raw_text:
                 raise ValueError(self._describe_empty_extraction(extracted_document.metadata))
@@ -4447,6 +4699,7 @@ class KnowledgeFacade:
                     {
                         "parser_run_id": parser_run.id,
                         "document_id": document.id,
+                        "char_count": document.char_count,
                         "paragraph_count": len(paragraphs),
                         "sentence_count": len(created_sentences),
                         **parser_block_stats,
@@ -4630,6 +4883,12 @@ class KnowledgeFacade:
                 content = bytes(file_info.get("content") or b"")
                 if not content:
                     raise ValueError(f"Empty file input: {filename}")
+                size_bytes = len(content)
+                estimated_char_count = int(
+                    file_info.get("estimated_char_count")
+                    or file_info.get("char_count")
+                    or self._estimate_file_character_count_from_size(size_bytes)
+                )
                 item = IngestItem(
                     ingest_run_id=run.id,
                     tenant=tenant,
@@ -4643,7 +4902,11 @@ class KnowledgeFacade:
                     progress_message="Fájl rögzítve, háttérben feldolgozásra vár.",
                     pipeline_route="source_parser",
                     created_by=created_by,
-                    metadata={"filename": filename},
+                    metadata={
+                        "filename": filename,
+                        "size_bytes": size_bytes,
+                        "estimated_char_count": estimated_char_count,
+                    },
                 )
                 object_key = self._build_storage_key(tenant=tenant, run_id=run.id, item_id=item.id, filename=filename)
                 stored = self._object_storage.put_bytes(
@@ -4663,9 +4926,9 @@ class KnowledgeFacade:
                         object_key=stored.key,
                         original_filename=filename,
                         mime_type=str(file_info.get("mime_type") or stored.content_type or "application/octet-stream"),
-                        size_bytes=stored.size_bytes or len(content),
+                        size_bytes=stored.size_bytes or size_bytes,
                         checksum_sha256=self._sha256_bytes(content),
-                        metadata={"etag": stored.etag},
+                        metadata={"etag": stored.etag, "estimated_char_count": estimated_char_count},
                     )
                 )
             created_items = self._ingest_item_store.create_many(items)
@@ -4794,8 +5057,8 @@ class KnowledgeFacade:
             return self._refresh_ingest_run(run_id)
         return run
 
-    def list_ingest_runs(self, corpus_uuid: str, *, limit: int = 20) -> list[IngestRun]:
-        runs = self._ingest_run_store.list_for_corpus(corpus_uuid, limit=limit)
+    def list_ingest_runs(self, corpus_uuid: str, *, limit: int = 20, offset: int = 0) -> list[IngestRun]:
+        runs = self._ingest_run_store.list_for_corpus(corpus_uuid, limit=limit, offset=offset)
         refreshed: list[IngestRun] = []
         for run in runs:
             if run.status in {"queued", "processing"}:
@@ -4803,6 +5066,34 @@ class KnowledgeFacade:
             else:
                 refreshed.append(run)
         return refreshed
+
+    def ingest_run_list_summary(self, corpus_uuid: str) -> dict[str, Any]:
+        total_run_count = None
+        if hasattr(self._ingest_run_store, "count_for_corpus"):
+            total_run_count = int(self._ingest_run_store.count_for_corpus(corpus_uuid))
+        total_char_count = 0
+        total_sentence_count = 0
+        if hasattr(self._ingest_item_store, "list_for_corpus"):
+            all_items = self._ingest_item_store.list_for_corpus(corpus_uuid)
+        else:
+            runs = self.list_ingest_runs(corpus_uuid, limit=1000, offset=0)
+            all_items = [item for run in runs for item in self.list_ingest_items(run.id)]
+            if total_run_count is None:
+                total_run_count = len(runs)
+        for item in all_items:
+            item_char_count = self._ingest_item_char_count(item)
+            if item_char_count <= 0 and item.source_id:
+                document = self._document_store.get_for_source(item.source_id)
+                if document is not None:
+                    item_char_count = int(document.char_count or len(document.text_content or ""))
+            total_char_count += item_char_count
+            total_sentence_count += self._ingest_item_sentence_count(item)
+        return {
+            "total_run_count": int(total_run_count or 0),
+            "total_item_count": len(all_items),
+            "total_char_count": total_char_count,
+            "total_sentence_count": total_sentence_count,
+        }
 
     def get_ingest_item(self, item_id: str) -> IngestItem | None:
         return self._ingest_item_store.get(item_id)
@@ -4904,6 +5195,51 @@ class KnowledgeFacade:
 
     def list_ingest_items(self, run_id: str) -> list[IngestItem]:
         return self._ingest_item_store.list_for_run(run_id)
+
+    def enrich_ingest_items_with_document_metrics(self, items: list[IngestItem]) -> list[IngestItem]:
+        enriched: list[IngestItem] = []
+        for item in items:
+            metadata = dict(item.metadata or {})
+            if self._ingest_item_char_count(item) <= 0 and item.source_id:
+                document = self._document_store.get_for_source(item.source_id)
+                if document is not None:
+                    metadata["char_count"] = int(document.char_count or len(document.text_content or ""))
+            enriched.append(replace(item, metadata=metadata) if metadata != (item.metadata or {}) else item)
+        return enriched
+
+    @staticmethod
+    def _ingest_item_char_count(item: IngestItem) -> int:
+        metadata = item.metadata or {}
+        for key in ("char_count", "processed_char_count"):
+            value = metadata.get(key)
+            if isinstance(value, (int, float)):
+                return max(0, int(value))
+        parser_status = metadata.get("parser_block_status")
+        if isinstance(parser_status, dict):
+            char_start = parser_status.get("char_start")
+            char_end = parser_status.get("char_end")
+            if isinstance(char_start, (int, float)) and isinstance(char_end, (int, float)) and char_end >= char_start:
+                return int(char_end - char_start)
+        return 0
+
+    @staticmethod
+    def _ingest_item_sentence_count(item: IngestItem) -> int:
+        metadata = item.metadata or {}
+        value = metadata.get("sentence_count")
+        if isinstance(value, (int, float)):
+            return max(0, int(value))
+        summary = metadata.get("processing_summary")
+        if isinstance(summary, dict):
+            progress = summary.get("document_progress")
+            if isinstance(progress, dict):
+                processed_parts = progress.get("processed_parts")
+                total_parts = progress.get("total_parts")
+                phase = str(progress.get("phase") or "")
+                if phase in {"sentence_interpretation", "completed"} and isinstance(total_parts, (int, float)):
+                    return max(0, int(total_parts))
+                if phase in {"sentence_interpretation", "completed"} and isinstance(processed_parts, (int, float)):
+                    return max(0, int(processed_parts))
+        return 0
 
     def list_ingest_events(self, run_id: str) -> list[IngestEvent]:
         return self._ingest_event_store.list_for_run(run_id)
@@ -5256,6 +5592,117 @@ class KnowledgeFacade:
 
                 def _pipeline_progress(stage: str, payload: dict[str, Any]) -> None:
                     nonlocal finished_item
+                    if stage == "file_character_count_started":
+                        size_bytes = int(payload.get("size_bytes") or 0)
+                        estimated_char_count = int(payload.get("estimated_char_count") or 0)
+                        label = (
+                            f"Fájl beolvasása és karakterszám becslése indul "
+                            f"({self._format_size_label(size_bytes)}, kb. {estimated_char_count} karakter)."
+                        )
+                        finished_item = self._update_item_processing_summary(
+                            finished_item,
+                            progress_message=label,
+                            module_updates={
+                                "parser": self._build_processing_module(
+                                    key="parser",
+                                    status="processing",
+                                    label="Mondatkinyerés",
+                                    message=label,
+                                ),
+                            },
+                            document_progress=self._build_document_progress(
+                                phase="file_character_count",
+                                processed_parts=max(1, int(max(size_bytes, 1) * 0.05)) if size_bytes > 0 else 0,
+                                total_parts=max(size_bytes, 1),
+                                label=label,
+                                extra={
+                                    "size_bytes": size_bytes,
+                                    "estimated_char_count": estimated_char_count,
+                                },
+                            ),
+                            extra_metadata={
+                                "size_bytes": size_bytes,
+                                "estimated_char_count": estimated_char_count,
+                            },
+                        )
+                        return
+                    if stage == "file_bytes_loaded":
+                        size_bytes = int(payload.get("size_bytes") or 0)
+                        processed_bytes = int(payload.get("processed_bytes") or 0)
+                        estimated_char_count = int(payload.get("estimated_char_count") or 0)
+                        label = (
+                            f"Fájl beolvasva, szövegkinyerés és karakterszámolás folyamatban "
+                            f"({self._format_size_label(size_bytes)}, kb. {estimated_char_count} karakter)."
+                        )
+                        # A szövegkinyerés nem minden formátumnál mérhető soronként, ezért a fájlméretből becsült köztes állapotot mutatjuk.
+                        estimated_processed = max(1, int(max(size_bytes, 1) * 0.7))
+                        finished_item = self._update_item_processing_summary(
+                            finished_item,
+                            progress_message=label,
+                            module_updates={
+                                "parser": self._build_processing_module(
+                                    key="parser",
+                                    status="processing",
+                                    label="Mondatkinyerés",
+                                    processed_parts=min(estimated_processed, max(size_bytes, 1)),
+                                    total_parts=max(size_bytes, 1),
+                                    message=label,
+                                ),
+                            },
+                            document_progress=self._build_document_progress(
+                                phase="file_character_count",
+                                processed_parts=min(estimated_processed, max(size_bytes, 1)),
+                                total_parts=max(size_bytes, 1),
+                                label=label,
+                                extra={
+                                    "size_bytes": size_bytes,
+                                    "processed_bytes": processed_bytes,
+                                    "estimated_char_count": estimated_char_count,
+                                },
+                            ),
+                        )
+                        return
+                    if stage == "file_character_count_completed":
+                        size_bytes = int(payload.get("size_bytes") or 0)
+                        estimated_char_count = int(payload.get("estimated_char_count") or 0)
+                        char_count = int(payload.get("char_count") or 0)
+                        paragraph_count = int(payload.get("paragraph_count") or 0)
+                        label = (
+                            f"Karakterszámolás kész: {char_count} karakter "
+                            f"({self._format_size_label(size_bytes)}, becslés: {estimated_char_count})."
+                        )
+                        finished_item = self._update_item_processing_summary(
+                            finished_item,
+                            progress_message=label,
+                            module_updates={
+                                "parser": self._build_processing_module(
+                                    key="parser",
+                                    status="processing",
+                                    label="Mondatkinyerés",
+                                    processed_parts=max(size_bytes, 1),
+                                    total_parts=max(size_bytes, 1),
+                                    message=label,
+                                ),
+                            },
+                            document_progress=self._build_document_progress(
+                                phase="file_character_count",
+                                processed_parts=max(size_bytes, 1),
+                                total_parts=max(size_bytes, 1),
+                                label=label,
+                                extra={
+                                    "size_bytes": size_bytes,
+                                    "estimated_char_count": estimated_char_count,
+                                    "char_count": char_count,
+                                    "paragraph_count": paragraph_count,
+                                },
+                            ),
+                            extra_metadata={
+                                "estimated_char_count": estimated_char_count,
+                                "char_count": char_count,
+                                "paragraph_count": paragraph_count,
+                            },
+                        )
+                        return
                     if stage == "parser_started":
                         finished_item = self._update_item_processing_summary(
                             finished_item,
@@ -5383,6 +5830,7 @@ class KnowledgeFacade:
                             extra_metadata={
                                 "parser_run_id": payload.get("parser_run_id"),
                                 "document_id": payload.get("document_id"),
+                                "char_count": int(payload.get("char_count") or 0),
                                 "sentence_count": sentence_count,
                                 "paragraph_count": int(payload.get("paragraph_count") or 0),
                                 "parser_block_counters": {
@@ -5574,7 +6022,9 @@ class KnowledgeFacade:
                 )
                 parsed_document = self._document_store.get_for_source(created_source.id)
                 sentence_count = 0
+                char_count = 0
                 if parsed_document is not None:
+                    char_count = int(parsed_document.char_count or len(parsed_document.text_content or ""))
                     sentence_count = len(self._sentence_store.list_for_document(parsed_document.id))
                 finished_item = self._update_item_processing_summary(
                     finished_item,
@@ -5599,6 +6049,7 @@ class KnowledgeFacade:
                     extra_metadata={
                         "parser_run_id": parser_run.id,
                         "document_id": parsed_document.id if parsed_document is not None else None,
+                        "char_count": char_count,
                         "sentence_count": sentence_count,
                     },
                 )
@@ -5685,7 +6136,7 @@ class KnowledgeFacade:
             )
             return bool(started_run.continue_on_error)
 
-    def process_ingest_run(self, run_id: str) -> IngestRun:
+    def process_ingest_run(self, run_id: str, *, auto_refresh_semantic_index: bool = True) -> IngestRun:
         run = self._ingest_run_store.get(run_id)
         if run is None:
             raise ValueError("Ingest run not found")
@@ -5705,7 +6156,8 @@ class KnowledgeFacade:
                 finally:
                     started_run = self._refresh_ingest_run(run_id)
         final_run = self._refresh_ingest_run(run_id)
-        self._auto_refresh_semantic_block_index_after_ingest(final_run)
+        if auto_refresh_semantic_index:
+            self._auto_refresh_semantic_block_index_after_ingest(final_run)
         final_run = self._refresh_ingest_run(run_id)
         self._log_ingest_trace_summary(run_id)
         return final_run
@@ -5755,23 +6207,46 @@ class KnowledgeFacade:
             metadata.update(
                 {
                     "semantic_block_auto_index_status": "scheduled",
+                    "index_progress_state": "embedding_queued",
                     "semantic_block_auto_index_build_id": build.id,
                 }
             )
             self._ingest_run_store.update(replace(run, metadata=metadata, updated_at=_utcnow()))
 
             async def _run() -> None:
-                finished = await self.run_index_build(build.id)
-                latest = self._ingest_run_store.get(run.id)
-                if latest is not None:
-                    latest_metadata = dict(latest.metadata or {})
-                    latest_metadata.update(
-                        {
-                            "semantic_block_auto_index_status": finished.status,
-                            "semantic_block_auto_index_build_id": finished.id,
-                        }
-                    )
-                    self._ingest_run_store.update(replace(latest, metadata=latest_metadata, updated_at=_utcnow()))
+                try:
+                    latest_start = self._ingest_run_store.get(run.id)
+                    if latest_start is not None:
+                        latest_start_metadata = dict(latest_start.metadata or {})
+                        latest_start_metadata["index_progress_state"] = "embedding_started"
+                        self._ingest_run_store.update(
+                            replace(latest_start, metadata=latest_start_metadata, updated_at=_utcnow())
+                        )
+                    finished = await self.run_index_build(build.id)
+                    latest = self._ingest_run_store.get(run.id)
+                    if latest is not None:
+                        latest_metadata = dict(latest.metadata or {})
+                        latest_metadata.update(
+                            {
+                                "semantic_block_auto_index_status": finished.status,
+                                "semantic_block_auto_index_build_id": finished.id,
+                                "index_progress_state": "index_ready" if finished.status == "ready" else "index_failed",
+                            }
+                        )
+                        self._ingest_run_store.update(replace(latest, metadata=latest_metadata, updated_at=_utcnow()))
+                except Exception as exc:
+                    logger.warning("semantic block auto index task failed: %s", exc, exc_info=True)
+                    latest = self._ingest_run_store.get(run.id)
+                    if latest is not None:
+                        latest_metadata = dict(latest.metadata or {})
+                        latest_metadata.update(
+                            {
+                                "semantic_block_auto_index_status": "failed",
+                                "semantic_block_auto_index_error": str(exc),
+                                "index_progress_state": "index_failed",
+                            }
+                        )
+                        self._ingest_run_store.update(replace(latest, metadata=latest_metadata, updated_at=_utcnow()))
 
             try:
                 loop = asyncio.get_running_loop()
@@ -5788,6 +6263,7 @@ class KnowledgeFacade:
                     {
                         "semantic_block_auto_index_status": "failed",
                         "semantic_block_auto_index_error": str(exc),
+                        "index_progress_state": "index_failed",
                     }
                 )
                 self._ingest_run_store.update(replace(latest, metadata=latest_metadata, updated_at=_utcnow()))
@@ -5871,10 +6347,83 @@ class KnowledgeFacade:
     def get_index_build(self, build_id: str) -> IndexBuild | None:
         return self._index_build_store.get(build_id)
 
+    def list_index_builds(self, corpus_uuid: str) -> list[IndexBuild]:
+        return self._index_build_store.list_for_corpus(corpus_uuid)
+
+    def is_ingest_run_stale(self, run: IngestRun) -> bool:
+        if run.status not in {"queued", "processing"}:
+            return False
+        reference = run.updated_at or run.started_at or run.created_at
+        if reference is None:
+            return False
+        return (_utcnow() - reference).total_seconds() >= self._STALE_INGEST_RUN_FAIL_AFTER_SEC
+
+    def mark_ingest_run_failed_as_stale(self, run_id: str, *, reason: str) -> IngestRun:
+        run = self._ingest_run_store.get(run_id)
+        if run is None:
+            raise ValueError("Ingest run not found")
+        if run.status not in {"queued", "processing"}:
+            return run
+        metadata = dict(run.metadata or {})
+        metadata["stale_recovery_status"] = "failed"
+        metadata["stale_recovery_reason"] = reason
+        metadata["stale_recovery_at"] = _utcnow().isoformat()
+        failed = self._ingest_run_store.update(
+            replace(
+                run,
+                status="failed",
+                completed_at=_utcnow(),
+                updated_at=_utcnow(),
+                metadata=metadata,
+            )
+        )
+        self._record_ingest_event(
+            run_id=failed.id,
+            event_type="run_stale_failed",
+            status="failed",
+            message=reason,
+        )
+        return failed
+
+    def is_index_build_stale(self, build: IndexBuild) -> bool:
+        if build.status != "building":
+            return False
+        reference = build.started_at or build.created_at
+        if reference is None:
+            return False
+        return (_utcnow() - reference).total_seconds() >= self._STALE_INDEX_BUILD_FAIL_AFTER_SEC
+
+    def mark_index_build_failed_as_stale(self, build_id: str, *, reason: str) -> IndexBuild:
+        build = self._index_build_store.get(build_id)
+        if build is None:
+            raise ValueError("Index build not found")
+        if build.status != "building":
+            return build
+        metadata = dict(build.metadata or {})
+        metadata["stale_recovery_status"] = "failed"
+        metadata["stale_recovery_reason"] = reason
+        metadata["stale_recovery_at"] = _utcnow().isoformat()
+        failed = self._index_build_store.update(
+            replace(
+                build,
+                status="failed",
+                error=reason,
+                completed_at=_utcnow(),
+                metadata=metadata,
+            )
+        )
+        self._metrics_store.increment("build_failed_count", 1)
+        self._log_step("build.stale_failed", status="error", tenant=failed.tenant, build_id=failed.id, error=reason)
+        return failed
+
     async def run_index_build(self, build_id: str) -> IndexBuild:
         build = self._index_build_store.get(build_id)
         if build is None:
             raise ValueError("Index build not found")
+        if build.status == "ready":
+            return build
+        if build.status == "building":
+            raise ValueError("Index build already in progress")
         started = replace(build, status="building", started_at=_utcnow(), error=None)
         self._index_build_store.update(started)
         timer = time.perf_counter()
@@ -5882,13 +6431,37 @@ class KnowledgeFacade:
             sources = self._source_store.list_for_corpus(started.corpus_uuid)
             vector_index = self._vector_index_factory()
             profile = self._default_index_profile(started.index_profile_key)
-            await vector_index.ensure_collection_schema_async(started.collection_name)
+            vector_size = self._vector_size_for_profile(profile, vector_index)
+            started = self._index_build_store.update(
+                replace(
+                    started,
+                    metadata={
+                        **dict(started.metadata or {}),
+                        "index_progress_state": "embedding_started",
+                        "embedding_profile": profile.embedding_strategy,
+                    },
+                )
+            )
+            await vector_index.ensure_collection_schema_async(
+                started.collection_name,
+                vector_size=vector_size,
+            )
 
             total_chunks = 0
             for source in sources:
                 text = str(source.raw_content or "").strip()
                 if not text:
                     continue
+                self._index_build_store.update(
+                    replace(
+                        started,
+                        metadata={
+                            **dict(started.metadata or {}),
+                            "index_progress_state": "embedding_batching",
+                            "active_source_id": source.id,
+                        },
+                    )
+                )
                 chunks = self._chunk_builder.build_chunks(text)
                 total_chunks += len(chunks)
                 rows = build_sentence_rows(chunks, source.title)
@@ -5898,6 +6471,16 @@ class KnowledgeFacade:
                     payload["source_title"] = source.title
                     payload["build_id"] = started.id
                     payload["index_profile_key"] = profile.key
+                self._index_build_store.update(
+                    replace(
+                        started,
+                        metadata={
+                            **dict(started.metadata or {}),
+                            "index_progress_state": "embedding_upserting",
+                            "active_source_id": source.id,
+                        },
+                    )
+                )
                 await vector_index.upsert_sentence_points(started.collection_name, rows)
                 self._source_store.update(replace(source, status="ingested"))
 
@@ -5936,6 +6519,9 @@ class KnowledgeFacade:
                     **started.metadata,
                     "source_count": len(sources),
                     "profile_key": profile.key,
+                    "embedding_strategy": profile.embedding_strategy,
+                    "vector_size": vector_size,
+                    "index_progress_state": "index_ready",
                     "retrieval_chunk_count": len(retrieval_chunk_rows),
                     "retrieval_chunk_indexed": bool(retrieval_chunk_rows),
                     "semantic_block_count": len(semantic_block_rows),
@@ -5957,19 +6543,62 @@ class KnowledgeFacade:
             )
             return finished
         except Exception as exc:
-            failed = replace(started, status="failed", error=str(exc), completed_at=_utcnow())
+            failed = replace(
+                started,
+                status="failed",
+                error=str(exc),
+                completed_at=_utcnow(),
+                metadata={
+                    **dict(started.metadata or {}),
+                    "index_progress_state": "index_failed",
+                },
+            )
             self._index_build_store.update(failed)
             self._metrics_store.increment("build_failed_count", 1)
             self._log_step("build.failed", status="error", tenant=failed.tenant, build_id=failed.id, error=str(exc))
             raise
 
+    async def run_index_build_with_retry(self, build_id: str) -> IndexBuild:
+        lock = self._index_build_lock(build_id)
+        if not lock.acquire(blocking=False):
+            current = self._index_build_store.get(build_id)
+            if current is None:
+                raise ValueError("Index build not found")
+            return current
+        try:
+            last_error: Exception | None = None
+            for attempt in range(1, self._INDEX_BUILD_RETRY_COUNT + 1):
+                try:
+                    return await self.run_index_build(build_id)
+                except Exception as exc:
+                    last_error = exc
+                    if attempt >= self._INDEX_BUILD_RETRY_COUNT:
+                        raise
+                    await asyncio.sleep(self._INDEX_BUILD_RETRY_BACKOFF_SEC * attempt)
+            if last_error is not None:
+                raise last_error
+            raise ValueError("Index build retry failed")
+        finally:
+            lock.release()
+
     def _resolve_builds(self, *, corpus_uuid: str, build_ids: list[str] | None = None) -> list[IndexBuild]:
+        def is_ready_build(item: IndexBuild | None) -> bool:
+            if item is None:
+                return False
+            status = str(getattr(item, "status", "") or "").strip().lower()
+            if status in {"ready", "completed", "success", "succeeded", "done"}:
+                return True
+            progress_state = str((getattr(item, "metadata", {}) or {}).get("index_progress_state") or "").strip().lower()
+            if progress_state in {"index_ready", "ready", "completed", "done"}:
+                return True
+            return False
+
         if build_ids:
-            builds = [item for item in (self._index_build_store.get(build_id) for build_id in build_ids) if item is not None]
+            builds = [item for item in (self._index_build_store.get(build_id) for build_id in build_ids) if is_ready_build(item)]
         else:
-            builds = [item for item in self._index_build_store.list_for_corpus(corpus_uuid) if item.status == "ready"]
+            builds = [item for item in self._index_build_store.list_for_corpus(corpus_uuid) if is_ready_build(item)]
             builds = builds[:1]
-        return [item for item in builds if item.status == "ready"]
+        return [item for item in builds if is_ready_build(item)]
 
     async def _retrieve_hits_with_resilience(
         self,
@@ -6543,8 +7172,77 @@ class KnowledgeFacade:
                 continue
             seen_block_ids.add(block_id)
             matched_semantic_blocks.append(block)
-            if len(matched_semantic_blocks) >= 4:
-                break
+        matched_semantic_blocks = self._filter_relevant_semantic_blocks(
+            matched_semantic_blocks,
+            max_blocks=4,
+        )
+        if not matched_chunks and matched_semantic_blocks:
+            # Fallback: ha a query-aware retrieval nem adott chunkot, de vannak erős szemantikus blokkok,
+            # készítsünk minimális synthesis-bemenetet ezekből.
+            fallback_chunks: list[dict[str, Any]] = []
+            fallback_claims: list[dict[str, Any]] = []
+            for block in matched_semantic_blocks:
+                source_id = str(block.get("source_id") or "").strip()
+                sentence_ids = [str(item).strip() for item in (block.get("sentence_ids") or []) if str(item).strip()]
+                claim_ids = [str(item).strip() for item in (block.get("claim_ids") or []) if str(item).strip()]
+                block_id = str(block.get("id") or block.get("block_id") or "").strip()
+                entity_name = str(block.get("primary_subject") or "").strip()
+                claim_text = str(block.get("summary") or block.get("text") or "").strip()
+                if not source_id or not claim_text:
+                    continue
+                if not sentence_ids:
+                    sentence_ids = [f"{block_id or source_id}-sentence-1"]
+                if not claim_ids:
+                    claim_ids = [f"{block_id or source_id}-claim-1"]
+                chunk_confidence = float(block.get("match_score") or 0.0)
+                chunk_confidence = max(0.45, min(round(chunk_confidence / 2.0, 4), 0.95))
+                fallback_chunks.append(
+                    {
+                        "profile_id": str(block.get("profile_id") or ""),
+                        "entity_name": entity_name,
+                        "retrieval_chunk_text": claim_text,
+                        "conflict_marker": bool(block.get("conflict_count")),
+                        "temporal_context_used": False,
+                        "matched_claim_ids": claim_ids,
+                        "evidence_ids": sentence_ids,
+                        "source_ids": [source_id],
+                        "retrieval_confidence": chunk_confidence,
+                    }
+                )
+                for claim_id in claim_ids:
+                    fallback_claims.append(
+                        {
+                            "profile_id": str(block.get("profile_id") or ""),
+                            "entity_name": entity_name,
+                            "claim_id": claim_id,
+                            "claim_text": claim_text,
+                            "raw_claim_text": claim_text,
+                            "canonical_claim_text": claim_text,
+                            "display_claim_text": claim_text,
+                            "language": str(block.get("language") or ""),
+                            "predicate": "",
+                            "object": "",
+                            "fact_bucket": "descriptors",
+                            "claim_group": "descriptor",
+                            "claim_semantic_type": "attribute",
+                            "state": "",
+                            "time_filter": "",
+                            "time_values": list(block.get("time_values") or []),
+                            "sentence_ids": sentence_ids,
+                            "source_ids": [source_id],
+                            "conflict_marker": bool(block.get("conflict_count")),
+                        }
+                    )
+            if fallback_chunks:
+                matched_chunks = fallback_chunks
+                matched_claims = self._enrich_matched_claims_for_explanation(fallback_claims)
+                query_aware_result["matched_chunks"] = matched_chunks
+                query_aware_result["matched_claims"] = matched_claims
+                query_aware_result["retrieval_confidence"] = round(
+                    sum(float(item.get("retrieval_confidence") or 0.0) for item in matched_chunks) / len(matched_chunks),
+                    4,
+                )
+                query_aware_result["query_retrieval_match_count"] = len(matched_chunks)
         synthesis_result = SynthesisEngineV0().synthesize(
             query_profile=query_profile,
             matched_chunks=matched_chunks,
@@ -6812,6 +7510,11 @@ class KnowledgeFacade:
                     if citation.source_id in source_metadata_by_id
                     else ""
                 ),
+                "created_at": (
+                    source_metadata_by_id[citation.source_id].created_at.isoformat()
+                    if citation.source_id in source_metadata_by_id and source_metadata_by_id[citation.source_id].created_at
+                    else None
+                ),
             }
             for index, citation in enumerate(run.citations, start=1)
         ]
@@ -6838,8 +7541,10 @@ class KnowledgeFacade:
                     "display_type": self._source_display_type(source),
                     "created_by": source.created_by,
                     "created_by_label": self._source_created_by_label(source),
+                    "created_at": source.created_at.isoformat() if source.created_at else None,
                 }
             )
+        corpus = self._corpus_store.get_by_uuid(effective_corpus_uuid)
         return {
             "query_run_id": run.id,
             "kb_uuid": effective_corpus_uuid,
@@ -6899,6 +7604,8 @@ class KnowledgeFacade:
             "debug_enabled": debug,
             "current_user_id": current_user_id,
             "current_user_role": current_user_role,
+            "pii_depersonalization_enabled": bool(getattr(corpus, "pii_depersonalization_enabled", True)),
+            "personal_data_sensitivity": str(getattr(corpus, "personal_data_sensitivity", "medium") or "medium"),
         }
 
     async def answer_support(

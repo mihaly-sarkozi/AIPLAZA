@@ -12,7 +12,12 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Request, Response
 
 from core.capabilities.auth.dto import LoginInput, LoginTwoFactorRequired
 from core.capabilities.auth.exceptions import TwoFactorEmailError, TwoFactorTooManyAttemptsError
-from core.capabilities.auth.rate_limit.auth_limits import check_login_step1_email, check_login_step2_pending_token
+from core.capabilities.auth.rate_limit.auth_limits import (
+    check_login_burst,
+    check_login_step1_email,
+    check_login_step2_pending_token,
+    register_failed_login_attempt,
+)
 from core.capabilities.auth.service.refresh_result import RefreshFailed, RefreshFailReason, RefreshSuccess
 from core.capabilities.auth.router.auth_response_builder import (
     build_token_response,
@@ -28,18 +33,22 @@ from core.capabilities.users.router.responses import UserResponse
 from core.di import (
     OptionalTenantContextDep,
     RequiredTenantContextDep,
+    get_service,
     get_login_service,
     get_logout_service,
     get_refresh_service,
     get_token_service,
 )
 from core.kernel.config.config_loader import settings
+from core.kernel.logging.observability import increment_metric, log_structured_event
 from core.kernel.security.csrf import generate_csrf_token, set_csrf_cookie
 from core.kernel.security.rate_limit import limiter, refresh_token_key
-from core.platform.auth.auth_dependencies import get_current_user_optional
+from core.platform.auth.auth_dependencies import get_current_user, get_current_user_optional
 from core.platform.auth.token_allowlist import add as allowlist_add, remove_by_user as allowlist_remove_by_user
+from core.platform.auth.token_allowlist import TokenAllowlistUnavailableError
 from core.platform.auth.token_service import TokenService
 from core.kernel.security.cookie_policy import clear_refresh_cookie, set_refresh_cookie
+from core.platform.service_keys import PLATFORM_ADMIN_SERVICE
 from lang.messages import ErrorCode
 from shared.presentation import LocalizedPresenterBase
 
@@ -48,9 +57,26 @@ _presenter = LocalizedPresenterBase()
 _log = logging.getLogger(__name__)
 
 
+def _request_ip(request: Request) -> str | None:
+    return getattr(request.client, "host", None) if request.client else None
+
+
+def _ensure_not_banned_ip(request: Request) -> None:
+    ip = _request_ip(request)
+    if not ip:
+        return
+    try:
+        svc = get_service(PLATFORM_ADMIN_SERVICE)
+        if hasattr(svc, "is_ip_banned") and svc.is_ip_banned(ip):
+            raise HTTPException(status_code=403, detail="IP address is temporarily blocked")
+    except RuntimeError:
+        return
+
+
 # CSRF TOKEN kezelése
 @router.get("/auth/csrf-token")
-def get_csrf_token(response: Response, tenant: OptionalTenantContextDep):
+@limiter.limit("120/minute")
+def get_csrf_token(request: Request, response: Response, tenant: OptionalTenantContextDep):
     """Return CSRF token for double-submit; also set in cookie. No auth required."""
     token = generate_csrf_token()
     set_csrf_cookie(
@@ -72,6 +98,7 @@ def login(
     tenant: RequiredTenantContextDep,
     svc: LoginService = Depends(get_login_service),
 ):
+    _ensure_not_banned_ip(request)
     lang = _presenter.lang(request)
 
     if getattr(request.state, "user", None) is not None:
@@ -83,8 +110,11 @@ def login(
     elif getattr(req, "email", None):
         if not check_login_step1_email(req.email, tenant.slug):
             raise HTTPException(status_code=429, detail=_presenter.detail_for_lang(ErrorCode.AUTH_RATE_LIMIT, lang))
+        if not check_login_burst(req.email, _request_ip(request), tenant.slug):
+            increment_metric("auth.burst_block_total", 1.0, tags={"tenant": tenant.slug or "_"})
+            raise HTTPException(status_code=429, detail=_presenter.detail_for_lang(ErrorCode.AUTH_RATE_LIMIT, lang))
 
-    client_host = getattr(request.client, "host", None) if request.client else None
+    client_host = _request_ip(request)
     inp = LoginInput(
         email=req.email,
         password=req.password,
@@ -104,18 +134,48 @@ def login(
             status_code=429,
             detail=_presenter.detail_for_lang(ErrorCode.TWO_FACTOR_TOO_MANY_ATTEMPTS, lang),
         )
+    except ValueError as e:
+        if str(e) == "authenticator_required_setup":
+            raise HTTPException(
+                status_code=403,
+                detail="Admin és owner felhasználónak az Authenticator beállítása kötelező a belépéshez (próbaidőszakon kívül).",
+            ) from e
+        raise
     except Exception as e:
         _log.exception("auth login failed unexpectedly: %s", e)
         detail = _presenter.detail_for_lang(ErrorCode.LOGIN_ERROR, lang)
-        if os.environ.get("APP_ENV", "dev").lower() != "prod":
-            detail = {**detail, "debug_message": str(e)}
         raise HTTPException(status_code=500, detail=detail) from e
 
     if result is None:
+        failure_count = register_failed_login_attempt(req.email or "", client_host, tenant.slug)
+        failure_threshold = max(1, int(getattr(settings, "rate_limit_login_failure_ban_threshold", 16)))
+        if failure_count >= failure_threshold and client_host:
+            try:
+                admin_svc = get_service(PLATFORM_ADMIN_SERVICE)
+                if hasattr(admin_svc, "ban_ip"):
+                    admin_svc.ban_ip(
+                        ip=client_host,
+                        reason="auth_login_bruteforce_detected",
+                        expires_hours=max(1, int(getattr(settings, "rate_limit_login_failure_ban_hours", 2))),
+                        admin_user_id=None,
+                    )
+                    increment_metric("auth.auto_ip_ban_total", 1.0, tags={"tenant": tenant.slug or "_"})
+                    log_structured_event(
+                        "core.auth",
+                        "auth.auto_ip_ban",
+                        tenant_slug=tenant.slug,
+                        ip=client_host,
+                        failure_count=failure_count,
+                    )
+            except Exception:
+                _log.warning("Automatic IP ban failed after repeated login attempts.")
         raise HTTPException(status_code=401, detail=_presenter.detail_for_lang(ErrorCode.INVALID_CREDENTIALS, lang))
 
     if isinstance(result, LoginTwoFactorRequired):
-        return TwoFactorRequiredResponse(pending_token=result.pending_token)
+        return TwoFactorRequiredResponse(
+            pending_token=result.pending_token,
+            challenge_type=getattr(result, "challenge_type", "email"),
+        )
 
     try:
         return build_token_response(
@@ -124,11 +184,11 @@ def login(
             result=result,
             auto_login=getattr(req, "auto_login", False),
         )
+    except TokenAllowlistUnavailableError as e:
+        raise HTTPException(status_code=503, detail=str(e)) from e
     except Exception as e:
         _log.exception("auth login token/cookie/allowlist response failed: %s", e)
         detail = _presenter.detail_for_lang(ErrorCode.LOGIN_ERROR, lang)
-        if os.environ.get("APP_ENV", "dev").lower() != "prod":
-            detail = {**detail, "debug_message": str(e)}
         raise HTTPException(status_code=500, detail=detail) from e
 
 
@@ -142,6 +202,7 @@ def demo_login(
     svc: LoginService = Depends(get_login_service),
     token_service: TokenService = Depends(get_token_service),
 ):
+    _ensure_not_banned_ip(request)
     return handle_demo_login(
         request=request,
         response=response,
@@ -162,6 +223,7 @@ def refresh_tokens(
     svc: RefreshService = Depends(get_refresh_service),
     login_svc: LoginService = Depends(get_login_service),
 ):
+    _ensure_not_banned_ip(request)
     """Refresh token csak cookie-ból; új access + refresh cookie-t ad."""
     lang = _presenter.lang(request)
     rt = request.cookies.get("refresh_token")
@@ -189,7 +251,10 @@ def refresh_tokens(
             int(svc.tokens.verify(result.refresh_token)["sub"])
         )
 
-    allowlist_add(tenant.slug, user.id, result.access_jti)
+    try:
+        allowlist_add(tenant.slug, user.id, result.access_jti)
+    except TokenAllowlistUnavailableError as e:
+        raise HTTPException(status_code=503, detail=str(e)) from e
     max_age = cookie_max_age(auto_login=result.auto_login)
     set_refresh_cookie(
         response,
@@ -223,8 +288,9 @@ def logout(
     svc: LogoutService = Depends(get_logout_service),
     token_service: TokenService = Depends(get_token_service),
 ):
+    _ensure_not_banned_ip(request)
     rt = request.cookies.get("refresh_token")
-    ip = getattr(request.client, "host", None) if request.client else None
+    ip = _request_ip(request)
     ua = request.headers.get("user-agent")
 
     user_id: int | None = user.id if user else None
@@ -246,3 +312,56 @@ def logout(
         )
 
     return {"ok": True}
+
+
+@router.get("/auth/authenticator/status")
+@limiter.limit("60/minute")
+def authenticator_status(
+    request: Request,
+    user: User = Depends(get_current_user),
+    svc: LoginService = Depends(get_login_service),
+):
+    return svc.authenticator_status(user.id)
+
+
+@router.post("/auth/authenticator/setup")
+@limiter.limit("20/minute")
+def authenticator_setup(
+    request: Request,
+    user: User = Depends(get_current_user),
+    svc: LoginService = Depends(get_login_service),
+):
+    issuer = getattr(settings, "authenticator_issuer", "AIPLAZA")
+    return svc.start_authenticator_setup(user.id, user.email, issuer=issuer)
+
+
+@router.post("/auth/authenticator/confirm")
+@limiter.limit("20/minute")
+def authenticator_confirm(
+    request: Request,
+    body: dict = Body(...),
+    user: User = Depends(get_current_user),
+    svc: LoginService = Depends(get_login_service),
+):
+    code = str((body or {}).get("code", "")).strip()
+    if not code:
+        raise HTTPException(status_code=400, detail="Authenticator code is required")
+    try:
+        return svc.confirm_authenticator_setup(user.id, code)
+    except ValueError as exc:
+        if str(exc) == "authenticator_setup_not_started":
+            raise HTTPException(status_code=400, detail="Authenticator setup was not started") from exc
+        if str(exc) == "invalid_authenticator_code":
+            raise HTTPException(status_code=400, detail="Invalid authenticator code") from exc
+        raise HTTPException(status_code=400, detail="Authenticator setup error") from exc
+
+
+@router.delete("/auth/authenticator")
+@limiter.limit("20/minute")
+def authenticator_disable(
+    request: Request,
+    user: User = Depends(get_current_user),
+    svc: LoginService = Depends(get_login_service),
+):
+    svc.disable_authenticator(user.id)
+    return {"enabled": False, "pending": False}

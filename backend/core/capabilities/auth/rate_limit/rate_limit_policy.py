@@ -16,6 +16,10 @@ LOGIN_STEP1_WINDOW_SEC: int = 3600   # 1 hour
 LOGIN_STEP2_MAX_PER_TOKEN: int = 5
 LOGIN_STEP2_WINDOW_SEC: int = 60     # 1 minute
 
+LOGIN_BURST_MAX_PER_IP_EMAIL_10S: int = 5
+LOGIN_BURST_WINDOW_SEC: int = 10
+LOGIN_FAILURE_BAN_WINDOW_SEC: int = 900
+
 
 # --- Pure logic ---------------------------------------------------------
 
@@ -55,6 +59,28 @@ def pending_redis_key(tenant_slug: str | None, pending_token: str) -> str:
     return f"rl:login_pending:{t}:{p}"
 
 
+def burst_mem_key(tenant_slug: str | None, email: str, ip: str | None) -> str:
+    return f"{(tenant_slug or '').strip()}:{(email or '').strip().lower()}:{(ip or '').strip()}"
+
+
+def burst_redis_key(tenant_slug: str | None, email: str, ip: str | None) -> str:
+    t = (tenant_slug or "").strip()
+    e = (email or "").strip().lower()
+    i = (ip or "").strip()
+    return f"rl:login_burst:{t}:{e}:{i}"
+
+
+def failure_ban_mem_key(tenant_slug: str | None, email: str, ip: str | None) -> str:
+    return f"{(tenant_slug or '').strip()}:{(email or '').strip().lower()}:{(ip or '').strip()}"
+
+
+def failure_ban_redis_key(tenant_slug: str | None, email: str, ip: str | None) -> str:
+    t = (tenant_slug or "").strip()
+    e = (email or "").strip().lower()
+    i = (ip or "").strip()
+    return f"rl:login_fail_ban:{t}:{e}:{i}"
+
+
 __all__ = [
     "LOGIN_STEP1_MAX_PER_EMAIL",
     "LOGIN_STEP1_WINDOW_SEC",
@@ -65,5 +91,12 @@ __all__ = [
     "is_within_limit",
     "pending_mem_key",
     "pending_redis_key",
+    "LOGIN_BURST_MAX_PER_IP_EMAIL_10S",
+    "LOGIN_BURST_WINDOW_SEC",
+    "LOGIN_FAILURE_BAN_WINDOW_SEC",
+    "burst_mem_key",
+    "burst_redis_key",
+    "failure_ban_mem_key",
+    "failure_ban_redis_key",
     "prune_old_timestamps",
 ]

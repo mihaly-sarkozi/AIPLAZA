@@ -47,6 +47,13 @@ export type SettingsResponse = {
   timezone: SettingsTimezone;
   date_format: SettingsDateFormat;
   time_format: SettingsTimeFormat;
+  billing_company_name: string;
+  billing_tax_id: string;
+  billing_address_line: string;
+  billing_postal_code: string;
+  billing_city: string;
+  billing_region: string;
+  billing_country: string;
 };
 
 export type PatchSettingsPayload = {
@@ -54,6 +61,13 @@ export type PatchSettingsPayload = {
   timezone?: SettingsTimezone;
   date_format?: SettingsDateFormat;
   time_format?: SettingsTimeFormat;
+  billing_company_name?: string;
+  billing_tax_id?: string;
+  billing_address_line?: string;
+  billing_postal_code?: string;
+  billing_city?: string;
+  billing_region?: string;
+  billing_country?: string;
 };
 
 export async function getSettings(): Promise<SettingsResponse> {

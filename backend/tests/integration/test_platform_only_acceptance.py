@@ -14,6 +14,8 @@ from core.capabilities.users.dto import User
 from core.di import RequiredTenantContextDep
 from core.kernel.app_factory import create_app_from_manifests
 from core.kernel.config.config_loader import settings
+from core.platform.lifecycle import router as lifecycle_router
+from core.platform.lifecycle.dto import HealthResponse, LivenessResponse, ReadinessResponse
 from core.platform.registry import load_core_platform_manifest
 from core.platform.auth.auth_dependencies import get_current_user, require_permission
 from core.platform.permissions.permission_service import PermissionService
@@ -111,6 +113,136 @@ def test_platform_only_metrics_endpoint_is_tenant_optional():
     assert "# TYPE aiplaza_metric_count counter" in response.text
 
 
+def test_platform_only_metrics_endpoint_prod_blocks_without_token(monkeypatch: pytest.MonkeyPatch):
+    app = _build_platform_only_app()
+    stack, tenant_repo, _demo_snapshot_unused = _tenant_repo_patch_stack()
+    with stack:
+        stack.enter_context(patch.object(tenant_repo, "get_by_domain", return_value=None))
+        monkeypatch.setattr(lifecycle_router, "get_app_env", lambda: "prod")
+        monkeypatch.setattr(settings, "metrics_require_ip_allowlist_in_prod", True)
+        monkeypatch.setattr(settings, "metrics_allowed_ips", "testclient")
+        monkeypatch.setattr(settings, "metrics_require_token_in_prod", True)
+        monkeypatch.setattr(settings, "metrics_access_token", "secret-token")
+        client = TestClient(app, base_url=f"http://{settings.tenant_base_domain}")
+        response = client.get("/api/metrics")
+
+    assert response.status_code == 404
+
+
+def test_platform_only_metrics_endpoint_prod_accepts_valid_token(monkeypatch: pytest.MonkeyPatch):
+    app = _build_platform_only_app()
+    stack, tenant_repo, _demo_snapshot_unused = _tenant_repo_patch_stack()
+    with stack:
+        stack.enter_context(patch.object(tenant_repo, "get_by_domain", return_value=None))
+        monkeypatch.setattr(lifecycle_router, "get_app_env", lambda: "prod")
+        monkeypatch.setattr(settings, "metrics_require_ip_allowlist_in_prod", True)
+        monkeypatch.setattr(settings, "metrics_allowed_ips", "testclient")
+        monkeypatch.setattr(settings, "metrics_require_token_in_prod", True)
+        monkeypatch.setattr(settings, "metrics_access_token", "secret-token")
+        client = TestClient(app, base_url=f"http://{settings.tenant_base_domain}")
+        response = client.get("/api/metrics", headers={"X-Metrics-Token": "secret-token"})
+
+    assert response.status_code == 200
+    assert "text/plain" in response.headers["content-type"]
+
+
+def test_platform_only_lifecycle_endpoint_prod_blocks_without_token(monkeypatch: pytest.MonkeyPatch):
+    app = _build_platform_only_app()
+    stack, tenant_repo, _demo_snapshot_unused = _tenant_repo_patch_stack()
+    with stack:
+        stack.enter_context(patch.object(tenant_repo, "get_by_domain", return_value=None))
+        monkeypatch.setattr(lifecycle_router, "get_app_env", lambda: "prod")
+        monkeypatch.setattr(settings, "metrics_require_ip_allowlist_in_prod", True)
+        monkeypatch.setattr(settings, "metrics_allowed_ips", "testclient")
+        monkeypatch.setattr(settings, "metrics_require_token_in_prod", True)
+        monkeypatch.setattr(settings, "metrics_access_token", "secret-token")
+        client = TestClient(app, base_url=f"http://{settings.tenant_base_domain}")
+        response = client.get("/api/platform/lifecycle")
+
+    assert response.status_code == 404
+
+
+def test_platform_only_lifecycle_endpoint_prod_accepts_valid_token(monkeypatch: pytest.MonkeyPatch):
+    app = _build_platform_only_app()
+    stack, tenant_repo, _demo_snapshot_unused = _tenant_repo_patch_stack()
+    with stack:
+        stack.enter_context(patch.object(tenant_repo, "get_by_domain", return_value=None))
+        monkeypatch.setattr(lifecycle_router, "get_app_env", lambda: "prod")
+        monkeypatch.setattr(settings, "metrics_require_ip_allowlist_in_prod", True)
+        monkeypatch.setattr(settings, "metrics_allowed_ips", "testclient")
+        monkeypatch.setattr(settings, "metrics_require_token_in_prod", True)
+        monkeypatch.setattr(settings, "metrics_access_token", "secret-token")
+        client = TestClient(app, base_url=f"http://{settings.tenant_base_domain}")
+        response = client.get("/api/platform/lifecycle", headers={"X-Metrics-Token": "secret-token"})
+
+    assert response.status_code == 200
+    assert response.json().get("status")
+
+
+def test_platform_readiness_returns_503_when_not_ready():
+    app = _build_platform_only_app()
+    stack, tenant_repo, _demo_snapshot_unused = _tenant_repo_patch_stack()
+
+    class _NotReadyLifecycle:
+        def readiness(self):
+            return ReadinessResponse(status="not_ready", checks={"database": "ok", "cache": "ok"})
+
+        def health(self):
+            return HealthResponse(
+                status="degraded",
+                liveness=LivenessResponse(status="alive", started_at=None, startup_completed=False),
+                readiness=self.readiness(),
+            )
+
+    app.dependency_overrides[lifecycle_router.get_lifecycle_service] = lambda: _NotReadyLifecycle()
+    with stack:
+        stack.enter_context(patch.object(tenant_repo, "get_by_domain", return_value=None))
+        client = TestClient(app, base_url=f"http://{settings.tenant_base_domain}")
+        response = client.get("/api/health/ready")
+    app.dependency_overrides.pop(lifecycle_router.get_lifecycle_service, None)
+
+    assert response.status_code == 503
+    assert response.json()["status"] == "not_ready"
+
+
+def test_platform_health_returns_503_when_degraded():
+    app = _build_platform_only_app()
+    stack, tenant_repo, _demo_snapshot_unused = _tenant_repo_patch_stack()
+
+    class _NotReadyLifecycle:
+        def readiness(self):
+            return ReadinessResponse(status="not_ready", checks={"database": "ok", "cache": "ok"})
+
+        def health(self):
+            return HealthResponse(
+                status="degraded",
+                liveness=LivenessResponse(status="alive", started_at=None, startup_completed=False),
+                readiness=self.readiness(),
+            )
+
+    app.dependency_overrides[lifecycle_router.get_lifecycle_service] = lambda: _NotReadyLifecycle()
+    with stack:
+        stack.enter_context(patch.object(tenant_repo, "get_by_domain", return_value=None))
+        client = TestClient(app, base_url=f"http://{settings.tenant_base_domain}")
+        response = client.get("/api/health")
+    app.dependency_overrides.pop(lifecycle_router.get_lifecycle_service, None)
+
+    assert response.status_code == 503
+    assert response.json()["status"] == "degraded"
+
+
+def test_platform_admin_routes_rejected_on_tenant_subdomain() -> None:
+    app = _build_platform_only_app()
+    stack, tenant_repo, _demo_snapshot_unused = _tenant_repo_patch_stack()
+    with stack:
+        stack.enter_context(patch.object(tenant_repo, "get_by_domain", return_value=None))
+        client = TestClient(app, base_url=f"http://demo.{settings.tenant_base_domain}")
+        response = client.get("/api/platform-admin/auth/csrf-token")
+
+    assert response.status_code == 400
+    assert "host install útvonal" in response.json()["detail"]
+
+
 def test_platform_only_tenant_middleware_rejects_unknown_platform_subdomain_for_api():
     app = _build_platform_only_app()
     router = APIRouter()
@@ -128,7 +260,7 @@ def test_platform_only_tenant_middleware_rejects_unknown_platform_subdomain_for_
         response = client.get("/api/platform-only-tenant-check")
 
     assert response.status_code == 404
-    assert "Ismeretlen vagy nem létező tenant" in response.json()["detail"]
+    assert response.json()["detail"] == "404"
 
 
 def test_platform_only_auth_base_returns_401_without_user():

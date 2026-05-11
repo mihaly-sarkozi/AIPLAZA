@@ -20,9 +20,9 @@ class SubscriptionStateMachine:
 
     def resolve(self, subscription: Any, *, overdue_invoice: Any | None = None, now: datetime | None = None) -> str:
         current = now or self.clock.now()
-        if overdue_invoice is not None and getattr(overdue_invoice, "status", None) == "issued":
+        if overdue_invoice is not None and getattr(overdue_invoice, "status", None) in {"issued", "payment_failed"}:
             due_at = getattr(overdue_invoice, "due_at", None)
-            if due_at is not None and due_at <= current:
+            if due_at is not None and due_at.date() < current.date():
                 return SubscriptionStatus.RESTRICTED.value
 
         if getattr(subscription, "plan_code", None) == "free":
@@ -47,17 +47,14 @@ class RenewalUseCase:
             and getattr(subscription, "scheduled_change_effective_period", None) == period_key
             and getattr(subscription, "scheduled_plan_code", None)
         ):
-            subscription = self.service._repo.upsert_subscription(
+            subscription = self.service._upsert_subscription_from_existing(
                 tenant.tenant_id,
+                subscription,
                 plan_code=subscription.scheduled_plan_code,
                 billing_period=subscription.scheduled_billing_period or subscription.billing_period,
                 status=SubscriptionStatus.ACTIVE.value if subscription.scheduled_plan_code != "free" else SubscriptionStatus.TRIAL.value,
                 trial_started_at=subscription.trial_started_at if subscription.scheduled_plan_code == "free" else None,
                 trial_ends_at=subscription.trial_ends_at if subscription.scheduled_plan_code == "free" else None,
-                extra_kb_count=int(subscription.extra_kb_count or 0),
-                extra_storage_gb=int(subscription.extra_storage_gb or 0),
-                carryover_addon_questions=int(subscription.carryover_addon_questions or 0),
-                carryover_training_chars=int(subscription.carryover_training_chars or 0),
                 scheduled_plan_code=None,
                 scheduled_billing_period=None,
                 scheduled_change_effective_period=None,
@@ -74,26 +71,39 @@ class RestrictionUseCase:
     clock: Clock
 
     def sync_status(self, tenant: Any, subscription: Any) -> Any:
-        overdue_invoice = self.service._repo.get_latest_invoice_for_type(tenant.tenant_id, "monthly_subscription")
+        current = self.clock.now()
+        failed_invoice = self.service._repo.get_latest_invoice_for_type(tenant.tenant_id, "monthly_subscription_failed")
+        paid_invoice = self.service._repo.get_latest_invoice_for_type(tenant.tenant_id, "monthly_subscription")
+        overdue_invoice = None
+        if failed_invoice is not None and getattr(failed_invoice, "status", None) == "payment_failed":
+            failed_due_at = getattr(failed_invoice, "due_at", None)
+            paid_issued_at = getattr(paid_invoice, "issued_at", None) if paid_invoice is not None else None
+            failed_issued_at = getattr(failed_invoice, "issued_at", None)
+            paid_after_failed = False
+            if paid_issued_at is not None and failed_issued_at is not None:
+                try:
+                    paid_after_failed = paid_issued_at > failed_issued_at
+                except TypeError:
+                    paid_after_failed = paid_issued_at.replace(tzinfo=None) > failed_issued_at.replace(tzinfo=None)
+            if not paid_after_failed and failed_due_at is not None and failed_due_at.date() < current.date():
+                overdue_invoice = failed_invoice
+        if overdue_invoice is not None:
+            invoice_issued_at = getattr(overdue_invoice, "issued_at", None)
+            subscription_updated_at = getattr(subscription, "updated_at", None)
+            if invoice_issued_at is not None and subscription_updated_at is not None:
+                try:
+                    invoice_is_older_than_subscription = invoice_issued_at < subscription_updated_at
+                except TypeError:
+                    invoice_is_older_than_subscription = invoice_issued_at.replace(tzinfo=None) < subscription_updated_at.replace(tzinfo=None)
+                if invoice_is_older_than_subscription:
+                    overdue_invoice = None
         next_status = self.state_machine.resolve(subscription, overdue_invoice=overdue_invoice, now=self.clock.now())
         if next_status == subscription.status:
             return subscription
-        return self.service._repo.upsert_subscription(
+        return self.service._upsert_subscription_from_existing(
             tenant.tenant_id,
-            plan_code=subscription.plan_code,
-            billing_period=subscription.billing_period,
+            subscription,
             status=next_status,
-            trial_started_at=subscription.trial_started_at,
-            trial_ends_at=subscription.trial_ends_at,
-            extra_kb_count=int(subscription.extra_kb_count or 0),
-            extra_storage_gb=int(subscription.extra_storage_gb or 0),
-            carryover_addon_questions=int(subscription.carryover_addon_questions or 0),
-            carryover_training_chars=int(subscription.carryover_training_chars or 0),
-            scheduled_plan_code=subscription.scheduled_plan_code,
-            scheduled_billing_period=subscription.scheduled_billing_period,
-            scheduled_change_effective_period=subscription.scheduled_change_effective_period,
-            question_warning_period_key=subscription.question_warning_period_key,
-            question_warning_level=int(subscription.question_warning_level or 0),
         )
 
     def assert_not_restricted(self, tenant: Any, subscription: Any) -> tuple[bool, str | None]:
@@ -122,37 +132,14 @@ class InvoicingUseCase:
             return
         if subscription.status == SubscriptionStatus.RESTRICTED.value:
             return
-        if now.date() < next_charge_date:
+        billing_date = self.service._billing_due_date(subscription, next_charge_date)
+        if now.date() < billing_date:
             return
-        invoice_exists = self.service._repo.get_invoice(tenant.tenant_id, "monthly_subscription", next_period_key)
+        period_key = self.service._subscription_period_key(billing_date)
+        invoice_exists = self.service._repo.get_invoice(tenant.tenant_id, "monthly_subscription", period_key)
         if invoice_exists is not None:
             return
-        plan = plan_map.get(subscription.plan_code) or plan_map["free"]
-        total_cents = self.service._estimate_next_invoice(subscription)["total_cents"]
-        self.service._repo.create_invoice(
-            tenant.tenant_id,
-            invoice_type="monthly_subscription",
-            period_key=next_period_key,
-            currency=self.service.default_currency,
-            total_cents=total_cents,
-            description=f"{plan.name} {self.service._billing_period_label(subscription.billing_period)} díj",
-            lines=[
-                {
-                    "code": plan.code,
-                    "name": plan.name,
-                    "billing_period": subscription.billing_period,
-                    "period_multiplier": self.service._billing_period_multiplier(subscription.billing_period),
-                    "unit_price_cents": self.service._plan_monthly_charge_after_discount(
-                        plan.price_cents, subscription.billing_period
-                    ),
-                    "extra_kb_count": int(subscription.extra_kb_count or 0),
-                    "extra_storage_gb": int(subscription.extra_storage_gb or 0),
-                    "total_cents": total_cents,
-                }
-            ],
-            due_at=datetime.combine(next_charge_date, datetime.min.time(), tzinfo=now.tzinfo) + timedelta(0),
-            status="issued",
-        )
+        self.service.complete_subscription_billing(tenant, subscription, outcome="success")
 
 
 @dataclass

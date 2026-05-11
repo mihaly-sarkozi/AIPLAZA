@@ -58,14 +58,18 @@ export const useLocaleStore = create<LocaleState>((set) => ({
     applyThemeToDocument(theme);
     try {
       localStorage.setItem(THEME_STORAGE_KEY, theme);
-    } catch (_) {}
+    } catch {
+      void 0;
+    }
     set({ theme });
   },
   setLocaleAndTheme: (locale, theme) => {
     applyThemeToDocument(theme);
     try {
       localStorage.setItem(THEME_STORAGE_KEY, theme);
-    } catch (_) {}
+    } catch {
+      void 0;
+    }
     set({ locale, theme });
   },
 }));

@@ -8,6 +8,8 @@ import {
   useUpdateKbMutation,
 } from "../hooks/useKb";
 
+const KB_NAME_MAX_LENGTH = 200;
+
 export default function KBEdit() {
   const { t } = useTranslation();
   const { uuid } = useParams();
@@ -38,10 +40,19 @@ export default function KBEdit() {
     e.preventDefault();
     if (!uuid) return;
     setError("");
+    const nameTrim = name.trim();
+    if (!nameTrim) {
+      setError(t("common.fieldRequired"));
+      return;
+    }
+    if (nameTrim.length > KB_NAME_MAX_LENGTH) {
+      setError(t("kb.nameMaxLength").replace("{{count}}", String(KB_NAME_MAX_LENGTH)));
+      return;
+    }
     updateKbMutation.mutate(
       {
         uuid,
-        name: name.trim(),
+        name: nameTrim,
         description: description.trim() || undefined,
       },
       {
@@ -80,7 +91,7 @@ export default function KBEdit() {
           <label className="block mb-1 text-[var(--color-label)]">{t("kb.labelName")}{t("common.required")}</label>
           <input
             type="text"
-            maxLength={200}
+            maxLength={KB_NAME_MAX_LENGTH}
             required
             value={name}
             onChange={(e) => setName(e.target.value)}

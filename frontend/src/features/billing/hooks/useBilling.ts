@@ -31,6 +31,10 @@ export type BillingUpgradePreview = {
   new_monthly_cents: number;
   delta_monthly_cents: number;
   prorated_charge_cents: number;
+  old_remaining_credit_cents: number;
+  next_period_charge_cents: number;
+  total_charge_cents: number;
+  paid_until_iso: string;
   currency: string;
 };
 
@@ -38,6 +42,10 @@ export type BillingUpgradeComplete = {
   status: string;
   prorated_charge_cents: number;
   prorated_charge: number;
+  old_remaining_credit_cents: number;
+  next_period_charge_cents: number;
+  total_charge_cents: number;
+  paid_until_iso: string;
 };
 
 export type BillingOverview = {
@@ -50,8 +58,27 @@ export type BillingOverview = {
   usage: Record<string, unknown>;
   invoices: Array<Record<string, unknown>>;
   estimated_next_invoice: Record<string, unknown>;
+  payment_warning?: Record<string, unknown> | null;
   demo_mode?: boolean;
 };
+
+export type BillingAccessStatus = {
+  restricted: boolean;
+  payment_warning?: Record<string, unknown> | null;
+};
+
+export function useBillingAccessStatus(options?: Omit<UseQueryOptions<BillingAccessStatus>, "queryKey" | "queryFn">) {
+  const user = useAuthStore((s) => s.user);
+  return useQuery({
+    queryKey: queryKeys.billingAccessStatus,
+    queryFn: async () => {
+      const res = await api.get("/billing/access-status");
+      return res.data as BillingAccessStatus;
+    },
+    enabled: Boolean(user),
+    ...options,
+  });
+}
 
 export function useBillingOverview(options?: Omit<UseQueryOptions<BillingOverview>, "queryKey" | "queryFn">) {
   const user = useAuthStore((s) => s.user);

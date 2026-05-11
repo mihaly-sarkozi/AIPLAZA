@@ -15,3 +15,4 @@ class TenantSignupRequest(BaseModel):
     plan_code: str | None = "free"
     billing_period: str | None = "monthly"
     demo_session_id: str | None = None
+    captcha_token: str | None = None

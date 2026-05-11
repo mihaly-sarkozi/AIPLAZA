@@ -1,4 +1,12 @@
 # Canonical rate limit middleware module location.
+import threading
+import time
+from collections import defaultdict, deque
+from typing import Any
+
+from core.capabilities.cache.redis_client import get_redis
+from core.kernel.config.config_loader import settings
+from core.kernel.logging.observability import increment_metric
 
 def _tenant_user_or_ip_key(request):
     """
@@ -60,6 +68,10 @@ class _LazyLimiterProxy:
 limiter = _LazyLimiterProxy()
 
 
+def get_rate_limit_redis():
+    return get_redis()
+
+
 def refresh_token_key(request):
     """
     Rate limit kulcs refresh végponthoz: tenant + session.
@@ -71,3 +83,61 @@ def refresh_token_key(request):
     if rt:
         return f"t:{tenant}:refresh:{rt}"
     return f"t:{tenant}:ip:{get_remote_address(request)}"
+
+
+_fallback_lock = threading.Lock()
+_fallback_buckets: dict[str, deque[float]] = defaultdict(deque)
+
+
+def _bucket_allowed_memory(key: str, *, window_sec: int, max_requests: int) -> bool:
+    now = time.monotonic()
+    with _fallback_lock:
+        bucket = _fallback_buckets[key]
+        while bucket and now - bucket[0] > window_sec:
+            bucket.popleft()
+        if len(bucket) >= max_requests:
+            return False
+        bucket.append(now)
+        return True
+
+
+def _bucket_allowed_redis(key: str, *, window_sec: int, max_requests: int) -> bool | None:
+    redis_client = get_redis()
+    if redis_client is None:
+        return None
+    try:
+        epoch_window = int(time.time() // window_sec)
+        redis_key = f"rl:fallback:{key}:{epoch_window}"
+        count = int(redis_client.incr(redis_key, 1) or 0)
+        redis_client.expire(redis_key, window_sec + 3)
+        return count <= max_requests
+    except Exception:
+        return None
+
+
+def enforce_fallback_throttle(request: Any) -> tuple[bool, str]:
+    """
+    Fallback throttle olyan auth endpointokra, ahol nincs explicit limiter decorator.
+    """
+    path = str(getattr(getattr(request, "url", None), "path", "") or "")
+    method = str(getattr(request, "method", "") or "").upper()
+    sensitive_routes = {
+        ("GET", "/api/auth/csrf-token"),
+        ("POST", "/api/auth/authenticator/setup"),
+        ("POST", "/api/auth/authenticator/confirm"),
+        ("DELETE", "/api/auth/authenticator"),
+        ("GET", "/api/platform-admin/auth/csrf-token"),
+        ("GET", "/api/chat/ws-token"),
+    }
+    if (method, path) not in sensitive_routes:
+        return True, ""
+    tenant = str(getattr(getattr(request, "state", object()), "tenant_slug", "") or "")
+    remote_ip = str(getattr(getattr(request, "client", None), "host", "") or "unknown")
+    key = f"{tenant}:{remote_ip}:{method}:{path}"
+    allowed = _bucket_allowed_redis(key, window_sec=60, max_requests=120)
+    if allowed is None:
+        allowed = _bucket_allowed_memory(key, window_sec=60, max_requests=120)
+    if not allowed:
+        increment_metric("rate_limit.reject_total", 1.0, tags={"endpoint": path, "scope": "fallback"})
+        return False, "Too many requests."
+    return True, ""

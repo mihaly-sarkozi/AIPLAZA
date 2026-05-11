@@ -21,6 +21,7 @@ from .kb_user_permission_orm import KbUserPermissionORM
 from .mention_orm import KnowledgeMentionORM
 from .paragraph_orm import KnowledgeParagraphORM
 from .parser_run_orm import KnowledgeParserRunORM
+from .pii_mapping_orm import KnowledgePiiMappingORM
 from .query_run_orm import KnowledgeQueryRunORM
 from .sentence_orm import KnowledgeSentenceORM
 from .sentence_interpretation_orm import KnowledgeSentenceInterpretationORM
@@ -37,6 +38,7 @@ __all__ = [
     'KnowledgeInterpretationRunORM',
     'KnowledgeMentionORM',
     'KnowledgeParserRunORM',
+    'KnowledgePiiMappingORM',
     'KnowledgeDocumentORM',
     'KnowledgeParagraphORM',
     'KnowledgeSentenceORM',

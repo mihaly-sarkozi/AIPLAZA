@@ -10,6 +10,16 @@ from apps.settings.mappers.settings_mapper import (
 
 pytestmark = [pytest.mark.unit, pytest.mark.must_pass]
 
+BILLING_DEFAULTS = {
+    "billing_company_name": "",
+    "billing_tax_id": "",
+    "billing_address_line": "",
+    "billing_postal_code": "",
+    "billing_city": "",
+    "billing_region": "",
+    "billing_country": "",
+}
+
 
 def test_build_settings_response_includes_all_fields() -> None:
     payload = build_settings_response(
@@ -26,6 +36,7 @@ def test_build_settings_response_includes_all_fields() -> None:
         "timezone": "Europe/Budapest",
         "date_format": "DD.MM.YYYY",
         "time_format": "HH:mm:ss",
+        **BILLING_DEFAULTS,
     }
 
 

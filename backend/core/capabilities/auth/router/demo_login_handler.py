@@ -15,6 +15,7 @@ from core.capabilities.auth.router.auth_response_builder import build_token_resp
 from core.capabilities.auth.router.responses import TokenResponse
 from core.capabilities.auth.service import LoginService
 from core.kernel.clock import utc_now
+from core.platform.auth.token_allowlist import TokenAllowlistUnavailableError
 from core.platform.auth.token_service import TokenService
 
 
@@ -68,9 +69,12 @@ def handle_demo_login(
         auto_login=True,
         tenant=tenant_auth_context(tenant),
     )
-    return build_token_response(
-        response=response,
-        tenant=tenant,
-        result=result,
-        auto_login=True,
-    )
+    try:
+        return build_token_response(
+            response=response,
+            tenant=tenant,
+            result=result,
+            auto_login=True,
+        )
+    except TokenAllowlistUnavailableError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc

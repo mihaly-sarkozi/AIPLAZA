@@ -18,6 +18,10 @@ def __getattr__(name: str):
         from core.capabilities.auth.repositories.pending_2fa_repository import Pending2FARepository
 
         return Pending2FARepository
+    if name == "UserAuthenticatorRepository":
+        from core.capabilities.auth.repositories.user_authenticator_repository import UserAuthenticatorRepository
+
+        return UserAuthenticatorRepository
     raise AttributeError(name)
 
 __all__ = [
@@ -25,4 +29,5 @@ __all__ = [
     "TwoFactorRepository",
     "TwoFactorAttemptRepository",
     "Pending2FARepository",
+    "UserAuthenticatorRepository",
 ]

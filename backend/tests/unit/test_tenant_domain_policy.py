@@ -83,12 +83,14 @@ def test_verify_domain_sets_timestamp_and_invalidates_cache():
     tenant_repo = MagicMock()
     tenant_repo.verify_domain.return_value = SimpleNamespace(domain="portal.acme.test")
     service = TenantDomainVerificationService(tenant_repo)
+    service._assert_dns_challenge = MagicMock()  # type: ignore[method-assign]
+    service._assert_dns_points_to_platform = MagicMock()  # type: ignore[method-assign]
 
-    result = service.verify_domain("Portal.Acme.Test", actor_user_id=42)
+    result = service.verify_domain("Portal.Acme.Test", tenant_id=7, actor_user_id=42)
 
     assert result is not None
     tenant_repo.verify_domain.assert_called_once()
     args, kwargs = tenant_repo.verify_domain.call_args
-    assert args[0] == "Portal.Acme.Test"
+    assert args[0] == "portal.acme.test"
     assert kwargs["updated_by"] == 42
     assert kwargs["verified_at"] is not None

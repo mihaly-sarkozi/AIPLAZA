@@ -16,6 +16,16 @@ from core.platform.auth.auth_dependencies import get_current_user
 
 pytestmark = [pytest.mark.unit, pytest.mark.must_pass]
 
+BILLING_DEFAULTS = {
+    "billing_company_name": "",
+    "billing_tax_id": "",
+    "billing_address_line": "",
+    "billing_postal_code": "",
+    "billing_city": "",
+    "billing_region": "",
+    "billing_country": "",
+}
+
 
 class _FakeSettingsFacade:
     def __init__(self) -> None:
@@ -48,6 +58,13 @@ class _FakeSettingsFacade:
         timezone: str | None = None,
         date_format: str | None = None,
         time_format: str | None = None,
+        billing_company_name: str | None = None,
+        billing_tax_id: str | None = None,
+        billing_address_line: str | None = None,
+        billing_postal_code: str | None = None,
+        billing_city: str | None = None,
+        billing_region: str | None = None,
+        billing_country: str | None = None,
         updated_by: int | None = None,
     ) -> dict[str, object]:
         self.calls.append(
@@ -58,6 +75,13 @@ class _FakeSettingsFacade:
                     "timezone": timezone,
                     "date_format": date_format,
                     "time_format": time_format,
+                    "billing_company_name": billing_company_name,
+                    "billing_tax_id": billing_tax_id,
+                    "billing_address_line": billing_address_line,
+                    "billing_postal_code": billing_postal_code,
+                    "billing_city": billing_city,
+                    "billing_region": billing_region,
+                    "billing_country": billing_country,
                     "updated_by": updated_by,
                 },
             )
@@ -124,6 +148,7 @@ def test_get_settings_returns_success_shape(monkeypatch: pytest.MonkeyPatch) -> 
         "timezone": "UTC",
         "date_format": "YYYY-MM-DD",
         "time_format": "HH:mm",
+        **BILLING_DEFAULTS,
     }
 
 
@@ -151,6 +176,13 @@ def test_patch_settings_delegates_to_facade(monkeypatch: pytest.MonkeyPatch) -> 
             "timezone": "Europe/Budapest",
             "date_format": "DD.MM.YYYY",
             "time_format": "HH:mm:ss",
+            "billing_company_name": None,
+            "billing_tax_id": None,
+            "billing_address_line": None,
+            "billing_postal_code": None,
+            "billing_city": None,
+            "billing_region": None,
+            "billing_country": None,
             "updated_by": 1,
         },
     )

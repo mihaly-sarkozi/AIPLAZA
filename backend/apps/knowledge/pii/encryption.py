@@ -26,7 +26,7 @@ class PiiEncryptor:
         key = cfg_key if cfg_key else _derive_key_from_secret(getattr(settings, "jwt_secret", ""))
         self._fernet = Fernet(key.encode("utf-8"))
         self._allow_legacy_plaintext = bool(
-            getattr(app_settings, "pii_allow_legacy_plaintext_read", True)
+            getattr(app_settings, "pii_allow_legacy_plaintext_read", False)
         )
 
     # Ez a metódus a(z) encrypt logikáját valósítja meg.

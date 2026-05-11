@@ -7,6 +7,7 @@ import os
 import sys
 import threading
 import traceback
+from dataclasses import dataclass, field
 from contextlib import contextmanager
 from typing import Any
 
@@ -24,10 +25,75 @@ def _utc_now_iso() -> str:
     return utc_now().isoformat()
 
 
+@dataclass
+class _MetricSeries:
+    name: str
+    unit: str
+    tags: dict[str, Any] = field(default_factory=dict)
+    count: int = 0
+    sum: float = 0.0
+    min: float = 0.0
+    max: float = 0.0
+    last: float = 0.0
+    values: list[float] = field(default_factory=list)
+    histogram_buckets: tuple[float, ...] = field(default_factory=tuple)
+    histogram_bucket_counts: list[int] = field(default_factory=list)
+
+
 class InMemoryMetricRegistry:
     def __init__(self) -> None:
         self._lock = threading.Lock()
-        self._stats: dict[str, dict[str, Any]] = {}
+        self._stats: dict[tuple[str, tuple[tuple[str, str], ...]], _MetricSeries] = {}
+        self._max_samples_per_series = 2048
+        self._histogram_buckets_by_unit: dict[str, tuple[float, ...]] = {
+            "ms": (5.0, 10.0, 25.0, 50.0, 75.0, 100.0, 150.0, 250.0, 500.0, 750.0, 1000.0, 2000.0, 5000.0, 10000.0),
+            "count": (1.0, 2.0, 5.0, 10.0, 20.0, 50.0, 100.0, 250.0, 500.0, 1000.0, 5000.0),
+            "usd": (0.001, 0.01, 0.05, 0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 20.0, 50.0),
+            "tokens": (10.0, 50.0, 100.0, 250.0, 500.0, 1000.0, 2000.0, 5000.0, 10000.0, 20000.0),
+            "bytes": (256.0, 1024.0, 4096.0, 16384.0, 65536.0, 262144.0, 1048576.0, 5242880.0, 10485760.0),
+        }
+        raw_ms = str(
+            os.environ.get("OBSERVABILITY_METRICS_HISTOGRAM_BUCKETS_MS")
+            or os.environ.get("observability_metrics_histogram_buckets_ms")
+            or ""
+        ).strip()
+        if raw_ms:
+            try:
+                parsed = tuple(float(item.strip()) for item in raw_ms.split(",") if item.strip())
+                if parsed and all(value > 0 for value in parsed):
+                    self._histogram_buckets_by_unit["ms"] = tuple(sorted(parsed))
+            except Exception:
+                pass
+
+    @staticmethod
+    def _normalize_tags(tags: dict[str, Any] | None) -> dict[str, str]:
+        normalized: dict[str, str] = {}
+        for key, value in (tags or {}).items():
+            normalized[str(key)] = str(value)
+        return normalized
+
+    def _series_key(self, name: str, tags: dict[str, Any] | None) -> tuple[str, tuple[tuple[str, str], ...]]:
+        normalized_tags = self._normalize_tags(tags)
+        return str(name), tuple(sorted(normalized_tags.items()))
+
+    def _series_buckets(self, unit: str) -> tuple[float, ...]:
+        normalized = str(unit or "count").strip().lower()
+        return self._histogram_buckets_by_unit.get(normalized, self._histogram_buckets_by_unit["count"])
+
+    @staticmethod
+    def _quantile(values: list[float], ratio: float) -> float:
+        if not values:
+            return 0.0
+        if len(values) == 1:
+            return float(values[0])
+        sorted_values = sorted(values)
+        position = ratio * (len(sorted_values) - 1)
+        lower_idx = int(position)
+        upper_idx = min(lower_idx + 1, len(sorted_values) - 1)
+        if lower_idx == upper_idx:
+            return float(sorted_values[lower_idx])
+        weight = position - lower_idx
+        return float(sorted_values[lower_idx] * (1.0 - weight) + sorted_values[upper_idx] * weight)
 
     def observe(
         self,
@@ -38,32 +104,87 @@ class InMemoryMetricRegistry:
         tags: dict[str, Any] | None = None,
     ) -> None:
         with self._lock:
-            current = self._stats.get(name)
+            series_key = self._series_key(name, tags)
+            current = self._stats.get(series_key)
             if current is None:
-                self._stats[name] = {
-                    "count": 1,
-                    "sum": float(value),
-                    "min": float(value),
-                    "max": float(value),
-                    "last": float(value),
-                    "unit": unit,
-                    "tags": dict(tags or {}),
-                }
-                return
-            current["count"] += 1
-            current["sum"] += float(value)
-            current["min"] = min(float(current["min"]), float(value))
-            current["max"] = max(float(current["max"]), float(value))
-            current["last"] = float(value)
-            if tags:
-                current["tags"] = dict(tags)
+                normalized_tags = self._normalize_tags(tags)
+                buckets = self._series_buckets(unit)
+                current = _MetricSeries(
+                    name=str(name),
+                    unit=str(unit or "count"),
+                    tags=normalized_tags,
+                    count=0,
+                    sum=0.0,
+                    min=float(value),
+                    max=float(value),
+                    last=float(value),
+                    values=[],
+                    histogram_buckets=buckets,
+                    histogram_bucket_counts=[0 for _ in buckets],
+                )
+                self._stats[series_key] = current
+            current.count += 1
+            current.sum += float(value)
+            current.min = min(float(current.min), float(value))
+            current.max = max(float(current.max), float(value))
+            current.last = float(value)
+            current.values.append(float(value))
+            if len(current.values) > self._max_samples_per_series:
+                current.values.pop(0)
+            for idx, upper in enumerate(current.histogram_buckets):
+                if float(value) <= upper:
+                    current.histogram_bucket_counts[idx] += 1
 
     def snapshot(self) -> dict[str, dict[str, Any]]:
         with self._lock:
+            aggregated: dict[str, dict[str, Any]] = {}
+            for series in self._stats.values():
+                current = aggregated.get(series.name)
+                if current is None:
+                    current = {
+                        "count": 0,
+                        "sum": 0.0,
+                        "min": float(series.min),
+                        "max": float(series.max),
+                        "last": float(series.last),
+                        "unit": series.unit,
+                        "tags": dict(series.tags),
+                        "_samples": [],
+                    }
+                    aggregated[series.name] = current
+                current["count"] += int(series.count)
+                current["sum"] += float(series.sum)
+                current["min"] = min(float(current["min"]), float(series.min))
+                current["max"] = max(float(current["max"]), float(series.max))
+                current["last"] = float(series.last)
+                current["_samples"].extend(series.values)
+            for values in aggregated.values():
+                samples = list(values.pop("_samples", []))
+                values["p95"] = self._quantile(samples, 0.95)
+                values["p99"] = self._quantile(samples, 0.99)
             return {
                 name: dict(values)
-                for name, values in self._stats.items()
+                for name, values in aggregated.items()
             }
+
+    def iter_series(self) -> list[_MetricSeries]:
+        with self._lock:
+            return [
+                _MetricSeries(
+                    name=series.name,
+                    unit=series.unit,
+                    tags=dict(series.tags),
+                    count=int(series.count),
+                    sum=float(series.sum),
+                    min=float(series.min),
+                    max=float(series.max),
+                    last=float(series.last),
+                    values=list(series.values),
+                    histogram_buckets=tuple(series.histogram_buckets),
+                    histogram_bucket_counts=list(series.histogram_bucket_counts),
+                )
+                for series in self._stats.values()
+            ]
 
     def reset(self) -> None:
         with self._lock:
@@ -86,7 +207,16 @@ _SAFE_FIELD_NAMES = frozenset(
         "error_message",
         "event_id",
         "event_name",
+        "event",
+        "service",
+        "requestId",
+        "userId",
+        "userAgent",
+        "deviceId",
+        "riskScore",
         "event_type",
+        "country",
+        "reason",
         "idempotency_key",
         "instance_role",
         "level",
@@ -207,6 +337,59 @@ def _prometheus_name(name: str) -> str:
     return normalized or "unnamed"
 
 
+def _prometheus_label_name(name: str) -> str:
+    normalized = "".join(ch if ch.isalnum() else "_" for ch in str(name or "").strip().lower())
+    normalized = "_".join(part for part in normalized.split("_") if part)
+    return normalized or "label"
+
+
+def _prometheus_label_value(value: Any) -> str:
+    text = str(value if value is not None else "")
+    return text.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n")
+
+
+def _prometheus_labels(metric_name: str, tags: dict[str, Any] | None) -> str:
+    labels: dict[str, str] = {"metric": _prometheus_name(metric_name)}
+    for key, value in (tags or {}).items():
+        label_key = _prometheus_label_name(key)
+        labels[label_key] = _prometheus_label_value(value)
+    ordered = ",".join(f'{key}="{value}"' for key, value in sorted(labels.items()))
+    return ordered
+
+
+def _prometheus_series_labels(tags: dict[str, Any] | None) -> str:
+    labels: dict[str, str] = {}
+    for key, value in (tags or {}).items():
+        labels[_prometheus_label_name(str(key))] = _prometheus_label_value(value)
+    return ",".join(f'{key}="{value}"' for key, value in sorted(labels.items()))
+
+
+def _render_native_histogram_for_series(series: _MetricSeries) -> list[str]:
+    base = f"aiplaza_{_prometheus_name(series.name)}"
+    labels = _prometheus_series_labels(series.tags)
+    lines = [
+        f"# HELP {base} Histogram for metric '{series.name}'.",
+        f"# TYPE {base} histogram",
+    ]
+    running = 0
+    for idx, upper in enumerate(series.histogram_buckets):
+        running += int(series.histogram_bucket_counts[idx])
+        le_value = f"{upper:g}"
+        if labels:
+            lines.append(f'{base}_bucket{{{labels},le="{le_value}"}} {running}')
+        else:
+            lines.append(f'{base}_bucket{{le="{le_value}"}} {running}')
+    if labels:
+        lines.append(f'{base}_bucket{{{labels},le="+Inf"}} {int(series.count)}')
+        lines.append(f"{base}_count{{{labels}}} {int(series.count)}")
+        lines.append(f"{base}_sum{{{labels}}} {float(series.sum)}")
+    else:
+        lines.append(f'{base}_bucket{{le="+Inf"}} {int(series.count)}')
+        lines.append(f"{base}_count {int(series.count)}")
+        lines.append(f"{base}_sum {float(series.sum)}")
+    return lines
+
+
 def render_prometheus_metrics() -> str:
     lines = [
         "# HELP aiplaza_metric_count Observed metric sample count.",
@@ -215,15 +398,22 @@ def render_prometheus_metrics() -> str:
         "# TYPE aiplaza_metric_sum gauge",
         "# HELP aiplaza_metric_last Last observed metric sample.",
         "# TYPE aiplaza_metric_last gauge",
+        "# HELP aiplaza_metric_p95 Approximate p95 from local samples.",
+        "# TYPE aiplaza_metric_p95 gauge",
+        "# HELP aiplaza_metric_p99 Approximate p99 from local samples.",
+        "# TYPE aiplaza_metric_p99 gauge",
     ]
     for name, values in sorted(get_metrics_snapshot().items()):
-        metric = _prometheus_name(name)
-        labels = f'metric="{metric}"'
+        labels = _prometheus_labels(name, values.get("tags"))
         lines.append(f"aiplaza_metric_count{{{labels}}} {float(values.get('count') or 0.0)}")
         lines.append(f"aiplaza_metric_sum{{{labels}}} {float(values.get('sum') or 0.0)}")
         lines.append(f"aiplaza_metric_last{{{labels}}} {float(values.get('last') or 0.0)}")
+        lines.append(f"aiplaza_metric_p95{{{labels}}} {float(values.get('p95') or 0.0)}")
+        lines.append(f"aiplaza_metric_p99{{{labels}}} {float(values.get('p99') or 0.0)}")
         if "max" in values:
             lines.append(f"aiplaza_metric_max{{{labels}}} {float(values.get('max') or 0.0)}")
+    for series in sorted(_metrics.iter_series(), key=lambda item: (item.name, tuple(sorted(item.tags.items())))):
+        lines.extend(_render_native_histogram_for_series(series))
     return "\n".join(lines) + "\n"
 
 

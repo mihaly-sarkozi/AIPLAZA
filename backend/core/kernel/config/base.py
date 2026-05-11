@@ -3,7 +3,9 @@
 # 2026.02.14 - Sárközi Mihály
 
 import os
+import re
 import secrets
+from pathlib import Path
 from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -13,6 +15,7 @@ _DEFAULT_SMTP_PORT = 587
 _DEFAULT_SMTP_USER = ""
 _DEFAULT_SMTP_FROM_EMAIL = ""
 _DEFAULT_SMTP_FROM_NAME = ""
+_DOMAIN_LABEL_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$")
 
 
 class BaseConfig(BaseSettings):
@@ -25,6 +28,7 @@ class BaseConfig(BaseSettings):
     # CORS: frontend origin(s), vesszővel elválasztva. acme.local esetén pl. :5173 (Vite)
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
     cors_origin_regex: str = r"https?://[^.]+\.app\.test(:\d+)?"
+    csrf_refresh_allowed_origins: str = ""
     
     # Jelszó beállító link (emailben): path + opcionális frontend port (ha a kérés a backend portjára jön, pl. proxy).
     # Pl. path=/set-password, port=5173 → link: http://demo.local:5173/set-password?token=...
@@ -50,6 +54,21 @@ class BaseConfig(BaseSettings):
 
     # Redis: token allowlist (bejelentkezett tokenek jti). Üres = in-memory fallback (dev).
     redis_url: str = ""
+    # Metrics endpoint védelem: prod-ban csak allowlistelt IP + token.
+    metrics_access_token: str = ""
+    metrics_allowed_ips: str = "127.0.0.1,::1"
+    metrics_require_token_in_prod: bool = True
+    metrics_require_ip_allowlist_in_prod: bool = True
+    # Observability export / tracing
+    observability_service_name: str = "aiplaza-backend"
+    observability_metrics_histogram_buckets_ms: str = "5,10,25,50,75,100,150,250,500,750,1000,2000,5000,10000"
+    observability_trace_enabled: bool = False
+    observability_trace_sample_ratio: float = 0.1
+    observability_otlp_endpoint: str = ""
+    sentry_enabled: bool = False
+    sentry_dsn: str = ""
+    sentry_environment: str = ""
+    sentry_traces_sample_rate: float = 0.05
 
     # Auth/JWT: élesben .env-ben JWT_SECRET kötelező (pl. openssl rand -hex 64)
     jwt_secret: str = secrets.token_hex(64)
@@ -73,6 +92,8 @@ class BaseConfig(BaseSettings):
     platform_event_outbox_max_retries: int = 10
     platform_event_outbox_retry_delay_sec: int = 5
     platform_event_outbox_poll_interval_sec: float = 1.0
+    platform_event_outbox_backlog_soft_limit: int = 5000
+    platform_event_handler_timeout_sec: int = 15
     # Lejárt lock után más worker újra claimelheti a sort (összeomlott feldolgozó).
     platform_event_outbox_stale_lock_sec: int = 300
     # Üres = hostname:pid; több workerben állíts egyedi értéket (pl. Kubernetes pod name).
@@ -81,6 +102,15 @@ class BaseConfig(BaseSettings):
     # Invite / set-password token TTL (óra); 1–4 óra ajánlott (rövid életű link).
     invite_ttl_hours: int = 4
 
+    # Főtenant / platform admin bootstrap. Ha mindkettő meg van adva, induláskor
+    # létrejön az első platform admin felhasználó a public sémában.
+    platform_admin_bootstrap_email: str = ""
+    platform_admin_bootstrap_password: str = ""
+    platform_admin_mfa_required: bool = True
+    platform_admin_login_alert_email: str = ""
+    platform_admin_ip_allowlist_enabled: bool = False
+    platform_admin_allowed_ips: str = "127.0.0.1,::1"
+
     # 2FA policy: max próbálkozás / ablak, lock (központi réteg).
     two_fa_max_attempts: int = 5
     two_fa_attempt_window_minutes: int = 15
@@ -88,13 +118,113 @@ class BaseConfig(BaseSettings):
 
     # Rate limit: login IP alapú (5/perc élesben; tesztekben magasabb limit lehet env-ből)
     rate_limit_login_per_minute: int = 10
+    rate_limit_login_step1_per_email_per_hour: int = 25
+    rate_limit_login_burst_per_10s: int = 5
+    rate_limit_login_failure_ban_threshold: int = 16
+    rate_limit_login_failure_ban_window_sec: int = 900
+    rate_limit_login_failure_ban_hours: int = 2
+    platform_admin_max_failed_login_attempts: int = 8
+    platform_admin_mfa_attempt_window_minutes: int = 15
+    platform_admin_mfa_lock_minutes: int = 30
+    platform_admin_mfa_totp_max_attempts_per_user: int = 5
+    platform_admin_mfa_totp_max_attempts_per_ip: int = 10
+    platform_admin_mfa_recovery_max_attempts_per_user: int = 3
+    platform_admin_mfa_recovery_max_attempts_per_ip: int = 6
+
+    # Websocket flood protection
+    ws_chat_max_messages_per_10s: int = 20
+    ws_chat_max_message_chars: int = 8000
+    ws_chat_idle_timeout_sec: int = 45
+    enable_chat_websocket: bool = False
+    ws_chat_max_connections_per_tenant: int = 20
+    ws_chat_max_connections_per_user: int = 3
+
+    # LLM abuse guard: tenant + channel scoped budget
+    llm_budget_request_limit_per_minute: int = 120
+    llm_budget_prompt_chars_per_minute: int = 120000
+    llm_budget_concurrency_limit: int = 8
+    llm_budget_tenant_daily_tokens: int = 120000
+    llm_budget_tenant_monthly_tokens: int = 2000000
+    llm_budget_demo_daily_tokens: int = 30000
+    llm_budget_demo_monthly_tokens: int = 150000
+    llm_budget_starter_monthly_tokens: int = 900000
+    llm_budget_global_daily_spend_usd: float = 15.0
+    llm_budget_input_cost_per_1k_tokens_usd: float = 0.003
+    llm_budget_output_cost_per_1k_tokens_usd: float = 0.006
+    llm_budget_estimated_completion_tokens: int = 220
+    llm_budget_fail_closed_without_redis: bool = True
+    token_allowlist_fail_closed_without_redis: bool = True
+    channel_quota_fail_closed_without_redis: bool = True
+    chat_max_answer_chars: int = 2400
+    chat_max_input_chars: int = 2400
+    chat_max_history_items: int = 30
+    chat_max_history_chars: int = 12000
+    chat_max_retrieval_items: int = 20
+    chat_max_retrieval_chars: int = 6000
+    chat_default_max_sources: int = 8
+    chat_starter_max_sources: int = 5
+    chat_demo_max_sources: int = 3
+    chat_demo_max_question_chars: int = 1024
+    chat_demo_max_history_items: int = 8
+    chat_demo_max_history_chars: int = 2400
+    chat_demo_max_retrieval_items: int = 6
+    chat_demo_max_retrieval_chars: int = 1800
+    chat_demo_allow_debug: bool = False
+    chat_debug_responses_enabled: bool = True
+    channel_default_max_daily_limit: int = 5000
+    channel_default_max_per_minute_limit: int = 120
+    channel_demo_max_daily_limit: int = 100
+    channel_demo_max_per_minute_limit: int = 10
+    channel_session_max_per_minute: int = 30
+    channel_session_max_burst_10s: int = 5
+    channel_session_min_interval_ms: int = 1500
+    channel_session_wait_max_ms: int = 900
+    channel_session_cookie_max_age_sec: int = 86400
+
+    # Demo signup abuse guard
+    demo_signups_enabled: bool = True
+    demo_signup_max_per_day: int = 30
+    demo_signup_max_per_ip_per_day: int = 3
+    demo_signup_max_per_ip_email_per_day: int = 2
+    demo_signup_max_per_session_per_day: int = 2
+    demo_signup_max_per_email: int = 1
+    demo_trial_days: int = 7
+    demo_signup_captcha_provider: str = "none"  # none | turnstile | recaptcha
+    demo_signup_captcha_secret: str = ""
+    demo_signup_require_captcha: bool = False
+    demo_signup_require_email_verification: bool = True
+    demo_signup_expose_login_token_in_response: bool = False
+    demo_signup_block_disposable_emails: bool = True
+    demo_signup_external_disposable_domains_path: str = ""
+    demo_signup_require_mx: bool = True
+    demo_signup_fail_closed_without_redis: bool = True
+    training_mfa_required: bool = True
+
+    # Embedding provider konfiguráció (knowledge indexelés / retrieval).
+    embedding_provider: str = "local"  # local | openai
+    embedding_model: str = "BAAI/bge-m3"
+    embedding_vector_size: int = 1024
+    embedding_batch_size: int = 16
+    embedding_worker_concurrency: int = 2
+    legacy_knowledge_ingest_enabled: bool = False
+    knowledge_url_ingest_enabled: bool = False
+    upload_magic_sniff_enabled: bool = True
+    upload_parser_timeout_sec: int = 20
+    upload_pdf_max_pages: int = 200
+    upload_docx_max_zip_entries: int = 5000
+    upload_docx_max_decompressed_bytes: int = 30 * 1024 * 1024
+    upload_docx_max_compression_ratio: float = 120.0
+    upload_malware_scan_provider: str = "none"  # none | clamav
+    upload_malware_scan_required_in_prod: bool = True
+    upload_malware_scan_timeout_sec: int = 5
+    upload_clamav_unix_socket_path: str = "/var/run/clamav/clamd.ctl"
 
     # Mention pipeline debug: True esetén minden sentence után részletes mention debug print fut.
-    debug_mention: bool = True
+    debug_mention: bool = False
     # Claim pipeline debug: True esetén a claim extractor részletes debug printet és type debugot ír.
-    debug_claim: bool = True
+    debug_claim: bool = False
     # Space-time pipeline debug: True esetén a frame extractor részletes debug printet ír.
-    debug_space_time: bool = True
+    debug_space_time: bool = False
     # Claim extractor verzió: "legacy" = jelenlegi út, "v1" = új extractor.
     claim_extractor_version: str = "v1"
 
@@ -109,6 +239,18 @@ class BaseConfig(BaseSettings):
     smtp_password: str = ""
     smtp_from_email: str = _DEFAULT_SMTP_FROM_EMAIL
     smtp_from_name: str = _DEFAULT_SMTP_FROM_NAME
+
+    # Számlakiállító adatai. Élesben .env-ből töltsd (invoice_issuer_*).
+    invoice_issuer_name: str = "BrainBankCenter"
+    invoice_issuer_tax_id: str = ""
+    invoice_issuer_address_line: str = ""
+    invoice_issuer_postal_code: str = ""
+    invoice_issuer_city: str = ""
+    invoice_issuer_region: str = ""
+    invoice_issuer_country: str = ""
+    invoice_issuer_phone: str = ""
+    invoice_issuer_website: str = ""
+    invoice_issuer_email: str = ""
 
     # ---------------------------------------------------------------------------
     # Biztonsági konfiguráció validátorok (Pydantic model szint)
@@ -148,6 +290,50 @@ class BaseConfig(BaseSettings):
         return self
 
     @model_validator(mode="after")
+    def validate_upload_security_settings(self) -> "BaseConfig":
+        if int(self.upload_parser_timeout_sec) <= 0:
+            raise ValueError("upload_parser_timeout_sec pozitívnak kell lennie.")
+        if int(self.upload_pdf_max_pages) <= 0:
+            raise ValueError("upload_pdf_max_pages pozitívnak kell lennie.")
+        if int(self.upload_docx_max_zip_entries) <= 0:
+            raise ValueError("upload_docx_max_zip_entries pozitívnak kell lennie.")
+        if int(self.upload_docx_max_decompressed_bytes) <= 0:
+            raise ValueError("upload_docx_max_decompressed_bytes pozitívnak kell lennie.")
+        if float(self.upload_docx_max_compression_ratio) <= 1.0:
+            raise ValueError("upload_docx_max_compression_ratio értéke legyen > 1.0.")
+        provider = str(self.upload_malware_scan_provider or "none").strip().lower()
+        if provider not in {"none", "clamav"}:
+            raise ValueError("upload_malware_scan_provider értéke: none vagy clamav.")
+        if int(self.upload_malware_scan_timeout_sec) <= 0:
+            raise ValueError("upload_malware_scan_timeout_sec pozitívnak kell lennie.")
+        socket_path = str(self.upload_clamav_unix_socket_path or "").strip()
+        if provider == "clamav" and not socket_path:
+            raise ValueError("clamav providerhez upload_clamav_unix_socket_path kötelező.")
+        if provider == "clamav" and socket_path:
+            # Path check csak formai, tényleges elérhetőség runtime.
+            _ = Path(socket_path)
+        return self
+
+    @model_validator(mode="after")
+    def validate_observability_settings(self) -> "BaseConfig":
+        if not (0.0 <= float(self.observability_trace_sample_ratio) <= 1.0):
+            raise ValueError("observability_trace_sample_ratio értéke 0.0 és 1.0 között legyen.")
+        if not (0.0 <= float(self.sentry_traces_sample_rate) <= 1.0):
+            raise ValueError("sentry_traces_sample_rate értéke 0.0 és 1.0 között legyen.")
+        buckets_raw = str(self.observability_metrics_histogram_buckets_ms or "").strip()
+        if not buckets_raw:
+            raise ValueError("observability_metrics_histogram_buckets_ms nem lehet üres.")
+        try:
+            parsed = [float(item.strip()) for item in buckets_raw.split(",") if item.strip()]
+        except Exception as exc:
+            raise ValueError("observability_metrics_histogram_buckets_ms csak számokat tartalmazhat.") from exc
+        if not parsed or any(value <= 0 for value in parsed):
+            raise ValueError("observability histogram bucket értékek legyenek pozitív számok.")
+        if parsed != sorted(parsed):
+            raise ValueError("observability histogram bucket lista legyen növekvő sorrendben.")
+        return self
+
+    @model_validator(mode="after")
     def validate_ttl_fields(self) -> "BaseConfig":
         """Token TTL értékek alapszintű szanity check-je."""
         if self.access_ttl_min <= 0:
@@ -175,6 +361,144 @@ class BaseConfig(BaseSettings):
                 f"rate_limit_login_per_minute értéke {self.rate_limit_login_per_minute}, "
                 "de pozitívnak kell lennie."
             )
+        if self.rate_limit_login_step1_per_email_per_hour <= 0:
+            raise ValueError("rate_limit_login_step1_per_email_per_hour pozitívnak kell lennie.")
+        if self.rate_limit_login_burst_per_10s <= 0:
+            raise ValueError("rate_limit_login_burst_per_10s pozitívnak kell lennie.")
+        if self.rate_limit_login_failure_ban_threshold <= 0:
+            raise ValueError("rate_limit_login_failure_ban_threshold pozitívnak kell lennie.")
+        if self.rate_limit_login_failure_ban_window_sec <= 0:
+            raise ValueError("rate_limit_login_failure_ban_window_sec pozitívnak kell lennie.")
+        if self.rate_limit_login_failure_ban_hours <= 0:
+            raise ValueError("rate_limit_login_failure_ban_hours pozitívnak kell lennie.")
+        if self.platform_admin_max_failed_login_attempts <= 0:
+            raise ValueError("platform_admin_max_failed_login_attempts pozitívnak kell lennie.")
+        if self.platform_admin_mfa_attempt_window_minutes <= 0:
+            raise ValueError("platform_admin_mfa_attempt_window_minutes pozitívnak kell lennie.")
+        if self.platform_admin_mfa_lock_minutes <= 0:
+            raise ValueError("platform_admin_mfa_lock_minutes pozitívnak kell lennie.")
+        if self.platform_admin_mfa_totp_max_attempts_per_user <= 0:
+            raise ValueError("platform_admin_mfa_totp_max_attempts_per_user pozitívnak kell lennie.")
+        if self.platform_admin_mfa_totp_max_attempts_per_ip <= 0:
+            raise ValueError("platform_admin_mfa_totp_max_attempts_per_ip pozitívnak kell lennie.")
+        if self.platform_admin_mfa_recovery_max_attempts_per_user <= 0:
+            raise ValueError("platform_admin_mfa_recovery_max_attempts_per_user pozitívnak kell lennie.")
+        if self.platform_admin_mfa_recovery_max_attempts_per_ip <= 0:
+            raise ValueError("platform_admin_mfa_recovery_max_attempts_per_ip pozitívnak kell lennie.")
+        if self.ws_chat_max_messages_per_10s <= 0:
+            raise ValueError("ws_chat_max_messages_per_10s pozitívnak kell lennie.")
+        if self.ws_chat_max_message_chars <= 0:
+            raise ValueError("ws_chat_max_message_chars pozitívnak kell lennie.")
+        if self.ws_chat_idle_timeout_sec <= 0:
+            raise ValueError("ws_chat_idle_timeout_sec pozitívnak kell lennie.")
+        if self.ws_chat_max_connections_per_tenant <= 0:
+            raise ValueError("ws_chat_max_connections_per_tenant pozitívnak kell lennie.")
+        if self.ws_chat_max_connections_per_user <= 0:
+            raise ValueError("ws_chat_max_connections_per_user pozitívnak kell lennie.")
+        if self.llm_budget_request_limit_per_minute <= 0:
+            raise ValueError("llm_budget_request_limit_per_minute pozitívnak kell lennie.")
+        if self.llm_budget_prompt_chars_per_minute <= 0:
+            raise ValueError("llm_budget_prompt_chars_per_minute pozitívnak kell lennie.")
+        if self.llm_budget_concurrency_limit <= 0:
+            raise ValueError("llm_budget_concurrency_limit pozitívnak kell lennie.")
+        if self.llm_budget_tenant_daily_tokens <= 0:
+            raise ValueError("llm_budget_tenant_daily_tokens pozitívnak kell lennie.")
+        if self.llm_budget_tenant_monthly_tokens <= 0:
+            raise ValueError("llm_budget_tenant_monthly_tokens pozitívnak kell lennie.")
+        if self.llm_budget_demo_daily_tokens <= 0:
+            raise ValueError("llm_budget_demo_daily_tokens pozitívnak kell lennie.")
+        if self.llm_budget_demo_monthly_tokens <= 0:
+            raise ValueError("llm_budget_demo_monthly_tokens pozitívnak kell lennie.")
+        if self.llm_budget_starter_monthly_tokens <= 0:
+            raise ValueError("llm_budget_starter_monthly_tokens pozitívnak kell lennie.")
+        if self.llm_budget_global_daily_spend_usd <= 0:
+            raise ValueError("llm_budget_global_daily_spend_usd pozitívnak kell lennie.")
+        if self.llm_budget_input_cost_per_1k_tokens_usd <= 0:
+            raise ValueError("llm_budget_input_cost_per_1k_tokens_usd pozitívnak kell lennie.")
+        if self.llm_budget_output_cost_per_1k_tokens_usd <= 0:
+            raise ValueError("llm_budget_output_cost_per_1k_tokens_usd pozitívnak kell lennie.")
+        if self.llm_budget_estimated_completion_tokens <= 0:
+            raise ValueError("llm_budget_estimated_completion_tokens pozitívnak kell lennie.")
+        if self.chat_max_answer_chars <= 0:
+            raise ValueError("chat_max_answer_chars pozitívnak kell lennie.")
+        if self.chat_max_input_chars <= 0:
+            raise ValueError("chat_max_input_chars pozitívnak kell lennie.")
+        if self.chat_max_history_items <= 0:
+            raise ValueError("chat_max_history_items pozitívnak kell lennie.")
+        if self.chat_max_history_chars <= 0:
+            raise ValueError("chat_max_history_chars pozitívnak kell lennie.")
+        if self.chat_max_retrieval_items <= 0:
+            raise ValueError("chat_max_retrieval_items pozitívnak kell lennie.")
+        if self.chat_max_retrieval_chars <= 0:
+            raise ValueError("chat_max_retrieval_chars pozitívnak kell lennie.")
+        if self.chat_default_max_sources <= 0:
+            raise ValueError("chat_default_max_sources pozitívnak kell lennie.")
+        if self.chat_starter_max_sources <= 0:
+            raise ValueError("chat_starter_max_sources pozitívnak kell lennie.")
+        if self.chat_demo_max_sources <= 0:
+            raise ValueError("chat_demo_max_sources pozitívnak kell lennie.")
+        if self.chat_demo_max_question_chars <= 0:
+            raise ValueError("chat_demo_max_question_chars pozitívnak kell lennie.")
+        if self.chat_demo_max_history_items <= 0:
+            raise ValueError("chat_demo_max_history_items pozitívnak kell lennie.")
+        if self.chat_demo_max_history_chars <= 0:
+            raise ValueError("chat_demo_max_history_chars pozitívnak kell lennie.")
+        if self.chat_demo_max_retrieval_items <= 0:
+            raise ValueError("chat_demo_max_retrieval_items pozitívnak kell lennie.")
+        if self.chat_demo_max_retrieval_chars <= 0:
+            raise ValueError("chat_demo_max_retrieval_chars pozitívnak kell lennie.")
+        if self.channel_default_max_daily_limit <= 0:
+            raise ValueError("channel_default_max_daily_limit pozitívnak kell lennie.")
+        if self.channel_default_max_per_minute_limit <= 0:
+            raise ValueError("channel_default_max_per_minute_limit pozitívnak kell lennie.")
+        if self.channel_demo_max_daily_limit <= 0:
+            raise ValueError("channel_demo_max_daily_limit pozitívnak kell lennie.")
+        if self.channel_demo_max_per_minute_limit <= 0:
+            raise ValueError("channel_demo_max_per_minute_limit pozitívnak kell lennie.")
+        if self.channel_session_max_per_minute <= 0:
+            raise ValueError("channel_session_max_per_minute pozitívnak kell lennie.")
+        if self.channel_session_max_burst_10s <= 0:
+            raise ValueError("channel_session_max_burst_10s pozitívnak kell lennie.")
+        if self.channel_session_min_interval_ms <= 0:
+            raise ValueError("channel_session_min_interval_ms pozitívnak kell lennie.")
+        if self.channel_session_wait_max_ms < 0:
+            raise ValueError("channel_session_wait_max_ms nem lehet negatív.")
+        if self.channel_session_cookie_max_age_sec <= 0:
+            raise ValueError("channel_session_cookie_max_age_sec pozitívnak kell lennie.")
+        if self.platform_event_outbox_backlog_soft_limit <= 0:
+            raise ValueError("platform_event_outbox_backlog_soft_limit pozitívnak kell lennie.")
+        if self.platform_event_handler_timeout_sec <= 0:
+            raise ValueError("platform_event_handler_timeout_sec pozitívnak kell lennie.")
+        if self.demo_signup_max_per_day <= 0:
+            raise ValueError("demo_signup_max_per_day pozitívnak kell lennie.")
+        if self.demo_signup_max_per_ip_per_day <= 0:
+            raise ValueError("demo_signup_max_per_ip_per_day pozitívnak kell lennie.")
+        if self.demo_signup_max_per_ip_email_per_day <= 0:
+            raise ValueError("demo_signup_max_per_ip_email_per_day pozitívnak kell lennie.")
+        if self.demo_signup_max_per_session_per_day <= 0:
+            raise ValueError("demo_signup_max_per_session_per_day pozitívnak kell lennie.")
+        if self.demo_signup_max_per_email <= 0:
+            raise ValueError("demo_signup_max_per_email pozitívnak kell lennie.")
+        if self.demo_trial_days <= 0:
+            raise ValueError("demo_trial_days pozitívnak kell lennie.")
+        provider = (self.demo_signup_captcha_provider or "").strip().lower()
+        if provider not in {"none", "turnstile", "recaptcha"}:
+            raise ValueError("demo_signup_captcha_provider értéke: none, turnstile vagy recaptcha lehet.")
+        if self.demo_signup_require_captcha and provider == "none":
+            raise ValueError("demo_signup_require_captcha=True esetén demo_signup_captcha_provider nem lehet 'none'.")
+        return self
+
+    @model_validator(mode="after")
+    def validate_embedding_fields(self) -> "BaseConfig":
+        provider = (self.embedding_provider or "").strip().lower()
+        if provider not in {"local", "openai"}:
+            raise ValueError("embedding_provider érvénytelen. Megengedett értékek: local, openai.")
+        if self.embedding_vector_size <= 0:
+            raise ValueError("embedding_vector_size pozitívnak kell lennie.")
+        if self.embedding_batch_size <= 0:
+            raise ValueError("embedding_batch_size pozitívnak kell lennie.")
+        if self.embedding_worker_concurrency <= 0:
+            raise ValueError("embedding_worker_concurrency pozitívnak kell lennie.")
         return self
 
     @model_validator(mode="after")
@@ -263,6 +587,22 @@ class BaseConfig(BaseSettings):
         if "*" in hosts:
             raise ValueError("Wildcard '*' trusted_hosts production-ben nem engedélyezett.")
 
+        # --- Tenant base domain / CORS regex policy ---
+        base_domain = (self.tenant_base_domain or "").strip().lower()
+        if not base_domain:
+            raise ValueError("tenant_base_domain kötelező production környezetben.")
+        if base_domain in {"local", "localhost"}:
+            raise ValueError("tenant_base_domain='local/localhost' production-ben nem engedélyezett.")
+        if any(token in base_domain for token in ("*", "/", "\\", ":", " ")):
+            raise ValueError("tenant_base_domain production-ben csak tiszta hostname lehet.")
+        labels = [part for part in base_domain.split(".") if part]
+        if len(labels) < 2:
+            raise ValueError(
+                "tenant_base_domain production-ben teljes domain kell legyen (pl. app.example.com)."
+            )
+        if any(not _DOMAIN_LABEL_RE.fullmatch(label) for label in labels):
+            raise ValueError("tenant_base_domain nem RFC-kompatibilis hostname formátum.")
+
         # --- Password policy ---
         if (self.password_security_level or "").strip().lower() == "basic":
             raise ValueError(
@@ -299,11 +639,42 @@ class BaseConfig(BaseSettings):
                 "redis_url kötelező production környezetben (rate limit megosztott tároló és token allowlist)."
             )
 
-        # --- CSRF nem kapcsolható ki ---
-        disable_csrf = (os.getenv("DISABLE_CSRF") or "").strip().lower()
-        if disable_csrf in ("1", "true", "yes", "on"):
+        # --- CSRF / debug bypass env-ek productionben ne legyenek beállítva ---
+        disable_csrf_raw = (os.getenv("DISABLE_CSRF") or "").strip()
+        if disable_csrf_raw:
             raise ValueError(
-                "DISABLE_CSRF be van kapcsolva production-ben — távolítsd el vagy állítsd üresre."
+                "DISABLE_CSRF production-ben nem lehet beállítva. "
+                "Távolítsd el az env-ből (ne 0-ra állítsd, hanem töröld)."
+            )
+        billing_debug_routes_raw = (os.getenv("BILLING_DEBUG_ROUTES_ENABLED") or "").strip()
+        if billing_debug_routes_raw:
+            raise ValueError(
+                "BILLING_DEBUG_ROUTES_ENABLED production-ben nem lehet beállítva. "
+                "A debug route-ok maradjanak rejtve."
+            )
+        billing_disabled_raw = (os.getenv("BILLING_DISABLED") or "").strip()
+        if billing_disabled_raw:
+            raise ValueError(
+                "BILLING_DISABLED production-ben nem lehet beállítva. "
+                "Ez megkerülheti a kérdéskeret-védelmet."
+            )
+        billing_provider_raw = (os.getenv("BILLING_PROVIDER") or "manual").strip().lower()
+        if billing_provider_raw in {"simulated", "stripe_test"}:
+            raise ValueError(
+                f"BILLING_PROVIDER={billing_provider_raw!r} production-ben nem engedélyezett. "
+                "Amíg nincs éles payment provider, manual módot használj."
+            )
+        billing_mode_raw = (os.getenv("BILLING_MODE") or "manual").strip().lower()
+        if billing_mode_raw != "manual":
+            raise ValueError(
+                f"BILLING_MODE={billing_mode_raw!r} production-ben nem engedélyezett. "
+                "Állítsd BILLING_MODE=manual értékre."
+            )
+        pii_legacy_plaintext_raw = (os.getenv("PII_ALLOW_LEGACY_PLAINTEXT_READ") or "").strip().lower()
+        if pii_legacy_plaintext_raw in {"1", "true", "yes", "on"}:
+            raise ValueError(
+                "PII_ALLOW_LEGACY_PLAINTEXT_READ production-ben nem engedélyezett. "
+                "Futtasd le a PII migrációt, majd állítsd false értékre."
             )
 
         # --- Access TTL production korlát ---

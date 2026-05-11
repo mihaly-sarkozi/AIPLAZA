@@ -18,6 +18,7 @@ from apps.knowledge.models import (
     KnowledgeQueryRunORM,
     KnowledgeSentenceORM,
     KnowledgeSentenceInterpretationORM,
+    KnowledgePiiMappingORM,
     KnowledgeSpaceTimeFrameORM,
     KnowledgeSourceORM,
 )
@@ -58,15 +59,21 @@ def _install_knowledge_schema(engine, slug: str) -> None:
             KnowledgeLocalEntityClusterORM.__table__,
             KnowledgeIndexBuildORM.__table__,
             KnowledgeQueryRunORM.__table__,
+            KnowledgePiiMappingORM.__table__,
         ),
     )
     run_schema_statements(
         engine,
         slug,
         (
+            'ALTER TABLE "{schema}".knowledge_bases ALTER COLUMN name TYPE VARCHAR(200)',
             'ALTER TABLE "{schema}".knowledge_bases ADD COLUMN IF NOT EXISTS created_by INTEGER',
             'ALTER TABLE "{schema}".knowledge_bases ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW()',
             'ALTER TABLE "{schema}".knowledge_bases ADD COLUMN IF NOT EXISTS updated_by INTEGER',
+            'ALTER TABLE "{schema}".knowledge_bases ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP',
+            'ALTER TABLE "{schema}".knowledge_bases ADD COLUMN IF NOT EXISTS deleted_display_name VARCHAR(200)',
+            'ALTER TABLE "{schema}".knowledge_bases ADD COLUMN IF NOT EXISTS deleted_training_char_count BIGINT NOT NULL DEFAULT 0',
+            'ALTER TABLE "{schema}".knowledge_bases ADD COLUMN IF NOT EXISTS pii_depersonalization_enabled BOOLEAN NOT NULL DEFAULT TRUE',
             'ALTER TABLE "{schema}".kb_user_permission ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW()',
             'ALTER TABLE "{schema}".kb_user_permission ADD COLUMN IF NOT EXISTS created_by INTEGER',
             'ALTER TABLE "{schema}".kb_user_permission ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW()',
@@ -82,7 +89,7 @@ def register_knowledge_tenant_hooks() -> None:
         [
             TenantSchemaHook(
                 name="knowledge",
-                revision="knowledge.block_memory.v1",
+                revision="knowledge.block_memory.v2",
                 install=_install_knowledge_schema,
                 table_names=(
                     "knowledge_bases",
@@ -104,6 +111,7 @@ def register_knowledge_tenant_hooks() -> None:
                     "knowledge_local_entity_clusters",
                     "knowledge_index_builds",
                     "knowledge_query_runs",
+                    "knowledge_pii_mappings",
                 ),
             )
         ]

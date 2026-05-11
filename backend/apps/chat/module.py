@@ -19,8 +19,15 @@ class ChatModule(AppModule):
     def register(self, container: ModuleContext) -> None:
         infra = build_chat_infrastructure(
             knowledge_service=container.get_optional_service(MODULE_KNOWLEDGE_SERVICE),
+            db_session_factory=container.infrastructure.db_session_factory,
+            audit_service=container.audit_service,
         )
         service = infra.build_chat_service()
+        if getattr(service, "channel_access_service", None) is not None:
+            try:
+                service.channel_access_service.ensure_storage()
+            except Exception:
+                pass
         container.set_state(CTX_STATE_CHAT_INFRASTRUCTURE, infra)
         container.register_factory(MODULE_CHAT_LLM_CLIENT_FACTORY, infra.build_llm_client)
         container.register_service(MODULE_CHAT_SERVICE, service)
@@ -31,11 +38,11 @@ class ChatModule(AppModule):
 
     # Ez a metódus a(z) light_paths logikáját valósítja meg.
     def light_paths(self) -> tuple[str, ...]:
-        return ("/api/chat",)
+        return ("/api/chat", "/api/channel/chat", "/api/channel/feedback")
 
     # Ez a metódus a(z) permissions logikáját valósítja meg.
     def permissions(self) -> tuple[str, ...]:
-        return ("chat.use",)
+        return ("chat.use", "chat.channel.manage", "chat.channel.analytics")
 
     # Ez a metódus a(z) ui_nav_meta logikáját valósítja meg.
     def ui_nav_meta(self) -> tuple[dict[str, str], ...]:

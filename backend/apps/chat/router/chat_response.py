@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 
 class ChatSourceItem(BaseModel):
     kb_uuid: str
+    kb_name: str = ""
     point_id: str
     source_id: str = ""
     title: str = ""
@@ -15,6 +16,7 @@ class ChatSourceItem(BaseModel):
     display_type: str = ""
     created_by: int | None = None
     created_by_label: str = ""
+    created_at: str | None = None
 
 
 class AskResponse(BaseModel):
@@ -33,3 +35,6 @@ class AskResponse(BaseModel):
     matched_chunks: list[dict[str, Any]] = Field(default_factory=list)
     claims: list[dict[str, Any]] = Field(default_factory=list)
     context_blocks: list[dict[str, Any]] = Field(default_factory=list)
+    prompt_context: dict[str, Any] = Field(default_factory=dict)
+    encoded_prompt_context: str = ""
+    restored_pii_spans: list[dict[str, Any]] = Field(default_factory=list)

@@ -19,9 +19,6 @@ from core.extensions.tenant.signup.orchestrator_result import DemoSignupResult
 from core.kernel.config.config_loader import settings
 from core.platform.extensions.tenant_hooks import TenantSignupContext, TenantSignupHook, get_tenant_signup_hooks
 
-_DEMO_TRIAL_DAYS = 30
-
-
 class DemoNewSignupUseCase:
     """Create a brand-new demo tenant end-to-end."""
 
@@ -118,7 +115,8 @@ class DemoNewSignupUseCase:
         subscription_period: str,
         demo_session_id: str,
     ) -> DemoSignupResult:
-        demo_expires_at = demo_trial_expires_at(self._clock.now(), days=_DEMO_TRIAL_DAYS)
+        trial_days = max(1, int(getattr(settings, "demo_trial_days", 7) or 7))
+        demo_expires_at = demo_trial_expires_at(self._clock.now(), days=trial_days)
         primary_domain = demo_host_hint(slug, self._tenant_base_domain)
 
         try:

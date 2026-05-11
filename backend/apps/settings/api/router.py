@@ -27,6 +27,13 @@ def update_settings(
         timezone=body.timezone,
         date_format=body.date_format,
         time_format=body.time_format,
+        billing_company_name=body.billing_company_name,
+        billing_tax_id=body.billing_tax_id,
+        billing_address_line=body.billing_address_line,
+        billing_postal_code=body.billing_postal_code,
+        billing_city=body.billing_city,
+        billing_region=body.billing_region,
+        billing_country=body.billing_country,
         updated_by=current_user.id,
     )
 

@@ -11,6 +11,8 @@ class DevAppConfig(BaseSettings):
     app_version: str = "1.0"
 
     openai_api_key: str = ""
+    chat_provider: str = "openai"
+    chat_model: str = "gpt-4o-mini"
     qdrant_url: str = "http://localhost:6333"
     qdrant_api_key: str = ""
     object_storage_enabled: bool = True
@@ -25,12 +27,23 @@ class DevAppConfig(BaseSettings):
     
     ollama_url: str = "http://localhost:11434"
     ollama_model: str = "qwen2.5:7b-instruct"
+    ollama_api_key: str = "ollama"
 
     kb_upload_max_mb: int = 40
     kb_store_raw_content: bool = False
+    upload_magic_sniff_enabled: bool = True
+    upload_parser_timeout_sec: int = 20
+    upload_pdf_max_pages: int = 200
+    upload_docx_max_zip_entries: int = 5000
+    upload_docx_max_decompressed_bytes: int = 30 * 1024 * 1024
+    upload_docx_max_compression_ratio: float = 120.0
+    upload_malware_scan_provider: str = "none"
+    upload_malware_scan_required_in_prod: bool = True
+    upload_malware_scan_timeout_sec: int = 5
+    upload_clamav_unix_socket_path: str = "/var/run/clamav/clamd.ctl"
     pii_encryption_key: str = ""
     pii_retention_days: int = 90
-    pii_allow_legacy_plaintext_read: bool = True
+    pii_allow_legacy_plaintext_read: bool = False
 
     rerank_semantic_match_weight: float = 0.22
     rerank_entity_match_weight: float = 0.20
@@ -49,6 +62,11 @@ class DevAppConfig(BaseSettings):
     qdrant_lexical_overlap_weight: float = 0.72
     qdrant_lexical_substring_weight: float = 0.28
     qdrant_timeout_sec: int = 120
+    embedding_provider: str = "local"
+    embedding_model: str = "BAAI/bge-m3"
+    embedding_vector_size: int = 1024
+    embedding_batch_size: int = 16
+    embedding_worker_concurrency: int = 2
 
     kb_max_seed_assertions: int = 8
     kb_max_expanded_assertions: int = 12

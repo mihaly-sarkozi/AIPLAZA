@@ -5,6 +5,8 @@ import { SavedModal } from "../../../components/SavedModal";
 import { getApiErrorMessage } from "../../../utils/getApiErrorMessage";
 import { useCreateKbMutation } from "../hooks/useKb";
 
+const KB_NAME_MAX_LENGTH = 200;
+
 export default function KBCreate() {
   const { t } = useTranslation();
   const [name, setName] = useState("");
@@ -17,8 +19,17 @@ export default function KBCreate() {
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
+    const nameTrim = name.trim();
+    if (!nameTrim) {
+      setError(t("common.fieldRequired"));
+      return;
+    }
+    if (nameTrim.length > KB_NAME_MAX_LENGTH) {
+      setError(t("kb.nameMaxLength").replace("{{count}}", String(KB_NAME_MAX_LENGTH)));
+      return;
+    }
     createKbMutation.mutate(
-      { name: name.trim(), description: description.trim() || undefined },
+      { name: nameTrim, description: description.trim() || undefined },
       {
         onSuccess: () => {
           setSavedModalOpen(true);
@@ -55,7 +66,7 @@ export default function KBCreate() {
           <label className="block mb-1 text-[var(--color-label)]">{t("kb.labelName")}{t("common.required")}</label>
           <input
             type="text"
-            maxLength={200}
+            maxLength={KB_NAME_MAX_LENGTH}
             required
             value={name}
             onChange={(e) => setName(e.target.value)}

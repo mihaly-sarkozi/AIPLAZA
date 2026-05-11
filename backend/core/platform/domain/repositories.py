@@ -19,3 +19,6 @@ class DomainRepository:
 
     def create_domain(self, tenant_id: int, domain: str, *, created_by: int | None = None) -> TenantDomain:
         return self._tenant_repo.create_domain(tenant_id, domain, created_by=created_by)
+
+    def delete_domain(self, domain: str, *, tenant_id: int | None = None) -> None:
+        self._tenant_repo.delete_domain(domain, tenant_id=tenant_id)

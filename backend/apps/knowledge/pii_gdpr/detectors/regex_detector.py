@@ -134,6 +134,20 @@ _REGEX_RULES: List[Tuple] = [
     (EntityType.PERSONAL_ID, r"\b[XYZ]\d{7}[A-Z]\b", 0.70, RiskClass.DIRECT_PII),
     # Név közvetlenül dokumentum címke előtt: "Misi NIE száma ..."
     (EntityType.PERSON_NAME, r"\b([A-ZÁÉÍÓÖŐÚÜŰ][a-záéíóöőúüű]{2,})\s+(?=(?:NIE|DNI|NIF)\b)", 0.86, RiskClass.DIRECT_PII, 1),
+    # Egyszavas név + leíró tagmondat + dokumentum címke ugyanabban a mondatban
+    # pl. "Péter magas és kék szemű, személyi igazolvány száma AU321654"
+    (
+        EntityType.PERSON_NAME,
+        r"\b([A-ZÁÉÍÓÖŐÚÜŰÑ][a-záéíóöőúüűñ]{2,})\b"
+        r"(?=[^.\n]{0,80},\s*(?:"
+        r"szem[eé]lyi(?:\s+igazolv[aá]ny)?(?:\s+sz[aá]ma)?|"
+        r"igazolv[aá]ny(?:\s+sz[aá]ma)?|"
+        r"útlev[ée]lsz[aá]ma|útlev[ée]l|passport(?:\s+number)?|dni|nif|nie"
+        r")\b)",
+        0.86,
+        RiskClass.DIRECT_PII,
+        1,
+    ),
     # identificador de dispositivo DEV-ES-2025-44
     (EntityType.DEVICE_ID, r"(?i)\b(?:identificador\s+de\s+dispositivo|id\s+de\s+dispositivo)\s*[:\-]?\s*[\w\-]{8,40}\b", 0.82, RiskClass.INDIRECT_IDENTIFIER),
     (EntityType.DEVICE_ID, r"\bDEV[\- ]?(?:ES[\- ]?)?(?:\d+[\-])*\d{4,10}\b", 0.68, RiskClass.INDIRECT_IDENTIFIER),
@@ -199,6 +213,12 @@ class RegexDetector(BaseDetector):
     _PERSON_LABEL_CONTEXT = re.compile(
         r"(?i)\b(?:szerző|author|modified\s+by|reviewer|name|név)\b"
     )
+    _DOC_LABEL_IN_PERSON = re.compile(
+        r"(?i)\b(?:"
+        r"útlev[ée]lsz[aá]ma|útlev[ée]l|passport(?:\s+number)?|"
+        r"szem[eé]lyi|igazolv[aá]ny|dni|nif|nie"
+        r")\b"
+    )
 
     # Ez a metódus a(z) detect logikáját valósítja meg.
     def detect(self, text: str, language: str = "en") -> List[DetectionResult]:
@@ -222,6 +242,14 @@ class RegexDetector(BaseDetector):
                             # Dokumentum-azonosító kontextusban a nyers számsor ne telefonszám legyen.
                             continue
                     if entity_type == EntityType.PERSON_NAME:
+                        doc_label = self._DOC_LABEL_IN_PERSON.search(matched)
+                        if doc_label:
+                            # "Feri Útlevélszáma" -> csak a tényleges névrész maradjon.
+                            trimmed = matched[:doc_label.start()].strip()
+                            if not trimmed:
+                                continue
+                            matched = trimmed
+                            end = start + len(matched)
                         if self._ADDRESS_WORD_IN_PERSON.search(matched):
                             # Címrészek (pl. Calle Mayor, King Street) ne legyenek PERSON_NAME.
                             continue

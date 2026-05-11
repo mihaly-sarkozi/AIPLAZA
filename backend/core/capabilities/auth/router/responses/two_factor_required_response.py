@@ -9,3 +9,7 @@ class TwoFactorRequiredResponse(BaseModel):
         ...,
         description="2. lépéshez add vissza a two_factor_code-dal.",
     )
+    challenge_type: str = Field(
+        default="email",
+        description="A 2FA challenge típusa: email vagy authenticator.",
+    )

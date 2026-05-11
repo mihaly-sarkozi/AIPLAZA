@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 import pytest
 
 from apps import load_enabled_app_modules
@@ -8,6 +10,7 @@ from core.platform.bootstrap.manifest import (
     load_app_manifest,
     load_platform_only_app_manifest,
 )
+from core.kernel import app_factory as app_factory_module
 from core.kernel.app_factory import create_app_from_manifests
 from core.platform.registry import load_core_platform_manifest
 
@@ -74,3 +77,28 @@ def test_platform_manifest_orders_modules_by_registration_dependencies():
     assert keys.index("platform.settings") < keys.index("platform.auth")
     assert keys.index("platform.users") < keys.index("platform.tenant")
     assert keys.index("platform.tenant") < keys.index("platform.domain")
+
+
+def test_platform_app_disables_openapi_docs_in_prod(monkeypatch):
+    monkeypatch.setattr(app_factory_module, "get_app_env", lambda: "prod")
+    app = create_app_from_manifests(
+        load_core_platform_manifest(),
+        load_platform_only_app_manifest(),
+    )
+
+    routes = {getattr(route, "path", "") for route in app.routes}
+
+    assert "/docs" not in routes
+    assert "/redoc" not in routes
+    assert "/openapi.json" not in routes
+
+
+def test_cors_origin_regex_rejects_non_tenant_origins(monkeypatch):
+    monkeypatch.setattr(app_factory_module.settings, "tenant_base_domain", "app.test", raising=False)
+    regex = app_factory_module._build_cors_origin_regex()
+
+    assert re.match(regex, "https://demo.app.test")
+    assert re.match(regex, "https://app.test")
+    assert not re.match(regex, "https://app.test.evil.com")
+    assert not re.match(regex, "https://evil-app.test")
+    assert not re.match(regex, "https://evil.com")

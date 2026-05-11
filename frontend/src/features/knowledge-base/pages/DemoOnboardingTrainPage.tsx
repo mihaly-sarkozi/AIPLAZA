@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "../../../i18n";
 import { useAuthStore } from "../../../store/authStore";
@@ -49,7 +49,7 @@ export default function DemoOnboardingTrainPage() {
   const trainingProgress = useMemo(() => getTrainingProgress(activeTrainingRun), [activeTrainingRun]);
   const loading =
     createTextMutation.isPending || createFileMutation.isPending || isTrainingActive(activeTrainingRun?.status);
-  const trainingStatusDetail = useMemo(() => getTrainingStatusDetail(activeTrainingRun), [activeTrainingRun]);
+  const trainingStatusDetail = useMemo(() => getTrainingStatusDetail(activeTrainingRun, t), [activeTrainingRun, t]);
 
   useEffect(() => {
     if (user?.tenant_demo_mode && user.tenant_kb_has_training === true) {
@@ -68,13 +68,13 @@ export default function DemoOnboardingTrainPage() {
     setStatusText("");
   }, [kbLoading, kbUuid, t]);
 
-  const runAfterSuccess = () => {
+  const runAfterSuccess = useCallback(() => {
     setStatusKind("success");
     setStatusText(t("kb.trainedSuccess"));
     if (user) {
       setUser({ ...user, tenant_kb_has_training: true });
     }
-  };
+  }, [setUser, t, user]);
 
   const onCloseTrainingDone = () => {
     setShowTrainingDoneModal(false);
@@ -94,10 +94,10 @@ export default function DemoOnboardingTrainPage() {
       setShowTrainingDoneModal(true);
     } else {
       setStatusKind("error");
-      setStatusText(getTrainingFailureMessage(activeTrainingRun) ?? "A tanítás futása sikertelen.");
+      setStatusText(getTrainingFailureMessage(activeTrainingRun, t) ?? t("chat.trainingFailed"));
     }
     setActiveTrainingRunId(undefined);
-  }, [activeTrainingRun, activeTrainingRunId]);
+  }, [activeTrainingRun, activeTrainingRunId, runAfterSuccess, t]);
 
   const onOpenTrainModal = () => {
     if (loading || !kbUuid) return;

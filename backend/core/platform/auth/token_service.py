@@ -87,6 +87,32 @@ class TokenService:
         token = jwt.encode(payload, self.secret, algorithm=self.alg)
         return token, jti
 
+    def make_platform_admin_access(
+        self,
+        user_id: int,
+        user_ver: int = 0,
+        role: str = "admin",
+    ) -> tuple[str, str]:
+        """Access token for the public-schema platform admin console."""
+        now = self._now()
+        jti = str(uuid.uuid4())
+        payload = {
+            "sub": str(user_id),
+            "typ": "platform_admin_access",
+            "jti": jti,
+            "user_ver": user_ver,
+            "role": role,
+            "exp": now + datetime.timedelta(minutes=self.access_exp),
+            "iat": now,
+            "nbf": now,
+        }
+        if self.issuer is not None:
+            payload["iss"] = self.issuer
+        if self.audience is not None:
+            payload["aud"] = self.audience
+        token = jwt.encode(payload, self.secret, algorithm=self.alg)
+        return token, jti
+
     def make_refresh_pair(
         self,
         user_id: int,
@@ -110,6 +136,30 @@ class TokenService:
             "iat": now,
             "nbf": now,
             "al": auto_login,
+        }
+        if self.issuer is not None:
+            payload["iss"] = self.issuer
+        if self.audience is not None:
+            payload["aud"] = self.audience
+        token = jwt.encode(payload, self.secret, algorithm=self.alg)
+        return token, payload
+
+    def make_platform_admin_refresh_pair(
+        self,
+        user_id: int,
+        user_ver: int = 0,
+    ) -> tuple[str, Dict[str, Any]]:
+        """Refresh JWT for the public-schema platform admin console."""
+        now = self._now()
+        jti = str(uuid.uuid4())
+        payload = {
+            "sub": str(user_id),
+            "typ": "platform_admin_refresh",
+            "jti": jti,
+            "user_ver": user_ver,
+            "exp": now + datetime.timedelta(minutes=self.refresh_exp),
+            "iat": now,
+            "nbf": now,
         }
         if self.issuer is not None:
             payload["iss"] = self.issuer

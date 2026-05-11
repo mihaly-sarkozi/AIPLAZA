@@ -5,11 +5,15 @@ export const ACTIVE_RUN_STATUSES = new Set(["received", "queued", "processing"])
 export type TrainingLogRow = {
   runId: string;
   itemId: string | null;
+  sourceId: string | null;
   status: string;
   timestamp: string;
   kindLabel: string;
   title: string;
   preview: string;
+  createdByLabel: string;
+  charCount: number;
+  sentenceCount: number;
 };
 
 export type ProcessingModuleSummary = {
@@ -52,6 +56,34 @@ export type RunProgressSummary = {
   last_error_message?: string | null;
 };
 
+export type ProcessingPreviewLabels = {
+  noData: string;
+  processed: string;
+  sentence: string;
+  character: string;
+};
+
+export type TrainingKindLabels = {
+  file: string;
+  text: string;
+  url: string;
+  unknown: string;
+};
+
+const DEFAULT_PROCESSING_PREVIEW_LABELS: ProcessingPreviewLabels = {
+  noData: "nincs adat",
+  processed: "Feldolgozva",
+  sentence: "mondat",
+  character: "karakter",
+};
+
+const DEFAULT_TRAINING_KIND_LABELS: TrainingKindLabels = {
+  file: "Fájl",
+  text: "Szöveg",
+  url: "Hivatkozás",
+  unknown: "Ismeretlen",
+};
+
 function normalizeWhitespace(value: string): string {
   return value.replace(/\s+/g, " ").trim();
 }
@@ -68,6 +100,15 @@ export function formatTimestamp(value: string | null | undefined): string {
   return date.toLocaleString("hu-HU");
 }
 
+export function formatInteger(value: number | null | undefined): string {
+  return new Intl.NumberFormat("hu-HU").format(Math.max(0, Math.round(value ?? 0)));
+}
+
+export function getNumericMetadataValue(metadata: Record<string, unknown> | null | undefined, key: string): number {
+  const value = metadata?.[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
 export function getStatusLabel(status: string): string {
   switch ((status || "").trim()) {
     case "received":
@@ -78,6 +119,8 @@ export function getStatusLabel(status: string): string {
       return "Feldolgozás";
     case "completed":
       return "Kész";
+    case "partial_success":
+      return "Részben kész";
     case "failed":
       return "Hiba";
     case "duplicate":
@@ -112,6 +155,8 @@ export function getStatusBadgeClass(status: string): string {
   switch ((status || "").trim()) {
     case "completed":
       return "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300";
+    case "partial_success":
+      return "bg-teal-500/10 text-teal-700 dark:text-teal-300";
     case "failed":
     case "rejected":
       return "bg-rose-500/10 text-rose-700 dark:text-rose-300";
@@ -128,17 +173,24 @@ export function getStatusBadgeClass(status: string): string {
   }
 }
 
-export function getItemKindLabel(item: Pick<IngestItem, "input_type"> | null | undefined): string {
-  switch ((item?.input_type || "").trim()) {
+function getInputKindLabel(inputType: string | null | undefined, labels: TrainingKindLabels): string {
+  switch ((inputType || "").trim()) {
     case "file":
-      return "Fájl";
+      return labels.file;
     case "text":
-      return "Szöveg";
+      return labels.text;
     case "url":
-      return "Hivatkozás";
+      return labels.url;
     default:
-      return item?.input_type || "Ismeretlen";
+      return inputType || labels.unknown;
   }
+}
+
+export function getItemKindLabel(
+  item: Pick<IngestItem, "input_type"> | null | undefined,
+  labels: TrainingKindLabels = DEFAULT_TRAINING_KIND_LABELS
+): string {
+  return getInputKindLabel(item?.input_type, labels);
 }
 
 export function getItemTitle(item: IngestItem): string {
@@ -159,7 +211,7 @@ export function getItemTitle(item: IngestItem): string {
 
 export function getItemPreview(item: IngestItem): string {
   if (item.input_type === "file") {
-    return item.display_name || item.title || "Ismeretlen fájl";
+    return "";
   }
   if (item.input_type === "url") {
     const url = typeof item.metadata?.url === "string" ? item.metadata.url : item.origin;
@@ -207,7 +259,7 @@ export function getRunProgressPercent(run: IngestRun | null | undefined): number
     return Math.max(0, Math.min(100, Math.round(summary.overall_percent)));
   }
   if (!run) return 0;
-  if (run.status === "completed") return 100;
+  if (run.status === "completed" || run.status === "partial_success") return 100;
   const total = Math.max(run.batch_size || 0, 1);
   const done = run.completed_count + run.failed_count + run.duplicate_count + run.rejected_count;
   return Math.max(0, Math.min(99, Math.round((done / total) * 100)));
@@ -242,34 +294,55 @@ export function formatModuleProgress(module: ProcessingModuleSummary | undefined
   return label;
 }
 
-export function getItemProcessingPreview(item: IngestItem | null | undefined): string {
-  if (!item) return "nincs adat";
+export function getItemProcessingPreview(
+  item: IngestItem | null | undefined,
+  labels: ProcessingPreviewLabels = DEFAULT_PROCESSING_PREVIEW_LABELS
+): string {
+  if (!item) return labels.noData;
+  const percent = getItemProgressPercent(item);
+  const sentenceCount = getNumericMetadataValue(item.metadata, "sentence_count");
+  const charCount = getNumericMetadataValue(item.metadata, "char_count");
   const summary = getItemProcessingSummary(item);
-  const parser = summary.modules.parser;
-  const interpretation = summary.modules.sentence_interpretation;
-  const evaluation = summary.modules.sentence_evaluation;
-  const parts = [
-    `Parser: ${formatModuleProgress(parser)}`,
-    `Értelmezés: ${formatModuleProgress(interpretation)}`,
-    `Értékelés: ${formatModuleProgress(evaluation)}`,
-  ];
-  if (summary.document_progress?.label) {
-    parts.push(String(summary.document_progress.label));
-  }
+  const parts = [`${labels.processed} ${percent}%`];
+  if (sentenceCount > 0) parts.push(`${formatInteger(sentenceCount)} ${labels.sentence}`);
+  if (charCount > 0) parts.push(`${formatInteger(charCount)} ${labels.character}`);
+  const label = summary.document_progress?.label || item.progress_message;
+  if (label && percent < 100) parts.push(String(label));
   return parts.join(" | ");
 }
 
-export function getRunProcessingPreview(run: IngestRun | null | undefined): string {
-  if (!run) return "nincs adat";
-  const summary = getRunProgressSummary(run);
+export function getRunProcessingPreview(
+  run: IngestRun | null | undefined,
+  labels: ProcessingPreviewLabels = DEFAULT_PROCESSING_PREVIEW_LABELS
+): string {
+  if (!run) return labels.noData;
   const percent = getRunProgressPercent(run);
-  const parts = [`${percent}%`];
-  const label = getRunProgressLabel(run);
-  if (label) parts.push(label);
-  if (typeof summary.active_item_label === "string" && summary.active_item_label.trim()) {
-    parts.push(summary.active_item_label);
-  }
+  const sentenceCount = getNumericMetadataValue(run.metadata, "total_sentence_count");
+  const charCount = getNumericMetadataValue(run.metadata, "total_char_count");
+  const parts = [`${labels.processed} ${percent}%`];
+  if (sentenceCount > 0) parts.push(`${formatInteger(sentenceCount)} ${labels.sentence}`);
+  if (charCount > 0) parts.push(`${formatInteger(charCount)} ${labels.character}`);
   return parts.join(" | ");
+}
+
+export function getItemProgressPercent(item: IngestItem | null | undefined): number {
+  if (!item) return 0;
+  if (["completed", "duplicate", "rejected", "failed"].includes(item.status)) return 100;
+  const progress = getItemProcessingSummary(item).document_progress;
+  if (typeof progress?.progress_percent === "number") {
+    const percent = Math.max(0, Math.min(100, Math.round(progress.progress_percent)));
+    if (progress.phase === "file_character_count") {
+      return Math.max(5, Math.min(20, Math.round(percent * 0.2)));
+    }
+    if (progress.phase === "parser") {
+      return Math.max(20, Math.min(50, Math.round(percent * 0.5)));
+    }
+    if (progress.phase === "sentence_interpretation") {
+      return Math.max(55, Math.min(99, 55 + Math.round(percent * 0.44)));
+    }
+    return percent;
+  }
+  return 0;
 }
 
 export function getRunPrimaryItem(run: IngestRun, preferredItemId?: string | null): IngestItem | null {
@@ -280,18 +353,25 @@ export function getRunPrimaryItem(run: IngestRun, preferredItemId?: string | nul
   return run.items[0] ?? null;
 }
 
-export function buildTrainingRows(runs: IngestRun[]): TrainingLogRow[] {
+export function buildTrainingRows(
+  runs: IngestRun[],
+  kindLabels: TrainingKindLabels = DEFAULT_TRAINING_KIND_LABELS
+): TrainingLogRow[] {
   const rows: TrainingLogRow[] = runs.flatMap<TrainingLogRow>((run) => {
     if (!run.items.length) {
       return [
         {
           runId: run.id,
           itemId: null,
+          sourceId: null,
           status: run.status,
           timestamp: run.created_at,
-          kindLabel: run.input_channel,
+          kindLabel: getInputKindLabel(run.input_channel, kindLabels),
           title: run.id,
           preview: `Batch méret: ${run.batch_size}`,
+          createdByLabel: run.created_by_label || "Ismeretlen",
+          charCount: getNumericMetadataValue(run.metadata, "total_char_count"),
+          sentenceCount: getNumericMetadataValue(run.metadata, "total_sentence_count"),
         },
       ];
     }
@@ -299,11 +379,15 @@ export function buildTrainingRows(runs: IngestRun[]): TrainingLogRow[] {
     return run.items.map<TrainingLogRow>((item) => ({
       runId: run.id,
       itemId: item.id,
+      sourceId: item.source_id || (typeof item.metadata?.source_id === "string" ? item.metadata.source_id : null),
       status: item.status || run.status,
       timestamp: item.created_at || run.created_at,
-      kindLabel: getItemKindLabel(item),
+      kindLabel: getItemKindLabel(item, kindLabels),
       title: getItemTitle(item),
       preview: getItemPreview(item),
+      createdByLabel: item.created_by_label || run.created_by_label || "Ismeretlen",
+      charCount: getNumericMetadataValue(item.metadata, "char_count"),
+      sentenceCount: getNumericMetadataValue(item.metadata, "sentence_count"),
     }));
   });
 

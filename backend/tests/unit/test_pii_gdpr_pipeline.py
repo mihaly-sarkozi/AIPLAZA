@@ -171,3 +171,16 @@ def test_legacy_pii_adapter_contract():
     assert "user@example.com" not in out
     # Standard placeholders (ref_id-val: [EMAIL_ADDRESS_r0]; ref nélkül: [EMAIL_ADDRESS])
     assert "EMAIL_ADDRESS" in out or "PHONE_NUMBER" in out
+
+
+def test_legacy_filter_pii_detects_person_before_document_clause_hu():
+    from apps.knowledge.pii import filter_pii
+
+    text = (
+        "Péter magas és kék szemű, személyi igazolvány száma AU321654. "
+        "János alacsony és kedvetlen, Feri Útlevélszáma PW897654"
+    )
+    matches = filter_pii(text, "medium")
+    names = [m[3] for m in matches if m[2] == "név"]
+
+    assert "Péter" in names

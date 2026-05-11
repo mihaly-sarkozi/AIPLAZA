@@ -2,30 +2,106 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-
-from openai import AsyncOpenAI
+from typing import Any
 
 from core.kernel.config import app_settings
+from apps.chat.channel_access import ChannelAccessRepository, ChannelAccessService
+from apps.chat.service.pii_depersonalization import PiiDepersonalizationService
 from apps.chat.service.chat_service import ChatService
+
+
+class _KnowledgePiiBridge:
+    def __init__(self, knowledge_service: object | None) -> None:
+        self._knowledge_service = knowledge_service
+
+    def resolve_or_create_token(self, *, corpus_uuid: str, entity_type: str, original_value: str) -> str:
+        if self._knowledge_service is None or not hasattr(self._knowledge_service, "resolve_or_create_pii_token"):
+            return ""
+        return str(
+            self._knowledge_service.resolve_or_create_pii_token(
+                corpus_uuid=corpus_uuid,
+                entity_type=entity_type,
+                original_value=original_value,
+            )
+            or ""
+        )
+
+    def resolve_tokens(self, *, corpus_uuid: str, tokens: list[str]) -> dict[str, str]:
+        if self._knowledge_service is None or not hasattr(self._knowledge_service, "resolve_pii_tokens"):
+            return {}
+        value = self._knowledge_service.resolve_pii_tokens(corpus_uuid=corpus_uuid, tokens=tokens)
+        return value if isinstance(value, dict) else {}
+
+    def detect(self, text: str, sensitivity: str) -> list[tuple[int, int, str, str]]:
+        if self._knowledge_service is None or not hasattr(self._knowledge_service, "detect_pii_matches"):
+            return []
+        value = self._knowledge_service.detect_pii_matches(text=text, sensitivity=sensitivity)
+        return value if isinstance(value, list) else []
 
 
 @dataclass(frozen=True)
 class ChatModuleInfrastructure:
     knowledge_service: object | None = None
+    db_session_factory: object | None = None
+    audit_service: object | None = None
+
+    @staticmethod
+    def _openai_client(**kwargs: Any):
+        try:
+            from openai import AsyncOpenAI
+        except Exception as exc:  # pragma: no cover - dependency/environment guard
+            raise RuntimeError("Az openai csomag nincs telepitve a chat klienshez.") from exc
+        return AsyncOpenAI(**kwargs)
 
     # Ez a metódus felépíti a(z) llm client logikáját.
-    def build_llm_client(self) -> AsyncOpenAI:
-        return AsyncOpenAI(api_key=app_settings.openai_api_key)
+    def build_llm_client(self):
+        provider = str(getattr(app_settings, "chat_provider", "openai") or "openai").strip().lower()
+        if provider == "ollama":
+            base_url = str(getattr(app_settings, "ollama_url", "http://localhost:11434") or "http://localhost:11434").rstrip("/")
+            api_key = str(getattr(app_settings, "ollama_api_key", "ollama") or "ollama")
+            return self._openai_client(
+                base_url=f"{base_url}/v1",
+                api_key=api_key,
+            )
+        return self._openai_client(api_key=app_settings.openai_api_key)
 
     # Ez a metódus felépíti a(z) chat szolgáltatás logikáját.
     def build_chat_service(self) -> ChatService:
+        provider = str(getattr(app_settings, "chat_provider", "openai") or "openai").strip().lower()
+        model_name = (
+            str(getattr(app_settings, "ollama_model", "qwen2.5:7b-instruct") or "qwen2.5:7b-instruct")
+            if provider == "ollama"
+            else str(getattr(app_settings, "chat_model", "gpt-4o-mini") or "gpt-4o-mini")
+        )
+        channel_access_service = None
+        pii_depersonalization_service = None
+        if self.db_session_factory is not None:
+            channel_access_service = ChannelAccessService(ChannelAccessRepository(self.db_session_factory))
+            pii_bridge = _KnowledgePiiBridge(self.knowledge_service)
+            pii_depersonalization_service = PiiDepersonalizationService(
+                pii_bridge,
+                detector=pii_bridge.detect,
+            )
         return ChatService(
             chat_model=self.build_llm_client(),
+            chat_model_name=model_name,
             kb_service=self.knowledge_service,
             retrieval_service=self.knowledge_service,
+            channel_access_service=channel_access_service,
+            pii_depersonalization_service=pii_depersonalization_service,
+            audit_service=self.audit_service,
         )
 
 
 # Ez a függvény felépíti a(z) chat infrastructure logikáját.
-def build_chat_infrastructure(*, knowledge_service: object | None = None) -> ChatModuleInfrastructure:
-    return ChatModuleInfrastructure(knowledge_service=knowledge_service)
+def build_chat_infrastructure(
+    *,
+    knowledge_service: object | None = None,
+    db_session_factory: object | None = None,
+    audit_service: object | None = None,
+) -> ChatModuleInfrastructure:
+    return ChatModuleInfrastructure(
+        knowledge_service=knowledge_service,
+        db_session_factory=db_session_factory,
+        audit_service=audit_service,
+    )

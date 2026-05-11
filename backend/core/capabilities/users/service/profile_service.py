@@ -35,7 +35,10 @@ class UserProfileService:
         )
 
     def get_default_settings(self) -> dict[str, str]:
-        owner = self._user_repository.get_owner()
+        try:
+            owner = self._user_repository.get_owner()
+        except Exception:
+            owner = None
         return default_owner_settings(owner)
 
     def update_me(

@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import api, { fetchCsrfToken } from "../../../api/axiosClient";
+import api, { bindAuthStoreAdapter, fetchCsrfToken } from "../../../api/axiosClient";
 
 /**
  * Authentication state – access token in memory only.
@@ -95,3 +95,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     set({ user: null, token: null });
   },
 }));
+
+bindAuthStoreAdapter({
+  getToken: () => useAuthStore.getState().token,
+  setToken: (token) => useAuthStore.getState().setToken(token),
+  logout: () => useAuthStore.getState().logout(),
+});

@@ -98,18 +98,22 @@ def test_login_401_response_has_code_and_message(client: TestClient):
     assert "Hibás" in detail["message"] or "Invalid" in detail["message"]
 
 
-def test_login_five_times_wrong_password_all_return_401(client: TestClient):
-    """5x rossz jelszó: mindegyik hívás 401-et ad (service None); az 5. után a user zárolva (is_active=False), a 6. is 401."""
+def test_login_five_times_wrong_password_stays_blocked(client: TestClient):
+    """Többszöri rossz jelszó esetén a válasz 401 vagy anti-abuse 429, de sikeres login nem történhet."""
+    seen_401 = False
     for _ in range(6):
         r = client.post(
             "/api/auth/login",
             json={"email": "locked@example.com", "password": "wrong"},
         )
-        assert r.status_code == 401
+        assert r.status_code in (401, 429)
+        if r.status_code == 401:
+            seen_401 = True
         detail = r.json().get("detail")
         assert detail is not None
-        if isinstance(detail, dict):
+        if r.status_code == 401 and isinstance(detail, dict):
             assert detail.get("code") == "invalid_credentials"
+    assert seen_401
 
 
 # ---------- Sikeres 1. lépés → TwoFactorRequiredResp (200) ----------

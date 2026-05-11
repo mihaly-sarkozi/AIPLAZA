@@ -7,3 +7,4 @@ from dataclasses import dataclass
 @dataclass(frozen=True)
 class LoginTwoFactorRequired:
     pending_token: str # Pending token, amit kiküldünk a usernek 2FA kód küldésére
+    challenge_type: str = "email"

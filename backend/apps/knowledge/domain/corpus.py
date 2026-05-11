@@ -16,6 +16,10 @@ class Corpus:
     updated_at: datetime | None
     personal_data_mode: str = "no_personal_data"
     personal_data_sensitivity: str = "medium"
+    pii_depersonalization_enabled: bool = True
+    deleted_at: datetime | None = None
+    deleted_display_name: str | None = None
+    deleted_training_char_count: int = 0
 
 
 __all__ = ["Corpus"]

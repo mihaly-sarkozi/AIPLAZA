@@ -5,23 +5,20 @@ from pydantic import BaseModel, Field
 
 
 class KBCreate(BaseModel):
-    name: str = Field(..., max_length=20)
+    name: str = Field(..., max_length=200)
     description: Optional[str] = None
     permissions: Optional[List[dict]] = None  # [ {"user_id": int, "permission": "use"|"train"|"none"} ]
 
 class KBUpdate(BaseModel):
-    name: str = Field(..., max_length=20)
+    name: str = Field(..., max_length=200)
     description: Optional[str] = None
     personal_data_mode: Optional[str] = Field(
         default=None,
         description="no_personal_data | with_confirmation | allowed_not_to_ai | no_pii_filter",
     )
+    pii_depersonalization_enabled: Optional[bool] = None
 
 class KBDelete(BaseModel):
-    confirm_name: str
-
-
-class KBClear(BaseModel):
     confirm_name: str
 
 

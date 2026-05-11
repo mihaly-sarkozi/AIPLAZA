@@ -7,6 +7,7 @@ from core.capabilities.auth.repositories import (
     SessionRepository,
     TwoFactorAttemptRepository,
     TwoFactorRepository,
+    UserAuthenticatorRepository,
 )
 from core.capabilities.audit.repositories.audit_log_repository import AuditLogRepository
 from core.capabilities.email.email_service import EmailService
@@ -26,6 +27,7 @@ class RepositoryRegistry:
     two_factor_attempt_repo: TwoFactorAttemptRepository
     pending_2fa_repo: Pending2FARepository
     invite_token_repo: InviteTokenRepository
+    user_authenticator_repo: UserAuthenticatorRepository
 
 
 @dataclass(frozen=True)
@@ -50,6 +52,7 @@ def build_infrastructure() -> InfrastructureRegistry:
         two_factor_attempt_repo=TwoFactorAttemptRepository(db_session_factory),
         pending_2fa_repo=Pending2FARepository(db_session_factory),
         invite_token_repo=InviteTokenRepository(db_session_factory),
+        user_authenticator_repo=UserAuthenticatorRepository(db_session_factory),
     )
 
     return InfrastructureRegistry(

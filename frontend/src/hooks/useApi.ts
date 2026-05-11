@@ -64,7 +64,7 @@ export function useDefaultSettingsSuspense() {
 
 export function useLoginMutation(
   options?: UseMutationOptions<
-    { access_token?: string; pending_token?: string },
+    { access_token?: string; pending_token?: string; challenge_type?: "email" | "authenticator" },
     Error,
     Record<string, unknown>
   >
@@ -72,7 +72,7 @@ export function useLoginMutation(
   return useMutation({
     mutationFn: async (payload: Record<string, unknown>) => {
       const res = await api.post("/auth/login", payload);
-      return res.data as { access_token?: string; pending_token?: string };
+      return res.data as { access_token?: string; pending_token?: string; challenge_type?: "email" | "authenticator" };
     },
     ...options,
   });

@@ -1,13 +1,13 @@
-import { lazy, useEffect, Suspense } from "react";
+import { lazy, useEffect, Suspense, useMemo, useState } from "react";
 import { BrowserRouter, Navigate, Route, Routes, useLocation } from "react-router-dom";
 
-import { fetchCsrfToken } from "../api/axiosClient";
+import api, { fetchCsrfToken } from "../api/axiosClient";
 import ErrorBoundary from "../components/ErrorBoundary";
-import { useLocaleStore } from "../i18n";
+import { useLocaleStore, useTranslation } from "../i18n";
 import type { Locale, Theme } from "../i18n";
 import MainLayout from "../layouts/MainLayout";
 import { useAuthStore } from "../store/authStore";
-import { isTenantSubdomain } from "../utils/domain";
+import { getTenantBaseDomain, isTenantSubdomain } from "../utils/domain";
 import ProtectedRoute from "../features/auth/components/ProtectedRoute";
 import { getAuthenticatedFallbackPath, getModuleRoutes, preloadFrontendModules } from "./moduleRegistry";
 import type { ModuleRouteDefinition } from "./moduleTypes";
@@ -23,6 +23,31 @@ const GuardFallback = () => (
     Betöltés…
   </div>
 );
+
+function UnknownTenantHostPage() {
+  const { t } = useTranslation();
+  const mainDomainUrl = useMemo(() => {
+    if (typeof window === "undefined") return `https://${getTenantBaseDomain()}`;
+    const port = window.location.port ? `:${window.location.port}` : "";
+    return `${window.location.protocol}//${getTenantBaseDomain()}${port}`;
+  }, []);
+
+  return (
+    <div className="min-h-screen flex items-center justify-center px-4 bg-[var(--color-background)] text-[var(--color-foreground)]">
+      <div className="max-w-xl text-center">
+        <p className="text-6xl font-bold mb-4">404</p>
+        <h1 className="text-2xl md:text-3xl font-semibold mb-3">{t("tenantNotFound.title")}</h1>
+        <p className="text-[var(--color-muted-foreground)] mb-8">{t("tenantNotFound.description")}</p>
+        <a
+          href={mainDomainUrl}
+          className="inline-flex items-center justify-center px-5 py-3 rounded-lg bg-[var(--color-primary)] text-[var(--color-on-primary)] font-medium hover:opacity-90 transition"
+        >
+          {t("tenantNotFound.backToMain")}
+        </a>
+      </div>
+    </div>
+  );
+}
 
 function ScrollToTopOnRouteChange() {
   const location = useLocation();
@@ -64,11 +89,36 @@ export default function AppShell() {
   const loadUser = useAuthStore((state) => state.loadUser);
   const user = useAuthStore((state) => state.user);
   const setLocaleAndTheme = useLocaleStore((state) => state.setLocaleAndTheme);
+  const [tenantHostStatus, setTenantHostStatus] = useState<"checking" | "valid" | "invalid">(
+    isTenantSubdomain() ? "checking" : "valid",
+  );
 
   useEffect(() => {
+    if (!isTenantSubdomain()) {
+      setTenantHostStatus("valid");
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        await api.get("/auth/default-settings");
+        if (!cancelled) setTenantHostStatus("valid");
+      } catch (error) {
+        const status = (error as { response?: { status?: number } })?.response?.status;
+        if (!cancelled) setTenantHostStatus(status === 404 ? "invalid" : "valid");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (tenantHostStatus !== "valid") return;
     const path = window.location.pathname || "";
     void (async () => {
       if (path === "/demo" || path === "/demo-login" || path === "/demo-expired") return;
+      if (path.startsWith("/platform-admin")) return;
       if (path === "/" && !isTenantSubdomain()) return;
       await fetchCsrfToken();
       if (path === "/login" || path.startsWith("/forgot") || path.startsWith("/set-password")) {
@@ -78,7 +128,7 @@ export default function AppShell() {
       }
       await loadUser();
     })();
-  }, [loadUser]);
+  }, [loadUser, tenantHostStatus]);
 
   useEffect(() => {
     if (user?.locale && user?.theme) {
@@ -93,6 +143,9 @@ export default function AppShell() {
   const publicRoutes = getModuleRoutes("public");
   const mainRoutes = getModuleRoutes("main");
   const fallbackPath = getAuthenticatedFallbackPath();
+
+  if (tenantHostStatus === "checking") return <GuardFallback />;
+  if (tenantHostStatus === "invalid") return <UnknownTenantHostPage />;
 
   return (
     <ErrorBoundary>

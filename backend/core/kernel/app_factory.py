@@ -13,6 +13,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.requests import Request
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -25,7 +26,9 @@ from core.extensions.tenant.middleware import TenantMiddleware
 from core.extensions.tenant.router.tenant_router import router as tenant_api_router
 from core.extensions.tenant.service import register_manifest_tenant_schema_hooks
 from core.kernel.config.config_loader import settings
+from core.kernel.config.environment import get_app_env
 from core.kernel.logging.observability import configure_structured_logging, increment_metric, log_exception_event, log_structured_event
+from core.kernel.logging.telemetry import configure_runtime_telemetry
 from core.kernel.middleware.observability import CorrelationIdMiddleware, RequestTimingMiddleware
 from core.kernel.middleware.security import AuthMiddleware, CSRFMiddleware, SecurityHeadersMiddleware
 from core.kernel.security.security_bootstrap import assert_security_ready
@@ -35,6 +38,7 @@ from core.platform.service_keys import (
     PLATFORM_TENANT_LIFECYCLE_POLICY,
 )
 from core.kernel.security.rate_limit import limiter
+from core.kernel.security.rate_limit.rate_limit_middleware import enforce_fallback_throttle
 from lang.messages import get_message, lang_from_request
 
 configure_structured_logging()
@@ -126,6 +130,14 @@ def _register_exception_handlers(app: FastAPI) -> None:
 
 # Ez a függvény regisztrálja a(z) middlewares logikáját.
 def _register_middlewares(app: FastAPI, manifest: PlatformManifest) -> None:
+    @app.middleware("http")
+    async def fallback_endpoint_throttle(request: Request, call_next):
+        allowed, _ = enforce_fallback_throttle(request)
+        if not allowed:
+            return JSONResponse(status_code=429, content={"detail": "Túl sok kérés. Próbáld újra később."})
+        return await call_next(request)
+
+    app.add_middleware(SlowAPIMiddleware)
     if os.environ.get("DISABLE_CSRF") != "1":
         app.add_middleware(CSRFMiddleware)
 
@@ -195,6 +207,15 @@ def _register_manifest_hooks(manifest: PlatformManifest) -> None:
 def create_platform_app(manifest: PlatformManifest) -> FastAPI:
     assert_security_ready(settings)
     _register_manifest_hooks(manifest)
+    app_env = get_app_env()
+    docs_url = manifest.docs_url
+    redoc_url = manifest.redoc_url
+    openapi_url = "/openapi.json"
+    if app_env == "prod":
+        # Productionben az OpenAPI/Swagger felület ne legyen nyílt interneten.
+        docs_url = None
+        redoc_url = None
+        openapi_url = None
 
     # Ez az aszinkron függvény a(z) lifespan logikáját valósítja meg.
     @asynccontextmanager
@@ -213,10 +234,12 @@ def create_platform_app(manifest: PlatformManifest) -> FastAPI:
         title=manifest.app_name,
         description=manifest.description,
         version=manifest.version,
-        docs_url=manifest.docs_url,
-        redoc_url=manifest.redoc_url,
+        docs_url=docs_url,
+        redoc_url=redoc_url,
+        openapi_url=openapi_url,
         lifespan=lifespan,
     )
+    configure_runtime_telemetry(settings, app)
     app.state.limiter = limiter
     app.state.platform_manifest = manifest
     _register_exception_handlers(app)

@@ -12,6 +12,22 @@ export function getModule(): FrontendModuleDefinition {
         requiredPermission: "settings.read",
         loader: () => import("@frontend/features/billing/pages/BillingInvoicesPage"),
       },
+      {
+        key: "billing.settleCheckout",
+        path: "/admin/szamlak/kiegyenlites",
+        layout: "main",
+        requiresAuth: true,
+        requiredPermission: "settings.read",
+        loader: () => import("@frontend/features/billing/pages/BillingSettleCheckoutPage"),
+      },
+      {
+        key: "billing.dateSimulation",
+        path: "/admin/datum-szimulacio",
+        layout: "main",
+        requiresAuth: true,
+        requiredPermission: "settings.read",
+        loader: () => import("@frontend/features/billing/pages/BillingDateSimulationPage"),
+      },
     ],
     menuItems: () => [
       {

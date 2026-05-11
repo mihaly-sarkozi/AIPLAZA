@@ -5,7 +5,14 @@ from fastapi import APIRouter, Body, Depends, HTTPException
 from core.capabilities.users.dto import User
 from core.di import RequiredTenantContextDep, service_dependency
 from core.platform.auth.auth_dependencies import require_permission
-from core.platform.domain.errors import DomainManagementBlockedError, DomainNotFoundError, DomainTakenError, TenantNotFoundError
+from core.platform.domain.errors import (
+    DomainManagementBlockedError,
+    DomainNotFoundError,
+    DomainPrimaryDeleteBlockedError,
+    DomainTakenError,
+    TenantNotFoundError,
+)
+from core.platform.domain.errors import DomainDnsVerificationFailedError
 from core.platform.domain.dto import (
     DomainCreateRequest,
     DomainOverviewResponse,
@@ -48,6 +55,8 @@ def add_custom_domain(
         raise HTTPException(status_code=404, detail="tenant_not_found")
     except DomainManagementBlockedError as exc:
         raise HTTPException(status_code=403, detail=str(exc))
+    except DomainDnsVerificationFailedError as exc:
+        raise HTTPException(status_code=400, detail=f"domain_dns_verification_failed:{exc.reason}")
 
 
 @router.post("/platform/domain/custom/verify", response_model=DomainRecordResponse)
@@ -65,6 +74,26 @@ def verify_custom_domain(
         )
     except DomainNotFoundError:
         raise HTTPException(status_code=404, detail="domain_not_found")
+    except TenantNotFoundError:
+        raise HTTPException(status_code=404, detail="tenant_not_found")
+    except DomainManagementBlockedError as exc:
+        raise HTTPException(status_code=403, detail=str(exc))
+
+
+@router.post("/platform/domain/custom/delete")
+def delete_custom_domain(
+    tenant: RequiredTenantContextDep,
+    body: DomainVerifyRequest = Body(...),
+    svc: DomainService = Depends(get_domain_service),
+    current_user: User = Depends(require_permission("domain.write")),
+):
+    try:
+        svc.delete_custom_domain(tenant.slug, body.domain)
+        return {"status": "ok"}
+    except DomainNotFoundError:
+        raise HTTPException(status_code=404, detail="domain_not_found")
+    except DomainPrimaryDeleteBlockedError:
+        raise HTTPException(status_code=400, detail="domain_primary_delete_blocked")
     except TenantNotFoundError:
         raise HTTPException(status_code=404, detail="tenant_not_found")
     except DomainManagementBlockedError as exc:

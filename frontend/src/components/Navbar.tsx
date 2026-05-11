@@ -4,34 +4,47 @@ import { GearIcon } from "@radix-ui/react-icons";
 import { useTranslation } from "../i18n";
 import { useAuthStore, isDemoInitialPasswordMode } from "../store/authStore";
 import { hasUserPermission } from "../platform/permissions";
+import { useBillingOverview } from "../features/billing/hooks/useBilling";
+import { getModuleMenuDefinitions } from "../platform/moduleRegistry";
 
 type NavbarProps = {
   onOpenProfile?: () => void;
   onOpenChangePassword?: () => void;
-  onOpenSystemSettings?: () => void;
+  topOffsetClassName?: string;
 };
 
-export default function Navbar({ onOpenProfile, onOpenChangePassword, onOpenSystemSettings }: NavbarProps) {
+export default function Navbar({
+  onOpenProfile,
+  onOpenChangePassword,
+  topOffsetClassName = "top-0",
+}: NavbarProps) {
   const { t } = useTranslation();
   const user = useAuthStore((s) => s.user);
   const logout = useAuthStore((s) => s.logout);
+  const { data: billingOverview } = useBillingOverview({ enabled: user?.role === "owner" });
   const navigate = useNavigate();
   const location = useLocation();
   const [menuOpen, setMenuOpen] = useState(false);
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
+  const hamburgerButtonRef = useRef<HTMLDivElement | null>(null);
+  const hamburgerMenuRef = useRef<HTMLDivElement | null>(null);
   const profileMenuRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     const onPointerDown = (event: MouseEvent) => {
-      if (!profileMenuOpen) return;
       const target = event.target as Node | null;
-      if (profileMenuRef.current && target && !profileMenuRef.current.contains(target)) {
+      if (profileMenuOpen && profileMenuRef.current && target && !profileMenuRef.current.contains(target)) {
         setProfileMenuOpen(false);
+      }
+      const clickedHamburgerButton = Boolean(hamburgerButtonRef.current && target && hamburgerButtonRef.current.contains(target));
+      const clickedHamburgerMenu = Boolean(hamburgerMenuRef.current && target && hamburgerMenuRef.current.contains(target));
+      if (menuOpen && !clickedHamburgerButton && !clickedHamburgerMenu) {
+        setMenuOpen(false);
       }
     };
     document.addEventListener("mousedown", onPointerDown);
     return () => document.removeEventListener("mousedown", onPointerDown);
-  }, [profileMenuOpen]);
+  }, [menuOpen, profileMenuOpen]);
 
   const handleLogout = () => {
     setMenuOpen(false);
@@ -45,22 +58,38 @@ export default function Navbar({ onOpenProfile, onOpenChangePassword, onOpenSyst
     navigate(path);
   };
 
+  const hasPaidInvoice = (billingOverview?.invoices ?? []).some((invoice) => {
+    const status = String(invoice.status ?? "").trim().toLowerCase();
+    return status === "paid" || status === "simulated_paid";
+  });
+
+  const visibleMenuItems = getModuleMenuDefinitions()
+    .filter((item) => (item.requiresAuth ? Boolean(user) : true))
+    .filter((item) => (item.requiredPermission ? hasUserPermission(user, item.requiredPermission) : true))
+    .filter((item) => (item.key === "billing.menu" ? hasPaidInvoice : true))
+    .filter((item) => (item.key === "billing.dateSimulation" ? import.meta.env.DEV : true))
+    .sort((a, b) => (a.order ?? 999) - (b.order ?? 999))
+    .map((item) => ({
+      key: item.key,
+      label: t(item.labelKey),
+      path: item.path,
+      order: item.order ?? 999,
+    }));
+
+  if (import.meta.env.DEV && hasUserPermission(user, "settings.read")) {
+    visibleMenuItems.push({
+      key: "billing.dateSimulation.dev",
+      label: t("nav.dateSimulation"),
+      path: "/admin/datum-szimulacio",
+      order: 46,
+    });
+  }
+
   const leftMenuSections = [
-    [
-      { key: "chat", label: t("nav.chat"), path: "/chat", visible: Boolean(user) },
-      { key: "knowledge", label: t("nav.knowledgeBase"), path: "/kb", visible: hasUserPermission(user, "knowledge.read") },
-    ],
-    [
-      { key: "traffic", label: t("nav.traffic"), path: "/admin/forgalom", visible: hasUserPermission(user, "settings.read") },
-      { key: "packages", label: t("nav.packages"), path: "/admin/csomagok", visible: hasUserPermission(user, "settings.read") },
-      { key: "billing", label: t("nav.invoices"), path: "/admin/szamlak", visible: hasUserPermission(user, "settings.read") },
-    ],
-    [
-      { key: "roles", label: t("roles.title"), path: "/admin/roles", visible: hasUserPermission(user, "users.write") },
-    ],
-  ]
-    .map((section) => section.filter((item) => item.visible))
-    .filter((section) => section.length > 0);
+    visibleMenuItems.filter((item) => item.order < 30),
+    visibleMenuItems.filter((item) => item.order >= 30 && item.order < 50),
+    visibleMenuItems.filter((item) => item.order >= 50),
+  ].filter((section) => section.length > 0);
 
   const showHamburger = !user || user.role === "owner";
 
@@ -69,10 +98,10 @@ export default function Navbar({ onOpenProfile, onOpenChangePassword, onOpenSyst
   }, [showHamburger]);
 
   return (
-    <nav className="w-full bg-[var(--color-background)] text-[var(--color-foreground)] border-b border-[var(--color-border)] fixed top-0 left-0 z-50">
+    <nav className={`w-full bg-[var(--color-background)] text-[var(--color-foreground)] border-b border-[var(--color-border)] fixed ${topOffsetClassName} left-0 z-50`}>
       <div className="p-2 flex justify-between items-center">
         {/* Bal oldal: hamburger + BrainBankCenter */}
-        <div className="flex items-center gap-2 min-w-0">
+        <div ref={hamburgerButtonRef} className="flex items-center gap-2 min-w-0">
           {showHamburger ? (
             <button
               type="button"
@@ -135,7 +164,7 @@ export default function Navbar({ onOpenProfile, onOpenChangePassword, onOpenSyst
                   setMenuOpen(false);
                   setProfileMenuOpen((v) => !v);
                 }}
-                className="p-2 rounded hover:bg-gray-200 dark:hover:bg-gray-700 shrink-0"
+                className="p-2 rounded shrink-0 hover:bg-gray-200 dark:hover:bg-gray-700"
                 aria-label={t("nav.settings")}
               >
                 <GearIcon className="w-5 h-5 text-[var(--color-foreground)]" />
@@ -168,21 +197,6 @@ export default function Navbar({ onOpenProfile, onOpenChangePassword, onOpenSyst
                   >
                     {t(user && isDemoInitialPasswordMode(user) ? "nav.setInitialPassword" : "nav.changePassword")}
                   </button>
-                  {user?.role === "owner" ? (
-                    <button
-                      onClick={() => {
-                        if (onOpenSystemSettings) {
-                          setProfileMenuOpen(false);
-                          onOpenSystemSettings();
-                          return;
-                        }
-                        go("/admin/settings?section=system");
-                      }}
-                      className="w-full text-left px-4 py-2 text-sm hover:bg-[var(--color-border)]/20"
-                    >
-                      {t("nav.systemSettings")}
-                    </button>
-                  ) : null}
                 </div>
               )}
             </>
@@ -192,7 +206,7 @@ export default function Navbar({ onOpenProfile, onOpenChangePassword, onOpenSyst
 
       {/* Lenyíló menü – keskeny, balra igazított sáv */}
       {showHamburger && menuOpen && (
-        <div className="absolute left-2 top-full mt-2 w-56 rounded-lg border border-[var(--color-border)] bg-[var(--color-background)] shadow-lg py-2 z-[60]">
+        <div ref={hamburgerMenuRef} className="absolute left-2 top-full mt-2 w-56 rounded-lg border border-[var(--color-border)] bg-[var(--color-background)] shadow-lg py-2 z-[60]">
           {leftMenuSections.map((section, sectionIdx) => (
             <div key={`menu-section-${sectionIdx}`} className="flex flex-col gap-1 px-2">
               {section.map((item) => (

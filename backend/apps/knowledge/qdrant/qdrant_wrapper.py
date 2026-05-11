@@ -6,11 +6,11 @@ from qdrant_client import models as qm
 from qdrant_client.http.exceptions import ResponseHandlingException, UnexpectedResponse
 
 _log = logging.getLogger(__name__)
-from openai import AsyncOpenAI
 from typing import Any
 import asyncio
 import uuid as uuid_lib
 import re
+from apps.knowledge.ai.embedding_provider import EmbeddingProvider
 from core.kernel.config import app_settings
 
 
@@ -24,8 +24,7 @@ class QdrantClientWrapper:
         self,
         url: str,
         api_key: str,
-        openai_key: str,
-        embedding_model: str = "text-embedding-3-large",
+        embedding_provider: EmbeddingProvider,
         timeout: int | None = None,
     ):
         client_kwargs: dict[str, Any] = {
@@ -37,9 +36,9 @@ class QdrantClientWrapper:
         if timeout is not None:
             client_kwargs["timeout"] = int(timeout)
         self.client = QdrantClient(**client_kwargs)
-        self.openai = AsyncOpenAI(api_key=openai_key)
-        self.embedding_model = embedding_model
-        self.vector_size = 3072  # text-embedding-3-large
+        self.embedding_provider = embedding_provider
+        self.embedding_model = str(getattr(embedding_provider, "model_key", "unknown"))
+        self.vector_size = int(getattr(embedding_provider, "vector_size", 1024) or 1024)
         self._embedding_cache: dict[str, list[float]] = {}
         self._embedding_cache_order: list[str] = []
         self._embedding_cache_max = 64
@@ -181,15 +180,13 @@ class QdrantClientWrapper:
         return max(0.0, min(1.0, matched / total))
 
     async def embed_text(self, text: str) -> list[float]:
-        """Szöveg embedding generálása OpenAI API-val."""
+        """Szöveg embedding generálása konfigurált providerrel."""
         normalized = " ".join(str(text or "").split())
+        if len(normalized) > 12000:
+            normalized = normalized[:12000]
         if normalized in self._embedding_cache:
             return list(self._embedding_cache[normalized])
-        response = await self.openai.embeddings.create(
-            model=self.embedding_model,
-            input=normalized
-        )
-        vector = response.data[0].embedding
+        vector = await self.embedding_provider.embed_text(normalized)
         self._embedding_cache[normalized] = vector
         self._embedding_cache_order.append(normalized)
         if len(self._embedding_cache_order) > self._embedding_cache_max:
@@ -661,6 +658,30 @@ class QdrantClientWrapper:
     def delete_collection(self, name: str) -> None:
         """Kollekció törlése Qdrant-ból."""
         self.client.delete_collection(collection_name=name)
+
+    def collection_storage_stats(self, name: str) -> dict[str, int]:
+        """Qdrant kollekció becsült vektormérete bájtban."""
+        try:
+            info = self.client.get_collection(collection_name=name)
+        except Exception:
+            return {"points_count": 0, "vectors_count": 0, "vector_size": 0, "estimated_bytes": 0}
+        points_count = int(getattr(info, "points_count", None) or 0)
+        vectors_count = int(getattr(info, "vectors_count", None) or points_count or 0)
+        vector_size = int(self.vector_size or 0)
+        try:
+            vectors_config = getattr(getattr(info, "config", None), "params", None)
+            vectors = getattr(vectors_config, "vectors", None)
+            if getattr(vectors, "size", None):
+                vector_size = int(vectors.size)
+        except Exception:
+            vector_size = int(self.vector_size or 0)
+        estimated_bytes = max(0, vectors_count * vector_size * 4)
+        return {
+            "points_count": points_count,
+            "vectors_count": vectors_count,
+            "vector_size": vector_size,
+            "estimated_bytes": estimated_bytes,
+        }
 
     async def insert(
         self,

@@ -53,6 +53,7 @@ class AuthPlatformModule(AppModule):
             two_factor_service,
             container.security.audit_service,
             two_factor_settings=settings_service,
+            user_authenticator_repository=repos.user_authenticator_repo,
             transaction_manager=container.infrastructure.db_session_factory.transaction,
             clock=clock,
         )

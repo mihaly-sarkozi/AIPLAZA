@@ -25,6 +25,22 @@ class IngestCreateUrlRequest(BaseModel):
     items: list[IngestCreateUrlItem] = Field(..., min_length=1)
 
 
+class IngestFileEstimateItemResponse(BaseModel):
+    filename: str
+    mime_type: str | None = None
+    char_count: int = 0
+    storage_bytes: int = 0
+
+
+class IngestFileEstimateResponse(BaseModel):
+    file_count: int
+    total_char_count: int
+    total_storage_bytes: int
+    can_start: bool
+    reason: str | None = None
+    items: list[IngestFileEstimateItemResponse] = Field(default_factory=list)
+
+
 class IngestEventResponse(BaseModel):
     id: str
     ingest_run_id: str
@@ -58,6 +74,8 @@ class IngestItemResponse(BaseModel):
     started_at: datetime | None = None
     completed_at: datetime | None = None
     updated_at: datetime
+    created_by: int | None = None
+    created_by_label: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -79,9 +97,20 @@ class IngestRunResponse(BaseModel):
     started_at: datetime | None = None
     completed_at: datetime | None = None
     updated_at: datetime
+    created_by: int | None = None
+    created_by_label: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
     items: list[IngestItemResponse] = Field(default_factory=list)
     events: list[IngestEventResponse] = Field(default_factory=list)
+
+
+class IngestRunListResponse(BaseModel):
+    items: list[IngestRunResponse] = Field(default_factory=list)
+    total_count: int = 0
+    limit: int
+    offset: int
+    has_more: bool = False
+    summary: dict[str, Any] = Field(default_factory=dict)
 
 
 class CitationResponse(BaseModel):

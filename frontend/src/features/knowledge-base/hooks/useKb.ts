@@ -1,8 +1,11 @@
 import {
   useQuery,
+  useInfiniteQuery,
   useMutation,
   useQueryClient,
   type UseQueryOptions,
+  type InfiniteData,
+  type UseInfiniteQueryOptions,
   type UseMutationOptions,
 } from "@tanstack/react-query";
 import {
@@ -13,31 +16,30 @@ import {
   createUrlIngestRun,
   updateKb,
   deleteKb,
-  clearKb,
   getIngestRun,
   getKbPermissions,
   listIngestRuns,
   reprocessIngestItem,
   setKbPermissions,
   type IngestRun,
+  type IngestRunListResponse,
   type KbItem,
   type KbPermissionItem,
   type CreateKbPayload,
   type UpdateKbPayload,
   type DeleteKbPayload,
-  type ClearKbPayload,
   type PersonalDataMode,
 } from "../services";
 import { queryKeys } from "../../../queryKeys";
 
 export type {
   IngestRun,
+  IngestRunListResponse,
   KbItem,
   KbPermissionItem,
   CreateKbPayload,
   UpdateKbPayload,
   DeleteKbPayload,
-  ClearKbPayload,
   PersonalDataMode,
 };
 
@@ -85,7 +87,10 @@ export function useCreateKbMutation(
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: createKb,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.kb }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.kb });
+      queryClient.invalidateQueries({ queryKey: queryKeys.billingOverview });
+    },
     ...options,
   });
 }
@@ -96,7 +101,10 @@ export function useUpdateKbMutation(
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: updateKb,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.kb }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.kb });
+      queryClient.invalidateQueries({ queryKey: queryKeys.billingOverview });
+    },
     ...options,
   });
 }
@@ -107,20 +115,9 @@ export function useDeleteKbMutation(
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: deleteKb,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.kb }),
-    ...options,
-  });
-}
-
-export function useClearKbMutation(
-  options?: UseMutationOptions<unknown, Error, ClearKbPayload>
-) {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: clearKb,
-    onSuccess: async (_, { uuid }) => {
-      await queryClient.invalidateQueries({ queryKey: queryKeys.kb });
-      await queryClient.invalidateQueries({ queryKey: queryKeys.kbIngestRuns(uuid) });
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.kb });
+      queryClient.invalidateQueries({ queryKey: queryKeys.billingOverview });
     },
     ...options,
   });
@@ -128,7 +125,7 @@ export function useClearKbMutation(
 
 export function useIngestRuns(
   kbUuid: string | undefined,
-  options?: Omit<UseQueryOptions<IngestRun[]>, "queryKey" | "queryFn">
+  options?: Omit<UseQueryOptions<IngestRunListResponse>, "queryKey" | "queryFn">
 ) {
   return useQuery({
     queryKey: queryKeys.kbIngestRuns(kbUuid ?? ""),
@@ -136,6 +133,63 @@ export function useIngestRuns(
     enabled: !!kbUuid,
     ...options,
   });
+}
+
+export function useInfiniteIngestRuns(
+  kbUuid: string | undefined,
+  options?: Omit<
+    UseInfiniteQueryOptions<
+      IngestRunListResponse,
+      Error,
+      InfiniteData<IngestRunListResponse, number>,
+      readonly unknown[],
+      number
+    >,
+    "queryKey" | "queryFn" | "initialPageParam" | "getNextPageParam"
+  >
+) {
+  return useInfiniteQuery<IngestRunListResponse, Error, InfiniteData<IngestRunListResponse, number>, readonly unknown[], number>({
+    queryKey: [...queryKeys.kbIngestRuns(kbUuid ?? ""), "infinite"],
+    queryFn: ({ pageParam }) => listIngestRuns(kbUuid!, { limit: 10, offset: pageParam }),
+    initialPageParam: 0,
+    getNextPageParam: (lastPage) => (lastPage.has_more ? lastPage.offset + lastPage.limit : undefined),
+    enabled: !!kbUuid,
+    ...options,
+  });
+}
+
+function insertIngestRunIntoInfiniteCache(
+  previous: InfiniteData<IngestRunListResponse, number> | undefined,
+  run: IngestRun
+): InfiniteData<IngestRunListResponse, number> | undefined {
+  if (!previous || previous.pages.length === 0) return previous;
+  if (previous.pages.some((page) => page.items.some((item) => item.id === run.id))) return previous;
+  const [firstPage, ...restPages] = previous.pages;
+  const nextFirstPage: IngestRunListResponse = {
+    ...firstPage,
+    items: [run, ...firstPage.items],
+    total_count: firstPage.total_count + 1,
+    summary: {
+      ...firstPage.summary,
+      total_run_count: Number(firstPage.summary?.total_run_count ?? firstPage.total_count) + 1,
+    },
+  };
+  return {
+    ...previous,
+    pages: [nextFirstPage, ...restPages],
+  };
+}
+
+function useStoreCreatedIngestRun() {
+  const queryClient = useQueryClient();
+  return (run: IngestRun) => {
+    queryClient.setQueryData(queryKeys.kbIngestRun(run.id), run);
+    queryClient.setQueryData<InfiniteData<IngestRunListResponse, number>>(
+      [...queryKeys.kbIngestRuns(run.corpus_uuid), "infinite"],
+      (previous) => insertIngestRunIntoInfiniteCache(previous, run)
+    );
+    queryClient.invalidateQueries({ queryKey: queryKeys.kbIngestRuns(run.corpus_uuid) });
+  };
 }
 
 export function useIngestRun(
@@ -153,28 +207,30 @@ export function useIngestRun(
 export function useCreateTextIngestMutation(
   options?: UseMutationOptions<IngestRun, Error, { kbUuid: string; title: string; text: string }>
 ) {
-  const queryClient = useQueryClient();
+  const storeCreatedRun = useStoreCreatedIngestRun();
+  const { onSuccess, ...mutationOptions } = options ?? {};
   return useMutation({
     mutationFn: ({ kbUuid, title, text }) => createTextIngestRun(kbUuid, { title, text }),
-    onSuccess: (run) => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.kbIngestRuns(run.corpus_uuid) });
-      queryClient.setQueryData(queryKeys.kbIngestRun(run.id), run);
+    onSuccess: (run, variables, onMutateResult, context) => {
+      storeCreatedRun(run);
+      onSuccess?.(run, variables, onMutateResult, context);
     },
-    ...options,
+    ...mutationOptions,
   });
 }
 
 export function useCreateFileIngestMutation(
-  options?: UseMutationOptions<IngestRun, Error, { kbUuid: string; files: File[] }>
+  options?: UseMutationOptions<IngestRun, Error, { kbUuid: string; files: File[]; characterCounts?: number[] }>
 ) {
-  const queryClient = useQueryClient();
+  const storeCreatedRun = useStoreCreatedIngestRun();
+  const { onSuccess, ...mutationOptions } = options ?? {};
   return useMutation({
-    mutationFn: ({ kbUuid, files }) => createFileIngestRun(kbUuid, files),
-    onSuccess: (run) => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.kbIngestRuns(run.corpus_uuid) });
-      queryClient.setQueryData(queryKeys.kbIngestRun(run.id), run);
+    mutationFn: ({ kbUuid, files, characterCounts }) => createFileIngestRun(kbUuid, files, characterCounts),
+    onSuccess: (run, variables, onMutateResult, context) => {
+      storeCreatedRun(run);
+      onSuccess?.(run, variables, onMutateResult, context);
     },
-    ...options,
+    ...mutationOptions,
   });
 }
 
@@ -185,14 +241,15 @@ export function useCreateUrlIngestMutation(
     { kbUuid: string; items: Array<{ url: string; title?: string }> }
   >
 ) {
-  const queryClient = useQueryClient();
+  const storeCreatedRun = useStoreCreatedIngestRun();
+  const { onSuccess, ...mutationOptions } = options ?? {};
   return useMutation({
     mutationFn: ({ kbUuid, items }) => createUrlIngestRun(kbUuid, items),
-    onSuccess: (run) => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.kbIngestRuns(run.corpus_uuid) });
-      queryClient.setQueryData(queryKeys.kbIngestRun(run.id), run);
+    onSuccess: (run, variables, onMutateResult, context) => {
+      storeCreatedRun(run);
+      onSuccess?.(run, variables, onMutateResult, context);
     },
-    ...options,
+    ...mutationOptions,
   });
 }
 

@@ -12,5 +12,9 @@ class KnowledgeBase(BaseModel):
     qdrant_collection_name: str
     personal_data_mode: str = "no_personal_data"   # no_personal_data | with_confirmation | allowed_not_to_ai
     personal_data_sensitivity: str = "medium"       # weak | medium | strong
+    pii_depersonalization_enabled: bool = True
     created_at: datetime | None
     updated_at: datetime | None
+    deleted_at: datetime | None = None
+    deleted_display_name: str | None = None
+    deleted_training_char_count: int = 0

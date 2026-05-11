@@ -47,6 +47,7 @@ PLATFORM_AUTH_TWO_FACTOR_SERVICE = "platform.auth.two_factor_service"
 PLATFORM_LOGIN_SERVICE = "platform.login_service"
 PLATFORM_REFRESH_SERVICE = "platform.refresh_service"
 PLATFORM_LOGOUT_SERVICE = "platform.logout_service"
+PLATFORM_ADMIN_SERVICE = "platform.admin.service"
 
 # ---------------------------------------------------------------------------
 # Users

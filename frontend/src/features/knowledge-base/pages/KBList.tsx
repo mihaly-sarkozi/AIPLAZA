@@ -13,7 +13,6 @@ import {
   useCreateKbMutation,
   useUpdateKbMutation,
   useDeleteKbMutation,
-  useClearKbMutation,
   useKbPermissions,
   useSetKbPermissionsMutation,
   type KbItem,
@@ -25,6 +24,47 @@ import { useBillingOverview } from "../../billing/hooks/useBilling";
 const PERM_NONE = "none";
 const PERM_USE = "use";
 const PERM_TRAIN = "train";
+const KB_NAME_MAX_LENGTH = 200;
+const LIST_PAGE_SIZE = 10;
+
+function formatBytes(value: number | null | undefined): string {
+  const bytes = Math.max(0, Number(value || 0));
+  if (bytes < 1024) return `${Math.round(bytes)} B`;
+  const units = ["KB", "MB", "GB", "TB"];
+  let size = bytes / 1024;
+  let unitIndex = 0;
+  while (size >= 1024 && unitIndex < units.length - 1) {
+    size /= 1024;
+    unitIndex += 1;
+  }
+  return `${new Intl.NumberFormat("hu-HU", { maximumFractionDigits: size >= 10 ? 1 : 2 }).format(size)} ${units[unitIndex]}`;
+}
+
+function formatInteger(value: number | null | undefined): string {
+  return new Intl.NumberFormat("hu-HU").format(Math.max(0, Number(value || 0)));
+}
+
+function formatThousands(value: number | null | undefined): string {
+  const safeValue = Math.max(0, Number(value || 0));
+  if (safeValue < 1000) return formatInteger(safeValue);
+  return `${new Intl.NumberFormat("hu-HU", { maximumFractionDigits: 1 }).format(safeValue / 1000)}E`;
+}
+
+function metricValue(
+  kb: KbItem,
+  key: "file_bytes" | "database_bytes" | "qdrant_bytes" | "total_bytes" | "training_char_count"
+): number {
+  const value = kb.storage_metrics?.[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+function isDeletedKb(kb: KbItem): boolean {
+  return kb.status === "deleted" || Boolean(kb.deleted_at);
+}
+
+function nameMaxLengthMessage(t: (key: string) => string): string {
+  return t("kb.nameMaxLength").replace("{{count}}", String(KB_NAME_MAX_LENGTH));
+}
 
 export default function KBList() {
   const { t } = useTranslation();
@@ -33,50 +73,85 @@ export default function KBList() {
   const currentUserId = useAuthStore((s) => s.user?.id);
   const canManage = useAuthStore((s) => s.user?.role === "admin" || s.user?.role === "owner");
   const isOwner = useAuthStore((s) => s.user?.role === "owner");
-  const { data: items = [], isLoading: loading, error: listError } = useKbList();
+  const { data: items = [], isLoading: loading, error: listError } = useKbList({
+    refetchOnMount: "always",
+  });
   const { data: users = [] } = useUsers({ enabled: canManage });
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [createFormError, setCreateFormError] = useState<string | null>(null);
   const [editFormError, setEditFormError] = useState<string | null>(null);
-  const [editingKb, setEditingKb] = useState<KbItem | null>(null);
   const [settingsKb, setSettingsKb] = useState<KbItem | null>(null);
+  const [piiDepersonalizationEnabled, setPiiDepersonalizationEnabled] = useState(true);
   const [deleteConfirmKb, setDeleteConfirmKb] = useState<KbItem | null>(null);
   const [deleteTypeName, setDeleteTypeName] = useState("");
-  const [clearConfirmKb, setClearConfirmKb] = useState<KbItem | null>(null);
-  const [clearTypeName, setClearTypeName] = useState("");
   const [savedModalOpen, setSavedModalOpen] = useState(false);
-  const [showDemoKbLimitModal, setShowDemoKbLimitModal] = useState(false);
+  const [showKbLimitModal, setShowKbLimitModal] = useState(false);
+  const [visibleCount, setVisibleCount] = useState(LIST_PAGE_SIZE);
+  const loadMoreRef = useRef<HTMLDivElement | null>(null);
 
   const { data: billingOverview, isPending: billingOverviewPending } = useBillingOverview({
     enabled: isOwner,
+    refetchOnMount: "always",
   });
-  const canDeleteKb = isOwner && import.meta.env.DEV;
-  const canClearKb = isOwner && (import.meta.env.DEV || Boolean(billingOverview?.demo_mode));
+  const paymentWarning = (billingOverview?.payment_warning as Record<string, unknown> | null | undefined) ?? null;
+  const billingRestricted =
+    String((billingOverview?.subscription as Record<string, unknown> | undefined)?.status ?? "").toLowerCase() === "restricted" ||
+    paymentWarning?.is_expired === true;
+  const demoMode = Boolean(billingOverview?.demo_mode);
+  const canDeleteKb = isOwner && (import.meta.env.DEV || demoMode);
+  const activeKnowledgeBaseCount = useMemo(() => items.filter((kb) => !isDeletedKb(kb)).length, [items]);
+  const visibleItems = useMemo(() => {
+    return [...items]
+      .filter((kb) => !isDeletedKb(kb) || metricValue(kb, "training_char_count") > 0)
+      .sort((left, right) => Number(isDeletedKb(left)) - Number(isDeletedKb(right)));
+  }, [items]);
+  const displayedItems = useMemo(() => visibleItems.slice(0, visibleCount), [visibleItems, visibleCount]);
 
-  /** Tudástár-létrehozás helyett csomag / korlát felugró, ha a csomag szerinti limit elérve (pl. demo: 1 db). */
+  useEffect(() => {
+    setVisibleCount(LIST_PAGE_SIZE);
+  }, [visibleItems.length]);
+
+  useEffect(() => {
+    const node = loadMoreRef.current;
+    if (!node || visibleCount >= visibleItems.length) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          setVisibleCount((count) => Math.min(count + LIST_PAGE_SIZE, visibleItems.length));
+        }
+      },
+      { rootMargin: "320px" }
+    );
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [visibleCount, visibleItems.length]);
+
+  /** Tudástár-létrehozás helyett csomag / korlát felugró, ha az aktuális csomag szerinti limit elérve. */
   const kbPackageLimitBlocked = useMemo(() => {
     if (!isOwner || billingOverviewPending || !billingOverview) return false;
     const kbMaxRaw = billingOverview.limits?.knowledge_bases;
-    const resources = billingOverview.usage?.resources as { knowledge_bases?: number } | undefined;
-    const kbUsedRaw = resources?.knowledge_bases;
     const kbMax = typeof kbMaxRaw === "number" ? kbMaxRaw : Number.NaN;
-    const kbUsed = typeof kbUsedRaw === "number" ? kbUsedRaw : items.length;
-    const atPlanKbLimit = Number.isFinite(kbMax) && kbMax > 0 && kbUsed >= kbMax;
-    const demoSecondKb = Boolean(billingOverview.demo_mode && items.length >= 1);
-    return atPlanKbLimit || demoSecondKb;
-  }, [isOwner, billingOverviewPending, billingOverview, items.length]);
+    return Number.isFinite(kbMax) && kbMax > 0 && activeKnowledgeBaseCount >= kbMax;
+  }, [isOwner, billingOverviewPending, billingOverview, activeKnowledgeBaseCount]);
+
+  const kbLimitDetails = useMemo(() => {
+    const kbMaxRaw = billingOverview?.limits?.knowledge_bases;
+    return {
+      max: typeof kbMaxRaw === "number" ? kbMaxRaw : null,
+      used: activeKnowledgeBaseCount,
+    };
+  }, [billingOverview, activeKnowledgeBaseCount]);
 
   const createKbMutation = useCreateKbMutation();
   const updateKbMutation = useUpdateKbMutation();
   const deleteKbMutation = useDeleteKbMutation();
-  const clearKbMutation = useClearKbMutation();
   const setPermissionsMutation = useSetKbPermissionsMutation();
   const actionLoading =
     createKbMutation.isPending ||
     updateKbMutation.isPending ||
     deleteKbMutation.isPending ||
-    clearKbMutation.isPending ||
     setPermissionsMutation.isPending;
+  const settingsSaveLoading = updateKbMutation.isPending || setPermissionsMutation.isPending;
 
   const [formData, setFormData] = useState({ name: "", description: "" });
   /** Create modal: user_id -> permission (none/use/train) */
@@ -98,7 +173,7 @@ export default function KBList() {
       next[p.user_id] = p.permission;
     }
     setSettingsPermissions(next);
-  }, [settingsKb?.uuid, settingsPermsList]);
+  }, [settingsKb, settingsPermsList]);
 
 
   const usersWithPermsCreate = useMemo(() => {
@@ -123,9 +198,11 @@ export default function KBList() {
   }, [settingsPermsList, settingsPermissions]);
 
   const error = listError ? (getApiErrorMessage(listError) ?? t("kb.errorLoad")) : null;
-  const totalKnowledgeBases = items.length;
-  const knowledgeBasesWithDescription = items.filter((kb) => (kb.description ?? "").trim().length > 0).length;
-  const knowledgeBasesWithoutDescription = totalKnowledgeBases - knowledgeBasesWithDescription;
+  const totalKnowledgeBases = activeKnowledgeBaseCount;
+  const totalFileBytes = visibleItems.reduce((sum, kb) => sum + metricValue(kb, "file_bytes"), 0);
+  const totalDatabaseBytes = visibleItems.reduce((sum, kb) => sum + metricValue(kb, "database_bytes"), 0);
+  const totalTrainingChars = visibleItems.reduce((sum, kb) => sum + metricValue(kb, "training_char_count"), 0);
+  const totalStorageBytes = visibleItems.reduce((sum, kb) => sum + metricValue(kb, "total_bytes"), 0);
 
   useEffect(() => {
     const openKbCreate = Boolean((location.state as { openKbCreate?: boolean })?.openKbCreate);
@@ -133,7 +210,7 @@ export default function KBList() {
     if (isOwner && billingOverviewPending) return;
     navigate(location.pathname, { replace: true, state: {} });
     if (kbPackageLimitBlocked) {
-      setShowDemoKbLimitModal(true);
+      setShowKbLimitModal(true);
     } else {
       resetForm();
       setShowCreateModal(true);
@@ -156,22 +233,20 @@ export default function KBList() {
 
   const openCreateModal = () => {
     if (kbPackageLimitBlocked) {
-      setShowDemoKbLimitModal(true);
+      setShowKbLimitModal(true);
       return;
     }
     resetForm();
     setShowCreateModal(true);
   };
 
-  const openEditModal = (kb: KbItem) => {
-    setEditingKb(kb);
-    setEditFormError(null);
-    setFormData({ name: kb.name, description: kb.description ?? "" });
-  };
-
   const openSettingsModal = (kb: KbItem) => {
     setSettingsKb(kb);
     setSettingsPermissions({});
+    setPiiDepersonalizationEnabled(kb.pii_depersonalization_enabled !== false);
+    settingsPermsSyncedUuid.current = null;
+    setEditFormError(null);
+    setFormData({ name: kb.name, description: kb.description ?? "" });
   };
 
   const handleCreate = (e: React.FormEvent) => {
@@ -182,13 +257,16 @@ export default function KBList() {
       setCreateFormError(t("common.fieldRequired"));
       return;
     }
+    if (nameTrim.length > KB_NAME_MAX_LENGTH) {
+      setCreateFormError(nameMaxLengthMessage(t));
+      return;
+    }
     const permissions = usersWithPermsCreate
       .filter((u) => u.permission && u.permission !== PERM_NONE)
       .map((u) => ({ user_id: u.id, permission: u.permission }));
     createKbMutation.mutate(
       {
         name: nameTrim,
-        description: formData.description?.trim() || undefined,
         permissions: permissions.length ? permissions : undefined,
       },
       {
@@ -204,25 +282,39 @@ export default function KBList() {
     );
   };
 
-  const handleUpdate = () => {
-    if (!editingKb) return;
+  const handleSaveSettings = () => {
+    if (!settingsKb) return;
     const nameTrim = formData.name?.trim() ?? "";
     setEditFormError(null);
     if (!nameTrim) {
       setEditFormError(t("common.fieldRequired"));
       return;
     }
+    if (nameTrim.length > KB_NAME_MAX_LENGTH) {
+      setEditFormError(nameMaxLengthMessage(t));
+      return;
+    }
+    const permissions = usersWithPermsSettings.map((u) => ({ user_id: u.id, permission: u.permission }));
     updateKbMutation.mutate(
       {
-        uuid: editingKb.uuid,
+        uuid: settingsKb.uuid,
         name: nameTrim,
-        description: formData.description?.trim() || undefined,
+        description: settingsKb.description?.trim() || undefined,
+        pii_depersonalization_enabled: piiDepersonalizationEnabled,
       },
       {
         onSuccess: () => {
-          setSavedModalOpen(true);
-          setEditingKb(null);
-          resetForm();
+          setPermissionsMutation.mutate(
+            { uuid: settingsKb.uuid, permissions },
+            {
+              onSuccess: () => {
+                setSavedModalOpen(true);
+                setSettingsKb(null);
+                resetForm();
+              },
+              onError: (err: unknown) => toast.error(getApiErrorMessage(err) ?? t("kb.errorPermissions")),
+            }
+          );
         },
         onError: (err: unknown) => {
           toast.error(getApiErrorMessage(err) ?? t("kb.errorUpdate"));
@@ -231,25 +323,10 @@ export default function KBList() {
     );
   };
 
-  const handleSaveSettings = () => {
-    if (!settingsKb) return;
-    const permissions = usersWithPermsSettings.map((u) => ({ user_id: u.id, permission: u.permission }));
-    setPermissionsMutation.mutate(
-      { uuid: settingsKb.uuid, permissions },
-      {
-        onSuccess: () => {
-          setSavedModalOpen(true);
-          setSettingsKb(null);
-        },
-        onError: (err: unknown) => toast.error(getApiErrorMessage(err) ?? t("kb.errorPermissions")),
-      }
-    );
-  };
-
   const handleDelete = () => {
     if (!deleteConfirmKb) return;
     if (!canDeleteKb) {
-      toast.error("A tudástár törlése csak fejlesztői módban érhető el.");
+      toast.error("A tudástár törlése csak fejlesztői vagy tesztüzemmódban érhető el.");
       return;
     }
     if (deleteTypeName.trim() !== deleteConfirmKb.name) {
@@ -266,31 +343,6 @@ export default function KBList() {
         },
         onError: (err: unknown) => {
           toast.error(getApiErrorMessage(err) ?? t("kb.errorDelete"));
-        },
-      }
-    );
-  };
-
-  const handleClear = () => {
-    if (!clearConfirmKb) return;
-    if (!canClearKb) {
-      toast.error("A tudástár kiürítése csak fejlesztői módban vagy ingyenes teszt üzemmódban érhető el.");
-      return;
-    }
-    if (clearTypeName.trim() !== clearConfirmKb.name) {
-      toast.error("A megerősítő név nem egyezik a tudástár nevével.");
-      return;
-    }
-    clearKbMutation.mutate(
-      { uuid: clearConfirmKb.uuid, confirm_name: clearTypeName.trim() },
-      {
-        onSuccess: () => {
-          toast.success("A tudástár tartalma kiürítve.");
-          setClearConfirmKb(null);
-          setClearTypeName("");
-        },
-        onError: (err: unknown) => {
-          toast.error(getApiErrorMessage(err) ?? "A tudástár kiürítése sikertelen.");
         },
       }
     );
@@ -313,9 +365,16 @@ export default function KBList() {
           description={t("kb.pageIntro")}
           actions={
             isOwner ? (
-              <Button onClick={openCreateModal} disabled={actionLoading || billingOverviewPending}>
-                {t("kb.newKb")}
-              </Button>
+              <div className="flex flex-wrap items-center gap-2">
+                <Button variant="secondary" onClick={() => navigate("/admin/forgalom")}>
+                  {t("nav.traffic")}
+                </Button>
+                {!billingRestricted ? (
+                <Button onClick={openCreateModal} disabled={actionLoading || billingOverviewPending}>
+                  {t("kb.newKb")}
+                </Button>
+                ) : null}
+              </div>
             ) : null
           }
         />
@@ -324,73 +383,102 @@ export default function KBList() {
           <Alert tone="error">{error}</Alert>
         )}
 
-        <div className="grid gap-4 md:grid-cols-3">
-          <div className="app-surface p-5">
-            <p className="text-sm text-[var(--color-muted)]">{t("kb.summaryTotal")}</p>
-            <p className="mt-2 text-2xl font-semibold text-[var(--color-foreground)]">{totalKnowledgeBases}</p>
+        <dl className="grid grid-cols-3 gap-x-3 gap-y-2 rounded-2xl bg-[var(--color-card-muted)]/60 px-3 py-2 md:grid-cols-5 md:px-4">
+          <div className="min-w-0">
+            <dt className="truncate text-[10px] font-medium uppercase tracking-wide text-[var(--color-muted)] md:text-xs">{t("kb.summaryTotal")}</dt>
+            <dd className="mt-0.5 truncate text-sm font-semibold text-[var(--color-foreground)] md:text-base">{totalKnowledgeBases}</dd>
           </div>
-          <div className="app-surface p-5">
-            <p className="text-sm text-[var(--color-muted)]">{t("kb.summaryWithDescription")}</p>
-            <p className="mt-2 text-2xl font-semibold text-[var(--color-foreground)]">{knowledgeBasesWithDescription}</p>
+          <div className="min-w-0">
+            <dt className="truncate text-[10px] font-medium uppercase tracking-wide text-[var(--color-muted)] md:text-xs">{t("kb.summaryTotalSize")}</dt>
+            <dd className="mt-0.5 truncate text-sm font-semibold text-[var(--color-foreground)] md:text-base">{formatBytes(totalStorageBytes)}</dd>
           </div>
-          <div className="app-surface p-5">
-            <p className="text-sm text-[var(--color-muted)]">{t("kb.summaryWithoutDescription")}</p>
-            <p className="mt-2 text-2xl font-semibold text-[var(--color-foreground)]">{knowledgeBasesWithoutDescription}</p>
+          <div className="min-w-0">
+            <dt className="truncate text-[10px] font-medium uppercase tracking-wide text-[var(--color-muted)] md:text-xs">{t("kb.summaryFiles")}</dt>
+            <dd className="mt-0.5 truncate text-sm font-semibold text-[var(--color-foreground)] md:text-base">{formatBytes(totalFileBytes)}</dd>
           </div>
-        </div>
+          <div className="min-w-0">
+            <dt className="truncate text-[10px] font-medium uppercase tracking-wide text-[var(--color-muted)] md:text-xs">{t("kb.summaryDatabaseSize")}</dt>
+            <dd className="mt-0.5 truncate text-sm font-semibold text-[var(--color-foreground)] md:text-base">{formatBytes(totalDatabaseBytes)}</dd>
+          </div>
+          <div className="min-w-0">
+            <dt className="truncate text-[10px] font-medium uppercase tracking-wide text-[var(--color-muted)] md:text-xs">{t("kb.summaryCharacters")}</dt>
+            <dd className="mt-0.5 truncate text-sm font-semibold text-[var(--color-foreground)] md:text-base">{formatThousands(totalTrainingChars)}</dd>
+          </div>
+        </dl>
 
-        <section className="app-surface p-6">
-          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-            <div>
-              <p className="text-sm font-medium text-[var(--color-muted)]">{t("kb.listSectionLabel")}</p>
-              <h2 className="mt-1 text-xl font-semibold text-[var(--color-foreground)]">{t("kb.listSectionTitle")}</h2>
-            </div>
-            <div className="badge-soft">
-              {t("kb.liveListLabel")}
-            </div>
-          </div>
-
-          <div className="app-table-wrap mt-6">
-            <div className="app-table-head hidden grid-cols-[1fr_1.5fr_1fr] gap-4 px-5 py-3 text-sm font-medium md:grid">
+        <section>
+          <div className="app-table-wrap">
+            <div className="app-table-head hidden grid-cols-[0.75fr_2fr_0.6fr] gap-4 !bg-[#efefef] px-5 py-3 text-sm font-medium !text-[var(--color-foreground)] md:grid">
               <div>{t("kb.tableName")}</div>
-              <div>{t("kb.tableDescription")}</div>
+              <div>{t("kb.tableTraffic")}</div>
               <div>{t("kb.tableActions")}</div>
             </div>
 
             <div className="divide-y divide-[var(--color-border)]">
-              {items.map((kb) => (
-                <div key={kb.uuid} className="grid gap-4 px-5 py-4 md:grid-cols-[1fr_1.5fr_1fr] md:items-center">
-                  <div className="flex items-center gap-3">
-                    <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[var(--color-card-muted)] text-sm font-medium text-[var(--color-muted-foreground)]">
-                      {kb.name.trim().charAt(0).toUpperCase() || "?"}
-                    </div>
-                    <div className="min-w-0">
-                      <p className="truncate font-medium text-[var(--color-foreground)]">{kb.name}</p>
-                      <span className="mt-1 inline-block rounded-lg bg-[var(--color-card-muted)] px-2 py-0.5 text-xs font-medium text-[var(--color-muted-foreground)]">
-                        {t("kb.itemLabel")}
+              {displayedItems.map((kb) => {
+                const deleted = isDeletedKb(kb);
+                return (
+                <div key={kb.uuid} className={`grid gap-4 px-5 py-4 md:grid-cols-[0.75fr_2fr_0.6fr] md:items-center ${deleted ? "text-[var(--color-muted)]" : ""}`}>
+                  <div className="min-w-0">
+                    <p className={`truncate font-medium ${deleted ? "text-[var(--color-muted)]" : "text-[var(--color-foreground)]"}`}>
+                      {kb.name}
+                    </p>
+                    {deleted ? (
+                      <span className="mt-1 inline-block rounded-lg bg-[var(--color-danger-text)] px-2 py-0.5 text-xs font-medium text-white">
+                        {t("kb.statusDeleted")}
                       </span>
+                    ) : (
+                      <span className="mt-1 inline-block rounded-lg bg-[var(--color-success-text)] px-2 py-0.5 text-xs font-medium text-white">
+                        {t("kb.statusActive")}
+                      </span>
+                    )}
+                  </div>
+
+                  <div className={`text-sm ${deleted ? "text-[var(--color-muted)]" : "text-[var(--color-muted)]"}`}>
+                    <div className="rounded-lg bg-[var(--color-card-muted)] px-3 py-2 text-xs leading-5 text-[var(--color-muted-foreground)]">
+                      <span className={`font-medium ${deleted ? "text-[var(--color-muted)]" : "text-[var(--color-foreground)]"}`}>{t("kb.metricCharacters")}: {formatThousands(metricValue(kb, "training_char_count"))}</span>
+                      <span className="mx-2">|</span>
+                      {t("kb.metricSize")}: {formatBytes(metricValue(kb, "total_bytes"))}
+                      <span className="mx-2">|</span>
+                      {t("kb.metricFile")}: {formatBytes(metricValue(kb, "file_bytes"))}
+                      <span className="mx-2">|</span>
+                      {t("kb.metricDatabase")}: {formatBytes(metricValue(kb, "database_bytes"))}
+                      {canManage && !deleted ? (
+                        <div className="mt-1">
+                          <button
+                            type="button"
+                            onClick={() => navigate(`/kb/ingest/${kb.uuid}`)}
+                            className="font-medium text-[var(--color-muted)] hover:text-[var(--color-muted-foreground)] hover:underline"
+                            title={t("kb.actionTrainingLog")}
+                            aria-label={t("kb.actionTrainingLog")}
+                          >
+                            {t("kb.actionLog")} →
+                          </button>
+                        </div>
+                      ) : null}
                     </div>
                   </div>
 
-                  <div className="text-sm text-[var(--color-muted)]">{kb.description?.trim() ? kb.description : "—"}</div>
-
-                  <div className="flex flex-wrap items-center gap-2 md:justify-start">
-                    {canClearKb && (
+                  <div className="flex flex-wrap justify-end gap-2">
+                    {deleted ? (
+                      <div className="w-full rounded-lg bg-[var(--color-card-muted)] px-3 py-2 text-center text-sm font-medium text-[var(--color-muted-foreground)]">
+                        {t("kb.deletedNoActions")}
+                      </div>
+                    ) : null}
+                    {canManage && !billingRestricted && !deleted && (
                       <Button
                         type="button"
-                        title="Tudástár kiürítése"
-                        variant="danger"
-                        onClick={() => {
-                          setClearConfirmKb(kb);
-                          setClearTypeName("");
-                        }}
+                        title={t("kb.actionSettings")}
+                        variant="secondary"
+                        onClick={() => openSettingsModal(kb)}
                         disabled={actionLoading}
-                        aria-label="Tudástár kiürítése"
+                        aria-label={t("kb.actionSettings")}
+                        size="sm"
                       >
-                        Kiürítés
+                        {t("kb.actionSettings")}
                       </Button>
                     )}
-                    {canDeleteKb && (
+                    {canDeleteKb && !billingRestricted && !deleted && (
                       <Button
                         type="button"
                         title={t("kb.actionDelete")}
@@ -401,50 +489,17 @@ export default function KBList() {
                         }}
                         disabled={actionLoading}
                         aria-label={t("kb.actionDelete")}
+                        size="sm"
                       >
                         {t("kb.actionDelete")}
                       </Button>
                     )}
-                    {canManage && (
-                      <Button
-                        type="button"
-                        title={t("kb.actionPermissions")}
-                        variant="secondary"
-                        onClick={() => openSettingsModal(kb)}
-                        disabled={actionLoading}
-                        aria-label={t("kb.actionPermissions")}
-                      >
-                        {t("kb.actionPermissions")}
-                      </Button>
-                    )}
-                    {canManage && (
-                      <Button
-                        type="button"
-                        title="Ingest"
-                        variant="primary"
-                        onClick={() => navigate(`/kb/ingest/${kb.uuid}`)}
-                        disabled={actionLoading}
-                        aria-label="Ingest"
-                      >
-                        Ingest
-                      </Button>
-                    )}
-                    {canManage && (
-                      <Button
-                        type="button"
-                        title={t("kb.actionEdit")}
-                        variant="secondary"
-                        onClick={() => openEditModal(kb)}
-                        disabled={actionLoading}
-                        aria-label={t("kb.actionEdit")}
-                      >
-                        {t("kb.actionSettings")}
-                      </Button>
-                    )}
                   </div>
                 </div>
-              ))}
+                );
+              })}
             </div>
+            <div ref={loadMoreRef} className="h-8" />
           </div>
         </section>
       </div>
@@ -468,17 +523,8 @@ export default function KBList() {
                   }}
                   className="w-full bg-[var(--color-input-bg)] border border-[var(--color-border)] text-[var(--color-foreground)] p-2 rounded"
                   placeholder={t("kb.placeholderName")}
-                  maxLength={200}
+                  maxLength={KB_NAME_MAX_LENGTH}
                   required
-                />
-              </div>
-              <div>
-                <label className="block mb-1 text-[var(--color-label)]">{t("kb.labelDescription")}</label>
-                <textarea
-                  value={formData.description}
-                  onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                  className="w-full bg-[var(--color-input-bg)] border border-[var(--color-border)] text-[var(--color-foreground)] p-2 rounded h-28 resize-y"
-                  placeholder={t("kb.placeholderDescription")}
                 />
               </div>
               {canManage && usersWithPermsCreate.length > 0 && (
@@ -487,7 +533,7 @@ export default function KBList() {
                   <p className="text-xs text-[var(--color-muted)] mb-2">{t("kb.permissionsHint")}</p>
                   <div className="border border-[var(--color-border)] rounded overflow-hidden max-h-48 overflow-y-auto">
                     <table className="w-full text-sm">
-                      <thead className="bg-[var(--color-table-head)]">
+                      <thead className="bg-[#efefef]">
                         <tr>
                           <th className="p-2 text-left text-xs font-normal text-[var(--color-foreground)]">{t("roles.tableName")}</th>
                           <th className="p-2 text-left text-xs font-normal text-[var(--color-foreground)]">{t("roles.tableEmail")}</th>
@@ -544,14 +590,19 @@ export default function KBList() {
         </Modal>
       )}
 
-      {/* Edit Modal – név és leírás */}
-      {editingKb && (
-        <Modal open={Boolean(editingKb)} onClose={() => setEditingKb(null)} panelClassName="max-w-lg">
-            <ModalHeader title={t("kb.modalEditTitle")} />
+      {/* Beállítás modál – alapadatok és jogosultságok */}
+      {settingsKb && (
+        <Modal open={Boolean(settingsKb)} onClose={() => setSettingsKb(null)} panelClassName="max-w-2xl">
+            <ModalHeader
+              eyebrow={t("nav.knowledgeBase")}
+              title={t("kb.actionSettings")}
+              description={t("kb.settingsUsageHint")}
+            />
             {editFormError && (
               <Alert tone="error" className="mb-4">{editFormError}</Alert>
             )}
-            <div className="space-y-4">
+
+            <div className="mb-5 space-y-4">
               <div>
                 <label className="block mb-1 text-[var(--color-label)]">{t("kb.labelName")}{t("common.required")}</label>
                 <input
@@ -563,51 +614,23 @@ export default function KBList() {
                   }}
                   className="w-full bg-[var(--color-input-bg)] border border-[var(--color-border)] text-[var(--color-foreground)] p-2 rounded"
                   placeholder={t("kb.placeholderName")}
-                  maxLength={200}
+                  maxLength={KB_NAME_MAX_LENGTH}
                   required
                 />
               </div>
-              <div>
-                <label className="block mb-1 text-[var(--color-label)]">{t("kb.labelDescription")}</label>
-                <textarea
-                  value={formData.description}
-                  onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                  className="w-full bg-[var(--color-input-bg)] border border-[var(--color-border)] text-[var(--color-foreground)] p-2 rounded h-28 resize-y"
-                  placeholder={t("kb.placeholderDescription")}
+              <label
+                className="!mb-0 !inline-flex !items-center rounded-lg border border-[var(--color-border)] px-3 py-2 text-sm text-[var(--color-foreground)]"
+                style={{ gap: "8px" }}
+              >
+                <input
+                  type="checkbox"
+                  checked={piiDepersonalizationEnabled}
+                  onChange={(event) => setPiiDepersonalizationEnabled(event.target.checked)}
+                  className="kb-perm-checkbox !mt-0 self-center"
                 />
-              </div>
+                <span className="leading-5 align-middle">PII deperszonalizáció az LLM felé (ajánlott)</span>
+              </label>
             </div>
-            <ModalFooter>
-              <Button
-                type="button"
-                onClick={() => {
-                  setEditingKb(null);
-                  resetForm();
-                }}
-                variant="secondary"
-                disabled={actionLoading}
-              >
-                {t("common.cancel")}
-              </Button>
-              <Button
-                type="button"
-                onClick={handleUpdate}
-                disabled={actionLoading}
-              >
-                {actionLoading ? t("common.loading") : t("common.save")}
-              </Button>
-            </ModalFooter>
-        </Modal>
-      )}
-
-      {/* Beállítás modál – jogosultságok (csak train joggal nyitható) */}
-      {settingsKb && (
-        <Modal open={Boolean(settingsKb)} onClose={() => setSettingsKb(null)} panelClassName="max-w-2xl">
-            <ModalHeader
-              eyebrow={t("nav.knowledgeBase")}
-              title={settingsKb.name}
-              description={t("kb.settingsUsageHint")}
-            />
 
                 <h3 className="text-sm font-semibold text-[var(--color-foreground)] mb-2">
                   {t("kb.permissionsTitle")}
@@ -619,7 +642,7 @@ export default function KBList() {
                 <div className="border border-[var(--color-border)] rounded overflow-hidden max-h-64 overflow-y-auto">
                   <table className="w-full text-sm">
                     <tbody>
-                      <tr className="border-b border-[var(--color-border)] bg-[var(--color-table-head)]">
+                      <tr className="border-b border-[var(--color-border)] bg-[#efefef]">
                         <td className="p-2 w-[20px] align-middle">
                           <input
                             type="checkbox"
@@ -742,7 +765,10 @@ export default function KBList() {
                 <ModalFooter className="mt-4">
                   <Button
                     type="button"
-                    onClick={() => setSettingsKb(null)}
+                    onClick={() => {
+                      setSettingsKb(null);
+                      resetForm();
+                    }}
                     variant="secondary"
                     disabled={actionLoading}
                   >
@@ -751,9 +777,9 @@ export default function KBList() {
                   <Button
                     type="button"
                     onClick={handleSaveSettings}
-                    disabled={setPermissionsMutation.isPending}
+                    disabled={settingsSaveLoading}
                   >
-                    {setPermissionsMutation.isPending
+                    {settingsSaveLoading
                       ? t("common.loading")
                       : t("common.save")}
                   </Button>
@@ -763,23 +789,25 @@ export default function KBList() {
         </Modal>
       )}
 
-      {showDemoKbLimitModal && (
+      {showKbLimitModal && (
         <Modal
-          open={showDemoKbLimitModal}
-          onClose={() => setShowDemoKbLimitModal(false)}
+          open={showKbLimitModal}
+          onClose={() => setShowKbLimitModal(false)}
           closeOnOverlay
           panelClassName="max-w-md"
         >
-            <h2 id="demo-kb-limit-title" className="text-xl font-bold text-[var(--color-foreground)] mb-3">
-              Demo korlát elérve
+            <h2 id="kb-limit-title" className="text-xl font-bold text-[var(--color-foreground)] mb-3">
+              {t("kb.limitReachedTitle")}
             </h2>
             <div className="space-y-3 text-sm text-[var(--color-muted-foreground)]">
-              <p>A demo verzióban egy tudástár hozható létre.</p>
               <p>
-                A teljes verzióban több tudástárat is kezelhetsz, és bővítheted a rendszered a saját igényeid
-                szerint.
+                {t("kb.limitReachedMessage")
+                  .replace("{{max}}", String(kbLimitDetails.max ?? t("kb.limitByPlan")))
+                  .replace("{{used}}", String(kbLimitDetails.used))}
               </p>
-              <p>A jelenlegi tudástárad természetesen megmarad.</p>
+              <p>
+                {t("kb.limitReachedHint")}
+              </p>
             </div>
             <div className="mt-6 flex flex-col-reverse sm:flex-row gap-2 sm:justify-end">
               <Button
@@ -787,7 +815,7 @@ export default function KBList() {
                 variant="secondary"
                 size="lg"
                 className="w-full sm:w-auto"
-                onClick={() => setShowDemoKbLimitModal(false)}
+                onClick={() => setShowKbLimitModal(false)}
               >
                 {t("common.back")}
               </Button>
@@ -796,11 +824,11 @@ export default function KBList() {
                 size="lg"
                 className="w-full sm:w-auto"
                 onClick={() => {
-                  setShowDemoKbLimitModal(false);
+                  setShowKbLimitModal(false);
                   navigate("/admin/csomagok");
                 }}
               >
-                {"\u{1F449}"} Csomagok megtekintése
+                {t("kb.viewPackages")}
               </Button>
             </div>
         </Modal>
@@ -811,44 +839,6 @@ export default function KBList() {
         onClose={() => setSavedModalOpen(false)}
       />
 
-      {canClearKb && clearConfirmKb && (
-        <Modal open={Boolean(clearConfirmKb)} onClose={() => setClearConfirmKb(null)} panelClassName="max-w-md">
-            <ModalHeader title="Tudástár kiürítése" />
-            <p className="text-sm text-[var(--color-muted)] mb-3">
-              Írd be a tudástár nevét a kiürítés megerősítéséhez. A tudástár megmarad, de a betöltött elemek,
-              ingest naplók és kapcsolódó index adatok törlődnek.
-            </p>
-            <input
-              type="text"
-              value={clearTypeName}
-              onChange={(e) => setClearTypeName(e.target.value)}
-              placeholder={clearConfirmKb.name}
-              className="w-full bg-[var(--color-input-bg)] border border-[var(--color-border)] text-[var(--color-foreground)] p-2 rounded mb-4"
-            />
-            <ModalFooter>
-              <Button
-                type="button"
-                onClick={() => {
-                  setClearConfirmKb(null);
-                  setClearTypeName("");
-                }}
-                variant="secondary"
-                disabled={actionLoading}
-              >
-                {t("common.cancel")}
-              </Button>
-              <Button
-                type="button"
-                onClick={handleClear}
-                variant="danger"
-                disabled={actionLoading || clearTypeName.trim() !== clearConfirmKb.name}
-              >
-                {actionLoading ? t("common.loading") : "Kiürítés"}
-              </Button>
-            </ModalFooter>
-        </Modal>
-      )}
-
       {/* Delete confirm */}
       {canDeleteKb && deleteConfirmKb && (
         <Modal open={Boolean(deleteConfirmKb)} onClose={() => setDeleteConfirmKb(null)} panelClassName="max-w-md">
@@ -856,6 +846,9 @@ export default function KBList() {
             <p className="text-sm text-[var(--color-muted)] mb-3">
               {t("kb.confirmDeleteTypeName").replace("{{name}}", deleteConfirmKb.name)}
             </p>
+            <div className="mb-4 rounded-lg border border-[var(--color-danger-border)] bg-[var(--color-danger-bg)] px-3 py-2 text-sm leading-relaxed text-[var(--color-danger-text)]">
+              {t("kb.confirmDeleteTrainingFilesWarning")}
+            </div>
             <input
               type="text"
               value={deleteTypeName}

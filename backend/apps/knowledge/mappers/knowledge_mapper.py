@@ -14,6 +14,34 @@ from apps.knowledge.domain.sentence_interpretation import SentenceInterpretation
 from apps.knowledge.domain.source import Source
 
 
+def _ingest_item_char_count(item: IngestItem) -> int:
+    metadata = item.metadata or {}
+    for key in ("char_count", "processed_char_count"):
+        value = metadata.get(key)
+        if isinstance(value, (int, float)):
+            return max(0, int(value))
+    return 0
+
+
+def _ingest_item_sentence_count(item: IngestItem) -> int:
+    metadata = item.metadata or {}
+    value = metadata.get("sentence_count")
+    if isinstance(value, (int, float)):
+        return max(0, int(value))
+    summary = metadata.get("processing_summary")
+    if isinstance(summary, dict):
+        progress = summary.get("document_progress")
+        if isinstance(progress, dict):
+            phase = str(progress.get("phase") or "")
+            total_parts = progress.get("total_parts")
+            processed_parts = progress.get("processed_parts")
+            if phase in {"sentence_interpretation", "completed"} and isinstance(total_parts, (int, float)):
+                return max(0, int(total_parts))
+            if phase in {"sentence_interpretation", "completed"} and isinstance(processed_parts, (int, float)):
+                return max(0, int(processed_parts))
+    return 0
+
+
 def build_corpus_response(corpus: Corpus, *, can_train: bool | None = None) -> dict[str, object]:
     return {
         "uuid": corpus.uuid,
@@ -147,7 +175,12 @@ def build_ingest_event_response(event: IngestEvent) -> dict[str, object]:
     }
 
 
-def build_ingest_item_response(item: IngestItem) -> dict[str, object]:
+def build_ingest_item_response(item: IngestItem, *, created_by_label: str | None = None) -> dict[str, object]:
+    metadata = {
+        **(item.metadata or {}),
+        "char_count": _ingest_item_char_count(item),
+        "sentence_count": _ingest_item_sentence_count(item),
+    }
     return {
         "id": item.id,
         "ingest_run_id": item.ingest_run_id,
@@ -170,11 +203,38 @@ def build_ingest_item_response(item: IngestItem) -> dict[str, object]:
         "started_at": item.started_at,
         "completed_at": item.completed_at,
         "updated_at": item.updated_at,
-        "metadata": item.metadata,
+        "created_by": item.created_by,
+        "created_by_label": created_by_label,
+        "metadata": metadata,
     }
 
 
-def build_ingest_run_response(run: IngestRun, *, items: list[IngestItem] | None = None, events: list[IngestEvent] | None = None) -> dict[str, object]:
+def build_ingest_run_response(
+    run: IngestRun,
+    *,
+    items: list[IngestItem] | None = None,
+    events: list[IngestEvent] | None = None,
+    created_by_label: str | None = None,
+    item_created_by_labels: dict[int, str] | None = None,
+) -> dict[str, object]:
+    response_items = [
+        build_ingest_item_response(
+            item,
+            created_by_label=(
+                item_created_by_labels.get(item.created_by)
+                if item.created_by is not None and item_created_by_labels
+                else created_by_label
+            ),
+        )
+        for item in (items or [])
+    ]
+    total_char_count = sum(int((item.get("metadata") or {}).get("char_count") or 0) for item in response_items)
+    total_sentence_count = sum(int((item.get("metadata") or {}).get("sentence_count") or 0) for item in response_items)
+    metadata = {
+        **(run.metadata or {}),
+        "total_char_count": total_char_count,
+        "total_sentence_count": total_sentence_count,
+    }
     return {
         "id": run.id,
         "corpus_uuid": run.corpus_uuid,
@@ -193,8 +253,10 @@ def build_ingest_run_response(run: IngestRun, *, items: list[IngestItem] | None 
         "started_at": run.started_at,
         "completed_at": run.completed_at,
         "updated_at": run.updated_at,
-        "metadata": run.metadata,
-        "items": [build_ingest_item_response(item) for item in (items or [])],
+        "created_by": run.created_by,
+        "created_by_label": created_by_label,
+        "metadata": metadata,
+        "items": response_items,
         "events": [build_ingest_event_response(event) for event in (events or [])],
     }
 

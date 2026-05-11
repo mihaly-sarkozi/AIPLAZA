@@ -5,6 +5,7 @@ Degrades gracefully if models are not installed.
 """
 from __future__ import annotations
 
+import re
 from typing import List, Optional
 
 from apps.knowledge.pii_gdpr.enums import EntityType, RiskClass, RecommendedAction
@@ -13,6 +14,16 @@ from apps.knowledge.pii_gdpr.detectors.base import BaseDetector
 
 # Szavak, amiket a NER ne detektáljon névként (pl. role-based, role)
 _PERSON_NAME_BLOCKLIST = frozenset({"role", "role-based", "role based", "rolebased"})
+_PERSON_SUFFIX_PATTERN = re.compile(
+    r"\s+(?:"
+    r"útlev[ée]lsz[aá]ma|"
+    r"útlev[ée]l|"
+    r"passport(?:\s+number)?|"
+    r"szem[eé]lyi(?:\s+igazolv[aá]ny)?(?:\s+sz[aá]ma)?|"
+    r"igazolv[aá]ny(?:\s+sz[aá]ma)?"
+    r")\b.*$",
+    re.IGNORECASE,
+)
 
 # NER label -> our EntityType
 _LABEL_MAP = {
@@ -25,6 +36,28 @@ _LABEL_MAP = {
     "LOCATION": EntityType.UNKNOWN,
     "DATE": EntityType.DATE,  # NER nem különböztet meg születési dátumot → általános dátum
 }
+
+
+def _normalize_person_span(text: str, start: int, end: int) -> tuple[int, int, str] | None:
+    raw = text[start:end]
+    stripped = raw.strip()
+    if not stripped:
+        return None
+
+    leading_ws = len(raw) - len(raw.lstrip())
+    normalized_start = start + leading_ws
+    normalized_end = normalized_start + len(stripped)
+    cleaned = _PERSON_SUFFIX_PATTERN.sub("", stripped).strip()
+    if not cleaned:
+        return None
+
+    mt = cleaned.casefold()
+    if mt in _PERSON_NAME_BLOCKLIST or any(mt.startswith(b) for b in ("role-", "role ")):
+        return None
+
+    if cleaned != stripped:
+        normalized_end = normalized_start + len(cleaned)
+    return normalized_start, normalized_end, cleaned
 
 
 class NERDetector(BaseDetector):
@@ -79,18 +112,22 @@ class NERDetector(BaseDetector):
                 continue
             if entity_type == EntityType.UNKNOWN:
                 continue
+            start = ent.start_char
+            end = ent.end_char
+            matched_text = text[start:end]
             if entity_type == EntityType.PERSON_NAME:
-                mt = text[ent.start_char:ent.end_char].strip().lower()
-                if mt in _PERSON_NAME_BLOCKLIST or any(mt.startswith(b) for b in ("role-", "role ")):
+                normalized = _normalize_person_span(text, start, end)
+                if normalized is None:
                     continue
+                start, end, matched_text = normalized
             confidence = 0.78
             risk = RiskClass.DIRECT_PII if entity_type == EntityType.PERSON_NAME else RiskClass.INDIRECT_IDENTIFIER
             results.append(
                 DetectionResult(
                     entity_type=entity_type,
-                    matched_text=text[ent.start_char:ent.end_char],
-                    start=ent.start_char,
-                    end=ent.end_char,
+                    matched_text=matched_text,
+                    start=start,
+                    end=end,
                     language=language,
                     source_detector=self.name,
                     confidence_score=confidence,
@@ -117,9 +154,10 @@ class NERDetector(BaseDetector):
                 continue
             matched = text[start:end]
             if entity_type == EntityType.PERSON_NAME:
-                mt = matched.strip().lower()
-                if mt in _PERSON_NAME_BLOCKLIST or any(mt.startswith(b) for b in ("role-", "role ")):
+                normalized = _normalize_person_span(text, start, end)
+                if normalized is None:
                     continue
+                start, end, matched = normalized
             confidence = 0.76
             risk = RiskClass.DIRECT_PII if entity_type == EntityType.PERSON_NAME else RiskClass.INDIRECT_IDENTIFIER
             results.append(

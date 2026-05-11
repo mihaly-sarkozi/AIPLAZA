@@ -124,6 +124,17 @@ class PlatformEventOutboxRepository:
             db.refresh(row)
             return row
 
+    def backlog_size(self) -> int:
+        """Aktuális feldolgozatlan backlog méret (pending/retry/processing)."""
+        with self._sf() as db:
+            count = (
+                db.query(func.count(PlatformEventOutboxORM.id))
+                .filter(PlatformEventOutboxORM.status.in_(("pending", "retry", "processing")))
+                .scalar()
+                or 0
+            )
+            return int(count)
+
     def claim_next_batch(
         self,
         *,

@@ -75,4 +75,6 @@ class AuditService:
             return "platform_brand"
         if action in {AuditLogAction.TENANT_PROVISIONED}:
             return "tenant"
+        if str(action).startswith("platform_admin_"):
+            return "platform_admin"
         return None

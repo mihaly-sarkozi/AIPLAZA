@@ -32,6 +32,18 @@ class InstanceRole(str, Enum):
 _VALID_ROLES = {r.value for r in InstanceRole}
 
 
+def _env_flag(name: str, *, default: bool) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    value = raw.strip().lower()
+    if value in {"1", "true", "yes", "on"}:
+        return True
+    if value in {"0", "false", "no", "off"}:
+        return False
+    return default
+
+
 def get_instance_role() -> InstanceRole:
     """Visszaadja a INSTANCE_ROLE env var alapján az aktuális szerepkört.
 
@@ -69,10 +81,28 @@ def should_run_background_workers() -> bool:
     return get_instance_role() == InstanceRole.COMBINED
 
 
+def should_run_standalone_outbox_worker() -> bool:
+    """True, ha a standalone worker process futtathat outbox loopot."""
+    role = get_instance_role()
+    if role not in {InstanceRole.WORKER, InstanceRole.COMBINED}:
+        return False
+    return _env_flag("OUTBOX_WORKER_LOOP_ENABLED", default=True)
+
+
+def should_run_standalone_billing_worker() -> bool:
+    """True, ha a standalone worker process futtathat periodikus billing loopot."""
+    role = get_instance_role()
+    if role not in {InstanceRole.WORKER, InstanceRole.COMBINED}:
+        return False
+    return _env_flag("BILLING_WORKER_LOOP_ENABLED", default=True)
+
+
 __all__ = [
     "InstanceRole",
     "get_instance_role",
     "is_web_process",
     "is_worker_process",
     "should_run_background_workers",
+    "should_run_standalone_billing_worker",
+    "should_run_standalone_outbox_worker",
 ]

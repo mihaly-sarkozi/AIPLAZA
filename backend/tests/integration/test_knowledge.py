@@ -35,10 +35,18 @@ def mock_kb_service():
 def client_kb(app, client, sample_user, mock_kb_service):
     """Client + admin user (owner) + KB service mock."""
     from apps.knowledge.dependencies import get_kb_service
+    from core.di import get_service, register_service
     from core.platform.auth.auth_dependencies import get_current_user
+    from core.platform.service_keys import PLATFORM_TENANT_USAGE_SERVICE
+
+    previous_usage_service = get_service(PLATFORM_TENANT_USAGE_SERVICE)
+    usage_service = MagicMock()
+    usage_service.can_create_kb.return_value = (True, None)
+    register_service(PLATFORM_TENANT_USAGE_SERVICE, usage_service)
     app.dependency_overrides[get_current_user] = lambda: sample_user
     app.dependency_overrides[get_kb_service] = lambda: mock_kb_service
     yield client
+    register_service(PLATFORM_TENANT_USAGE_SERVICE, previous_usage_service)
     app.dependency_overrides.pop(get_current_user, None)
     app.dependency_overrides.pop(get_kb_service, None)
 

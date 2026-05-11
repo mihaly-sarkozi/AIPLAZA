@@ -11,35 +11,17 @@ from typing import Any
 from apps.knowledge.domain.search_profile import SEARCH_PROFILE_BUILDER_VERSION, SearchProfile
 from apps.knowledge.domain.technical_memory_chunk import TechnicalMemoryChunk
 from apps.knowledge.service.entity_key_normalization import canonicalize_entity_key
+from shared.text.language_lexicon import SUPPORTED_LEXICON_LANGUAGES, get_lexicon_terms
 
 
 _MAX_SEARCH_TEXT_LENGTH = 1000
-_KEYWORD_STOPWORDS = {
-    "a",
-    "az",
-    "és",
-    "vagy",
-    "hogy",
-    "van",
-    "volt",
-    "még",
-    "jelenleg",
-    "the",
-    "and",
-    "or",
-    "is",
-    "was",
-    "currently",
-    "before",
-    "el",
-    "la",
-    "de",
-    "y",
-    "es",
-    "fue",
-    "actualmente",
-    "antes",
-}
+_KEYWORD_STOPWORDS: set[str] = set()
+for _lang in SUPPORTED_LEXICON_LANGUAGES:
+    _KEYWORD_STOPWORDS.update(token.lower() for token in get_lexicon_terms(_lang, "question_stopwords"))
+    _KEYWORD_STOPWORDS.update(token.lower() for token in get_lexicon_terms(_lang, "time_relative_current"))
+    _KEYWORD_STOPWORDS.update(token.lower() for token in get_lexicon_terms(_lang, "time_relative_bounded"))
+    _KEYWORD_STOPWORDS.update(token.lower() for token in get_lexicon_terms(_lang, "time_relative_open"))
+_KEYWORD_STOPWORDS.update({"még", "meg"})
 _KEYWORD_TOKEN_RE = re.compile(r"[\wÁÉÍÓÖŐÚÜŰáéíóöőúüűñÑ]+", flags=re.UNICODE)
 _CLAIM_GROUP_SIGNAL_KEYS = ("relation", "state", "rule", "event", "descriptor", "other")
 

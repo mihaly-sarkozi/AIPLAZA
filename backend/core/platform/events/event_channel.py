@@ -25,9 +25,11 @@ from core.extensions.tenant.context.tenant_context import current_tenant_schema
 from core.kernel.logging.observability import (
     get_observability_context,
     increment_metric,
+    observe_metric,
     log_exception_event,
     log_structured_event,
 )
+from core.kernel.config.config_loader import settings
 from core.kernel.config.instance_role import get_instance_role
 from core.platform.events.outbox import PlatformEventOutboxRepository
 
@@ -215,7 +217,15 @@ class SecurityAuditEventChannel:
         except Exception:
             meta.setdefault("instance_role", None)
         enriched_payload["_meta"] = meta
+        backlog_soft_limit = max(1, int(getattr(settings, "platform_event_outbox_backlog_soft_limit", 5000) or 5000))
         try:
+            backlog_size = int(self._outbox.backlog_size()) if hasattr(self._outbox, "backlog_size") else 0
+            observe_metric("outbox.backlog_size", float(backlog_size), unit="count")
+            if backlog_size >= backlog_soft_limit:
+                increment_metric("outbox.publish_rejected_total", 1.0, tags={"reason": "backlog_soft_limit"})
+                raise EventDeliveryError(
+                    f"Outbox backlog limit reached ({backlog_size}/{backlog_soft_limit})."
+                )
             self._outbox.append(
                 event_type=event_type,
                 payload=enriched_payload,

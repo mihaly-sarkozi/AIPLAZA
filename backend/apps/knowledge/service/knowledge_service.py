@@ -12,13 +12,6 @@ from core.platform.auth.auth_dependencies import has_permission
 
 
 class KnowledgeBaseService:
-    _DEMO_PROTECTED_KB_NAMES = {
-        "teszt tudástár",
-        "test knowledge base",
-        "base de conocimiento de prueba",
-        "test kb",
-    }
-
     # Ez a metódus a Python-specifikus speciális működést valósítja meg.
     def __init__(self, repo: MySQLKnowledgeBaseRepository, user_repo: Any = None) -> None:
         self.repo = repo
@@ -47,7 +40,17 @@ class KnowledgeBaseService:
 
     # Ez a metódus listázza a(z) all unfiltered logikáját.
     def list_all_unfiltered(self) -> list[KnowledgeBase]:
-        return self.repo.list_all()
+        return self.repo.list_all(include_deleted=True)
+
+    def storage_metrics_for_corpus(self, kb: KnowledgeBase) -> dict[str, int]:
+        return {
+            "file_bytes": 0,
+            "database_bytes": 0,
+            "qdrant_bytes": 0,
+            "total_bytes": 0,
+            "qdrant_points": 0,
+            "qdrant_vectors": 0,
+        }
 
     # Qdrant kollekció neve tanításhoz (uuid alapján).
     def qdrant_collection_for_uuid(self, kb_uuid: str) -> str | None:
@@ -98,6 +101,7 @@ class KnowledgeBaseService:
         name: str,
         description: str | None,
         personal_data_mode: Optional[str] = None,
+        pii_depersonalization_enabled: Optional[bool] = None,
         current_user_id: Optional[int] = None,
     ) -> KnowledgeBase:
         kb = self.repo.get_by_uuid(uuid)
@@ -109,6 +113,8 @@ class KnowledgeBaseService:
         kb.description = description
         if personal_data_mode is not None:
             kb.personal_data_mode = personal_data_mode
+        if pii_depersonalization_enabled is not None:
+            kb.pii_depersonalization_enabled = bool(pii_depersonalization_enabled)
         return self.repo.update(kb, actor_user_id=current_user_id)
 
     # Ez a metódus törli a(z) delete logikáját.
@@ -116,8 +122,6 @@ class KnowledgeBaseService:
         kb = self.repo.get_by_uuid(uuid)
         if not kb:
             raise ValueError("KB not found")
-        if demo_mode and (kb.name or "").strip().lower() in self._DEMO_PROTECTED_KB_NAMES:
-            raise ValueError("A teszt tudástár tesztüzemmódban nem törölhető.")
         if confirm_name and confirm_name != kb.name:
             raise ValueError("Confirmation name does not match")
         self.repo.delete(uuid)

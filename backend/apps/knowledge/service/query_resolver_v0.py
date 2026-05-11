@@ -3,39 +3,21 @@ from __future__ import annotations
 import re
 
 from apps.knowledge.domain.query_profile import QUERY_RESOLVER_VERSION, QueryProfile
-from apps.knowledge.service.language_rules import fold_text
-
-
-_STOPWORDS = {
-    "a",
-    "an",
-    "are",
-    "az",
-    "do",
-    "does",
-    "for",
-    "is",
-    "of",
-    "the",
-    "there",
-    "to",
-    "was",
-    "what",
-    "which",
-    "who",
-}
-_LOCATION_QUALIFIERS = ("office", "offices", "branch", "branches", "center", "centers", "site", "sites")
-_CURRENT_MARKERS = ("current", "currently", "active now", "jelenleg", "most", "actualmente")
-_HISTORICAL_MARKERS = ("was", "were", "previously", "historical", "in 20", "in 19", "korabban", "korábban", "anteriormente")
-_STATE_MARKERS = ("status", "active", "inactive", "aktív", "inaktív", "activo", "inactivo")
-_RELATION_MARKERS = ("use", "uses", "using", "integrate", "integrates", "integrated", "használ", "utiliza", "usa")
-_RULE_MARKERS = ("must", "should", "required", "rule", "policy", "kell", "kötelező", "debe")
-_EVENT_MARKERS = ("created", "updated", "completed", "happened", "happen", "deprecated", "changed", "launched", "megszűnt", "frissült")
-_DESCRIPTOR_MARKERS = ("who is", "what is", "describe", "description", "lead", "responsible", "apply", "applies")
+from apps.knowledge.service.language_rules import detect_language, fold_text
+from shared.text.language_lexicon import get_lexicon_terms
 
 
 def _contains_any(folded: str, markers: tuple[str, ...]) -> bool:
     return any(fold_text(marker) in folded for marker in markers)
+
+
+def _lexicon_terms(language: str | None, key: str) -> tuple[str, ...]:
+    values = []
+    for item in get_lexicon_terms(language, key):
+        folded = fold_text(item)
+        if folded and folded not in values:
+            values.append(folded)
+    return tuple(values)
 
 
 def _state_from_query(folded: str) -> str | None:
@@ -46,7 +28,7 @@ def _state_from_query(folded: str) -> str | None:
     return None
 
 
-def _intent_from_query(folded: str) -> tuple[str, str]:
+def _intent_from_query(folded: str, *, language: str | None) -> tuple[str, str]:
     if re.search(r"\bapply(?:ies)?\s+to\b", folded):
         return "descriptor", "intent:descriptor_apply_to_marker"
     if re.search(r"\bwhat\s+does\b.+\bdescribe\b", folded):
@@ -55,29 +37,34 @@ def _intent_from_query(folded: str) -> tuple[str, str]:
         return "descriptor", "intent:descriptor_what_is_policy_marker"
     if re.search(r"\bwhat\s+happened\s+to\b", folded) or re.search(r"\bwhen\s+did\b.+\bhappen\b", folded):
         return "event", "intent:event_question_marker"
-    if _contains_any(folded, _STATE_MARKERS):
+    if _contains_any(folded, _lexicon_terms(language, "state_markers")):
         return "state", "intent:state_marker"
-    if _contains_any(folded, _RULE_MARKERS):
+    if _contains_any(folded, _lexicon_terms(language, "rule_markers")):
         return "rule", "intent:rule_marker"
-    if _contains_any(folded, _EVENT_MARKERS):
+    if _contains_any(folded, _lexicon_terms(language, "event_markers")):
         return "event", "intent:event_marker"
-    if _contains_any(folded, _RELATION_MARKERS):
+    if _contains_any(folded, _lexicon_terms(language, "relation_markers")):
         return "relation", "intent:relation_marker"
-    if _contains_any(folded, _DESCRIPTOR_MARKERS):
+    if _contains_any(folded, _lexicon_terms(language, "descriptor_markers")):
         return "descriptor", "intent:descriptor_marker"
     return "unknown", "intent:unknown"
 
 
-def _expected_answer_type_from_query(folded: str) -> tuple[str | None, str | None]:
-    if re.search(r"\bhol\b", folded):
+def _expected_answer_type_from_query(folded: str, *, language: str | None) -> tuple[str | None, str | None]:
+    location_words = _lexicon_terms(language, "answer_type_location_words")
+    if location_words and any(re.search(rf"\b{re.escape(word)}\b", folded) for word in location_words):
         return "location", "answer_type:location_question"
-    if re.search(r"\bmikor\b", folded):
+    time_words = _lexicon_terms(language, "answer_type_time_words")
+    if time_words and any(re.search(rf"\b{re.escape(word)}\b", folded) for word in time_words):
         return "time", "answer_type:time_question"
-    if re.search(r"\b(ki|kik)\b", folded):
+    person_words = _lexicon_terms(language, "answer_type_person_words")
+    if person_words and any(re.search(rf"\b{re.escape(word)}\b", folded) for word in person_words):
         return "person", "answer_type:person_question"
-    if re.search(r"\bmi[eé]rt\b", folded):
+    explanation_words = _lexicon_terms(language, "answer_type_explanation_words")
+    if explanation_words and any(re.search(rf"\b{re.escape(word)}\b", folded) for word in explanation_words):
         return "explanation", "answer_type:explanation_question"
-    if re.search(r"\bmit\b", folded):
+    object_words = _lexicon_terms(language, "answer_type_object_words")
+    if object_words and any(re.search(rf"\b{re.escape(word)}\b", folded) for word in object_words):
         return "object", "answer_type:object_question"
     return None, None
 
@@ -87,7 +74,7 @@ def _relation_predicate_from_query(folded: str, intent: str) -> str | None:
         return None
     if re.search(r"\b(use|uses|using|haszn[aá]l|utiliza|usa)\b", folded):
         return "uses"
-    if re.search(r"\b(integrates|integrated|integrate)\b", folded):
+    if re.search(r"\b(integrates|integrated|integrate|integra|kapcsol[oó]dik)\b", folded):
         return "integrates"
     return None
 
@@ -121,22 +108,28 @@ def _rule_action_from_query(folded: str, intent: str) -> str | None:
     return None
 
 
-def _time_filter(folded: str, *, intent: str, state: str | None) -> tuple[str | None, str]:
+def _time_filter(
+    folded: str,
+    *,
+    intent: str,
+    state: str | None,
+    language: str | None,
+) -> tuple[str | None, str]:
     if intent == "event":
         return "event_time", "time:event_time"
     if "status of" in folded or "status for" in folded:
         return None, "time:no_forced_filter_status_question"
-    if _contains_any(folded, _HISTORICAL_MARKERS):
+    if _contains_any(folded, _lexicon_terms(language, "historical_markers")):
         return "historical", "time:historical_marker"
-    if _contains_any(folded, _CURRENT_MARKERS):
+    if _contains_any(folded, _lexicon_terms(language, "current_markers")):
         return "current", "time:current_marker"
     if intent == "state" and state and folded.startswith("which "):
         return "current", "time:state_listing_defaults_current"
     return None, "time:no_forced_filter"
 
 
-def _entity_type(folded: str) -> tuple[str | None, str | None]:
-    if any(re.search(rf"\b{re.escape(qualifier)}\b", folded) for qualifier in _LOCATION_QUALIFIERS):
+def _entity_type(folded: str, *, language: str | None) -> tuple[str | None, str | None]:
+    if any(re.search(rf"\b{re.escape(qualifier)}\b", folded) for qualifier in _lexicon_terms(language, "location_qualifiers")):
         return "location", "entity_type:location_qualifier"
     if any(token in folded for token in ("admin user", "user", "role", "usuario", "felhasználó", "felhasznalo")):
         return "user", "entity_type:user_keyword"
@@ -175,16 +168,39 @@ def _detected_entity(query: str, entity_type: str | None) -> tuple[str | None, l
     return None, []
 
 
-def _keywords(query: str, entity: str | None, state: str | None, intent: str) -> list[str]:
+def _keywords(query: str, entity: str | None, state: str | None, intent: str, *, language: str | None) -> list[str]:
     values: list[str] = []
+    stopwords = set(_lexicon_terms(language, "question_stopwords"))
+    stopwords.update({"kapcsolatban", "kapcslatban", "kapcsan", "kapcsán", "there"})
     for source in (query, entity or "", state or "", intent if intent != "unknown" else ""):
         for token in re.findall(r"[A-Za-zÁÉÍÓÖŐÚÜŰáéíóöőúüű0-9_-]+", source):
             folded = fold_text(token)
-            if not folded or folded in _STOPWORDS or len(folded) <= 1:
+            if not folded or folded in stopwords or len(folded) <= 1:
                 continue
-            if folded not in values:
-                values.append(folded)
+            for keyword in _keyword_variants(folded, language=language):
+                if keyword and keyword not in stopwords and len(keyword) > 1 and keyword not in values:
+                    values.append(keyword)
     return values
+
+
+def _keyword_variants(folded: str, *, language: str | None) -> list[str]:
+    variants = [folded]
+    # Gyakori magyar elgépelés: "nyugdijjakal" -> "nyugdijakal" -> "nyugdij".
+    repaired = re.sub(r"ijj(?=[a-z]|$)", "ij", folded)
+    if repaired not in variants:
+        variants.append(repaired)
+    suffixes = list(_lexicon_terms(language, "entity_suffixes"))
+    for hu_suffix in _lexicon_terms("hu", "entity_suffixes"):
+        if hu_suffix not in suffixes:
+            suffixes.append(hu_suffix)
+    for candidate in list(variants):
+        for suffix in suffixes:
+            if candidate.endswith(suffix) and len(candidate) > len(suffix) + 2:
+                stem = candidate[: -len(suffix)]
+                if stem not in variants:
+                    variants.append(stem)
+                break
+    return variants
 
 
 def _confidence(
@@ -218,8 +234,10 @@ class QueryResolverV0:
     def resolve(self, query: str) -> QueryProfile:
         raw_query = str(query or "").strip()
         folded = fold_text(raw_query)
+        language = detect_language(raw_query)
         reasons: list[str] = []
-        intent, intent_reason = _intent_from_query(folded)
+        reasons.append(f"language:{language}")
+        intent, intent_reason = _intent_from_query(folded, language=language)
         reasons.append(intent_reason)
         relation_predicate = _relation_predicate_from_query(folded, intent)
         if relation_predicate:
@@ -230,22 +248,33 @@ class QueryResolverV0:
         rule_action = _rule_action_from_query(folded, intent)
         if rule_action:
             reasons.append(f"rule_action:{rule_action}")
-        expected_answer_type, answer_type_reason = _expected_answer_type_from_query(folded)
+        expected_answer_type, answer_type_reason = _expected_answer_type_from_query(folded, language=language)
         if answer_type_reason:
             reasons.append(answer_type_reason)
         state = _state_from_query(folded)
         if state:
             reasons.append(f"state:{state}")
-        time_filter, time_reason = _time_filter(folded, intent=intent, state=state)
+        time_filter, time_reason = _time_filter(
+            folded,
+            intent=intent,
+            state=state,
+            language=language,
+        )
         reasons.append(time_reason)
-        entity_type, entity_type_reason = _entity_type(folded)
+        entity_type, entity_type_reason = _entity_type(folded, language=language)
         if entity_type_reason:
             reasons.append(entity_type_reason)
         entity, detected_entities = _detected_entity(raw_query, entity_type)
         detected_entities = [*detected_entities, *relation_object_entities]
         if entity:
             reasons.append("entity:explicit_query_entity")
-        keywords = _keywords(raw_query, " ".join(part for part in [entity or "", relation_object or ""] if part), state, intent)
+        keywords = _keywords(
+            raw_query,
+            " ".join(part for part in [entity or "", relation_object or ""] if part),
+            state,
+            intent,
+            language=language,
+        )
         return QueryProfile(
             entity_type=entity_type,
             entity=entity,

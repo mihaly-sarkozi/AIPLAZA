@@ -6,7 +6,7 @@
   --color-muted: #64748b;
   --color-muted-foreground: #475569;
   --color-label: #334155;
-  --color-border: #e2e8f0;
+  --color-border: #989fab;
   --color-button-hover: #eef2f7;
   --color-readonly-bg: #9ca3af;
   --color-input-bg: #ffffff;
@@ -45,7 +45,7 @@
   --color-muted: #94a3b8;
   --color-muted-foreground: #cbd5e1;
   --color-label: #e2e8f0;
-  --color-border: #26272b;
+  --color-border: #707174;
   --color-button-hover: #17181c;
   --color-readonly-bg: #6b7280;
   --color-input-bg: #0b0b0d;
@@ -119,6 +119,18 @@ input:focus, textarea:focus, select:focus {
   outline: none !important;
   border-width: 1px !important;
   box-shadow: none !important;
+  --tw-ring-shadow: 0 0 #0000 !important;
+  --tw-ring-offset-shadow: 0 0 #0000 !important;
+  --tw-ring-color: transparent !important;
+}
+
+.chat-composer-input,
+.chat-composer-input:focus,
+.chat-composer-input:focus-visible {
+  border: 0 !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+  outline: none !important;
   --tw-ring-shadow: 0 0 #0000 !important;
   --tw-ring-offset-shadow: 0 0 #0000 !important;
   --tw-ring-color: transparent !important;

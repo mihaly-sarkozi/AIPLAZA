@@ -8,6 +8,7 @@ from apps.knowledge.infrastructure import build_knowledge_infrastructure
 from apps.state_keys import CTX_STATE_KNOWLEDGE_INFRASTRUCTURE
 from core.platform.contract import AppModule, ModuleContext, RouteRegistration
 from apps.contracts.service_keys import (
+    MODULE_KNOWLEDGE_EVENT_CHANNEL,
     MODULE_KNOWLEDGE_EMBEDDING_SERVICE_FACTORY,
     MODULE_KNOWLEDGE_QDRANT_FACTORY,
     MODULE_KNOWLEDGE_REPOSITORY,
@@ -31,6 +32,10 @@ class KnowledgeModule(AppModule):
         container.register_factory(MODULE_KNOWLEDGE_EMBEDDING_SERVICE_FACTORY, infra.build_embedding_service)
         container.register_factory(MODULE_KNOWLEDGE_QDRANT_FACTORY, infra.build_qdrant_client)
         container.register_service(MODULE_KNOWLEDGE_SERVICE, service)
+        if getattr(container.security, "event_channel", None) is not None:
+            container.register_service(MODULE_KNOWLEDGE_EVENT_CHANNEL, container.security.event_channel)
+        from apps.knowledge.events import register_knowledge_event_handlers
+        register_knowledge_event_handlers(container.security.dispatcher)
         register_knowledge_tenant_signup_hook(service)
 
     # Ez a metódus a(z) routers logikáját valósítja meg.

@@ -87,6 +87,7 @@ class OutboxWorker:
         retry_delay_seconds: int = DEFAULT_RETRY_DELAY_SEC,
         batch_size: int = DEFAULT_BATCH_SIZE,
         stale_lock_after_sec: int = 300,
+        handler_timeout_seconds: int = 15,
         lock_owner: str | None = None,
     ) -> None:
         self._outbox = outbox_repository
@@ -96,6 +97,7 @@ class OutboxWorker:
         self._retry_delay = retry_delay_seconds
         self._batch_size = batch_size
         self._stale_lock_after_sec = max(1, int(stale_lock_after_sec))
+        self._handler_timeout_seconds = max(1, int(handler_timeout_seconds))
         self._lock_owner = lock_owner
         self._worker_run_id = uuid.uuid4().hex
         self._stop = threading.Event()
@@ -258,7 +260,7 @@ class OutboxWorker:
                 lock_owner=self._lock_owner,
             )
             try:
-                self._dispatcher.dispatch(item.event_type, item.payload or {})
+                self._dispatch_with_timeout(item.event_type, item.payload or {})
                 self._outbox.mark_processed(item.id)
                 increment_metric("platform.outbox.processed.count", 1.0, tags={"event_type": item.event_type})
                 log_structured_event(
@@ -291,6 +293,26 @@ class OutboxWorker:
                     max_attempts=self._max_retries,
                     retry_delay_seconds=self._retry_delay,
                 )
+
+    def _dispatch_with_timeout(self, event_type: str, payload: dict) -> None:
+        error_holder: list[Exception] = []
+
+        def _target() -> None:
+            try:
+                self._dispatcher.dispatch(event_type, payload)
+            except Exception as exc:  # pragma: no cover - propagated below
+                error_holder.append(exc)
+
+        thread = threading.Thread(target=_target, daemon=True, name=f"outbox-dispatch-{event_type}")
+        thread.start()
+        thread.join(timeout=float(self._handler_timeout_seconds))
+        if thread.is_alive():
+            increment_metric("outbox.handler_timeout_total", 1.0, tags={"event_type": event_type})
+            raise TimeoutError(
+                f"Outbox handler timeout ({self._handler_timeout_seconds}s) event_type={event_type}"
+            )
+        if error_holder:
+            raise error_holder[0]
 
 
 __all__ = [

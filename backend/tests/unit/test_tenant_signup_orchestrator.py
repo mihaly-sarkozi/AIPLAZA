@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from core.extensions.tenant.signup import orchestrator as orchestrator_module
+from core.extensions.tenant.signup.errors import DemoSessionRequiredError
 from core.extensions.tenant.signup.orchestrator_result import DemoSignupResult
 
 pytestmark = [pytest.mark.unit, pytest.mark.must_pass]
@@ -49,7 +50,7 @@ def test_orchestrator_does_not_pass_extra_kwargs_to_resend_use_case(monkeypatch:
     assert "audit_service" not in captured_new_signup_kwargs
 
 
-def test_signup_generates_demo_session_id_when_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_signup_requires_demo_session_id_when_missing(monkeypatch: pytest.MonkeyPatch) -> None:
     captured: dict[str, object] = {}
 
     class FakeSlugReserver:
@@ -105,16 +106,12 @@ def test_signup_generates_demo_session_id_when_missing(monkeypatch: pytest.Monke
         clock=object(),
     )
 
-    result = orchestrator.signup(
-        email="demo@example.com",
-        kb_name="Demo KB",
-        name="Demo User",
-        locale="hu",
-        resend_existing_access=False,
-        demo_session_id=None,
-    )
-
-    reserved_session_id = str(captured["reserved_session_id"])
-    assert reserved_session_id.startswith("demo-")
-    assert captured["new_signup_session_id"] == reserved_session_id
-    assert result.slug == "demo"
+    with pytest.raises(DemoSessionRequiredError):
+        orchestrator.signup(
+            email="demo@example.com",
+            kb_name="Demo KB",
+            name="Demo User",
+            locale="hu",
+            resend_existing_access=False,
+            demo_session_id=None,
+        )

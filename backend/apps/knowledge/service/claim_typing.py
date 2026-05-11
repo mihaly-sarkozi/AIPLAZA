@@ -2,9 +2,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 import re
+from typing import TYPE_CHECKING
 
-from apps.knowledge.domain.claim import Claim
 from apps.knowledge.service.language_rules import LANGUAGE_RULES, fold_text, get_language_rules, normalize_language
+
+if TYPE_CHECKING:
+    from apps.knowledge.domain.claim import Claim
 
 
 @dataclass(frozen=True)
@@ -89,6 +92,16 @@ CLAIM_TYPE_CONFIGS: dict[str, ClaimTypeConfig] = {
         conflict_behavior="weak",
         cardinality="multi",
         time_sensitive=True,
+    ),
+    "context_header": ClaimTypeConfig(
+        claim_type="context_header",
+        claim_group="other",
+        identity_weight=0.0,
+        similarity_weight=0.1,
+        tension_weight=0.0,
+        conflict_behavior="weak",
+        cardinality="multi",
+        time_sensitive=False,
     ),
     "other": ClaimTypeConfig(
         claim_type="other",

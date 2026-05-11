@@ -28,3 +28,15 @@ class DomainManagementBlockedError(DomainServiceError):
     def __init__(self, status: str | None = None) -> None:
         super().__init__(f"tenant_domain_management_blocked:{status or 'unknown'}")
         self.status = status
+
+
+class DomainDnsVerificationFailedError(DomainServiceError):
+    """A domain DNS ellenőrzés sikertelen."""
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(f"domain_dns_verification_failed:{reason}")
+        self.reason = reason
+
+
+class DomainPrimaryDeleteBlockedError(DomainServiceError):
+    """Elsődleges platform domain törlése tiltott."""

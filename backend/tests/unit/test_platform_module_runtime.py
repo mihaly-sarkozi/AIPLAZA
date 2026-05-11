@@ -31,9 +31,10 @@ class _DomainRepoStub:
             status=TenantStatus(tenant_id=7, slug="acme", is_active=True),
         )
         self.domains = [
-            SimpleNamespace(domain="acme.app.test", verified_at=None),
-            SimpleNamespace(domain="portal.acme.test", verified_at=datetime.now(timezone.utc)),
+            SimpleNamespace(domain="acme.app.test", verified_at=None, tenant_id=7),
+            SimpleNamespace(domain="portal.acme.test", verified_at=datetime.now(timezone.utc), tenant_id=7),
         ]
+        self.deleted: list[str] = []
 
     def get_tenant_by_slug(self, slug: str):
         return self.tenant if slug == "acme" else None
@@ -45,14 +46,24 @@ class _DomainRepoStub:
         return next((item for item in self.domains if item.domain == domain), None)
 
     def create_domain(self, tenant_id: int, domain: str, *, created_by=None):
-        row = SimpleNamespace(domain=domain, verified_at=None)
+        row = SimpleNamespace(domain=domain, verified_at=None, tenant_id=tenant_id)
         self.domains.append(row)
         return row
 
+    def delete_domain(self, domain: str, *, tenant_id=None):
+        self.deleted.append(domain)
+        self.domains = [item for item in self.domains if item.domain != domain]
+
 
 class _VerifyServiceStub:
-    def verify_domain(self, domain: str, *, actor_user_id=None):
+    def verify_domain(self, domain: str, *, tenant_id: int, actor_user_id=None):
         return SimpleNamespace(domain=domain, verified_at=datetime.now(timezone.utc))
+
+    def challenge_for_domain(self, domain: str, *, tenant_id: int):
+        return (f"_aiplaza-challenge.{domain}", f"token-{tenant_id}")
+
+    def cname_target(self) -> str:
+        return "app.test"
 
 
 class _LifecycleProbeStub:
@@ -129,3 +140,13 @@ def test_lifecycle_service_tracks_startup_and_readiness():
     assert health.status == "ok"
     assert status.startup_runs == 1
     assert status.startup_completed_at is not None
+
+
+def test_domain_service_deletes_custom_domain():
+    repo = _DomainRepoStub()
+    service = DomainService(repo, DomainPolicy(tenant_base_domain="app.test"), _VerifyServiceStub())
+
+    service.delete_custom_domain("acme", "portal.acme.test")
+
+    assert repo.deleted == ["portal.acme.test"]
+    assert all(item.domain != "portal.acme.test" for item in repo.domains)

@@ -29,3 +29,16 @@ class AuditLogAction(StrEnum):
     USER_EMAIL_CHANGED = "user_email_changed" # Felhasználó email címének módosítása
     USER_ROLE_CHANGED = "user_role_changed" # Felhasználó szerepkörének módosítása
     USER_UPDATED = "user_updated" # Felhasználó módosítása
+    PLATFORM_ADMIN_LOGIN_SUCCESS = "platform_admin_login_success"
+    PLATFORM_ADMIN_LOGIN_FAILED = "platform_admin_login_failed"
+    PLATFORM_ADMIN_REFRESH = "platform_admin_refresh"
+    PLATFORM_ADMIN_REFRESH_FAILED = "platform_admin_refresh_failed"
+    PLATFORM_ADMIN_LOGOUT = "platform_admin_logout"
+    PLATFORM_ADMIN_PROFILE_UPDATED = "platform_admin_profile_updated"
+    PLATFORM_ADMIN_PASSWORD_CHANGED = "platform_admin_password_changed"
+    PLATFORM_ADMIN_STATS_VIEWED = "platform_admin_stats_viewed"
+    PLATFORM_ADMIN_TENANT_STATS_VIEWED = "platform_admin_tenant_stats_viewed"
+    PLATFORM_ADMIN_SECURITY_IP_BANNED = "platform_admin_security_ip_banned"
+    PLATFORM_ADMIN_SECURITY_IP_UNBANNED = "platform_admin_security_ip_unbanned"
+    PLATFORM_ADMIN_SECURITY_ALERT_ACK = "platform_admin_security_alert_ack"
+    KNOWLEDGE_PII_DEPERSONALIZED = "knowledge_pii_depersonalized"

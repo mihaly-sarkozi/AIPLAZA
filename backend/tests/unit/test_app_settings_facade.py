@@ -6,6 +6,16 @@ from apps.settings.service.settings_facade import SettingsFacade
 
 pytestmark = [pytest.mark.unit, pytest.mark.must_pass]
 
+BILLING_DEFAULTS = {
+    "billing_company_name": "",
+    "billing_tax_id": "",
+    "billing_address_line": "",
+    "billing_postal_code": "",
+    "billing_city": "",
+    "billing_region": "",
+    "billing_country": "",
+}
+
 
 class _CoreSettingsService:
     def __init__(self) -> None:
@@ -26,6 +36,13 @@ class _CoreSettingsService:
         timezone: str | None = None,
         date_format: str | None = None,
         time_format: str | None = None,
+        billing_company_name: str | None = None,
+        billing_tax_id: str | None = None,
+        billing_address_line: str | None = None,
+        billing_postal_code: str | None = None,
+        billing_city: str | None = None,
+        billing_region: str | None = None,
+        billing_country: str | None = None,
         updated_by: int | None = None,
     ) -> dict[str, object]:
         self.update_calls.append(
@@ -67,6 +84,13 @@ class _MergingCoreSettingsService(_CoreSettingsService):
         timezone: str | None = None,
         date_format: str | None = None,
         time_format: str | None = None,
+        billing_company_name: str | None = None,
+        billing_tax_id: str | None = None,
+        billing_address_line: str | None = None,
+        billing_postal_code: str | None = None,
+        billing_city: str | None = None,
+        billing_region: str | None = None,
+        billing_country: str | None = None,
         updated_by: int | None = None,
     ) -> dict[str, object]:
         self.update_calls.append(
@@ -110,6 +134,7 @@ def test_get_settings_returns_mapped_core_snapshot() -> None:
         "timezone": "UTC",
         "date_format": "YYYY-MM-DD",
         "time_format": "HH:mm",
+        **BILLING_DEFAULTS,
     }
 
 
@@ -123,6 +148,7 @@ def test_get_settings_coerces_defaults_for_partial_core_snapshot() -> None:
         "timezone": "UTC",
         "date_format": "YYYY-MM-DD",
         "time_format": "HH:mm",
+        **BILLING_DEFAULTS,
     }
 
 
@@ -171,6 +197,7 @@ def test_update_settings_preserves_other_fields_for_partial_update() -> None:
         "timezone": "UTC",
         "date_format": "DD.MM.YYYY",
         "time_format": "HH:mm:ss",
+        **BILLING_DEFAULTS,
     }
 
 

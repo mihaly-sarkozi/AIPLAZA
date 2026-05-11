@@ -94,7 +94,7 @@ services:
       dockerfile: docker/frontend.Dockerfile
     container_name: aiplaza-frontend
     environment:
-      VITE_DEV_PROXY_TARGET: http://backend:8001
+      VITE_DEV_PROXY_TARGET: http://host.docker.internal:8001
       VITE_TENANT_DOMAIN: lvh.me
       VITE_API_URL: /api
       CHOKIDAR_USEPOLLING: "true"

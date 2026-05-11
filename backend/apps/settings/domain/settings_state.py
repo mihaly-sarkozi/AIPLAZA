@@ -47,6 +47,13 @@ class SettingsState:
     timezone: Timezone = "UTC"
     date_format: DateFormat = "YYYY-MM-DD"
     time_format: TimeFormat = "HH:mm"
+    billing_company_name: str = ""
+    billing_tax_id: str = ""
+    billing_address_line: str = ""
+    billing_postal_code: str = ""
+    billing_city: str = ""
+    billing_region: str = ""
+    billing_country: str = ""
 
 
 __all__ = ["DateFormat", "SettingsState", "TimeFormat", "Timezone"]

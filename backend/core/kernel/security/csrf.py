@@ -13,6 +13,8 @@ if TYPE_CHECKING:
 CSRF_COOKIE_NAME = "csrf_token"
 CSRF_HEADER_NAME = "X-CSRF-Token"
 CSRF_COOKIE_PATH = "/api"
+PLATFORM_ADMIN_CSRF_COOKIE_NAME = "platform_admin_csrf_token"
+PLATFORM_ADMIN_CSRF_COOKIE_PATH = "/api/platform-admin"
 
 
 # Ez a függvény a(z) generate_csrf_token logikáját valósítja meg.
@@ -32,6 +34,24 @@ def set_csrf_cookie(
         CSRF_COOKIE_NAME,
         value,
         path=CSRF_COOKIE_PATH,
+        httponly=True,
+        secure=secure,
+        samesite=samesite,
+    )
+
+
+def set_platform_admin_csrf_cookie(
+    response: "Response",
+    value: str,
+    *,
+    secure: bool,
+    samesite: str = "lax",
+) -> None:
+    """Set CSRF token cookie for platform-admin scope only."""
+    response.set_cookie(
+        PLATFORM_ADMIN_CSRF_COOKIE_NAME,
+        value,
+        path=PLATFORM_ADMIN_CSRF_COOKIE_PATH,
         httponly=True,
         secure=secure,
         samesite=samesite,

@@ -3,12 +3,23 @@
  * queries retry with exponential backoff; direct axios calls (auth, CSRF) are not retried.
  */
 import axios, { type InternalAxiosRequestConfig } from "axios";
-import { useAuthStore } from "../store/authStore";
 import { getSafeLoginRedirect } from "../utils/loginRedirect";
 import { getCsrfToken, setCsrfToken } from "../utils/csrf";
 import { useLocaleStore } from "../i18n";
 import { getApiErrorMessage } from "../utils/getApiErrorMessage";
 import { toast } from "sonner";
+
+type AuthStoreAdapter = {
+  getToken: () => string | null;
+  setToken: (token: string | null) => void;
+  logout: () => void;
+};
+
+let authStoreAdapter: AuthStoreAdapter | null = null;
+
+export function bindAuthStoreAdapter(adapter: AuthStoreAdapter): void {
+  authStoreAdapter = adapter;
+}
 
 // Dev proxy: baseURL legyen relatív (/api), hogy a kérés ugyanarra az originra menjen → refresh_token cookie (SameSite=Lax) elküldésre kerül.
 const api = axios.create({
@@ -28,10 +39,25 @@ api.interceptors.request.use((config) => {
   }
 
   const url = (config.url ?? "").toString();
-  if (/^\/auth\/login(\/|$)/.test(url) || /^\/auth\/register(\/|$)/.test(url)) {
+  if (config.headers.Authorization) return config;
+  if (
+    /^\/auth\/csrf-token(\/|$)/.test(url) ||
+    /^\/auth\/login(\/|$)/.test(url) ||
+    /^\/auth\/register(\/|$)/.test(url) ||
+    /^\/auth\/refresh(\/|$)/.test(url) ||
+    /^\/auth\/logout(\/|$)/.test(url) ||
+    /^\/auth\/forgot-password(\/|$)/.test(url) ||
+    /^\/auth\/demo-login(\/|$)/.test(url) ||
+    /^\/users\/set-password(\/|$)/.test(url) ||
+    /^\/platform-admin\/auth\/login(\/|$)/.test(url) ||
+    /^\/platform-admin\/auth\/csrf-token(\/|$)/.test(url) ||
+    /^\/platform-admin\/auth\/refresh(\/|$)/.test(url) ||
+    /^\/platform-admin\/auth\/logout(\/|$)/.test(url) ||
+    /^\/platform-admin\/set-password(\/|$)/.test(url)
+  ) {
     return config;
   }
-  const { token } = useAuthStore.getState();
+  const token = authStoreAdapter?.getToken() ?? null;
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
@@ -49,7 +75,7 @@ async function doRefresh(): Promise<string> {
     { withCredentials: true }
   );
   const newToken = res.data.access_token;
-  useAuthStore.getState().setToken(newToken);
+  authStoreAdapter?.setToken(newToken);
   return newToken;
 }
 
@@ -67,11 +93,11 @@ function redirectToLogin(err?: unknown): void {
     const msg = getApiErrorMessage(err) ?? "Változás történt a jogosultságokban. Jelentkezz be újra.";
     toast.error(msg);
   }
-  useAuthStore.getState().logout();
+  authStoreAdapter?.logout();
   if (typeof window === "undefined") return;
   const pathname = window.location.pathname || "";
   // Már login/forgot/set-password oldalon vagyunk → ne töltődjön újra (különben refresh 401 → logout → reload → végtelen ciklus)
-  if (pathname === "/login" || pathname.startsWith("/forgot") || pathname.startsWith("/set-password")) {
+  if (pathname === "/login" || pathname.startsWith("/forgot") || pathname.startsWith("/set-password") || pathname.startsWith("/platform-admin")) {
     return;
   }
   const path = getSafeLoginRedirect(pathname && pathname !== "/login" ? pathname : null);
@@ -84,12 +110,17 @@ api.interceptors.response.use(
   async (error) => {
     const originalRequest = error.config as (InternalAxiosRequestConfig & { _retry?: boolean }) | undefined;
     const url = (originalRequest?.url ?? "").toString();
+    const pathname = typeof window !== "undefined" ? window.location.pathname || "" : "";
 
     if (!originalRequest || error.response?.status !== 401 || originalRequest._retry) {
       return Promise.reject(error);
     }
+    // Platform-admin felületen tenant refresh ne fusson automatikusan (külön auth flow).
+    if (pathname.startsWith("/platform-admin") && !/^\/auth\//.test(url)) {
+      return Promise.reject(error);
+    }
     // Login/register 401: ne refresh-eljünk, hagyjuk a hibát
-    if (/^\/auth\/login(\/|$)/.test(url) || /^\/auth\/register(\/|$)/.test(url)) {
+    if (/^\/auth\/login(\/|$)/.test(url) || /^\/auth\/register(\/|$)/.test(url) || /^\/platform-admin\//.test(url)) {
       return Promise.reject(error);
     }
     // Ha maga a refresh kérés kapott 401-et (pl. törölt user, jogosultság változás) → üzenet ha kell, majd loginra
@@ -121,6 +152,16 @@ api.interceptors.response.use(
 export async function fetchCsrfToken(): Promise<void> {
   try {
     const res = await api.get<{ csrf_token: string }>("/auth/csrf-token", { withCredentials: true });
+    if (res.data?.csrf_token) setCsrfToken(res.data.csrf_token);
+  } catch {
+    setCsrfToken(null);
+  }
+}
+
+/** Platform-admin scoped CSRF token fetch (separate cookie namespace/path). */
+export async function fetchPlatformAdminCsrfToken(): Promise<void> {
+  try {
+    const res = await api.get<{ csrf_token: string }>("/platform-admin/auth/csrf-token", { withCredentials: true });
     if (res.data?.csrf_token) setCsrfToken(res.data.csrf_token);
   } catch {
     setCsrfToken(null);

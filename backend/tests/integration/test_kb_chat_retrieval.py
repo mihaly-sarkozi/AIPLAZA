@@ -46,3 +46,4 @@ def test_chat_returns_403_when_service_denies_kb_scope(client_authenticated: Tes
         assert r.status_code == 403
     finally:
         app.dependency_overrides.pop(get_chat_service, None)
+

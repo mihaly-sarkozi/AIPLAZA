@@ -1,5 +1,6 @@
 # Ez a fájl a(z) apps/features/knowledge/repositories csomag exportjait és inicializálási pontjait fogja össze.
 from .knowledge_base_repository import MySQLKnowledgeBaseRepository
+from .pii_mapping_repository import KnowledgePiiMappingRepository
 from .knowledge_ingest_repository import (
     SQLAlchemyIngestEventStore,
     SQLAlchemyIngestInputStore,
@@ -21,6 +22,7 @@ from .knowledge_parser_repository import (
 
 __all__ = [
     'MySQLKnowledgeBaseRepository',
+    'KnowledgePiiMappingRepository',
     'SQLAlchemyClaimStore',
     'SQLAlchemyDocumentStore',
     'SQLAlchemyIngestEventStore',

@@ -29,3 +29,23 @@ class DemoAlreadyExistsError(SignupError):
 
 class DemoEmailBlockedError(SignupError):
     """Ez az email cím le van tiltva (korábbi leiratkozás miatt)."""
+
+
+class DemoSignupDisabledError(SignupError):
+    """Új demo signup ideiglenesen le van tiltva."""
+
+
+class DemoSignupCapacityReachedError(SignupError):
+    """A napi demo kapacitás vagy limit betelt."""
+
+
+class DemoSignupRateLimitedError(SignupError):
+    """IP/email/session alapú signup limit túllépve."""
+
+
+class DemoSignupDisposableEmailError(SignupError):
+    """Disposable email domain nem engedélyezett."""
+
+
+class DemoSignupInvalidEmailDomainError(SignupError):
+    """Email domain nem érvényes / nem kézbesíthető."""

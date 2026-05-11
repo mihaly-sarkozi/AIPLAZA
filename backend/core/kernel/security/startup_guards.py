@@ -20,6 +20,7 @@ Bármilyen hiba esetén SecurityConfigError-t dob egyértelmű, cselekvésorient
 from __future__ import annotations
 
 import os
+import re
 
 
 class SecurityConfigError(ValueError):
@@ -238,6 +239,41 @@ def validate_rate_limit_config(settings: object, env: str) -> None:
         )
 
 
+_DOMAIN_LABEL_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$")
+
+
+def validate_cors_origin_regex_policy(settings: object, env: str) -> None:
+    """Production-ben tenant base domain legyen szigorúan valid.
+
+    Cél: az app_factory által épített allow_origin_regex ne legyen túl tág
+    hibás vagy fejlesztői domain beállítás miatt.
+    """
+    if env != "prod":
+        return
+    raw_base = str(getattr(settings, "tenant_base_domain", "") or "").strip().lower()
+    if not raw_base:
+        raise SecurityConfigError(
+            "tenant_base_domain production-ben kötelező a CORS origin regex biztonságos építéséhez."
+        )
+    if raw_base in {"local", "localhost"}:
+        raise SecurityConfigError(
+            f"tenant_base_domain={raw_base!r} production-ben nem engedélyezett."
+        )
+    if any(token in raw_base for token in ("*", "/", "\\", ":", " ")):
+        raise SecurityConfigError(
+            f"tenant_base_domain={raw_base!r} érvénytelen formátumú production-ben."
+        )
+    labels = [part for part in raw_base.split(".") if part]
+    if len(labels) < 2:
+        raise SecurityConfigError(
+            f"tenant_base_domain={raw_base!r} production-ben teljes domain kell legyen (pl. app.example.com)."
+        )
+    if any(not _DOMAIN_LABEL_RE.fullmatch(label) for label in labels):
+        raise SecurityConfigError(
+            f"tenant_base_domain={raw_base!r} nem RFC-kompatibilis hostname formátum."
+        )
+
+
 # ---------------------------------------------------------------------------
 # Redis / megosztott state guard (rate limit + allowlist)
 # ---------------------------------------------------------------------------
@@ -256,6 +292,74 @@ def validate_production_redis_url(settings: object, env: str) -> None:
         raise SecurityConfigError(
             "redis_url production-ben kötelező: a globális rate limiter és a token allowlist "
             "megosztott tárolót igényel (több worker / több példány esetén in-memory nem megfelelő)."
+        )
+
+
+def validate_demo_signup_hardening(settings: object, env: str) -> None:
+    """Production public-signup hardening guard."""
+    if env != "prod":
+        return
+    if not bool(getattr(settings, "demo_signups_enabled", True)):
+        return
+    if not bool(getattr(settings, "demo_signup_require_captcha", False)):
+        raise SecurityConfigError(
+            "Production-ben a demo signup captcha kötelező (demo_signup_require_captcha=true)."
+        )
+    provider = str(getattr(settings, "demo_signup_captcha_provider", "none") or "none").strip().lower()
+    if provider not in {"turnstile", "recaptcha"}:
+        raise SecurityConfigError(
+            "Production-ben demo signup captcha provider kötelező (turnstile vagy recaptcha)."
+        )
+    secret = str(getattr(settings, "demo_signup_captcha_secret", "") or "").strip()
+    if not secret:
+        raise SecurityConfigError(
+            "Production-ben demo signup captcha secret kötelező."
+        )
+    if not bool(getattr(settings, "demo_signup_require_email_verification", True)):
+        raise SecurityConfigError(
+            "Production-ben a demo signup email verifikáció nem kapcsolható ki."
+        )
+    if bool(getattr(settings, "demo_signup_expose_login_token_in_response", False)):
+        raise SecurityConfigError(
+            "Production-ben demo login token nem adható vissza signup válaszban (demo_signup_expose_login_token_in_response=false)."
+        )
+    if not bool(getattr(settings, "demo_signup_block_disposable_emails", True)):
+        raise SecurityConfigError(
+            "Production-ben disposable email tiltás kötelező a demo signupnál."
+        )
+    if not bool(getattr(settings, "demo_signup_require_mx", True)):
+        raise SecurityConfigError(
+            "Production-ben MX ellenőrzés kötelező a demo signupnál."
+        )
+
+
+def validate_billing_provider_hardening(env: str) -> None:
+    """Production-ben tiltja a fake payment provider-eket."""
+    if env != "prod":
+        return
+    provider = (os.getenv("BILLING_PROVIDER") or "manual").strip().lower()
+    if provider in {"simulated", "stripe_test"}:
+        raise SecurityConfigError(
+            f"BILLING_PROVIDER={provider!r} production-ben nem engedélyezett. "
+            "Használj manual módot, amíg nincs éles payment provider."
+        )
+    billing_mode = (os.getenv("BILLING_MODE") or "manual").strip().lower()
+    if billing_mode != "manual":
+        raise SecurityConfigError(
+            f"BILLING_MODE={billing_mode!r} production-ben nem engedélyezett. "
+            "Állítsd BILLING_MODE=manual értékre."
+        )
+
+
+def validate_pii_legacy_plaintext_hardening(env: str) -> None:
+    """Production-ben legacy plaintext PII read ne maradjon bekapcsolva."""
+    if env != "prod":
+        return
+    raw = (os.getenv("PII_ALLOW_LEGACY_PLAINTEXT_READ") or "").strip().lower()
+    if raw in {"1", "true", "yes", "on"}:
+        raise SecurityConfigError(
+            "PII_ALLOW_LEGACY_PLAINTEXT_READ production-ben nem engedélyezett. "
+            "Futtasd le a PII migrációt és állítsd false értékre."
         )
 
 
@@ -343,7 +447,10 @@ def run_kernel_security_guards(settings: object, env: str) -> None:
     validate_trusted_hosts(settings, env)
     validate_csrf_policy(env)
     validate_rate_limit_config(settings, env)
+    validate_cors_origin_regex_policy(settings, env)
     validate_production_redis_url(settings, env)
+    validate_billing_provider_hardening(env)
+    validate_pii_legacy_plaintext_hardening(env)
     validate_refresh_token_policy(settings, env)
 
 
@@ -357,6 +464,9 @@ __all__ = [
     "validate_csrf_policy",
     "validate_production_redis_url",
     "validate_rate_limit_config",
+    "validate_cors_origin_regex_policy",
+    "validate_billing_provider_hardening",
+    "validate_pii_legacy_plaintext_hardening",
     "validate_refresh_token_policy",
     "validate_trusted_hosts",
 ]

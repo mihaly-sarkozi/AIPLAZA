@@ -9,9 +9,12 @@ export const queryKeys = {
   profilePreferences: ["profile", "preferences"] as const,
   kb: ["kb"] as const,
   kbItem: (uuid: string) => ["kb", uuid] as const,
-  kbIngestRuns: (uuid: string) => ["kb", uuid, "ingest", "runs"] as const,
+  kbIngestRuns: (uuid: string) => ["kb", uuid, "ingest", "runs"] as readonly unknown[],
   kbIngestRun: (runId: string) => ["kb", "ingest", "run", runId] as const,
   settings: ["settings"] as const,
+  authenticatorStatus: ["auth", "authenticator", "status"] as const,
+  domainOverview: ["platform", "domain", "overview"] as const,
+  billingAccessStatus: ["billing", "accessStatus"] as const,
   billingOverview: ["billing", "overview"] as const,
   billingUpgradePreview: (planCode: string, billingPeriod: string) => ["billing", "upgradePreview", planCode, billingPeriod] as const,
 } as const;

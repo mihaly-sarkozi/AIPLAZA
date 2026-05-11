@@ -21,7 +21,9 @@ _TENANT_OPTIONAL_PATH_PREFIXES = (
     "/api/health",
     "/api/health/live",
     "/api/health/ready",
+    "/api/auth/csrf-token",
     "/api/metrics",
+    "/api/platform-admin/",
     "/api/platform/lifecycle",
     "/api/installer/",
 )
@@ -85,6 +87,8 @@ class TenantMiddleware:
             return
         path = scope.get("path", "")
         is_installer_path = path.startswith("/api/installer/")
+        is_csrf_token_path = path.startswith("/api/auth/csrf-token")
+        is_platform_admin_path = path.startswith("/api/platform-admin/")
         is_tenant_optional_path = any(path.startswith(prefix) for prefix in _TENANT_OPTIONAL_PATH_PREFIXES)
         state = initialize_tenant_state(scope)
         state["tenant_resolution_outcome"] = "not_evaluated"
@@ -118,7 +122,27 @@ class TenantMiddleware:
                 if value and value.strip()
             }
             if is_tenant_optional_path:
-                if allowed_install_hosts and host not in allowed_install_hosts:
+                if is_csrf_token_path and host not in allowed_install_hosts:
+                    csrf_slug, _is_custom, _snapshot = await loop.run_in_executor(
+                        None,
+                        lambda: self._resolution_service.resolve_request(host),
+                    )
+                    if not csrf_slug:
+                        state["tenant_resolution_outcome"] = "install_host_rejected"
+                        increment_metric("platform.tenant.resolution.failure.count", 1.0, tags={"reason": "install_host_rejected"})
+                        await _send_json_response(
+                            send, 400,
+                            {"detail": "Tenant hiányzik, vagy a host install útvonal nincs engedélyezve."}
+                        )
+                        current_tenant_schema.reset(token)
+                        return
+                if (
+                    allowed_install_hosts
+                    and (
+                        (is_platform_admin_path and host not in allowed_install_hosts)
+                        or (not is_platform_admin_path and not is_csrf_token_path and host not in allowed_install_hosts)
+                    )
+                ):
                     state["tenant_resolution_outcome"] = "install_host_rejected"
                     increment_metric("platform.tenant.resolution.failure.count", 1.0, tags={"reason": "install_host_rejected"})
                     await _send_json_response(
@@ -180,7 +204,7 @@ class TenantMiddleware:
                 )
                 await _send_json_response(
                     send, 404,
-                    {"detail": "Ismeretlen vagy nem létező tenant. Ellenőrizd a címet (pl. demo.local, acme.local)."}
+                    {"detail": "404"}
                 )
                 current_tenant_schema.reset(token)
                 return

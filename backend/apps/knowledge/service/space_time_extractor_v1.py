@@ -7,173 +7,15 @@ from apps.knowledge.domain.mention import Mention
 from apps.knowledge.domain.sentence import Sentence
 from apps.knowledge.domain.space_time_frame import SpaceTimeFrame
 from apps.knowledge.service.language_rules import detect_language, fold_text, get_language_rules, resolve_language
-
-TIME_KEYWORDS: dict[str, tuple[str, ...]] = {
-    "hu": (
-        "ma",
-        "tegnap",
-        "holnap",
-        "jelenleg",
-        "most",
-        "2024",
-        "2025",
-        "2026",
-        "januar",
-        "februar",
-        "marcius",
-        "aprilis",
-        "majus",
-        "junius",
-        "julius",
-        "augusztus",
-        "szeptember",
-        "oktober",
-        "november",
-        "december",
-        "ota",
-        "elott",
-        "utan",
-        "létrejött",
-        "módosult",
-    ),
-    "en": (
-        "today",
-        "yesterday",
-        "tomorrow",
-        "currently",
-        "now",
-        "since",
-        "before",
-        "after",
-        "january",
-        "february",
-        "march",
-        "april",
-        "may",
-        "june",
-        "july",
-        "august",
-        "september",
-        "october",
-        "november",
-        "december",
-        "created",
-        "updated",
-    ),
-    "es": (
-        "hoy",
-        "ayer",
-        "mañana",
-        "manana",
-        "actualmente",
-        "ahora",
-        "desde",
-        "antes",
-        "después",
-        "despues",
-        "enero",
-        "febrero",
-        "marzo",
-        "abril",
-        "mayo",
-        "junio",
-        "julio",
-        "agosto",
-        "septiembre",
-        "octubre",
-        "noviembre",
-        "diciembre",
-        "creado",
-        "actualizado",
-    ),
-}
-
-SPACE_KEYWORDS: dict[str, tuple[str, ...]] = {
-    "hu": ("iroda", "budapesti", "telephely", "helyszín", "helyszin", "ország", "orszag", "város", "varos"),
-    "en": ("office", "location", "site", "country", "city"),
-    "es": ("oficina", "ubicación", "ubicacion", "sede", "país", "pais", "ciudad"),
-}
-
-CURRENT_TIME_KEYWORDS = {
-    "hu": ("ma", "jelenleg", "most"),
-    "en": ("today", "currently", "now"),
-    "es": ("hoy", "actualmente", "ahora"),
-}
-
-OPEN_TIME_KEYWORDS = {
-    "hu": ("óta", "ota"),
-    "en": ("since",),
-    "es": ("desde",),
-}
-
-BOUNDED_TIME_KEYWORDS = {
-    "hu": ("előtt", "elott", "után", "utan", "korábban", "korabban"),
-    "en": ("before", "after", "earlier", "previously"),
-    "es": ("antes", "después", "despues", "anteriormente"),
-}
-
-EVENT_TIME_KEYWORDS = {
-    "hu": ("létrejött", "módosult", "created", "updated"),
-    "en": ("created", "updated", "létrejött", "módosult"),
-    "es": ("creado", "actualizado", "létrejött", "módosult"),
-}
-
-MONTH_KEYWORDS = {
-    "hu": (
-        "január",
-        "február",
-        "március",
-        "április",
-        "május",
-        "június",
-        "július",
-        "augusztus",
-        "szeptember",
-        "október",
-        "november",
-        "december",
-        "januar",
-        "februar",
-        "marcius",
-        "aprilis",
-        "majus",
-        "junius",
-        "julius",
-        "oktober",
-    ),
-    "en": (
-        "january",
-        "february",
-        "march",
-        "april",
-        "may",
-        "june",
-        "july",
-        "august",
-        "september",
-        "october",
-        "november",
-        "december",
-    ),
-    "es": (
-        "enero",
-        "febrero",
-        "marzo",
-        "abril",
-        "mayo",
-        "junio",
-        "julio",
-        "agosto",
-        "septiembre",
-        "octubre",
-        "noviembre",
-        "diciembre",
-    ),
-}
+from shared.text.language_lexicon import get_lexicon_terms
 
 YEAR_PATTERN = re.compile(r"\b(19|20)\d{2}\b")
 TOKEN_PATTERN = re.compile(r"[0-9A-Za-zÁÉÍÓÖŐÚÜŰáéíóöőúüűÑñ]+", flags=re.UNICODE)
 HU_YEAR_SUFFIX_PATTERN = re.compile(r"\b((?:19|20)\d{2})(?:-?ben|-?ban)\b", flags=re.IGNORECASE)
+
+
+def _lexicon_terms(language: str | None, key: str) -> tuple[str, ...]:
+    return get_lexicon_terms(language, key, include_fallback=False)
 
 
 def _normalize_text(value: str | None) -> str:
@@ -195,8 +37,19 @@ def _find_first_keyword(text: str, keywords: tuple[str, ...]) -> str | None:
     return None
 
 
+def _find_keyword_surface(text: str, keywords: tuple[str, ...]) -> str | None:
+    raw_text = str(text or "")
+    if not raw_text:
+        return None
+    for keyword in keywords:
+        match = re.search(r"\b" + re.escape(str(keyword)) + r"\b", raw_text, flags=re.IGNORECASE)
+        if match:
+            return match.group(0)
+    return None
+
+
 def _extract_month_or_year_phrase(text: str, *, language: str) -> str | None:
-    months = sorted((re.escape(item) for item in get_language_rules(language).month_keywords), key=len, reverse=True)
+    months = sorted((re.escape(item) for item in _lexicon_terms(language, "time_months")), key=len, reverse=True)
     if months:
         if language == "hu":
             year_first_pattern = re.compile(
@@ -267,7 +120,7 @@ def _extract_bounded_time_phrase(text: str, *, language: str) -> str | None:
 
 
 def _extract_current_keyword(text: str, *, language: str) -> str | None:
-    return _find_first_keyword(text, CURRENT_TIME_KEYWORDS.get(language, ()))
+    return _find_first_keyword(text, _lexicon_terms(language, "time_relative_current"))
 
 
 def _folded_with_index_map(text: str) -> tuple[str, list[int]]:
@@ -361,7 +214,7 @@ def _extract_space_phrase(text: str | None, *, language: str) -> str | None:
     tokens = TOKEN_PATTERN.findall(candidate)
     if not tokens:
         return None
-    keyword_set = {fold_text(item) for item in SPACE_KEYWORDS.get(language, ())}
+    keyword_set = {fold_text(item) for item in _lexicon_terms(language, "location_qualifiers")}
     for idx, token in enumerate(tokens):
         folded = fold_text(token)
         if folded not in keyword_set:
@@ -443,21 +296,22 @@ class SpaceTimeExtractorV1:
             overall_confidence = 0.6
 
         local_time_context = object_text or lowered_clause
-        local_bounded_keyword = _find_first_keyword(
-            local_time_context, BOUNDED_TIME_KEYWORDS.get(resolved_language, ())
-        )
-        current_keyword = _find_first_keyword(local_time_context, CURRENT_TIME_KEYWORDS.get(resolved_language, ()))
+        local_bounded_keyword = _find_first_keyword(local_time_context, _lexicon_terms(resolved_language, "time_relative_bounded"))
+        current_keyword = _find_first_keyword(local_time_context, _lexicon_terms(resolved_language, "time_relative_current"))
         if current_keyword is None and local_bounded_keyword is None:
-            current_keyword = _find_first_keyword(lowered_text, CURRENT_TIME_KEYWORDS.get(resolved_language, ()))
-        event_keyword = _find_first_keyword(object_text or lowered_clause, EVENT_TIME_KEYWORDS.get(resolved_language, ())) or _find_first_keyword(
-            lowered_text, EVENT_TIME_KEYWORDS.get(resolved_language, ())
+            current_keyword = _find_first_keyword(lowered_text, _lexicon_terms(resolved_language, "time_relative_current"))
+        event_keyword = _find_first_keyword(object_text or lowered_clause, _lexicon_terms(resolved_language, "time_event_markers")) or _find_first_keyword(
+            lowered_text, _lexicon_terms(resolved_language, "time_event_markers")
         )
-        open_keyword = _find_first_keyword(object_text or lowered_clause, OPEN_TIME_KEYWORDS.get(resolved_language, ())) or _find_first_keyword(
-            lowered_text, OPEN_TIME_KEYWORDS.get(resolved_language, ())
+        open_keyword = _find_first_keyword(object_text or lowered_clause, _lexicon_terms(resolved_language, "time_relative_open")) or _find_first_keyword(
+            lowered_text, _lexicon_terms(resolved_language, "time_relative_open")
         )
-        bounded_keyword = local_bounded_keyword or _find_first_keyword(lowered_text, BOUNDED_TIME_KEYWORDS.get(resolved_language, ()))
-        month_keyword = _find_first_keyword(object_text or lowered_clause, MONTH_KEYWORDS.get(resolved_language, ())) or _find_first_keyword(
-            lowered_text, MONTH_KEYWORDS.get(resolved_language, ())
+        bounded_keyword = local_bounded_keyword or _find_first_keyword(lowered_text, _lexicon_terms(resolved_language, "time_relative_bounded"))
+        month_keyword = _find_first_keyword(object_text or lowered_clause, _lexicon_terms(resolved_language, "time_months")) or _find_first_keyword(
+            lowered_text, _lexicon_terms(resolved_language, "time_months")
+        )
+        weekday_keyword = _find_first_keyword(object_text or lowered_clause, _lexicon_terms(resolved_language, "time_weekdays")) or _find_first_keyword(
+            lowered_text, _lexicon_terms(resolved_language, "time_weekdays")
         )
         year_with_marker = (
             _extract_year_with_marker(object_text, language=resolved_language)
@@ -482,6 +336,13 @@ class SpaceTimeExtractorV1:
             time_precision = "relative"
             time_confidence = max(time_confidence, 0.6)
             overall_confidence = max(overall_confidence, 0.6)
+        elif weekday_keyword is not None:
+            weekday_surface = _find_keyword_surface(object_text or predicate_clause or text, _lexicon_terms(resolved_language, "time_weekdays"))
+            time_mode = "bounded"
+            time_value = weekday_surface or weekday_keyword
+            time_precision = "weekday"
+            time_confidence = max(time_confidence, 0.6)
+            overall_confidence = max(overall_confidence, 0.6)
         elif event_keyword is not None:
             time_mode = "event"
             time_value = precise_time_value or year_with_marker or event_keyword
@@ -503,7 +364,10 @@ class SpaceTimeExtractorV1:
         elif precise_time_value is not None:
             time_mode = "bounded"
             time_value = precise_time_value
-            time_precision = "month" if any(_contains_keyword(precise_time_value, item) for item in MONTH_KEYWORDS.get(resolved_language, ())) else "year"
+            time_precision = "month" if any(
+                _contains_keyword(precise_time_value, item)
+                for item in _lexicon_terms(resolved_language, "time_months")
+            ) else "year"
             time_confidence = max(time_confidence, 0.6)
             overall_confidence = max(overall_confidence, 0.6)
         elif year_with_marker is not None:
@@ -527,7 +391,7 @@ class SpaceTimeExtractorV1:
                 or _extract_space_phrase(object_text, language=resolved_language)
                 or _extract_space_phrase(text, language=resolved_language)
             )
-        space_keyword = _find_first_keyword(lowered_text, SPACE_KEYWORDS.get(resolved_language, ()))
+        space_keyword = _find_first_keyword(lowered_text, _lexicon_terms(resolved_language, "location_qualifiers"))
         if space_value is not None:
             space_mode = "bounded"
             space_precision = "mention" if location_mention_space is not None else "entity_phrase"

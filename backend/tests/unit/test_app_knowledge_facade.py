@@ -107,7 +107,7 @@ class _CorpusStore:
         }
         self.permissions = {"kb-1": [(11, "train")]}
 
-    def list_all(self) -> list[Corpus]:
+    def list_all(self, *, include_deleted: bool = False) -> list[Corpus]:
         return list(self.items.values())
 
     def get_by_uuid(self, uuid: str) -> Corpus | None:
@@ -127,7 +127,7 @@ class _CorpusStore:
         self.items[updated.uuid] = updated
         return updated
 
-    def delete(self, uuid: str) -> None:
+    def delete(self, uuid: str, *, training_char_count: int = 0) -> None:
         self.items.pop(uuid, None)
 
     def list_permissions(self, corpus_uuid: str) -> list[tuple[int, str]]:
@@ -304,8 +304,10 @@ class _NoopObjectStorage:
 class _VectorIndex:
     def __init__(self) -> None:
         self.collections: dict[str, list[dict[str, object]]] = {}
+        self.ensure_calls: list[tuple[str, int | None]] = []
 
     async def ensure_collection_schema_async(self, collection_name: str, vector_size: int | None = None) -> None:
+        self.ensure_calls.append((collection_name, vector_size))
         self.collections.setdefault(collection_name, [])
 
     async def upsert_sentence_points(self, collection: str, rows: list[dict[str, object]]) -> None:
@@ -335,6 +337,21 @@ class _VectorIndex:
                     "payload": payload,
                     "fusion_score": 0.95,
                     "score": 0.95,
+                }
+            )
+
+    async def upsert_semantic_block_points(self, collection: str, rows: list[dict[str, object]]) -> None:
+        self.collections.setdefault(collection, [])
+        for row in rows:
+            payload = dict(row.get("payload") or {})
+            payload["text"] = row.get("text")
+            payload.setdefault("point_type", "semantic_block")
+            self.collections[collection].append(
+                {
+                    "id": str(row.get("id")),
+                    "payload": payload,
+                    "fusion_score": 0.92,
+                    "score": 0.92,
                 }
             )
 
@@ -1345,6 +1362,44 @@ def test_get_ingest_run_refreshes_stale_processing_status() -> None:
     assert refreshed.metadata["progress_summary"]["overall_percent"] == 100
 
 
+def test_refresh_ingest_run_marks_partial_success_when_mixed_terminal_states() -> None:
+    facade = _build_facade()
+    run_store = _InMemoryIngestRunStore()
+    item_store = _InMemoryIngestItemStore()
+    facade._ingest_run_store = run_store
+    facade._ingest_item_store = item_store
+
+    run = run_store.create(IngestRun(id="run-partial", corpus_uuid="kb-1", status="processing"))
+    item_store.create(
+        IngestItem(
+            id="item-ok",
+            ingest_run_id=run.id,
+            corpus_uuid="kb-1",
+            queue_order=1,
+            display_name="ok.txt",
+            status="completed",
+        )
+    )
+    item_store.create(
+        IngestItem(
+            id="item-failed",
+            ingest_run_id=run.id,
+            corpus_uuid="kb-1",
+            queue_order=2,
+            display_name="failed.txt",
+            status="failed",
+            error_message="parser error",
+        )
+    )
+
+    refreshed = facade._refresh_ingest_run(run.id)
+
+    assert refreshed.status == "partial_success"
+    assert refreshed.completed_count == 1
+    assert refreshed.failed_count == 1
+    assert refreshed.metadata["progress_summary"]["overall_percent"] == 100
+
+
 def test_is_stale_parser_processing_detects_half_finished_parse_state() -> None:
     facade = _build_facade()
     parser_run = ParserRun(source_id="source-1", corpus_uuid="kb-1", status="processing")
@@ -1475,6 +1530,84 @@ async def test_schedule_and_run_index_build_ingests_sources_into_build_collectio
     assert finished.chunk_count > 0
     assert finished.collection_name in vector_index.collections
     assert vector_index.collections[finished.collection_name]
+
+
+def test_schedule_index_build_uses_requested_profile_key_and_collection_suffix() -> None:
+    facade = _build_facade()
+
+    build = facade.schedule_index_build(
+        tenant="demo",
+        corpus_uuid="kb-1",
+        index_profile_key="hybrid_v1",
+        created_by=11,
+    )
+
+    assert build.index_profile_key == "hybrid_v1"
+    assert build.collection_name.endswith("__hybrid_v1")
+
+
+@pytest.mark.anyio
+async def test_run_index_build_persists_build_and_profile_metadata_for_vector_rows() -> None:
+    vector_index = _VectorIndex()
+    facade = _build_facade(vector_index=vector_index)
+    facade.create_source(
+        tenant="demo",
+        corpus_uuid="kb-1",
+        title="Pilot source",
+        source_type="text",
+        raw_content="Az SK MAX rendszer kezeli a szerzodeseket es workflow-kat.",
+        file_ref=None,
+        created_by=11,
+    )
+    facade._load_existing_retrieval_chunks = lambda **_kwargs: [
+        {
+            "profile_id": "global-profile:sk-max",
+            "entity_name": "SK MAX rendszer",
+            "entity_type": "system_component",
+            "canonical_key": "sk max rendszer",
+            "retrieval_chunk_id": "retrieval_chunk:sk-max",
+            "retrieval_chunk_text": "SK MAX rendszer workflow tamogatas",
+            "structured_facts": {"relations": []},
+            "source_ids": ["src-1"],
+            "evidence_ids": ["claim-1"],
+        }
+    ]
+    facade._load_existing_semantic_blocks = lambda **_kwargs: [
+        {
+            "id": "semantic-block-1",
+            "corpus_uuid": "kb-1",
+            "source_id": "src-1",
+            "document_id": "doc-1",
+            "claim_ids": ["claim-1"],
+            "sentence_ids": ["sentence-1"],
+            "primary_subject": "SK MAX rendszer",
+            "summary": "Workflow tamogatas",
+            "text": "Az SK MAX rendszer workflow folyamatokat tamogat.",
+            "time_modes": ["current"],
+            "space_modes": ["virtual"],
+            "entity_keys": ["sk max rendszer"],
+            "metadata": {"block_status": "approved"},
+        }
+    ]
+
+    build = facade.schedule_index_build(
+        tenant="demo",
+        corpus_uuid="kb-1",
+        index_profile_key="hybrid_v1",
+        created_by=11,
+    )
+    await facade.run_index_build(build.id)
+
+    assert vector_index.ensure_calls[0] == (build.collection_name, 1024)
+    rows = vector_index.collections[build.collection_name]
+    assert rows
+    assert any((row.get("payload") or {}).get("point_type") == "sentence" for row in rows)
+    assert any((row.get("payload") or {}).get("point_type") == "retrieval_chunk" for row in rows)
+    assert any((row.get("payload") or {}).get("point_type") == "semantic_block" for row in rows)
+    for row in rows:
+        payload = row.get("payload") or {}
+        assert payload.get("build_id") == build.id
+        assert payload.get("index_profile_key") == "hybrid_v1"
 
 
 @pytest.mark.anyio
@@ -1932,6 +2065,30 @@ async def test_retrieve_without_ready_index_build_still_runs_query_aware_synthes
     assert query_run.metadata["no_ready_index_build"] is True
     assert query_run.metadata["query_debug"]["no_ready_index_build"] is True
     assert query_run.metadata["answer_text"] == "The London office is currently inactive."
+
+
+@pytest.mark.anyio
+async def test_retrieve_accepts_completed_index_status_as_ready() -> None:
+    facade = _build_facade()
+    completed_build = facade._index_build_store.create(  # noqa: SLF001 - unit test inspects facade internals
+        IndexBuild(
+            tenant="demo",
+            corpus_uuid="kb-1",
+            index_profile_key="basic_chunk_v1",
+            status="completed",  # type: ignore[arg-type]
+            collection_name="kb_1__basic_chunk_v1",
+        )
+    )
+
+    query_run = await facade.retrieve(
+        tenant="demo",
+        corpus_uuid="kb-1",
+        query="What is the status of London office?",
+    )
+
+    assert query_run.build_ids == [completed_build.id]
+    assert query_run.metadata["no_ready_index_build"] is False
+    assert query_run.metadata["query_debug"]["no_ready_index_build"] is False
 
 
 @pytest.mark.anyio

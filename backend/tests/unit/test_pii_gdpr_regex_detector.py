@@ -61,3 +61,25 @@ def test_detects_date_of_birth(detector):
     results = detector.detect(text, "hu")
     dobs = [r for r in results if r.entity_type == EntityType.DATE_OF_BIRTH]
     assert len(dobs) >= 1
+
+
+@pytest.mark.release_acceptance
+def test_person_name_does_not_include_document_label(detector):
+    text = "János alacsony, Feri Útlevélszáma PW897654."
+    results = detector.detect(text, "hu")
+    person_matches = [r.matched_text for r in results if r.entity_type == EntityType.PERSON_NAME]
+
+    assert "Feri Útlevélszáma" not in person_matches
+    assert "Feri" in person_matches
+
+
+@pytest.mark.release_acceptance
+def test_person_name_detected_before_hungarian_document_clause(detector):
+    text = (
+        "Péter magas és kék szemű, személyi igazolvány száma AU321654. "
+        "János alacsony és kedvetlen, Feri Útlevélszáma PW897654."
+    )
+    results = detector.detect(text, "hu")
+    person_matches = [r.matched_text for r in results if r.entity_type == EntityType.PERSON_NAME]
+
+    assert "Péter" in person_matches

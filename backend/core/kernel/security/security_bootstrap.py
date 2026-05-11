@@ -31,9 +31,12 @@ import os
 from core.kernel.security.startup_guards import (
     SecurityConfigError,
     validate_basic_security_config,
+    validate_billing_provider_hardening,
     validate_csrf_policy,
+    validate_demo_signup_hardening,
     validate_jwt_config_presence_and_format,
     validate_jwt_secret_strength,
+    validate_pii_legacy_plaintext_hardening,
     validate_production_redis_url,
     validate_rate_limit_config,
     validate_refresh_token_policy,
@@ -82,6 +85,9 @@ def validate_all_security_config(settings: object, *, env: str) -> None:
         # További production hardening guard-ok a fenti, kötelező diagnosztikai
         # sorrend után futnak.
         validate_production_redis_url(settings, env)
+        validate_demo_signup_hardening(settings, env)
+        validate_billing_provider_hardening(env)
+        validate_pii_legacy_plaintext_hardening(env)
         validate_refresh_token_policy(settings, env)
         run_non_jwt_auth_policy_guards(settings, env)
     except SecurityPolicyError as exc:

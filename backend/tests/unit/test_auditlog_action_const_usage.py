@@ -14,6 +14,7 @@ _SERVICE_FILES = [
     Path("core/capabilities/users/service/invite_service.py"),
     Path("core/platform/settings/services.py"),
     Path("core/platform/brand/services.py"),
+    Path("core/platform_admin/router.py"),
     Path("core/extensions/tenant/signup/new_demo_signup.py"),
 ]
 
@@ -25,11 +26,22 @@ def _collect_audit_action_names(path: Path) -> set[str]:
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
             continue
-        if not isinstance(node.func, ast.Attribute) or node.func.attr != "log":
+        action_expr = None
+
+        # Közvetlen audit.log(AuditLogAction.X, ...)
+        if isinstance(node.func, ast.Attribute) and node.func.attr == "log":
+            action_expr = node.args[0] if node.args else None
+            if isinstance(action_expr, ast.Name):
+                # Wrapper függvény belső továbbadása (pl. audit.log(action, ...)) itt nem ellenőrizhető.
+                continue
+
+        # Wrapper hívás: _audit_log(audit, AuditLogAction.X, ...)
+        elif isinstance(node.func, ast.Name) and node.func.id == "_audit_log":
+            action_expr = node.args[1] if len(node.args) > 1 else None
+        else:
             continue
 
-        action_expr = node.args[0] if node.args else None
-        assert action_expr is not None, f"audit.log action missing in {path}"
+        assert action_expr is not None, f"Audit action missing in {path}"
         assert isinstance(action_expr, ast.Attribute), f"Audit action must be enum member in {path}"
         assert isinstance(action_expr.value, ast.Name), f"Audit action owner must be named in {path}"
         assert action_expr.value.id == "AuditLogAction", f"Audit action must use AuditLogAction in {path}"
@@ -55,5 +67,5 @@ def test_all_audit_action_enum_members_are_accounted_for_in_service_usage():
     enum_names = {member.name for member in AuditLogAction}
     unused = enum_names - used_names
 
-    # Legacy compatibility constant: defined, de jelenleg nincs aktív service kibocsátója.
-    assert unused == {"LOGOUT_ERROR"}
+    # Legacy compatibility constants: defined, de jelenleg nincs aktív service kibocsátójuk.
+    assert unused == {"LOGOUT_ERROR", "KNOWLEDGE_PII_DEPERSONALIZED"}

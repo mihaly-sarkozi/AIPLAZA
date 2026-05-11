@@ -251,14 +251,20 @@ def mock_user_service(sample_user):
 @pytest.fixture
 def client_superuser(app, client, sample_user, mock_user_service, mock_logout_service):
     from core.capabilities.users.dependencies import get_invite_service, get_user_service
-    from core.di import get_logout_service
+    from core.di import get_logout_service, get_service, register_service
     from core.platform.auth.auth_dependencies import get_current_user
+    from core.platform.service_keys import PLATFORM_TENANT_USAGE_SERVICE
 
+    previous_usage_service = get_service(PLATFORM_TENANT_USAGE_SERVICE)
+    usage_service = MagicMock()
+    usage_service.can_create_user.return_value = (True, None)
+    register_service(PLATFORM_TENANT_USAGE_SERVICE, usage_service)
     app.dependency_overrides[get_current_user] = lambda: sample_user
     app.dependency_overrides[get_user_service] = lambda: mock_user_service
     app.dependency_overrides[get_invite_service] = lambda: mock_user_service
     app.dependency_overrides[get_logout_service] = lambda: mock_logout_service
     yield client
+    register_service(PLATFORM_TENANT_USAGE_SERVICE, previous_usage_service)
     app.dependency_overrides.pop(get_current_user, None)
     app.dependency_overrides.pop(get_user_service, None)
     app.dependency_overrides.pop(get_invite_service, None)

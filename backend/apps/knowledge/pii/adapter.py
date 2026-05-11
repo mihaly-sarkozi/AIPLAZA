@@ -6,6 +6,7 @@ Nincs legacy fallback; a pii.pipeline és pii_filter mindkettő ezen keresztül 
 """
 from __future__ import annotations
 
+from functools import lru_cache
 from typing import List, Tuple
 
 from apps.knowledge.pii_gdpr.policy.legacy_mapping import get_legacy_name
@@ -15,21 +16,37 @@ from shared.text.span_utils import deduplicate_matches_longer_wins
 PiiMatch = Tuple[int, int, str, str]
 
 
+def _normalize_sensitivity(sensitivity: str | None) -> str:
+    value = str(sensitivity or "medium").strip().lower()
+    if value not in {"weak", "medium", "strong"}:
+        return "medium"
+    return value
+
+
+@lru_cache(maxsize=8)
+def _pipeline_for_normalized_sensitivity(sensitivity: str):
+    from apps.knowledge.pii_gdpr.pipeline.ingestion_pipeline import IngestionPipeline
+    from apps.knowledge.pii_gdpr.models import AnalyzerConfig, PolicyConfig
+
+    return IngestionPipeline(
+        analyzer_config=AnalyzerConfig(),
+        policy_config=PolicyConfig(mode="balanced", sensitivity=sensitivity),
+    )
+
+
+def _pipeline_for_sensitivity(sensitivity: str):
+    return _pipeline_for_normalized_sensitivity(_normalize_sensitivity(sensitivity))
+
+
 def _detect_via_gdpr(text: str, sensitivity: str) -> List[PiiMatch]:
     """
     Egyetlen policy engine: pii_gdpr. A sensitivity a PolicyConfig-ban van,
     a pipeline már csak az adott scope (weak/medium/strong) találatokat adja.
     """
     try:
-        from apps.knowledge.pii_gdpr.pipeline.ingestion_pipeline import IngestionPipeline
-        from apps.knowledge.pii_gdpr.models import AnalyzerConfig, PolicyConfig
+        pipeline = _pipeline_for_sensitivity(sensitivity)
     except ImportError as exc:
         raise RuntimeError("PII GDPR pipeline is unavailable") from exc
-
-    pipeline = IngestionPipeline(
-        analyzer_config=AnalyzerConfig(),
-        policy_config=PolicyConfig(mode="balanced", sensitivity=sensitivity),
-    )
     result = pipeline.run(text)
     raw = result.get("raw_detections") or []
     matches: List[PiiMatch] = []

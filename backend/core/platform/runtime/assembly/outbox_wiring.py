@@ -19,6 +19,7 @@ def wire_outbox_worker(
     if channel is None:
         return None
     stale = max(1, int(getattr(settings, "platform_event_outbox_stale_lock_sec", 300)))
+    handler_timeout = max(1, int(getattr(settings, "platform_event_handler_timeout_sec", 15)))
     return OutboxWorker(
         event_outbox_repo,
         security.dispatcher,
@@ -26,5 +27,6 @@ def wire_outbox_worker(
         max_retries=channel.max_retries,
         retry_delay_seconds=channel.retry_delay_seconds,
         stale_lock_after_sec=stale,
+        handler_timeout_seconds=handler_timeout,
         lock_owner=default_outbox_lock_owner(),
     )

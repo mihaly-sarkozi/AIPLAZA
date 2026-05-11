@@ -6,6 +6,8 @@ the TokenResponse body.  No routing, no business logic.
 """
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 from core.capabilities.auth.dto import LoginSuccess, TenantAuthContext
 from core.capabilities.auth.router.responses import TokenResponse
 from core.capabilities.users.router.responses import UserResponse
@@ -16,6 +18,33 @@ from core.platform.auth.token_allowlist import add as allowlist_add
 from fastapi.responses import Response
 
 
+def _parse_flag_datetime(value: object) -> datetime | None:
+    if value is None:
+        return None
+    raw = str(value).strip()
+    if not raw:
+        return None
+    try:
+        dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=UTC)
+    return dt.astimezone(UTC)
+
+
+def _is_trial_active(tenant) -> bool:
+    config = getattr(tenant, "config", None)
+    flags = getattr(config, "feature_flags", {}) or {}
+    is_demo_mode = bool(flags.get("demo_mode") or flags.get("trial_mode"))
+    if not is_demo_mode:
+        return False
+    expires_at = _parse_flag_datetime(flags.get("demo_expires_at") or flags.get("trial_expires_at"))
+    if expires_at is None:
+        return True
+    return expires_at > datetime.now(UTC)
+
+
 def tenant_auth_context(tenant) -> TenantAuthContext:
     """Extract the minimal TenantAuthContext from a resolved tenant snapshot."""
     return TenantAuthContext(
@@ -23,6 +52,7 @@ def tenant_auth_context(tenant) -> TenantAuthContext:
         slug=tenant.slug,
         correlation_id=tenant.correlation_id,
         security_version=tenant.security_version,
+        trial_active=_is_trial_active(tenant),
     )
 
 

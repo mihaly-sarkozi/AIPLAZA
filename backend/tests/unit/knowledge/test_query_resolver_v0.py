@@ -201,3 +201,18 @@ def test_query_resolver_detects_expected_answer_type_from_hungarian_question_wor
     assert resolver.resolve("Ki felelős a support service-ért?").expected_answer_type == "person"
     assert resolver.resolve("Mit használ a support service?").expected_answer_type == "object"
     assert resolver.resolve("Miért inaktív a London office?").expected_answer_type == "explanation"
+
+
+def test_query_resolver_adds_hungarian_typo_tolerant_keyword_stems() -> None:
+    profile = QueryResolverV0().resolve("nyugdijjakal kapcslatban?")
+
+    assert "nyugdij" in profile.keywords
+    assert "kapcslatban" not in profile.keywords
+
+
+def test_query_resolver_detects_expected_answer_type_from_spanish_question_words() -> None:
+    resolver = QueryResolverV0()
+
+    assert resolver.resolve("¿Dónde está la oficina de Madrid?").expected_answer_type == "location"
+    assert resolver.resolve("¿Cuándo fue actualizado el billing service?").expected_answer_type == "time"
+    assert resolver.resolve("¿Quién es responsable del support service?").expected_answer_type == "person"

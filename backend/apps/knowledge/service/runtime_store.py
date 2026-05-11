@@ -44,10 +44,10 @@ class InMemoryIndexProfileStore:
             "hybrid_v1": IndexProfile(
                 key="hybrid_v1",
                 chunking_rule="sentence+window",
-                embedding_strategy="openai:text-embedding-3-large",
+                embedding_strategy="local:BAAI/bge-m3",
                 index_type="qdrant_dense+lexical",
                 metadata_mode="source_payload",
-                config={"fusion": "semantic_lexical"},
+                config={"fusion": "semantic_lexical", "vector_size": 1024},
             ),
         }
 

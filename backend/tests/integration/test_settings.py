@@ -113,6 +113,13 @@ def test_patch_settings_success(client_authenticated: TestClient, mock_settings_
             timezone="Europe/Budapest",
             date_format="DD.MM.YYYY",
             time_format="HH:mm:ss",
+            billing_company_name=None,
+            billing_tax_id=None,
+            billing_address_line=None,
+            billing_postal_code=None,
+            billing_city=None,
+            billing_region=None,
+            billing_country=None,
             updated_by=1,
         )
     finally:

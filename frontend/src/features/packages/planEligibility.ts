@@ -54,6 +54,6 @@ export function readBillingResourceUsage(usage: Record<string, unknown> | undefi
   const training = (usage.training as Record<string, unknown> | undefined) ?? {};
   return {
     usedKbCount: Number(resources.knowledge_bases ?? 0),
-    usedGb: Number(training.storage_gb_used_rounded ?? 0),
+    usedGb: Number(resources.storage_gb_used_rounded ?? training.storage_gb_used_rounded ?? 0),
   };
 }

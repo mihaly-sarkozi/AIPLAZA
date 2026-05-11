@@ -5,6 +5,11 @@ from enum import Enum
 import re
 import unicodedata
 
+from shared.text.language_lexicon import (
+    SUPPORTED_LEXICON_LANGUAGES,
+    get_lexicon_terms,
+)
+
 
 class SupportedLanguage(str, Enum):
     HU = "hu"
@@ -12,7 +17,7 @@ class SupportedLanguage(str, Enum):
     ES = "es"
 
 
-SUPPORTED_LANGUAGES = [item.value for item in SupportedLanguage]
+SUPPORTED_LANGUAGES = [item for item in SUPPORTED_LEXICON_LANGUAGES]
 
 
 @dataclass(frozen=True)
@@ -39,7 +44,7 @@ LANGUAGE_RULES: dict[str, LanguageRuleSet] = {
     "hu": LanguageRuleSet(
         language="hu",
         detection_keywords=("a", "az", "kötelező", "használ", "igényel", "jelenleg", "frissült", "működik"),
-        stopwords=("a", "az", "egy", "és", "hogy", "vagy", "de", "is", "nem"),
+        stopwords=get_lexicon_terms("hu", "question_stopwords", include_fallback=False),
         article_stopwords=("a", "az", "egy"),
         filler_words=("jelenleg",),
         conjunction_keywords=("és", "de", "vagy"),
@@ -78,28 +83,7 @@ LANGUAGE_RULES: dict[str, LanguageRuleSet] = {
             "aktív",
             "inaktív",
         ),
-        month_keywords=(
-            "január",
-            "február",
-            "március",
-            "április",
-            "május",
-            "június",
-            "július",
-            "augusztus",
-            "szeptember",
-            "október",
-            "november",
-            "december",
-            "januar",
-            "februar",
-            "marcius",
-            "aprilis",
-            "majus",
-            "junius",
-            "julius",
-            "oktober",
-        ),
+        month_keywords=get_lexicon_terms("hu", "time_months", include_fallback=False),
         claim_type_keywords={
             "identifier": ("azonosító", "id", "uuid", "neve"),
             "stable_descriptor": ("van", "tartalmaz", "használ", "használja", "használnia", "készít"),
@@ -124,7 +108,7 @@ LANGUAGE_RULES: dict[str, LanguageRuleSet] = {
     "en": LanguageRuleSet(
         language="en",
         detection_keywords=("the", "must", "uses", "was", "created", "updated", "inactive"),
-        stopwords=("the", "a", "an", "and", "or", "of", "to", "in", "is", "was"),
+        stopwords=get_lexicon_terms("en", "question_stopwords", include_fallback=False),
         article_stopwords=("the", "a", "an"),
         filler_words=("currently",),
         conjunction_keywords=("and", "but", "or"),
@@ -189,20 +173,7 @@ LANGUAGE_RULES: dict[str, LanguageRuleSet] = {
             "leader",
             "is the compliance lead at",
         ),
-        month_keywords=(
-            "january",
-            "february",
-            "march",
-            "april",
-            "may",
-            "june",
-            "july",
-            "august",
-            "september",
-            "october",
-            "november",
-            "december",
-        ),
+        month_keywords=get_lexicon_terms("en", "time_months", include_fallback=False),
         claim_type_keywords={
             "identifier": ("id", "uuid", "called", "is named"),
             "stable_descriptor": ("has", "contains", "uses", "use", "supports", "applies to", "apply to", "remain", "includes"),
@@ -216,7 +187,7 @@ LANGUAGE_RULES: dict[str, LanguageRuleSet] = {
     "es": LanguageRuleSet(
         language="es",
         detection_keywords=("el", "la", "debe", "utiliza", "esta", "está", "fue", "creada", "actualizado"),
-        stopwords=("el", "la", "los", "las", "un", "una", "y", "o", "de", "del", "en", "es", "fue"),
+        stopwords=get_lexicon_terms("es", "question_stopwords", include_fallback=False),
         article_stopwords=("el", "la", "los", "las", "un", "una"),
         filler_words=("actualmente",),
         conjunction_keywords=("y", "pero", "o"),
@@ -268,20 +239,7 @@ LANGUAGE_RULES: dict[str, LanguageRuleSet] = {
             "fue",
             "es",
         ),
-        month_keywords=(
-            "enero",
-            "febrero",
-            "marzo",
-            "abril",
-            "mayo",
-            "junio",
-            "julio",
-            "agosto",
-            "septiembre",
-            "octubre",
-            "noviembre",
-            "diciembre",
-        ),
+        month_keywords=get_lexicon_terms("es", "time_months", include_fallback=False),
         claim_type_keywords={
             "identifier": ("identificador", "id", "uuid", "se llama", "nombre"),
             "stable_descriptor": ("tiene", "contiene", "usa", "utiliza", "soporta"),

@@ -13,6 +13,7 @@ from sqlalchemy import event
 from sqlalchemy.orm import sessionmaker
 
 from core.extensions.tenant.context.tenant_context import current_tenant_schema
+from core.kernel.logging.observability import increment_metric, log_exception_event
 from core.kernel.logging.request_timing import record_db_query
 
 _current_db_session: ContextVar[object | None] = ContextVar("current_db_session", default=None)
@@ -100,6 +101,7 @@ class _SessionFactory:
         )
         event.listen(self._engine, "before_cursor_execute", self._before_cursor_execute)
         event.listen(self._engine, "after_cursor_execute", self._after_cursor_execute)
+        event.listen(self._engine, "handle_error", self._handle_db_error)
         self._inner = sessionmaker(bind=self._engine, expire_on_commit=False, autoflush=False)
 
     # Ez a metódus a(z) before_cursor_execute logikáját valósítja meg.
@@ -115,6 +117,23 @@ class _SessionFactory:
             return
         started = starts.pop()
         record_db_query((time.monotonic() - started) * 1000)
+
+    @staticmethod
+    def _handle_db_error(exception_context):
+        original = getattr(exception_context, "original_exception", None)
+        if original is None:
+            return
+        statement = getattr(exception_context, "statement", None)
+        try:
+            increment_metric("platform.db.error.count", 1.0)
+            log_exception_event(
+                "core.db",
+                "db_error",
+                original,
+                statement_preview=(str(statement)[:240] if statement else None),
+            )
+        except Exception:
+            return
 
     # Ez a metódus a Python-specifikus speciális működést valósítja meg.
     def __call__(self):

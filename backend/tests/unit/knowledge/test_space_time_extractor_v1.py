@@ -305,3 +305,60 @@ def test_space_time_extractor_marks_historical_hungarian_relation_with_korabban(
 
     assert frame.time_mode == "bounded"
     assert frame.time_value == "korábban"
+
+
+def test_space_time_extractor_detects_hungarian_weekday_as_time_value() -> None:
+    sentence = Sentence(text_content="A folyamat hétfőn indul.", metadata={"language": "hu"})
+    claim = Claim(
+        sentence_id=sentence.id,
+        source_id=sentence.source_id,
+        claim_type="event",
+        subject_text="folyamat",
+        predicate_text="indul",
+        object_text="hétfőn",
+        metadata={"language": "hu"},
+    )
+
+    frame = SpaceTimeExtractorV1().extract(claim, sentence, language="hu")
+
+    assert frame.time_mode == "bounded"
+    assert frame.time_precision == "weekday"
+    assert frame.time_value in {"hétfő", "hetfo"}
+
+
+def test_space_time_extractor_detects_english_weekday_as_time_value() -> None:
+    sentence = Sentence(text_content="The review is scheduled on Monday.", metadata={"language": "en"})
+    claim = Claim(
+        sentence_id=sentence.id,
+        source_id=sentence.source_id,
+        claim_type="event",
+        subject_text="review",
+        predicate_text="is scheduled",
+        object_text="Monday",
+        metadata={"language": "en"},
+    )
+
+    frame = SpaceTimeExtractorV1().extract(claim, sentence, language="en")
+
+    assert frame.time_mode == "bounded"
+    assert frame.time_precision == "weekday"
+    assert frame.time_value == "Monday"
+
+
+def test_space_time_extractor_detects_spanish_weekday_as_time_value() -> None:
+    sentence = Sentence(text_content="La tarea se ejecuta el lunes.", metadata={"language": "es"})
+    claim = Claim(
+        sentence_id=sentence.id,
+        source_id=sentence.source_id,
+        claim_type="event",
+        subject_text="tarea",
+        predicate_text="se ejecuta",
+        object_text="lunes",
+        metadata={"language": "es"},
+    )
+
+    frame = SpaceTimeExtractorV1().extract(claim, sentence, language="es")
+
+    assert frame.time_mode == "bounded"
+    assert frame.time_precision == "weekday"
+    assert frame.time_value == "lunes"

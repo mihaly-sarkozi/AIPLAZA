@@ -8,7 +8,7 @@ from typing import Any
 class IndexProfile:
     key: str
     chunking_rule: str = "sentence"
-    embedding_strategy: str = "openai:text-embedding-3-large"
+    embedding_strategy: str = "local:BAAI/bge-m3"
     index_type: str = "qdrant_dense"
     metadata_mode: str = "source_payload"
     config: dict[str, Any] = field(default_factory=dict)
