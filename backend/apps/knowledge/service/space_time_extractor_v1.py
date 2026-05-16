@@ -48,6 +48,28 @@ def _find_keyword_surface(text: str, keywords: tuple[str, ...]) -> str | None:
     return None
 
 
+def _find_weekday_keyword(text: str, keywords: tuple[str, ...], *, language: str) -> str | None:
+    if language != "hu":
+        return _find_first_keyword(text, keywords)
+    folded_text = fold_text(text)
+    for keyword in keywords:
+        folded_keyword = fold_text(keyword)
+        if re.search(r"\b" + re.escape(folded_keyword) + r"(?:n|on|en|ön)?\b", folded_text, flags=re.IGNORECASE):
+            return keyword
+    return None
+
+
+def _find_weekday_surface(text: str, keywords: tuple[str, ...], *, language: str) -> str | None:
+    if language != "hu":
+        return _find_keyword_surface(text, keywords)
+    raw_text = str(text or "")
+    for keyword in sorted(keywords, key=len, reverse=True):
+        match = re.search(r"\b(" + re.escape(str(keyword)) + r")(?:n|on|en|ön)?\b", raw_text, flags=re.IGNORECASE)
+        if match:
+            return match.group(1)
+    return None
+
+
 def _extract_month_or_year_phrase(text: str, *, language: str) -> str | None:
     months = sorted((re.escape(item) for item in _lexicon_terms(language, "time_months")), key=len, reverse=True)
     if months:
@@ -310,8 +332,10 @@ class SpaceTimeExtractorV1:
         month_keyword = _find_first_keyword(object_text or lowered_clause, _lexicon_terms(resolved_language, "time_months")) or _find_first_keyword(
             lowered_text, _lexicon_terms(resolved_language, "time_months")
         )
-        weekday_keyword = _find_first_keyword(object_text or lowered_clause, _lexicon_terms(resolved_language, "time_weekdays")) or _find_first_keyword(
-            lowered_text, _lexicon_terms(resolved_language, "time_weekdays")
+        weekday_keyword = _find_weekday_keyword(
+            object_text or lowered_clause, _lexicon_terms(resolved_language, "time_weekdays"), language=resolved_language
+        ) or _find_weekday_keyword(
+            lowered_text, _lexicon_terms(resolved_language, "time_weekdays"), language=resolved_language
         )
         year_with_marker = (
             _extract_year_with_marker(object_text, language=resolved_language)
@@ -337,7 +361,7 @@ class SpaceTimeExtractorV1:
             time_confidence = max(time_confidence, 0.6)
             overall_confidence = max(overall_confidence, 0.6)
         elif weekday_keyword is not None:
-            weekday_surface = _find_keyword_surface(object_text or predicate_clause or text, _lexicon_terms(resolved_language, "time_weekdays"))
+            weekday_surface = _find_weekday_surface(object_text or predicate_clause or text, _lexicon_terms(resolved_language, "time_weekdays"), language=resolved_language)
             time_mode = "bounded"
             time_value = weekday_surface or weekday_keyword
             time_precision = "weekday"

@@ -7135,14 +7135,15 @@ class KnowledgeFacade:
             corpus_uuid=corpus_uuid,
             global_profiles=query_global_profiles,
         )
-        query_retrieval_chunks = (
-            RetrievalChunkBuilderV0().build_many(query_global_profiles, [])
-            if feedback_events or source_withdrawal_events
-            else self._load_existing_retrieval_chunks(
+        if feedback_events or source_withdrawal_events:
+            query_retrieval_chunks = RetrievalChunkBuilderV0().build_many(query_global_profiles, [])
+        else:
+            query_retrieval_chunks = self._load_existing_retrieval_chunks(
                 corpus_uuid=corpus_uuid,
                 exclude_interpretation_run_id=None,
             )
-        )
+            if not query_retrieval_chunks and query_global_profiles:
+                query_retrieval_chunks = RetrievalChunkBuilderV0().build_many(query_global_profiles, [])
         query_retrieval_chunks = self._order_chunks_by_vector_hits(query_retrieval_chunks, hits)
         query_aware_result = QueryAwareRetrievalV0().match(
             query_profile=query_profile,

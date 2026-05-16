@@ -142,6 +142,7 @@ def _entity_type(folded: str, *, language: str | None) -> tuple[str | None, str 
 
 def _detected_entity(query: str, entity_type: str | None) -> tuple[str | None, list[dict[str, str]]]:
     patterns = [
+        r"\b(?:what\s+is\s+(?:the\s+)?)?status\s+(?:of|for)\s+(?:the\s+)?([A-Za-z0-9_-]+(?:\s+[A-Za-z0-9_-]+){0,4}?\s+(?:office|branch|center|site|service|module|workflow|process|component|system))\b",
         r"\bwhat\s+does\s+(?:the\s+)?([A-Za-z0-9_-]+(?:\s+[A-Za-z0-9_-]+){0,4}?\s+(?:service|module|workflow|process|component|system))\s+(?:use|uses|using|integrate|integrates)\b",
         r"\bwhat\s+does\s+(?:the\s+)?([A-Za-z0-9_-]+(?:\s+[A-Za-z0-9_-]+){0,4}?\s+policy)\s+(?:apply\s+to|describe)\b",
         r"\bwhat\s+is\s+(?:the\s+)?([A-Za-z0-9_-]+(?:\s+[A-Za-z0-9_-]+){0,4}?\s+policy)\b",
@@ -185,14 +186,18 @@ def _keywords(query: str, entity: str | None, state: str | None, intent: str, *,
 
 def _keyword_variants(folded: str, *, language: str | None) -> list[str]:
     variants = [folded]
+    normalized_language = str(language or "").strip().lower()
+    allow_hungarian_variants = normalized_language not in {"en", "es"}
     # Gyakori magyar elgépelés: "nyugdijjakal" -> "nyugdijakal" -> "nyugdij".
-    repaired = re.sub(r"ijj(?=[a-z]|$)", "ij", folded)
-    if repaired not in variants:
-        variants.append(repaired)
+    if allow_hungarian_variants:
+        repaired = re.sub(r"ijj(?=[a-z]|$)", "ij", folded)
+        if repaired not in variants:
+            variants.append(repaired)
     suffixes = list(_lexicon_terms(language, "entity_suffixes"))
-    for hu_suffix in _lexicon_terms("hu", "entity_suffixes"):
-        if hu_suffix not in suffixes:
-            suffixes.append(hu_suffix)
+    if allow_hungarian_variants:
+        for hu_suffix in _lexicon_terms("hu", "entity_suffixes"):
+            if hu_suffix not in suffixes:
+                suffixes.append(hu_suffix)
     for candidate in list(variants):
         for suffix in suffixes:
             if candidate.endswith(suffix) and len(candidate) > len(suffix) + 2:
@@ -254,6 +259,9 @@ class QueryResolverV0:
         state = _state_from_query(folded)
         if state:
             reasons.append(f"state:{state}")
+        if intent == "state" and re.search(r"\bstatus\s+(?:of|for)\b", folded):
+            expected_answer_type = None
+            reasons.append("answer_type:status_state_question")
         time_filter, time_reason = _time_filter(
             folded,
             intent=intent,
