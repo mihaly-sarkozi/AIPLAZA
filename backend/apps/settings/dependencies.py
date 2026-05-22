@@ -2,18 +2,18 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import Depends
+from fastapi import Depends, Request
 
 from apps.settings.service.ports import SettingsFacadePort
-from core.capabilities.users.dto import User
-from core.platform.auth.auth_dependencies import require_permission
+from core.modules.users.domain.dto import User
+from core.modules.auth.web.dependencies.auth_dependencies import require_permission
 
 
-def get_settings_facade():
-    from apps.di import get_service
+def get_settings_facade(request: Request):
+    from core.kernel.http.app_dependencies import get_module_service
     from apps.settings.contracts import SETTINGS_SERVICE
 
-    return get_service(SETTINGS_SERVICE)
+    return get_module_service(SETTINGS_SERVICE, request)
 
 
 get_settings_service = get_settings_facade

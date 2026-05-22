@@ -5,7 +5,7 @@ from datetime import timezone
 import jwt
 import pytest
 
-from core.platform.auth.token_service import TokenService
+from core.modules.auth.service.token_service import TokenService
 
 pytestmark = [pytest.mark.unit, pytest.mark.must_pass]
 

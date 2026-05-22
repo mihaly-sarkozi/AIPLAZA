@@ -1,3 +1,7 @@
+# backend/apps/billing/models.py
+# Feladat: A billing app public schema SQLAlchemy ORM modelljeit definiálja. Catalog, subscription, question/training usage, invoice és debug state táblákat ír le tenantokra bontott előfizetés- és számlázási adatokhoz. Program-specifikus perzisztencia modell réteg.
+# Sárközi Mihály - 2026.05.21
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -116,6 +120,23 @@ class BillingInvoiceORM(PublicBase):
     issued_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow, server_default=func.now())
     due_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
     created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow, server_default=func.now())
+
+
+class BillingPaymentEventORM(PublicBase):
+    __tablename__ = "billing_payment_events"
+    __table_args__ = (
+        UniqueConstraint("provider", "event_id", name="uq_billing_payment_event_provider_event"),
+        {"schema": "public"},
+    )
+
+    id = Column(Integer, primary_key=True)
+    provider = Column(String(32), nullable=False, index=True)
+    event_id = Column(String(128), nullable=False)
+    event_type = Column(String(96), nullable=False)
+    tenant_id = Column(Integer, ForeignKey("public.tenants.id", ondelete="CASCADE"), nullable=True, index=True)
+    status = Column(String(24), nullable=False, default="processed", index=True)
+    payload = Column(JSONB, nullable=False, default=dict)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow, server_default=func.now(), index=True)
 
 
 class BillingDebugStateORM(PublicBase):

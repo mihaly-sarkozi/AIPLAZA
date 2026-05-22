@@ -22,6 +22,6 @@ def test_core_does_not_import_apps() -> None:
 
     assert not violations, format_violations(
         rule="Architektúra-szabály sérült: a `core/` nem importálhat `apps` namespace-et.",
-        guidance="Az irány mindig `apps -> core`; app-specifikus integrációhoz platform contractot, hookot vagy registry-t használj.",
+        guidance="Az irány mindig `apps -> core`; app-specifikus integrációhoz platform interface-t, hookot vagy registry-t használj.",
         violations=violations,
     )

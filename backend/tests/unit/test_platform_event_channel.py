@@ -4,13 +4,13 @@ from types import SimpleNamespace
 
 import pytest
 
-from core.capabilities.audit.const.audit_log_action_const import AuditLogAction
+from core.infrastructure.audit.const.audit_log_action_const import AuditLogAction
 from core.kernel.logging.observability import bind_observability_context, reset_observability_context
-from core.platform.events.dispatcher import EventDispatcher
-from core.platform.events.event_channel import SecurityAuditEventChannel
-from core.platform.events.handlers import register_security_audit_handlers
-from core.platform.events.outbox import OutboxWorkItem
-from core.platform.events.worker import OutboxWorker
+from core.kernel.events.dispatcher import EventDispatcher
+from core.kernel.events.event_channel import SecurityAuditEventChannel
+from core.kernel.events.handlers import register_security_audit_handlers
+from core.kernel.events.outbox import OutboxWorkItem
+from core.kernel.events.worker import OutboxWorker
 
 pytestmark = [pytest.mark.unit, pytest.mark.must_pass]
 
@@ -27,8 +27,8 @@ class _OutboxStub:
         self.appended.append((event_type, payload, idempotency_key))
         return SimpleNamespace(id=len(self.appended))
 
-    def claim_next_batch(self, *, limit: int = 100, stale_lock_after_sec: int = 300, lock_owner: str | None = None):
-        self.claimed_batches.append((limit, stale_lock_after_sec, lock_owner))
+    def claim_next_batch(self, *, limit: int = 100, stale_lock_after_sec: int = 300, lease_seconds: int = 300, lock_owner: str | None = None):
+        self.claimed_batches.append((limit, stale_lock_after_sec, lease_seconds, lock_owner))
         batch = self.due_events[:limit]
         self.due_events = self.due_events[limit:]
         return [

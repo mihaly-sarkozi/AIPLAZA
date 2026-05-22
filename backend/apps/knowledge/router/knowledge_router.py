@@ -1,15 +1,17 @@
 # Ez a fájl az adott modul HTTP útvonalait és kérés-válasz illesztését tartalmazza.
-from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, Request
 
-from apps.di import get_factory
 from apps.knowledge.dependencies import CurrentKnowledgeUserDep, KnowledgeFacadeDep, KnowledgeTenantDep
-from apps.knowledge.training_ingest import build_sentence_rows
-from core.di import get_login_service, get_service
-from core.kernel.config import app_settings
-from core.kernel.config.environment import get_app_env
+from apps.knowledge.api.upload_support import (
+    ensure_training_mfa as _ensure_training_mfa,
+    ensure_training_quota as _ensure_training_quota,
+    record_training_usage as _record_training_usage,
+)
+from core.kernel.deps.facade import get_service
+from core.kernel.config.config_loader import get_app_env
+from core.kernel.http.responses import OperationStatusResponse
+from core.kernel.http.security_errors import security_http_exception
 from core.kernel.security.rate_limit import limiter
-from shared.documents.text_extraction import extract_text_from_upload
-from shared.text.chunking import chunk_text_for_training
 
 from apps.knowledge.router.knowledge_requests import (
     KBCreate,
@@ -17,15 +19,13 @@ from apps.knowledge.router.knowledge_requests import (
     KBDelete,
     KBPermissionsUpdate,
     KBBatchPermissionsRequest,
-    IngestTrainingTextRequest,
 )
 from apps.knowledge.router.knowledge_response import KBOut, KBPermissionOut
 
-from core.platform.auth.auth_dependencies import require_permission
-from apps.contracts.service_keys import MODULE_KNOWLEDGE_QDRANT_FACTORY
-from core.platform.service_keys import PLATFORM_TENANT_USAGE_SERVICE
+from core.modules.auth.web.dependencies.auth_dependencies import require_permission
+from core.kernel.interface.keys import PLATFORM_TENANT_USAGE_SERVICE
 from apps.knowledge.ports.repositories import KbPermissionItem
-from core.capabilities.users.dto import User
+from core.modules.users.domain.dto import User
 
 router = APIRouter()
 
@@ -39,18 +39,6 @@ def _permissions_from_create(data: KBCreate) -> list[KbPermissionItem]:
         for p in data.permissions
         if isinstance(p, dict) and "user_id" in p
     ]
-
-
-def _ensure_training_mfa(user: User) -> None:
-    if not bool(getattr(app_settings, "training_mfa_required", True)):
-        return
-    login_service = get_login_service()
-    status = login_service.authenticator_status(int(getattr(user, "id", 0) or 0))
-    if not bool(status.get("enabled")):
-        raise HTTPException(
-            status_code=403,
-            detail="MFA kötelező a tanítási műveletekhez. Aktiváld az authenticator MFA-t.",
-        )
 
 
 @router.get("/kb", response_model=list[KBOut])
@@ -149,7 +137,7 @@ def get_kb_permissions(
 ):
     """Összes felhasználó és jogosultság (use/train/none) ehhez a tudástárhoz. Csak train joggal."""
     if not svc.user_can_train(uuid, user.id, user):
-        raise HTTPException(status_code=403, detail="No permission to manage this knowledge base")
+        raise security_http_exception()
     items = svc.get_permissions_with_users(uuid)
     return [KBPermissionOut.model_validate(x) for x in items]
 
@@ -177,14 +165,11 @@ def get_kb_permissions_batch(
     if len(unique_uuids) > 100:
         raise HTTPException(status_code=400, detail="Too many knowledge base ids.")
 
-    all_kbs = svc.list_all_unfiltered()
-    kb_id_by_uuid = {kb.uuid: kb.id for kb in all_kbs if kb.id is not None}
-    if user.role != "owner":
-        allowed_ids = svc.get_trainable_kb_ids(user.id, user)
-        for kb_uuid in unique_uuids:
-            kb_id = kb_id_by_uuid.get(kb_uuid)
-            if kb_id is not None and kb_id not in allowed_ids:
-                raise HTTPException(status_code=403, detail="No permission to manage one or more knowledge bases")
+    kb_by_uuid = {kb.uuid: kb for kb in svc.list_all_unfiltered()}
+    for kb_uuid in unique_uuids:
+        kb = kb_by_uuid.get(kb_uuid)
+        if kb is not None and not svc.can_train_knowledge_base(user, kb):
+            raise security_http_exception()
 
     items_by_kb = svc.get_permissions_with_users_batch(unique_uuids)
     return {
@@ -193,7 +178,7 @@ def get_kb_permissions_batch(
     }
 
 
-@router.put("/kb/{uuid}/permissions")
+@router.put("/kb/{uuid}/permissions", response_model=OperationStatusResponse)
 @limiter.limit("20/minute")
 def set_kb_permissions(
     request: Request,
@@ -205,11 +190,11 @@ def set_kb_permissions(
 ):
     """Jogosultságok beállítása: minden felhasználóhoz use/train/none. Csak train joggal; saját jogot nem lehet none-ra állítani."""
     if not svc.user_can_train(uuid, user.id, user):
-        raise HTTPException(status_code=403, detail="No permission to manage this knowledge base")
+        raise security_http_exception()
     perms: list[KbPermissionItem] = [(p.user_id, p.permission) for p in data.permissions]
     try:
         svc.set_permissions(uuid, perms, current_user_id=user.id)
-        return {"status": "ok"}
+        return OperationStatusResponse()
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -225,7 +210,7 @@ def update_kb(
 ):
     """Név/leírás szerkesztése: csak ha train joga van a tudástárhoz."""
     if not svc.user_can_train(uuid, user.id, user):
-        raise HTTPException(status_code=403, detail="No permission to edit this knowledge base")
+        raise security_http_exception()
     try:
         return svc.update(
             uuid,
@@ -239,126 +224,7 @@ def update_kb(
         raise HTTPException(status_code=400, detail=str(e))
 
 
-# Ez a függvény törli a(z) KB logikáját.
-_MAX_TRAINING_UPLOAD_BYTES = 20 * 1024 * 1024
-_UPLOAD_READ_CHUNK_BYTES = 1024 * 1024
-
-
-def _ensure_legacy_ingest_enabled() -> None:
-    if bool(getattr(app_settings, "legacy_knowledge_ingest_enabled", False)):
-        return
-    raise HTTPException(
-        status_code=410,
-        detail=(
-            "A legacy ingest útvonal le van tiltva. "
-            "Használd az új /knowledge/corpora/{corpus_uuid}/ingest/... API-t."
-        ),
-    )
-
-
-async def _read_upload_with_limit(upload: UploadFile, *, max_bytes: int) -> bytes:
-    total = 0
-    chunks: list[bytes] = []
-    while True:
-        chunk = await upload.read(_UPLOAD_READ_CHUNK_BYTES)
-        if not chunk:
-            break
-        total += len(chunk)
-        if total > max_bytes:
-            raise HTTPException(status_code=400, detail="File too large (max 20 MB).")
-        chunks.append(chunk)
-    return b"".join(chunks)
-
-
-@router.post("/kb/{uuid}/ingest-training")
-@limiter.limit("15/minute")
-async def ingest_training_text(
-    request: Request,
-    uuid: str,
-    body: IngestTrainingTextRequest,
-    tenant: KnowledgeTenantDep,
-    svc: KnowledgeFacadeDep,
-    user: CurrentKnowledgeUserDep,
-):
-    """Egyszerű szöveges tanítás: mondat chunkok Qdrant sentence pontokként."""
-    _ensure_legacy_ingest_enabled()
-    if not svc.user_can_train(uuid, user.id, user):
-        raise HTTPException(status_code=403, detail="No permission to train this knowledge base")
-    _ensure_training_mfa(user)
-    collection = svc.qdrant_collection_for_uuid(uuid)
-    if not collection:
-        raise HTTPException(status_code=404, detail="Knowledge base not found")
-    text = (body.text or "").strip()
-    if len(text) < 30:
-        raise HTTPException(status_code=400, detail="Text too short for training (min ~30 characters).")
-    chunks = chunk_text_for_training(text)
-    if not chunks:
-        raise HTTPException(status_code=400, detail="No usable text chunks after processing.")
-    usage_service = get_service(PLATFORM_TENANT_USAGE_SERVICE)
-    allowed, reason = usage_service.can_consume_training_chars(tenant, len(text))
-    if not allowed:
-        raise HTTPException(status_code=402, detail=reason or "Training quota exceeded")
-    qdrant = get_factory(MODULE_KNOWLEDGE_QDRANT_FACTORY)()
-    await qdrant.ensure_collection_schema_async(collection)
-    rows = build_sentence_rows(chunks, body.title)
-    await qdrant.upsert_sentence_points(collection, rows)
-    usage_service.record_training_ingest(
-        tenant,
-        char_count=len(text),
-        storage_bytes=len(text.encode("utf-8")),
-    )
-    return {"ok": True, "chunks": len(chunks)}
-
-
-@router.post("/kb/{uuid}/ingest-training-file")
-@limiter.limit("10/minute")
-async def ingest_training_file(
-    request: Request,
-    uuid: str,
-    tenant: KnowledgeTenantDep,
-    svc: KnowledgeFacadeDep,
-    user: CurrentKnowledgeUserDep,
-    file: UploadFile = File(...),
-):
-    _ensure_legacy_ingest_enabled()
-    if not svc.user_can_train(uuid, user.id, user):
-        raise HTTPException(status_code=403, detail="No permission to train this knowledge base")
-    _ensure_training_mfa(user)
-    collection = svc.qdrant_collection_for_uuid(uuid)
-    if not collection:
-        raise HTTPException(status_code=404, detail="Knowledge base not found")
-    raw = await _read_upload_with_limit(file, max_bytes=_MAX_TRAINING_UPLOAD_BYTES)
-    try:
-        text = extract_text_from_upload(file.filename or "upload.txt", raw)
-    except ValueError:
-        raise HTTPException(
-            status_code=400,
-            detail="Unsupported file type. Use .txt, .pdf, or .docx.",
-        )
-    text = text.strip()
-    if len(text) < 30:
-        raise HTTPException(status_code=400, detail="Extracted text too short for training.")
-    chunks = chunk_text_for_training(text)
-    if not chunks:
-        raise HTTPException(status_code=400, detail="No usable text chunks after processing.")
-    usage_service = get_service(PLATFORM_TENANT_USAGE_SERVICE)
-    allowed, reason = usage_service.can_consume_training_chars(tenant, len(text))
-    if not allowed:
-        raise HTTPException(status_code=402, detail=reason or "Training quota exceeded")
-    qdrant = get_factory(MODULE_KNOWLEDGE_QDRANT_FACTORY)()
-    await qdrant.ensure_collection_schema_async(collection)
-    title = (file.filename or "").rsplit(".", 1)[0][:200] or None
-    rows = build_sentence_rows(chunks, title)
-    await qdrant.upsert_sentence_points(collection, rows)
-    usage_service.record_training_ingest(
-        tenant,
-        char_count=len(text),
-        storage_bytes=len(raw),
-    )
-    return {"ok": True, "chunks": len(chunks)}
-
-
-@router.delete("/kb/{uuid}")
+@router.delete("/kb/{uuid}", response_model=OperationStatusResponse)
 def delete_kb(
     request: Request,
     uuid: str,
@@ -376,7 +242,7 @@ def delete_kb(
         if get_app_env() != "dev" and not demo_mode:
             raise HTTPException(status_code=403, detail="Knowledge base deletion is available only in dev mode or free test mode")
         svc.delete(uuid, data.confirm_name, demo_mode=demo_mode)
-        return {"status": "ok"}
+        return OperationStatusResponse()
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 

@@ -7,13 +7,13 @@ import pytest
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
 
-from core.capabilities.audit.service.audit_service import AuditService
-from core.capabilities.audit.const.audit_log_action_const import AuditLogAction
-from core.capabilities.audit.repositories.audit_log_repository import AuditLogRepository
+from core.infrastructure.audit.service.audit_service import AuditService
+from core.infrastructure.audit.const.audit_log_action_const import AuditLogAction
+from core.infrastructure.audit.repositories.audit_log_repository import AuditLogRepository
 from core.kernel.db.session import make_session_factory
-from core.extensions.tenant.context.tenant_context import current_tenant_schema
-from core.capabilities.users.dto.user import User
-from core.capabilities.users.repositories import InviteTokenRepository, UserRepository
+from core.modules.tenant.context.tenant_context import current_tenant_schema
+from core.modules.users.domain.dto.user import User
+from core.modules.users.repository.persistence import InviteTokenRepository, UserRepository
 
 _root = Path(__file__).resolve().parent.parent.parent
 if str(_root) not in sys.path:

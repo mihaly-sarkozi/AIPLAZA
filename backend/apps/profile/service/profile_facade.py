@@ -4,7 +4,6 @@ from apps.profile.mappers.profile_mapper import build_profile_preferences_respon
 from apps.profile.service.ports import (
     CoreProfileServicePort,
     PreferencesServicePort,
-    UserCacheInvalidationPort,
 )
 
 
@@ -15,12 +14,10 @@ class ProfileFacade:
         core_profile_service: CoreProfileServicePort,
         preferences_service: PreferencesServicePort,
         training_status_reader=None,
-        user_cache_invalidator: UserCacheInvalidationPort | None = None,
     ) -> None:
         self._core_profile_service = core_profile_service
         self._preferences = preferences_service
         self._training_status_reader = training_status_reader
-        self._user_cache_invalidator = user_cache_invalidator
 
     def get_profile(self, *, user, tenant) -> dict[str, object]:
         core_payload = self._core_profile_service.get_me(
@@ -72,8 +69,7 @@ class ProfileFacade:
                 user_id=user.id,
                 updates=app_preferences,
             )
-        if self._user_cache_invalidator is not None:
-            self._user_cache_invalidator(tenant.slug, user.id)
+        self._core_profile_service.invalidate_cache(tenant.slug, user.id)
         return self.get_profile(user=effective_user, tenant=tenant)
 
     def update_preferences(self, *, user, tenant, app_preferences: dict[str, object] | None) -> dict[str, object]:
@@ -82,8 +78,7 @@ class ProfileFacade:
             user_id=user.id,
             updates=app_preferences,
         )
-        if self._user_cache_invalidator is not None:
-            self._user_cache_invalidator(tenant.slug, user.id)
+        self._core_profile_service.invalidate_cache(tenant.slug, user.id)
         return build_profile_preferences_response(prefs)
 
 

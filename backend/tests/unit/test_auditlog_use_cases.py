@@ -8,15 +8,15 @@ import jwt
 import pytest
 from passlib.hash import bcrypt_sha256 as pwd_hasher
 
-from core.capabilities.audit.const.audit_log_action_const import AuditLogAction
-from core.capabilities.auth.dto import LoginInput, LoginTwoFactorRequired
-from core.capabilities.auth.exceptions import TwoFactorTooManyAttemptsError
-from core.capabilities.auth.service.login_service import LoginService
-from core.capabilities.auth.service.logout_service import LogoutService
-from core.capabilities.auth.service.refresh_service import RefreshService
-from core.capabilities.auth.dto.session import Session
-from core.capabilities.users.service.user_service import UserService
-from core.capabilities.users.dto.user import User
+from core.infrastructure.audit.const.audit_log_action_const import AuditLogAction
+from core.modules.auth.domain.dto import LoginInput, LoginTwoFactorRequired
+from core.modules.auth.domain.exceptions import TwoFactorTooManyAttemptsError
+from core.modules.auth.use_cases.login_service import LoginService
+from core.modules.auth.use_cases.logout_service import LogoutService
+from core.modules.auth.use_cases.refresh_service import RefreshService
+from core.modules.auth.domain.dto.session import Session
+from core.modules.users.service.user_service import UserService
+from core.modules.users.domain.dto.user import User
 
 
 pytestmark = pytest.mark.unit
@@ -324,7 +324,7 @@ def test_refresh_invalid_token_writes_refresh_failed_audit():
 
     result = svc.refresh("bad-token", ip="127.0.0.1", ua="pytest")
 
-    from core.capabilities.auth.service.refresh_result import RefreshFailed, RefreshFailReason
+    from core.modules.auth.use_cases.refresh_result import RefreshFailed, RefreshFailReason
 
     assert isinstance(result, RefreshFailed)
     assert result.reason == RefreshFailReason.INVALID_TOKEN

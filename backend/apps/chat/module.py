@@ -1,15 +1,17 @@
 # Ez a fájl egy modul regisztrációját, wiringját és publikus integrációját tartalmazza.
 from __future__ import annotations
 
-from apps.contracts import module_key
-from apps.contracts.service_keys import MODULE_CHAT_LLM_CLIENT_FACTORY, MODULE_CHAT_SERVICE, MODULE_KNOWLEDGE_SERVICE
+from core.kernel.interface.app_conventions import module_key
+from core.kernel.interface.app_keys import MODULE_CHAT_LLM_CLIENT_FACTORY, MODULE_CHAT_SERVICE, MODULE_KNOWLEDGE_SERVICE
 from apps.chat.infrastructure import build_chat_infrastructure
+from apps.chat.router.channel_credentials_router import router as channel_credentials_router
+from apps.chat.router.channel_router import router as channel_router
 from apps.chat.router.chat_router import router as chat_router
 from apps.state_keys import CTX_STATE_CHAT_INFRASTRUCTURE
-from core.platform.contract import AppModule, ModuleContext, RouteRegistration
+from core.kernel.interface import BaseAppModule, ModuleContext, RouteRegistration
 
 
-class ChatModule(AppModule):
+class ChatModule(BaseAppModule):
     key = module_key("chat")
 
     def optional_service_dependencies(self) -> tuple[str, ...]:
@@ -34,7 +36,11 @@ class ChatModule(AppModule):
 
     # Ez a metódus a(z) routers logikáját valósítja meg.
     def routers(self) -> tuple[RouteRegistration, ...]:
-        return (RouteRegistration(router=chat_router, prefix="/api", tags=("chat",)),)
+        return (
+            RouteRegistration(router=chat_router, prefix="/api", tags=("chat",)),
+            RouteRegistration(router=channel_credentials_router, prefix="/api", tags=("chat-channel-admin",)),
+            RouteRegistration(router=channel_router, prefix="/api", tags=("chat-channel",)),
+        )
 
     # Ez a metódus a(z) light_paths logikáját valósítja meg.
     def light_paths(self) -> tuple[str, ...]:
@@ -50,5 +56,5 @@ class ChatModule(AppModule):
 
 
 # Ez a függvény visszaadja a(z) modul logikáját.
-def get_module() -> AppModule:
+def get_module() -> BaseAppModule:
     return ChatModule()

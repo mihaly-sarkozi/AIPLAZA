@@ -6,8 +6,8 @@ import pytest
 
 from apps.settings.contracts import SETTINGS_SERVICE
 from apps.settings.module import SettingsAppModule
-from core.platform.contract import ModuleContext
-from core.platform.service_keys import PLATFORM_SETTINGS_SERVICE
+from core.kernel.interface import ModuleContext
+from core.kernel.interface.keys import PLATFORM_SETTINGS_SERVICE
 
 pytestmark = [pytest.mark.unit, pytest.mark.must_pass]
 

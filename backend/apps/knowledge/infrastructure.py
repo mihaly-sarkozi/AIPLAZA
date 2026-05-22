@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from core.kernel.config import app_settings
+from core.kernel.config.config_loader import settings
 from apps.knowledge.ai.embedding_provider import EmbeddingProvider, build_embedding_provider_from_settings
 from apps.knowledge.ai.embedding_service import EmbeddingService
 from apps.knowledge.qdrant.qdrant_wrapper import QdrantClientWrapper
@@ -75,21 +75,21 @@ class KnowledgeModuleInfrastructure:
     # Ez a metódus felépíti a(z) embedding szolgáltatás logikáját.
     def build_embedding_service(self) -> EmbeddingService:
         return EmbeddingService(
-            api_key=app_settings.openai_api_key,
-            model=app_settings.embedding_model,
-            vector_size=app_settings.embedding_vector_size,
+            api_key=settings.openai_api_key,
+            model=settings.embedding_model,
+            vector_size=settings.embedding_vector_size,
         )
 
     def build_embedding_provider(self) -> EmbeddingProvider:
-        return build_embedding_provider_from_settings(app_settings)
+        return build_embedding_provider_from_settings(settings)
 
     # Ez a metódus felépíti a(z) Qdrant client logikáját.
     def build_qdrant_client(self) -> QdrantClientWrapper:
         return QdrantClientWrapper(
-            url=app_settings.qdrant_url,
-            api_key=app_settings.qdrant_api_key,
+            url=settings.qdrant_url,
+            api_key=settings.qdrant_api_key,
             embedding_provider=self.build_embedding_provider(),
-            timeout=app_settings.qdrant_timeout_sec,
+            timeout=settings.qdrant_timeout_sec,
         )
 
     # Ez a metódus felépíti a(z) szolgáltatás logikáját.

@@ -1,5 +1,6 @@
-# Dependency injection for the database session.
-# 2026.03.07 - Sárközi Mihály
+# backend/core/kernel/db/dependency.py
+# Feladat: FastAPI dependencyként használható DB session providert ad. A központi settings alapján létrehozott SessionLocal factoryt használja, és request scope-ban yieldeli a sessiont. Általános core HTTP/DB adapter, bár az újabb runtime útvonalak inkább az InfrastructureRegistry session factoryját használják.
+# Sárközi Mihály - 2026.05.21
 
 from typing import Generator
 

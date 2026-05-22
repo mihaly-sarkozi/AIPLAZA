@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from apps.knowledge.api import router as knowledge_api_router
+from apps.knowledge.api import background_jobs as knowledge_background_jobs
 
 pytestmark = [pytest.mark.unit, pytest.mark.must_pass]
 
@@ -25,13 +25,13 @@ async def test_run_index_build_with_retry_retries_once_and_keeps_tenant_slug(mon
             raise RuntimeError("temporary failure")
         return None
 
-    monkeypatch.setattr(knowledge_api_router, "run_async_with_tenant_schema", _fake_runner)
+    monkeypatch.setattr(knowledge_background_jobs, "run_async_with_tenant_schema", _fake_runner)
 
     class _Facade:
         async def run_index_build(self, build_id: str) -> None:
             return None
 
-    await knowledge_api_router._run_index_build_with_retry("demo-tenant", _Facade(), "build-123", retries=1)
+    await knowledge_background_jobs.run_index_build_with_retry("demo-tenant", _Facade(), "build-123", retries=1)
 
     assert calls == [("demo-tenant", "build-123"), ("demo-tenant", "build-123")]
 
@@ -116,7 +116,7 @@ class _RecoveryFacade:
 def test_run_recovery_sweep_marks_stale_run_and_build_failed() -> None:
     facade = _RecoveryFacade()
 
-    knowledge_api_router._run_recovery_sweep_for_tenant("demo", facade, current_user_id=11)
+    knowledge_background_jobs.run_recovery_sweep_for_tenant("demo", facade, current_user_id=11)
 
     assert len(facade.failed_runs) == 1
     assert "run-1" in facade.failed_runs[0]

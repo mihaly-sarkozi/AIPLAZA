@@ -1,12 +1,6 @@
-# Refresh token cookie és session policy – multi-tenant, subdomain izoláció.
-#
-# Szabályok:
-# - Refresh token CSAK HttpOnly, Secure, SameSite (JS nem éri el; csak HTTPS ha be van kapcsolva; SameSite = nem küldi másik site-nak).
-# - Domain NINCS beállítva → host-only cookie: demo.local cookie NEM megy acme.local-ra (tenant → tenant nem szivárog).
-# - Path=/api → csak /api kéréseknél küldi a böngésző.
-#
-# Frontend/integráció: access token NE legyen localStorage-ban (XSS miatt); csak memóriában. Refresh csak cookie-ból (HttpOnly).
-# 2026.03 - Sárközi Mihály
+# backend/core/kernel/security/cookie_policy.py
+# Feladat: Refresh, platform-admin refresh, WebSocket token és channel chat session cookie policy helperjeit tartalmazza. A cookie-k host-only, HttpOnly, path-szűrt és konfigurált Secure/SameSite szabályokkal kerülnek beállításra, hogy tenantok között ne szivárogjanak. Core HTTP security helper, amelyet auth és chat routerek használnak.
+# Sárközi Mihály - 2026.05.21
 
 from __future__ import annotations
 

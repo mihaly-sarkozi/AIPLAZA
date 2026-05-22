@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import pytest
 
-from core.extensions.tenant.signup import orchestrator as orchestrator_module
-from core.extensions.tenant.signup.errors import DemoSessionRequiredError
-from core.extensions.tenant.signup.orchestrator_result import DemoSignupResult
+from core.modules.tenant.signup import orchestrator as orchestrator_module
+from core.modules.tenant.signup.errors import DemoSessionRequiredError
+from core.modules.tenant.signup.orchestrator_result import DemoSignupResult
 
 pytestmark = [pytest.mark.unit, pytest.mark.must_pass]
 

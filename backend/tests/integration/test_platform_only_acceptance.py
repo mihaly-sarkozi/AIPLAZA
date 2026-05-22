@@ -8,23 +8,24 @@ import pytest
 from fastapi import APIRouter, Depends
 from fastapi.testclient import TestClient
 
-from core.platform.bootstrap.manifest import load_platform_only_app_manifest
-from core.kernel.bootstrap.container import get_container
-from core.capabilities.users.dto import User
-from core.di import RequiredTenantContextDep
-from core.kernel.app_factory import create_app_from_manifests
+from core.kernel.app.app_container import get_container
+from core.modules.users.domain.dto import User
+from core.kernel.http.tenant_dependencies import RequiredTenantContextDep
+from core.kernel.app.app_factory import create_app_from_manifest
 from core.kernel.config.config_loader import settings
-from core.platform.lifecycle import router as lifecycle_router
-from core.platform.lifecycle.dto import HealthResponse, LivenessResponse, ReadinessResponse
-from core.platform.registry import load_core_platform_manifest
-from core.platform.auth.auth_dependencies import get_current_user, require_permission
-from core.platform.permissions.permission_service import PermissionService
+from core.kernel.lifecycle.health_response import HealthResponse
+from core.kernel.lifecycle.liveness_response import LivenessResponse
+from core.kernel.lifecycle.readiness_response import ReadinessResponse
+import core.kernel.lifecycle.lifecycle_router as lifecycle_router
+from core.kernel.app.app_manifest import AppManifest
+from core.modules.auth.web.dependencies.auth_dependencies import get_current_user, require_permission
+from core.kernel.security.permission_service import PermissionService
 
 pytestmark = [pytest.mark.integration, pytest.mark.must_pass]
 
 
 def _demo_snapshot():
-    from core.extensions.tenant.dto import TenantConfig, TenantDomainInfo, TenantSnapshot, TenantStatus
+    from core.modules.tenant.dto import TenantConfig, TenantDomainInfo, TenantSnapshot, TenantStatus
 
     return TenantSnapshot(
         tenant_id=1,
@@ -50,14 +51,15 @@ def _demo_snapshot():
 
 
 def _build_platform_only_app():
-    return create_app_from_manifests(
-        load_core_platform_manifest(),
-        load_platform_only_app_manifest(),
+    runtime_manifest = AppManifest.load_core().add_modules(())
+    return create_app_from_manifest(
+        runtime_manifest,
+        settings=settings,
     )
 
 
 def _tenant_repo_patch_stack():
-    container = get_container(load_platform_only_app_manifest)
+    container = get_container(AppManifest.load_core().add_modules(()))
     tenant_repo = container.get_tenant_repository()
     demo_snapshot = _demo_snapshot()
     return ExitStack(), tenant_repo, demo_snapshot
@@ -322,7 +324,7 @@ def test_platform_only_permission_engine_enforces_platform_permission():
             )
         )
         stack.enter_context(
-            patch("core.platform.auth.auth_dependencies.get_permission_service", return_value=permission_service)
+            patch("core.modules.auth.web.dependencies.auth_dependencies.get_permission_service", return_value=permission_service)
         )
         client = TestClient(app, base_url=f"http://demo.{settings.tenant_base_domain}")
         response = client.get("/api/platform-only-permission-check")

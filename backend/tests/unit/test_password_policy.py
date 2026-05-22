@@ -1,5 +1,5 @@
 from core.kernel.config.config_loader import settings
-from core.platform.auth.password_policy import validate_password_policy
+from shared.validation.password import validate_password_policy
 
 
 def test_basic_password_policy_accepts_simple_password():

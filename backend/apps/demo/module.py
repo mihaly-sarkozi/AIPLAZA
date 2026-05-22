@@ -1,15 +1,15 @@
 from __future__ import annotations
 
-from apps.contracts import module_key
-from core.platform.contract import AppModule, ModuleContext
+from core.kernel.interface.app_conventions import module_key
+from core.kernel.interface import BaseAppModule, ModuleContext
 
 
-class DemoAppModule(AppModule):
+class DemoAppModule(BaseAppModule):
     key = module_key("demo")
 
     def register(self, container: ModuleContext) -> None:
         return None
 
 
-def get_module() -> AppModule:
+def get_module() -> BaseAppModule:
     return DemoAppModule()

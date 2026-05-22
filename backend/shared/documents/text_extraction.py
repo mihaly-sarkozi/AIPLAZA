@@ -1,3 +1,7 @@
+# backend/shared/documents/text_extraction.py
+# Feladat: Feltöltött dokumentumok általános TXT/PDF/DOCX szöveg- és struktúra-kinyerését vezérli. TXT esetén egyszerű dekódolást, PDF esetén layout parser delegálást, DOCX esetén bekezdés/tábla/heading/lista heuristikát használ, majd ExtractedDocument contractot ad vissza. Shared utility réteg, amelyet appok használhatnak dokumentum ingesthez.
+# Sárközi Mihály - 2026.05.21
+
 from __future__ import annotations
 
 import io

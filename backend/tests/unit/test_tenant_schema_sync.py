@@ -1,7 +1,7 @@
 from sqlalchemy import Column, Integer, MetaData, Table
 
-import core.extensions.tenant.schema.hooks as tenant_schema_hooks
-from core.extensions.tenant.service import tenant_schema_service
+import core.modules.tenant.schema.hooks as tenant_schema_hooks
+from core.modules.tenant.service import tenant_schema_service
 
 
 class _FakeResult:

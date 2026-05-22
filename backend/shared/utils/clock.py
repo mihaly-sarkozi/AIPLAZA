@@ -1,3 +1,7 @@
+# backend/shared/utils/clock.py
+# Feladat: Közös, tesztelhető UTC óra absztrakciót ad. A Clock protokoll, SystemClock implementáció és default clock setter/getter segítségével appok és core komponensek egységesen kérhetnek aktuális időpontot vagy dátumot. Shared időkezelési utility.
+# Sárközi Mihály - 2026.05.21
+
 from __future__ import annotations
 
 from dataclasses import dataclass

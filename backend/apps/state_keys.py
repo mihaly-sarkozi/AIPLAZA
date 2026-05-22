@@ -1,6 +1,6 @@
 """App-szintű ModuleContext.state kulcsok.
 
-Az app modulok saját belső wiring kulcsai itt élnek, nem a core contractban.
+Az app modulok saját belső wiring kulcsai itt élnek, nem a core interface-ben.
 """
 from __future__ import annotations
 

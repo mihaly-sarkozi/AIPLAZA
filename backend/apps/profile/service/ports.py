@@ -21,6 +21,9 @@ class CoreProfileServicePort(Protocol):
     ) -> dict[str, object]:
         ...
 
+    def invalidate_cache(self, tenant_slug: str | None, user_id: int) -> None:
+        ...
+
 
 @runtime_checkable
 class PreferencesRepositoryPort(Protocol):
@@ -77,16 +80,9 @@ class ProfileFacadePort(Protocol):
         ...
 
 
-@runtime_checkable
-class UserCacheInvalidationPort(Protocol):
-    def __call__(self, tenant_slug: str | None, user_id: int) -> None:
-        ...
-
-
 __all__ = [
     "CoreProfileServicePort",
     "ProfileFacadePort",
     "PreferencesRepositoryPort",
     "PreferencesServicePort",
-    "UserCacheInvalidationPort",
 ]

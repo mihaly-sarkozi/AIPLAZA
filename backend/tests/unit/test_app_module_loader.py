@@ -5,7 +5,7 @@ import types
 
 import pytest
 
-from apps import _load_module
+from apps.registry import load_app_module
 
 pytestmark = [pytest.mark.unit, pytest.mark.must_pass]
 
@@ -21,13 +21,13 @@ def test_app_module_loader_returns_stable_instance_per_factory_path() -> None:
 
     fake_module.make_module = make_module
     sys.modules[module_name] = fake_module
-    _load_module.cache_clear()
+    load_app_module.cache_clear()
     try:
-        first = _load_module(f"{module_name}:make_module")
-        second = _load_module(f"{module_name}:make_module")
+        first = load_app_module(f"{module_name}:make_module")
+        second = load_app_module(f"{module_name}:make_module")
     finally:
         sys.modules.pop(module_name, None)
-        _load_module.cache_clear()
+        load_app_module.cache_clear()
 
     assert first is second
     assert calls == [1]

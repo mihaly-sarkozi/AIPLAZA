@@ -10,8 +10,8 @@ from sqlalchemy.engine import Engine
 from apps.knowledge.domain.index_build import IndexBuild
 from apps.knowledge.models import KnowledgeIndexBuildORM
 from apps.knowledge.repositories.knowledge_runtime_repository import SQLAlchemyIndexBuildStore
-from core.extensions.tenant.context.tenant_context import current_tenant_schema
-from core.extensions.tenant.service import install_schema_tables
+from core.modules.tenant.context.tenant_context import current_tenant_schema
+from core.modules.tenant.service import install_schema_tables
 from core.kernel.db.session import make_session_factory
 
 

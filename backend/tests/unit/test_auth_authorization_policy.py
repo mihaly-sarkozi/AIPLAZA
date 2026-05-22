@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from core.capabilities.users.dto import User
-from core.platform.auth.authorization_policy import AuthorizationPolicy
+from core.modules.users.domain.dto import User
+from core.modules.auth.domain.authorization_policy import AuthorizationPolicy
 
 
 class _PermissionService:

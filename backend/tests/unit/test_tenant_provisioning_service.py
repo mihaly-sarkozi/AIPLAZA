@@ -6,9 +6,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from core.extensions.tenant.dto import TenantConfig, TenantSnapshot, TenantStatus
-from core.platform.tenant_policy import TenantLifecyclePolicy
-from core.extensions.tenant.service.tenant_provisioning_service import (
+from core.modules.tenant.dto import TenantConfig, TenantSnapshot, TenantStatus
+from core.modules.tenant.domain.tenant_policy import TenantLifecyclePolicy
+from core.modules.tenant.service.tenant_provisioning_service import (
     TenantProvisioningRequest,
     TenantProvisioningService,
 )

@@ -1,11 +1,9 @@
 from __future__ import annotations
 
-from fastapi import BackgroundTasks
-
 import pytest
 
 from apps.knowledge import events as knowledge_events
-from apps.knowledge.api import router as knowledge_api_router
+from apps.knowledge.api import background_jobs as knowledge_background_jobs
 
 pytestmark = [pytest.mark.unit, pytest.mark.must_pass]
 
@@ -31,18 +29,30 @@ def test_enqueue_ingest_pipeline_job_uses_outbox_channel(monkeypatch: pytest.Mon
         def publish(self, event_type: str, payload: dict, *, idempotency_key: str | None = None) -> None:
             published.append((event_type, payload, idempotency_key))
 
-    monkeypatch.setattr(knowledge_api_router, "get_module_service", lambda _name: _Channel())
+    monkeypatch.setattr(knowledge_background_jobs, "get_module_service", lambda _name: _Channel())
 
-    background_tasks = BackgroundTasks()
-    knowledge_api_router._enqueue_ingest_pipeline_job(
+    knowledge_background_jobs.enqueue_ingest_pipeline_job(
         tenant_slug="demo",
         run_id="run-2",
         created_by=7,
-        background_tasks=background_tasks,
         facade=object(),
     )
 
-    assert len(background_tasks.tasks) == 0
     assert published[0][0] == "knowledge.ingest_pipeline"
     assert published[0][1]["run_id"] == "run-2"
+
+
+def test_enqueue_index_build_job_uses_outbox_channel(monkeypatch: pytest.MonkeyPatch) -> None:
+    published: list[tuple[str, dict, str | None]] = []
+
+    class _Channel:
+        def publish(self, event_type: str, payload: dict, *, idempotency_key: str | None = None) -> None:
+            published.append((event_type, payload, idempotency_key))
+
+    monkeypatch.setattr(knowledge_background_jobs, "get_module_service", lambda _name: _Channel())
+
+    knowledge_background_jobs.enqueue_index_build_job(tenant_slug="demo", build_id="build-1")
+
+    assert published[0][0] == "knowledge.index_build"
+    assert published[0][1]["build_id"] == "build-1"
 

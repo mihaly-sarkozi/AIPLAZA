@@ -5,8 +5,8 @@ from types import SimpleNamespace
 
 from fastapi import Request
 
-from core.extensions.tenant.dto import TenantConfig, TenantDomainInfo, TenantSnapshot, TenantStatus
-from core.kernel.di import get_tenant_context
+from core.modules.tenant.dto import TenantConfig, TenantDomainInfo, TenantSnapshot, TenantStatus
+from core.kernel.deps.facade import get_tenant_context
 
 
 def test_get_tenant_context_uses_snapshot_as_single_source():

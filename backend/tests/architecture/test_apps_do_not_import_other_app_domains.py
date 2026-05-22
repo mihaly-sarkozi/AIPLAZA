@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from apps.contracts.public_api import (
+from core.kernel.interface.public_api import (
     APP_PLATFORM_SUPPORT_DIRECTORIES,
     PUBLIC_SHARED_APPS_PREFIXES,
 )
@@ -53,8 +53,8 @@ def test_apps_do_not_import_other_app_implementations() -> None:
             "közvetlenül egy másik app belső implementációját."
         ),
         guidance=(
-            "Cross-app együttműködéshez közös contractot használj az "
-            "`apps.contracts` alatt, vagy a `core` publikus extension/contract "
+            "Cross-app együttműködéshez közös interface-t használj az "
+            "`core.kernel.interface` alatt, vagy a `core` publikus extension/interface "
             "felületein keresztül kapcsolódj."
         ),
         violations=violations,

@@ -5,7 +5,7 @@ from contextlib import nullcontext
 
 import pytest
 
-import apps.chat.router.chat_router as chat_router
+import apps.chat.router.channel_support as channel_support
 from apps.chat.channel_access import ChannelAccessRepository
 
 pytestmark = pytest.mark.unit
@@ -50,10 +50,10 @@ def test_session_quota_isolated_by_session_key() -> None:
 
 @pytest.mark.release_acceptance
 def test_session_pacing_returns_retry_after_for_too_fast_requests(monkeypatch) -> None:
-    monkeypatch.setattr(chat_router, "get_rate_limit_redis", lambda: None)
+    monkeypatch.setattr(channel_support, "get_rate_limit_redis", lambda: None)
     monkeypatch.setattr(
-        chat_router,
-        "_channel_session_limits",
+        channel_support,
+        "channel_session_limits",
         lambda: {
             "session_per_minute": 30,
             "session_burst_10s": 5,
@@ -62,18 +62,18 @@ def test_session_pacing_returns_retry_after_for_too_fast_requests(monkeypatch) -
             "session_cookie_max_age_sec": 86400,
         },
     )
-    with chat_router._channel_session_lock:
-        chat_router._channel_session_last_seen_ms.clear()
+    with channel_support.channel_session_lock:
+        channel_support.channel_session_last_seen_ms.clear()
 
     first = asyncio.run(
-        chat_router._apply_channel_session_pacing(
+        channel_support.apply_channel_session_pacing(
             tenant_id=1,
             credential_id=10,
             session_id="session-a",
         )
     )
     second = asyncio.run(
-        chat_router._apply_channel_session_pacing(
+        channel_support.apply_channel_session_pacing(
             tenant_id=1,
             credential_id=10,
             session_id="session-a",

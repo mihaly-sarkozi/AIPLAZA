@@ -58,9 +58,17 @@ def _item_to_domain(row: KnowledgeIngestItemORM) -> IngestItem:
         duplicate_of_item_id=row.duplicate_of_item_id,
         duplicate_of_source_id=row.duplicate_of_source_id,
         pipeline_route=row.pipeline_route,
+        pipeline_version=getattr(row, "pipeline_version", None) or "source_parser.v1",
+        idempotency_key=getattr(row, "idempotency_key", None),
         parser_job_id=row.parser_job_id,
         source_id=row.source_id,
         content_hash=row.content_hash,
+        lease_owner=getattr(row, "lease_owner", None),
+        lease_expires_at=getattr(row, "lease_expires_at", None),
+        heartbeat_at=getattr(row, "heartbeat_at", None),
+        retry_count=int(getattr(row, "retry_count", 0) or 0),
+        max_retries=int(getattr(row, "max_retries", 3) or 3),
+        dead_letter_reason=getattr(row, "dead_letter_reason", None),
         created_by=row.created_by,
         created_at=row.created_at,
         started_at=row.started_at,
@@ -228,9 +236,17 @@ class SQLAlchemyIngestItemStore:
                     duplicate_of_item_id=item.duplicate_of_item_id,
                     duplicate_of_source_id=item.duplicate_of_source_id,
                     pipeline_route=item.pipeline_route,
+                    pipeline_version=item.pipeline_version,
+                    idempotency_key=item.idempotency_key,
                     parser_job_id=item.parser_job_id,
                     source_id=item.source_id,
                     content_hash=item.content_hash,
+                    lease_owner=item.lease_owner,
+                    lease_expires_at=item.lease_expires_at,
+                    heartbeat_at=item.heartbeat_at,
+                    retry_count=item.retry_count,
+                    max_retries=item.max_retries,
+                    dead_letter_reason=item.dead_letter_reason,
                     metadata_json=dict(item.metadata or {}),
                     created_at=item.created_at,
                     updated_at=item.updated_at,
@@ -259,9 +275,17 @@ class SQLAlchemyIngestItemStore:
             row.duplicate_of_item_id = item.duplicate_of_item_id
             row.duplicate_of_source_id = item.duplicate_of_source_id
             row.pipeline_route = item.pipeline_route
+            row.pipeline_version = item.pipeline_version
+            row.idempotency_key = item.idempotency_key
             row.parser_job_id = item.parser_job_id
             row.source_id = item.source_id
             row.content_hash = item.content_hash
+            row.lease_owner = item.lease_owner
+            row.lease_expires_at = item.lease_expires_at
+            row.heartbeat_at = item.heartbeat_at
+            row.retry_count = item.retry_count
+            row.max_retries = item.max_retries
+            row.dead_letter_reason = item.dead_letter_reason
             row.metadata_json = dict(item.metadata or {})
             row.started_at = item.started_at
             row.completed_at = item.completed_at
@@ -293,12 +317,21 @@ class SQLAlchemyIngestItemStore:
             ).scalars().all()
             return [_item_to_domain(row) for row in rows]
 
-    def find_by_hash(self, *, corpus_uuid: str, content_hash: str, exclude_item_id: str | None = None) -> IngestItem | None:
+    def find_by_hash(
+        self,
+        *,
+        corpus_uuid: str,
+        content_hash: str,
+        exclude_item_id: str | None = None,
+        pipeline_version: str | None = None,
+    ) -> IngestItem | None:
         with self._sf() as session:
             stmt = select(KnowledgeIngestItemORM).where(
                 KnowledgeIngestItemORM.corpus_uuid == corpus_uuid,
                 KnowledgeIngestItemORM.content_hash == content_hash,
             ).order_by(KnowledgeIngestItemORM.created_at.asc())
+            if pipeline_version:
+                stmt = stmt.where(KnowledgeIngestItemORM.pipeline_version == pipeline_version)
             rows = session.execute(stmt).scalars().all()
             for row in rows:
                 if exclude_item_id and row.id == exclude_item_id:

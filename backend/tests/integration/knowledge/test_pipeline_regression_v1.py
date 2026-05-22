@@ -200,9 +200,12 @@ class _InMemoryItemStore:
         corpus_uuid: str,
         content_hash: str,
         exclude_item_id: str | None = None,
+        pipeline_version: str | None = None,
     ) -> IngestItem | None:
         for item in self.items.values():
             if item.id == exclude_item_id or item.corpus_uuid != corpus_uuid:
+                continue
+            if pipeline_version and item.pipeline_version != pipeline_version:
                 continue
             if item.content_hash == content_hash:
                 return item
@@ -369,6 +372,27 @@ class _NoopObjectStorage:
             size_bytes=len(content),
             content_type=content_type,
             metadata=metadata or {},
+        )
+
+    def put_fileobj(
+        self,
+        *,
+        key: str,
+        fileobj,
+        bucket: str | None = None,
+        content_type: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> StoredObjectRef:
+        pos = fileobj.tell()
+        fileobj.seek(0)
+        content = fileobj.read()
+        fileobj.seek(pos)
+        return self.put_bytes(
+            key=key,
+            content=content,
+            bucket=bucket,
+            content_type=content_type,
+            metadata=metadata,
         )
 
     def get_bytes(self, *, key: str, bucket: str | None = None) -> StoredObjectData:

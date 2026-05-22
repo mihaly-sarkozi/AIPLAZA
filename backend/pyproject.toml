@@ -9,6 +9,19 @@ description = "AIPLAZA alkalmazás"
 readme = "../START.md"
 requires-python = ">=3.10,<3.14"
 
+[project.optional-dependencies]
+test = [
+    "pytest~=8.3.0",
+    "pytest-asyncio",
+    "pytest-cov",
+    "httpx~=0.28.1",
+    "fakeredis",
+    "respx",
+    "freezegun",
+    "ruff>=0.7.0",
+    "mypy>=1.11.0",
+]
+
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["apps*", "config*", "core*", "lang*", "shared*"]
@@ -32,4 +45,30 @@ markers = [
     "expected_fail_not_implemented: funkció még nincs implementálva (xfail)",
     "smoke_only: csak triviális ellenőrzés (pl. lista visszatérés)",
     "release_acceptance: minimum release acceptance suite – minden ilyen tesztnek át kell mennie a ship előtt",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["apps", "core", "shared", "tests", "scripts"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM"]
+# Fokozatos bevezetés: kezdetben nem blokkolunk csak sorhossz miatt.
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
+follow_imports = "skip"
+warn_return_any = false
+warn_unused_configs = true
+pretty = true
+show_error_codes = true
+incremental = true
+cache_dir = ".mypy_cache"
+# Fokozatos bevezetés: először a kritikus security/error contract modulokon.
+files = [
+    "apps/knowledge/service/url_ingest_security.py",
+    "core/kernel/http/error_payloads.py",
 ]

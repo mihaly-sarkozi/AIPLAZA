@@ -260,6 +260,19 @@ class _NoopObjectStorage:
             metadata=metadata or {},
         )
 
+    def put_fileobj(self, *, key: str, fileobj, bucket: str | None = None, content_type: str | None = None, metadata=None):
+        pos = fileobj.tell()
+        fileobj.seek(0)
+        content = fileobj.read()
+        fileobj.seek(pos)
+        return self.put_bytes(
+            key=key,
+            content=content,
+            bucket=bucket,
+            content_type=content_type,
+            metadata=metadata,
+        )
+
     def put_text(
         self,
         *,

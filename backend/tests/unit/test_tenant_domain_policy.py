@@ -4,8 +4,8 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-from core.extensions.tenant.repositories.tenant_repository import TenantRepository
-from core.extensions.tenant.service.tenant_domain_verification_service import (
+from core.modules.tenant.repositories.tenant_repository import TenantRepository
+from core.modules.tenant.service.tenant_domain_verification_service import (
     TenantDomainVerificationService,
 )
 

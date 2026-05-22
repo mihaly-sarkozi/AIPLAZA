@@ -2,19 +2,19 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import Depends
+from fastapi import Depends, Request
 
 from apps.knowledge.service.ports import KnowledgeFacadePort
-from core.capabilities.users.dto import User
-from core.di import RequiredTenantContextDep
-from core.platform.auth.auth_dependencies import get_current_user
+from core.modules.users.domain.dto import User
+from core.kernel.http.tenant_dependencies import RequiredTenantContextDep
+from core.modules.auth.web.dependencies.auth_dependencies import get_current_user
 
 
-def get_kb_service():
-    from apps.di import get_service
+def get_kb_service(request: Request):
+    from core.kernel.http.app_dependencies import get_module_service
     from apps.knowledge.contracts import KNOWLEDGE_SERVICE
 
-    return get_service(KNOWLEDGE_SERVICE)
+    return get_module_service(KNOWLEDGE_SERVICE, request)
 
 
 get_knowledge_facade = get_kb_service

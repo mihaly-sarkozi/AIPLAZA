@@ -11,7 +11,7 @@ _project_root = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_project_root))
 os.chdir(_project_root)
 
-from core.platform_admin.schema_migrations import apply_platform_security_alerts_legacy_compat
+from admin.repository.schema_migrations import apply_platform_security_alerts_legacy_compat
 
 
 def _resolve_env_path() -> Path:

@@ -6,8 +6,8 @@ import asyncio
 
 import pytest
 
-from core.kernel.middleware.observability.correlation_id_middleware import CorrelationIdMiddleware
-from core.kernel.middleware.observability.request_timing_middleware import RequestTimingMiddleware
+from core.kernel.http.correlation_id_middleware import CorrelationIdMiddleware
+from core.kernel.http.request_timing_middleware import RequestTimingMiddleware
 
 pytestmark = [pytest.mark.unit, pytest.mark.must_pass]
 

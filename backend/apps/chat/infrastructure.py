@@ -4,7 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from core.kernel.config import app_settings
+from core.kernel.config.config_loader import settings
 from apps.chat.channel_access import ChannelAccessRepository, ChannelAccessService
 from apps.chat.service.pii_depersonalization import PiiDepersonalizationService
 from apps.chat.service.chat_service import ChatService
@@ -55,23 +55,23 @@ class ChatModuleInfrastructure:
 
     # Ez a metódus felépíti a(z) llm client logikáját.
     def build_llm_client(self):
-        provider = str(getattr(app_settings, "chat_provider", "openai") or "openai").strip().lower()
+        provider = str(getattr(settings, "chat_provider", "openai") or "openai").strip().lower()
         if provider == "ollama":
-            base_url = str(getattr(app_settings, "ollama_url", "http://localhost:11434") or "http://localhost:11434").rstrip("/")
-            api_key = str(getattr(app_settings, "ollama_api_key", "ollama") or "ollama")
+            base_url = str(getattr(settings, "ollama_url", "http://localhost:11434") or "http://localhost:11434").rstrip("/")
+            api_key = str(getattr(settings, "ollama_api_key", "ollama") or "ollama")
             return self._openai_client(
                 base_url=f"{base_url}/v1",
                 api_key=api_key,
             )
-        return self._openai_client(api_key=app_settings.openai_api_key)
+        return self._openai_client(api_key=settings.openai_api_key)
 
     # Ez a metódus felépíti a(z) chat szolgáltatás logikáját.
     def build_chat_service(self) -> ChatService:
-        provider = str(getattr(app_settings, "chat_provider", "openai") or "openai").strip().lower()
+        provider = str(getattr(settings, "chat_provider", "openai") or "openai").strip().lower()
         model_name = (
-            str(getattr(app_settings, "ollama_model", "qwen2.5:7b-instruct") or "qwen2.5:7b-instruct")
+            str(getattr(settings, "ollama_model", "qwen2.5:7b-instruct") or "qwen2.5:7b-instruct")
             if provider == "ollama"
-            else str(getattr(app_settings, "chat_model", "gpt-4o-mini") or "gpt-4o-mini")
+            else str(getattr(settings, "chat_model", "gpt-4o-mini") or "gpt-4o-mini")
         )
         channel_access_service = None
         pii_depersonalization_service = None

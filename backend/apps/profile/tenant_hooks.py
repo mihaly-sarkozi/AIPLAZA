@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from core.extensions.tenant.service import TenantSchemaHook, register_tenant_schema_hooks, run_schema_statements
+from core.modules.tenant.service import TenantSchemaHook, register_tenant_schema_hooks, run_schema_statements
 
 
 def _install_profile_schema(engine, slug: str) -> None:

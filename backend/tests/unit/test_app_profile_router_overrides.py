@@ -8,11 +8,11 @@ from fastapi.testclient import TestClient
 
 from apps.profile.api.router import router
 from apps.profile.dependencies import get_profile_facade
-from core.capabilities.users.dto import User
-from core.extensions.tenant.context.request_tenant_context import RequestTenantContext
-from core.extensions.tenant.dto import TenantConfig, TenantStatus
-from core.kernel.http_dependencies import require_tenant_context
-from core.platform.auth.auth_dependencies import get_current_user
+from core.modules.users.domain.dto import User
+from core.modules.tenant.context.request_tenant_context import RequestTenantContext
+from core.modules.tenant.dto import TenantConfig, TenantStatus
+from core.kernel.http.tenant_dependencies import require_tenant_context
+from core.modules.auth.web.dependencies.auth_dependencies import get_current_user
 
 pytestmark = [pytest.mark.unit, pytest.mark.must_pass]
 

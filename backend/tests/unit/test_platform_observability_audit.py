@@ -4,10 +4,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from core.capabilities.audit.const.audit_log_action_const import AuditLogAction
-from core.platform.brand.dto import BrandUpdateRequest
-from core.platform.brand.services import BrandService
-from core.platform.settings.services import SettingsService
+from core.infrastructure.audit.const.audit_log_action_const import AuditLogAction
+from core.modules.brand.service.brand_service import BrandService
+from core.modules.brand.web.requests.brand_update_request import BrandUpdateRequest
+from core.modules.settings.service.settings_service import SettingsService
 
 pytestmark = [pytest.mark.unit, pytest.mark.must_pass]
 

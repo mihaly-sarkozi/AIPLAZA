@@ -13,9 +13,9 @@ def test_chat_infrastructure_builds_ollama_openai_compatible_client(monkeypatch)
 
     monkeypatch.setattr(ChatModuleInfrastructure, "_openai_client", staticmethod(lambda **kwargs: _Client(**kwargs)))
 
-    monkeypatch.setattr(chat_infra_module.app_settings, "chat_provider", "ollama", raising=False)
-    monkeypatch.setattr(chat_infra_module.app_settings, "ollama_url", "http://localhost:11434", raising=False)
-    monkeypatch.setattr(chat_infra_module.app_settings, "ollama_api_key", "ollama", raising=False)
+    monkeypatch.setattr(chat_infra_module.settings, "chat_provider", "ollama", raising=False)
+    monkeypatch.setattr(chat_infra_module.settings, "ollama_url", "http://localhost:11434", raising=False)
+    monkeypatch.setattr(chat_infra_module.settings, "ollama_api_key", "ollama", raising=False)
 
     infra = ChatModuleInfrastructure()
     client = infra.build_llm_client()
@@ -33,10 +33,10 @@ def test_chat_infrastructure_uses_ollama_model_name(monkeypatch):
 
     monkeypatch.setattr(ChatModuleInfrastructure, "_openai_client", staticmethod(lambda **kwargs: _Client(**kwargs)))
 
-    monkeypatch.setattr(chat_infra_module.app_settings, "chat_provider", "ollama", raising=False)
-    monkeypatch.setattr(chat_infra_module.app_settings, "ollama_model", "qwen2.5:7b-instruct", raising=False)
-    monkeypatch.setattr(chat_infra_module.app_settings, "ollama_url", "http://localhost:11434", raising=False)
-    monkeypatch.setattr(chat_infra_module.app_settings, "ollama_api_key", "ollama", raising=False)
+    monkeypatch.setattr(chat_infra_module.settings, "chat_provider", "ollama", raising=False)
+    monkeypatch.setattr(chat_infra_module.settings, "ollama_model", "qwen2.5:7b-instruct", raising=False)
+    monkeypatch.setattr(chat_infra_module.settings, "ollama_url", "http://localhost:11434", raising=False)
+    monkeypatch.setattr(chat_infra_module.settings, "ollama_api_key", "ollama", raising=False)
 
     service = ChatModuleInfrastructure().build_chat_service()
 

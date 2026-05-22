@@ -1,13 +1,10 @@
 import asyncio
 # Ez a fájl az adott terület szolgáltatás- és üzleti logikáját tartalmazza.
-import inspect
 import logging
 import re
 import threading
-import unicodedata
 from collections.abc import AsyncIterator
-from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from time import perf_counter
 from typing import Any, Optional
 
@@ -21,11 +18,24 @@ except Exception:  # pragma: no cover - optional dependency guard
     APITimeoutError = Exception  # type: ignore
     RateLimitError = Exception  # type: ignore
 
-from core.kernel.config import app_settings
-from core.kernel.config.environment import get_app_env
-from core.platform.contract.observability import increment_metric, log_structured_event, observe_metric
-from core.kernel.security.rate_limit import get_rate_limit_redis
+from core.kernel.config.config_loader import settings
+from core.kernel.interface.observability import increment_metric, log_structured_event, observe_metric
+from apps.chat.service.answer_download_service import AnswerDownloadService, PermissionSubject
+from apps.chat.service.llm_answer_service import LLMAnswerService
 from apps.chat.service.pii_depersonalization import PiiDepersonalizationService
+from apps.chat.service.chat_text_utils import (
+    coerce_response_text,
+    dedupe_keep_order,
+    estimate_prompt_chars,
+    extract_response_text,
+    fold_lexicon_token,
+    fold_text,
+    sanitize_debug_text,
+    sanitize_debug_value,
+)
+from apps.chat.service.llm_budget import LlmBudgetConfig, LlmBudgetManager
+from apps.chat.service.prompt_builder import PromptBuilder
+from apps.chat.service.retrieval_context_builder import RetrievalContextBuilder
 from shared.text.language_lexicon import SUPPORTED_LEXICON_LANGUAGES, get_lexicon_terms, get_month_number
 from shared.utils import sanitize_log_data
 
@@ -34,8 +44,7 @@ _AUDIT_ACTION_KNOWLEDGE_PII_DEPERSONALIZED = "knowledge_pii_depersonalized"
 
 
 def _fold_lexicon_token(value: str) -> str:
-    normalized = unicodedata.normalize("NFKD", str(value or ""))
-    return "".join(ch for ch in normalized if not unicodedata.combining(ch)).lower().strip()
+    return fold_lexicon_token(value)
 
 
 class PiiDepersonalizationUnavailableError(RuntimeError):
@@ -44,13 +53,6 @@ class PiiDepersonalizationUnavailableError(RuntimeError):
 
 class ChatPolicyViolationError(RuntimeError):
     """Raised when a chat request violates policy rules."""
-
-
-@dataclass(frozen=True)
-class _PermissionSubject:
-    id: int | None
-    role: str | None
-    is_active: bool = True
 
 
 class ChatService:
@@ -124,80 +126,14 @@ class ChatService:
         return _AsyncOpenAI(**kwargs)
 
     def _chat_completion_kwargs(self, messages: list[dict[str, str]]) -> dict[str, Any]:
-        payload: dict[str, Any] = {
-            "model": self.chat_model_name,
-            "messages": messages,
-        }
-        create_callable = getattr(getattr(getattr(self.client, "chat", None), "completions", None), "create", None)
-        accepts_kwargs = False
-        accepted_names: set[str] = set()
-        if callable(create_callable):
-            try:
-                signature = inspect.signature(create_callable)
-                accepted_names = set(signature.parameters.keys())
-                accepts_kwargs = any(
-                    parameter.kind == inspect.Parameter.VAR_KEYWORD
-                    for parameter in signature.parameters.values()
-                )
-            except (TypeError, ValueError):
-                accepts_kwargs = True
-        else:
-            accepts_kwargs = True
-        if accepts_kwargs or "max_tokens" in accepted_names:
-            payload["max_tokens"] = self._chat_max_tokens
-        if self._chat_temperature >= 0 and (accepts_kwargs or "temperature" in accepted_names):
-            payload["temperature"] = self._chat_temperature
-        return payload
+        return self._llm_answer_service.chat_completion_kwargs(messages)
 
     @staticmethod
     def _coerce_response_text(value: Any) -> str:
-        if value is None:
-            return ""
-        if isinstance(value, str):
-            return value.strip()
-        if isinstance(value, (list, tuple)):
-            parts: list[str] = []
-            for item in value:
-                if isinstance(item, str):
-                    text = item.strip()
-                    if text:
-                        parts.append(text)
-                    continue
-                if isinstance(item, dict):
-                    for key in ("text", "content", "reasoning"):
-                        raw = item.get(key)
-                        if isinstance(raw, str) and raw.strip():
-                            parts.append(raw.strip())
-                            break
-            return "\n".join(part for part in parts if part).strip()
-        if isinstance(value, dict):
-            for key in ("text", "content", "reasoning", "summary"):
-                raw = value.get(key)
-                if isinstance(raw, str) and raw.strip():
-                    return raw.strip()
-            return ""
-        return str(value).strip()
+        return coerce_response_text(value)
 
     def _extract_response_text(self, response: Any) -> str:
-        choices = getattr(response, "choices", None) or []
-        if not choices:
-            return ""
-        message = getattr(choices[0], "message", None)
-        if message is None:
-            return ""
-        # Ollama OpenAI-kompatibilis válaszoknál előfordulhat, hogy a content üres,
-        # de a reasoning/output_text mező tartalmazza a tényleges kimenetet.
-        if isinstance(message, dict):
-            for key in ("content", "reasoning", "output_text"):
-                text = self._coerce_response_text(message.get(key))
-                if text:
-                    return text
-            return ""
-        for key in ("content", "reasoning", "output_text"):
-            text = self._coerce_response_text(getattr(message, key, None))
-            if text:
-                return text
-        return ""
+        return extract_response_text(response)
 
     # Ez a metódus a Python-specifikus speciális működést valósítja meg.
     def __init__(
@@ -213,37 +149,37 @@ class ChatService:
         audit_service: Any = None,
     ):
         if chat_model is None:
-            provider = str(getattr(app_settings, "chat_provider", "openai") or "openai").strip().lower()
+            provider = str(getattr(settings, "chat_provider", "openai") or "openai").strip().lower()
             if provider == "ollama":
-                base_url = str(getattr(app_settings, "ollama_url", "http://localhost:11434") or "http://localhost:11434").rstrip("/")
-                api_key = str(getattr(app_settings, "ollama_api_key", "ollama") or "ollama")
+                base_url = str(getattr(settings, "ollama_url", "http://localhost:11434") or "http://localhost:11434").rstrip("/")
+                api_key = str(getattr(settings, "ollama_api_key", "ollama") or "ollama")
                 self.client = self._openai_client(base_url=f"{base_url}/v1", api_key=api_key)
             else:
-                if not app_settings.openai_api_key:
+                if not settings.openai_api_key:
                     raise ValueError("❌ OPENAI_API_KEY nincs beállítva (config / .env).")
-                self.client = self._openai_client(api_key=app_settings.openai_api_key)
+                self.client = self._openai_client(api_key=settings.openai_api_key)
         else:
             self.client = chat_model
-        provider = str(getattr(app_settings, "chat_provider", "openai") or "openai").strip().lower()
+        provider = str(getattr(settings, "chat_provider", "openai") or "openai").strip().lower()
         default_model = (
-            str(getattr(app_settings, "ollama_model", "qwen2.5:7b-instruct") or "qwen2.5:7b-instruct")
+            str(getattr(settings, "ollama_model", "qwen2.5:7b-instruct") or "qwen2.5:7b-instruct")
             if provider == "ollama"
-            else str(getattr(app_settings, "chat_model", "gpt-4o-mini") or "gpt-4o-mini")
+            else str(getattr(settings, "chat_model", "gpt-4o-mini") or "gpt-4o-mini")
         )
         self.chat_model_name = str(chat_model_name or default_model)
         self._chat_completion_timeout_sec = max(
             5,
-            int(getattr(app_settings, "chat_completion_timeout_sec", 45) or 45),
+            int(getattr(settings, "chat_completion_timeout_sec", 45) or 45),
         )
         self._chat_context_timeout_sec = max(
             5,
-            int(getattr(app_settings, "chat_context_timeout_sec", 20) or 20),
+            int(getattr(settings, "chat_context_timeout_sec", 20) or 20),
         )
         self._chat_max_tokens = max(
             64,
-            int(getattr(app_settings, "chat_max_tokens", 220) or 220),
+            int(getattr(settings, "chat_max_tokens", 220) or 220),
         )
-        self._chat_temperature = float(getattr(app_settings, "chat_temperature", 0.2) or 0.2)
+        self._chat_temperature = float(getattr(settings, "chat_temperature", 0.2) or 0.2)
         self.kb_service = kb_service
         self.retrieval_service = retrieval_service
         self.query_parser = query_parser
@@ -252,46 +188,91 @@ class ChatService:
         self.pii_depersonalization_service = pii_depersonalization_service
         self.audit_service = audit_service
         self._recent_query_focus_by_user: dict[int, dict] = {}
+        self._prompt_builder = PromptBuilder(
+            max_conversation_history_messages=self._MAX_CONVERSATION_HISTORY_MESSAGES,
+            max_conversation_history_chars=self._MAX_CONVERSATION_HISTORY_CHARS,
+            max_retrieval_history_items=self._MAX_RETRIEVAL_HISTORY_ITEMS,
+            max_retrieval_history_chars=self._MAX_RETRIEVAL_HISTORY_CHARS,
+            multi_kb_packet_score_threshold=self._MULTI_KB_PACKET_SCORE_THRESHOLD,
+            multi_kb_block_score_threshold=self._MULTI_KB_BLOCK_SCORE_THRESHOLD,
+            multi_kb_block_relative_floor_ratio=self._MULTI_KB_BLOCK_RELATIVE_FLOOR_RATIO,
+        )
         self._llm_budget_request_limit_per_minute = max(
             1,
-            int(getattr(app_settings, "llm_budget_request_limit_per_minute", 120) or 120),
+            int(getattr(settings, "llm_budget_request_limit_per_minute", 120) or 120),
         )
         self._llm_budget_prompt_chars_per_minute = max(
             1,
-            int(getattr(app_settings, "llm_budget_prompt_chars_per_minute", 120000) or 120000),
+            int(getattr(settings, "llm_budget_prompt_chars_per_minute", 120000) or 120000),
         )
         self._llm_budget_concurrency_limit = max(
             1,
-            int(getattr(app_settings, "llm_budget_concurrency_limit", 8) or 8),
+            int(getattr(settings, "llm_budget_concurrency_limit", 8) or 8),
         )
         self._llm_budget_tenant_daily_tokens = max(
             1,
-            int(getattr(app_settings, "llm_budget_tenant_daily_tokens", 120_000) or 120_000),
+            int(getattr(settings, "llm_budget_tenant_daily_tokens", 120_000) or 120_000),
         )
         self._llm_budget_tenant_monthly_tokens = max(
             1,
-            int(getattr(app_settings, "llm_budget_tenant_monthly_tokens", 2_000_000) or 2_000_000),
+            int(getattr(settings, "llm_budget_tenant_monthly_tokens", 2_000_000) or 2_000_000),
         )
         self._llm_budget_global_daily_spend_usd = max(
             0.01,
-            float(getattr(app_settings, "llm_budget_global_daily_spend_usd", 15.0) or 15.0),
+            float(getattr(settings, "llm_budget_global_daily_spend_usd", 15.0) or 15.0),
         )
         self._llm_budget_input_cost_per_1k_tokens_usd = max(
             0.00001,
-            float(getattr(app_settings, "llm_budget_input_cost_per_1k_tokens_usd", 0.003) or 0.003),
+            float(getattr(settings, "llm_budget_input_cost_per_1k_tokens_usd", 0.003) or 0.003),
         )
         self._llm_budget_output_cost_per_1k_tokens_usd = max(
             0.00001,
-            float(getattr(app_settings, "llm_budget_output_cost_per_1k_tokens_usd", 0.006) or 0.006),
+            float(getattr(settings, "llm_budget_output_cost_per_1k_tokens_usd", 0.006) or 0.006),
         )
         self._llm_budget_estimated_completion_tokens = max(
             1,
-            int(getattr(app_settings, "llm_budget_estimated_completion_tokens", 220) or 220),
+            int(getattr(settings, "llm_budget_estimated_completion_tokens", 220) or 220),
+        )
+        self._llm_budget_manager = LlmBudgetManager(
+            config=LlmBudgetConfig(
+                request_limit_per_minute=self._llm_budget_request_limit_per_minute,
+                prompt_chars_per_minute=self._llm_budget_prompt_chars_per_minute,
+                concurrency_limit=self._llm_budget_concurrency_limit,
+                tenant_daily_tokens=self._llm_budget_tenant_daily_tokens,
+                tenant_monthly_tokens=self._llm_budget_tenant_monthly_tokens,
+                estimated_completion_tokens=self._llm_budget_estimated_completion_tokens,
+                input_cost_per_1k_tokens_usd=self._llm_budget_input_cost_per_1k_tokens_usd,
+                output_cost_per_1k_tokens_usd=self._llm_budget_output_cost_per_1k_tokens_usd,
+                global_daily_spend_usd=self._llm_budget_global_daily_spend_usd,
+                chat_max_tokens=self._chat_max_tokens,
+            ),
+            lock=self._budget_lock,
+            state=self._budget_state,
         )
         self._chat_max_answer_chars = max(
             120,
-            int(getattr(app_settings, "chat_max_answer_chars", 2400) or 2400),
+            int(getattr(settings, "chat_max_answer_chars", 2400) or 2400),
         )
+        self._llm_answer_service = LLMAnswerService(
+            client=self.client,
+            chat_model_name=self.chat_model_name,
+            chat_max_tokens=self._chat_max_tokens,
+            chat_temperature=self._chat_temperature,
+            completion_timeout_sec=self._chat_completion_timeout_sec,
+            response_text_extractor=self._extract_response_text,
+        )
+        self._retrieval_context_builder = RetrievalContextBuilder(
+            kb_service=self.kb_service,
+            retrieval_service=self.retrieval_service,
+            query_parser=self.query_parser,
+            context_builder=self.context_builder,
+            enrich_parsed_query=self._enrich_parsed_query,
+            is_followup=self._is_followup,
+            llm_context_text_from_packet=self._llm_context_text_from_packet,
+            stamp_packet_kb=self._stamp_packet_kb,
+            merge_context_packets=self._merge_context_packets,
+        )
+        self._answer_downloads = AnswerDownloadService(kb_service=self.kb_service)
 
     @staticmethod
     def estimate_prompt_chars(
@@ -300,10 +281,11 @@ class ChatService:
         conversation_history: list[dict[str, str]] | None,
         retrieval_history: list[str] | None,
     ) -> int:
-        total = len(str(question or ""))
-        total += sum(len(str(item.get("content") or item.get("text") or "")) for item in (conversation_history or []) if isinstance(item, dict))
-        total += sum(len(str(item or "")) for item in (retrieval_history or []))
-        return max(1, total)
+        return estimate_prompt_chars(
+            question=question,
+            conversation_history=conversation_history,
+            retrieval_history=retrieval_history,
+        )
 
     @staticmethod
     def _rollback_llm_redis_budget(
@@ -319,17 +301,18 @@ class ChatService:
         estimated_tokens: int,
         estimated_cost_micro: int,
     ) -> None:
-        try:
-            pipe = redis_client.pipeline()
-            pipe.decr(req_key, 1)
-            pipe.decrby(chars_key, prompt_units)
-            pipe.decr(inflight_key, 1)
-            pipe.decrby(day_tokens_key, estimated_tokens)
-            pipe.decrby(month_tokens_key, estimated_tokens)
-            pipe.decrby(global_spend_key, estimated_cost_micro)
-            pipe.execute()
-        except Exception:
-            logger.warning("LLM budget rollback failed.")
+        LlmBudgetManager.rollback_redis_budget(
+            redis_client,
+            req_key=req_key,
+            chars_key=chars_key,
+            inflight_key=inflight_key,
+            day_tokens_key=day_tokens_key,
+            month_tokens_key=month_tokens_key,
+            global_spend_key=global_spend_key,
+            prompt_units=prompt_units,
+            estimated_tokens=estimated_tokens,
+            estimated_cost_micro=estimated_cost_micro,
+        )
 
     def acquire_llm_budget(
         self,
@@ -338,236 +321,14 @@ class ChatService:
         scope: str,
         prompt_chars: int,
     ) -> tuple[bool, str, dict[str, Any] | None]:
-        tenant_key = str(int(tenant_id or 0))
-        scope_key = str(scope or "default").strip().lower() or "default"
-        is_demo_scope = ":demo" in scope_key or scope_key.endswith("demo")
-        is_starter_scope = ":starter" in scope_key or scope_key.endswith("starter")
-        effective_daily_tokens = self._llm_budget_tenant_daily_tokens
-        effective_monthly_tokens = self._llm_budget_tenant_monthly_tokens
-        if is_demo_scope:
-            effective_daily_tokens = min(
-                effective_daily_tokens,
-                max(1, int(getattr(app_settings, "llm_budget_demo_daily_tokens", 30_000) or 30_000)),
-            )
-            effective_monthly_tokens = min(
-                effective_monthly_tokens,
-                max(1, int(getattr(app_settings, "llm_budget_demo_monthly_tokens", 150_000) or 150_000)),
-            )
-        elif is_starter_scope:
-            effective_monthly_tokens = min(
-                effective_monthly_tokens,
-                max(1, int(getattr(app_settings, "llm_budget_starter_monthly_tokens", 900_000) or 900_000)),
-            )
-        now_utc = datetime.now(UTC)
-        minute_bucket = int(now_utc.timestamp() // 60)
-        day_bucket = now_utc.strftime("%Y%m%d")
-        month_bucket = now_utc.strftime("%Y%m")
-        prompt_units = max(1, int(prompt_chars or 1))
-        prompt_tokens = max(1, int(round(prompt_units / 4.0)))
-        completion_tokens = min(self._chat_max_tokens, self._llm_budget_estimated_completion_tokens)
-        estimated_tokens = max(1, prompt_tokens + completion_tokens)
-        estimated_cost_usd = (
-            (prompt_tokens / 1000.0) * self._llm_budget_input_cost_per_1k_tokens_usd
-            + (completion_tokens / 1000.0) * self._llm_budget_output_cost_per_1k_tokens_usd
+        return self._llm_budget_manager.acquire(
+            tenant_id=tenant_id,
+            scope=scope,
+            prompt_chars=prompt_chars,
         )
-        redis_client = get_rate_limit_redis()
-        fail_closed = bool(getattr(app_settings, "llm_budget_fail_closed_without_redis", True))
-        try:
-            env = get_app_env()
-        except Exception:
-            env = "dev"
-        if redis_client is None and fail_closed and env == "prod":
-            return False, "LLM budget szolgáltatás átmenetileg nem elérhető.", None
-        if redis_client is not None:
-            req_key = f"rl:llm:req:{tenant_key}:{scope_key}:{minute_bucket}"
-            chars_key = f"rl:llm:chars:{tenant_key}:{scope_key}:{minute_bucket}"
-            inflight_key = f"rl:llm:inflight:{tenant_key}:{scope_key}"
-            day_tokens_key = f"rl:llm:tokens:day:{tenant_key}:{day_bucket}"
-            month_tokens_key = f"rl:llm:tokens:month:{tenant_key}:{month_bucket}"
-            global_spend_key = f"rl:llm:spend:day:{day_bucket}"
-            estimated_cost_micro = int(round(estimated_cost_usd * 1_000_000))
-            try:
-                pipe = redis_client.pipeline()
-                pipe.incr(req_key, 1)
-                pipe.expire(req_key, 120)
-                pipe.incrby(chars_key, prompt_units)
-                pipe.expire(chars_key, 120)
-                pipe.incr(inflight_key, 1)
-                pipe.expire(inflight_key, 180)
-                pipe.incrby(day_tokens_key, estimated_tokens)
-                pipe.expire(day_tokens_key, 3 * 24 * 3600)
-                pipe.incrby(month_tokens_key, estimated_tokens)
-                pipe.expire(month_tokens_key, 40 * 24 * 3600)
-                pipe.incrby(global_spend_key, estimated_cost_micro)
-                pipe.expire(global_spend_key, 3 * 24 * 3600)
-                (
-                    req_count,
-                    _,
-                    chars_count,
-                    _,
-                    inflight_count,
-                    _,
-                    day_tokens,
-                    _,
-                    month_tokens,
-                    _,
-                    global_spend_micro,
-                    _,
-                ) = pipe.execute()
-                if int(req_count or 0) > self._llm_budget_request_limit_per_minute:
-                    self._rollback_llm_redis_budget(
-                        redis_client,
-                        req_key=req_key,
-                        chars_key=chars_key,
-                        inflight_key=inflight_key,
-                        day_tokens_key=day_tokens_key,
-                        month_tokens_key=month_tokens_key,
-                        global_spend_key=global_spend_key,
-                        prompt_units=prompt_units,
-                        estimated_tokens=estimated_tokens,
-                        estimated_cost_micro=estimated_cost_micro,
-                    )
-                    return False, "LLM kéréslimit elérve ebben a percben.", None
-                if int(chars_count or 0) > self._llm_budget_prompt_chars_per_minute:
-                    self._rollback_llm_redis_budget(
-                        redis_client,
-                        req_key=req_key,
-                        chars_key=chars_key,
-                        inflight_key=inflight_key,
-                        day_tokens_key=day_tokens_key,
-                        month_tokens_key=month_tokens_key,
-                        global_spend_key=global_spend_key,
-                        prompt_units=prompt_units,
-                        estimated_tokens=estimated_tokens,
-                        estimated_cost_micro=estimated_cost_micro,
-                    )
-                    return False, "LLM prompt limit elérve ebben a percben.", None
-                if int(inflight_count or 0) > self._llm_budget_concurrency_limit:
-                    self._rollback_llm_redis_budget(
-                        redis_client,
-                        req_key=req_key,
-                        chars_key=chars_key,
-                        inflight_key=inflight_key,
-                        day_tokens_key=day_tokens_key,
-                        month_tokens_key=month_tokens_key,
-                        global_spend_key=global_spend_key,
-                        prompt_units=prompt_units,
-                        estimated_tokens=estimated_tokens,
-                        estimated_cost_micro=estimated_cost_micro,
-                    )
-                    return False, "Túl sok párhuzamos LLM kérés folyamatban.", None
-                if int(day_tokens or 0) > effective_daily_tokens:
-                    self._rollback_llm_redis_budget(
-                        redis_client,
-                        req_key=req_key,
-                        chars_key=chars_key,
-                        inflight_key=inflight_key,
-                        day_tokens_key=day_tokens_key,
-                        month_tokens_key=month_tokens_key,
-                        global_spend_key=global_spend_key,
-                        prompt_units=prompt_units,
-                        estimated_tokens=estimated_tokens,
-                        estimated_cost_micro=estimated_cost_micro,
-                    )
-                    return False, "Napi AI token keret elérve a tenantnál.", None
-                if int(month_tokens or 0) > effective_monthly_tokens:
-                    self._rollback_llm_redis_budget(
-                        redis_client,
-                        req_key=req_key,
-                        chars_key=chars_key,
-                        inflight_key=inflight_key,
-                        day_tokens_key=day_tokens_key,
-                        month_tokens_key=month_tokens_key,
-                        global_spend_key=global_spend_key,
-                        prompt_units=prompt_units,
-                        estimated_tokens=estimated_tokens,
-                        estimated_cost_micro=estimated_cost_micro,
-                    )
-                    return False, "Havi AI token keret elérve a tenantnál.", None
-                if (int(global_spend_micro or 0) / 1_000_000.0) > self._llm_budget_global_daily_spend_usd:
-                    self._rollback_llm_redis_budget(
-                        redis_client,
-                        req_key=req_key,
-                        chars_key=chars_key,
-                        inflight_key=inflight_key,
-                        day_tokens_key=day_tokens_key,
-                        month_tokens_key=month_tokens_key,
-                        global_spend_key=global_spend_key,
-                        prompt_units=prompt_units,
-                        estimated_tokens=estimated_tokens,
-                        estimated_cost_micro=estimated_cost_micro,
-                    )
-                    return False, "A mai globális AI költségkeret betelt.", None
-                return True, "", {"backend": "redis", "inflight_key": inflight_key}
-            except Exception:
-                if fail_closed and env == "prod":
-                    logger.error("LLM budget Redis check failed in production fail-closed mode.")
-                    return False, "LLM budget szolgáltatás átmenetileg nem elérhető.", None
-                logger.warning("LLM budget Redis check failed, fallback to in-memory.")
-        key = (tenant_key, scope_key)
-        with self._budget_lock:
-            state = self._budget_state.get(key) or {
-                "minute": minute_bucket,
-                "day": day_bucket,
-                "month": month_bucket,
-                "requests": 0,
-                "chars": 0,
-                "inflight": 0,
-                "day_tokens": 0,
-                "month_tokens": 0,
-            }
-            if int(state.get("minute") or minute_bucket) != minute_bucket:
-                state["minute"] = minute_bucket
-                state["requests"] = 0
-                state["chars"] = 0
-            if str(state.get("day") or day_bucket) != day_bucket:
-                state["day"] = day_bucket
-                state["day_tokens"] = 0
-            if str(state.get("month") or month_bucket) != month_bucket:
-                state["month"] = month_bucket
-                state["month_tokens"] = 0
-            if int(state["requests"]) + 1 > self._llm_budget_request_limit_per_minute:
-                return False, "LLM kéréslimit elérve ebben a percben.", None
-            if int(state["chars"]) + prompt_units > self._llm_budget_prompt_chars_per_minute:
-                return False, "LLM prompt limit elérve ebben a percben.", None
-            if int(state["inflight"]) >= self._llm_budget_concurrency_limit:
-                return False, "Túl sok párhuzamos LLM kérés folyamatban.", None
-            if int(state.get("day_tokens") or 0) + estimated_tokens > effective_daily_tokens:
-                return False, "Napi AI token keret elérve a tenantnál.", None
-            if int(state.get("month_tokens") or 0) + estimated_tokens > effective_monthly_tokens:
-                return False, "Havi AI token keret elérve a tenantnál.", None
-            state["requests"] = int(state["requests"]) + 1
-            state["chars"] = int(state["chars"]) + prompt_units
-            state["inflight"] = int(state["inflight"]) + 1
-            state["day_tokens"] = int(state.get("day_tokens") or 0) + estimated_tokens
-            state["month_tokens"] = int(state.get("month_tokens") or 0) + estimated_tokens
-            self._budget_state[key] = state
-        return True, "", {"backend": "memory", "key": key}
 
     def release_llm_budget(self, reservation: dict[str, Any] | None) -> None:
-        if not reservation:
-            return
-        backend = str(reservation.get("backend") or "")
-        if backend == "redis":
-            redis_client = get_rate_limit_redis()
-            if redis_client is None:
-                return
-            inflight_key = str(reservation.get("inflight_key") or "").strip()
-            if not inflight_key:
-                return
-            try:
-                redis_client.decr(inflight_key, 1)
-            except Exception:
-                logger.debug("LLM budget inflight release failed (redis).")
-            return
-        key = reservation.get("key")
-        if not isinstance(key, tuple) or len(key) != 2:
-            return
-        with self._budget_lock:
-            state = self._budget_state.get(key)
-            if not state:
-                return
-            state["inflight"] = max(0, int(state.get("inflight") or 0) - 1)
+        self._llm_budget_manager.release(reservation)
 
     # Ez a metódus a(z) capture_retrieval_feedback logikáját valósítja meg.
     def capture_retrieval_feedback(
@@ -598,17 +359,12 @@ class ChatService:
         user_id: int | None = None,
         user_role: str | None = None,
     ) -> dict | None:
-        if self.kb_service is None or not hasattr(self.kb_service, "get_query_source_download"):
-            return None
-        download = self.kb_service.get_query_source_download(query_run_id, source_id)
-        if download is None:
-            return None
-        corpus_uuid = str(download.get("corpus_uuid") or "").strip()
-        if corpus_uuid and user_id is not None and hasattr(self.kb_service, "user_can_use"):
-            subject = _PermissionSubject(id=user_id, role=user_role, is_active=True)
-            if not self.kb_service.user_can_use(corpus_uuid, user_id, subject):
-                raise PermissionError("Nincs jogosultság a megadott tudástár használatához.")
-        return download
+        return self._answer_downloads.download_answer_source(
+            query_run_id=query_run_id,
+            source_id=source_id,
+            user_id=user_id,
+            user_role=user_role,
+        )
 
     def download_answer_context(
         self,
@@ -617,110 +373,43 @@ class ChatService:
         user_id: int | None = None,
         user_role: str | None = None,
     ) -> dict | None:
-        if self.kb_service is None or not hasattr(self.kb_service, "get_query_context_download"):
-            return None
-        download = self.kb_service.get_query_context_download(query_run_id)
-        if download is None:
-            return None
-        corpus_uuid = str(download.get("corpus_uuid") or "").strip()
-        if corpus_uuid and user_id is not None and hasattr(self.kb_service, "user_can_use"):
-            subject = _PermissionSubject(id=user_id, role=user_role, is_active=True)
-            if not self.kb_service.user_can_use(corpus_uuid, user_id, subject):
-                raise PermissionError("Nincs jogosultság a megadott tudástár használatához.")
-        return download
+        return self._answer_downloads.download_answer_context(
+            query_run_id=query_run_id,
+            user_id=user_id,
+            user_role=user_role,
+        )
 
     # Ez a metódus a(z) utcnow_naive logikáját valósítja meg.
     @staticmethod
     def _utcnow_naive() -> datetime:
-        from core.kernel.clock import utc_now_naive
+        from core.kernel.runtime.clock import utc_now_naive
 
         return utc_now_naive()
 
     # Ez a metódus a(z) dedupe_keep_order logikáját valósítja meg.
     @staticmethod
     def _dedupe_keep_order(values: list[str]) -> list[str]:
-        out: list[str] = []
-        seen: set[str] = set()
-        for value in values:
-            item = " ".join(str(value or "").strip().split())
-            if not item:
-                continue
-            key = item.lower()
-            if key in seen:
-                continue
-            seen.add(key)
-            out.append(item)
-        return out
+        return dedupe_keep_order(values)
 
     @staticmethod
     def _fold_text(value: str | None) -> str:
-        normalized = unicodedata.normalize("NFKD", value or "")
-        return "".join(char for char in normalized if not unicodedata.combining(char)).lower()
+        return fold_text(value)
 
     # Ez a metódus a(z) sanitize_debug_text logikáját valósítja meg.
     @staticmethod
     def _sanitize_debug_text(value: Any) -> str:
-        text = str(value or "")
-        if not text:
-            return ""
-        text = re.sub(r"(?i)\b[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}\b", "[redacted_email]", text)
-        text = re.sub(r"\b(?:\+?\d[\d\s().-]{6,}\d)\b", "[redacted_phone]", text)
-        text = re.sub(r"\b\d{6,}\b", "[redacted_number]", text)
-        return text[:400] + ("..." if len(text) > 400 else "")
+        return sanitize_debug_text(value)
 
     # Ez a metódus a(z) sanitize_debug_value logikáját valósítja meg.
     @classmethod
     def _sanitize_debug_value(cls, value: Any) -> Any:
-        if isinstance(value, dict):
-            return {str(k): cls._sanitize_debug_value(v) for k, v in value.items()}
-        if isinstance(value, list):
-            return [cls._sanitize_debug_value(v) for v in value]
-        if isinstance(value, tuple):
-            return [cls._sanitize_debug_value(v) for v in value]
-        if isinstance(value, str):
-            return cls._sanitize_debug_text(value)
-        return value
+        return sanitize_debug_value(value)
 
-    @classmethod
-    def _conversation_history_context(cls, conversation_history: list[dict[str, str]] | None) -> str:
-        if not conversation_history:
-            return ""
-        rows: list[str] = []
-        total = 0
-        for item in reversed(conversation_history[-cls._MAX_CONVERSATION_HISTORY_MESSAGES :]):
-            if not isinstance(item, dict):
-                continue
-            role = str(item.get("role") or "").strip().lower()
-            if role not in {"user", "assistant"}:
-                continue
-            text = " ".join(str(item.get("content") or item.get("text") or "").strip().split())
-            if not text:
-                continue
-            prefix = "Felhasználó" if role == "user" else "Asszisztens"
-            line = f"{prefix}: {text[:1200]}"
-            if total + len(line) > cls._MAX_CONVERSATION_HISTORY_CHARS:
-                break
-            rows.append(line)
-            total += len(line)
-        rows.reverse()
-        return "\n".join(rows)
+    def _conversation_history_context(self, conversation_history: list[dict[str, str]] | None) -> str:
+        return self._prompt_builder.conversation_history_context(conversation_history)
 
-    @classmethod
-    def _retrieval_history_context(cls, retrieval_history: list[str] | None) -> str:
-        if not retrieval_history:
-            return ""
-        rows: list[str] = []
-        total = 0
-        for item in retrieval_history[: cls._MAX_RETRIEVAL_HISTORY_ITEMS]:
-            text = " ".join(str(item or "").strip().split())
-            if not text:
-                continue
-            line = f"- {text[:300]}"
-            if total + len(line) > cls._MAX_RETRIEVAL_HISTORY_CHARS:
-                break
-            rows.append(line)
-            total += len(line)
-        return "\n".join(rows)
+    def _retrieval_history_context(self, retrieval_history: list[str] | None) -> str:
+        return self._prompt_builder.retrieval_history_context(retrieval_history)
 
     # Ez a metódus normalizálja a(z) place surface logikáját.
     @classmethod
@@ -1216,129 +905,17 @@ class ChatService:
         user_id: int | None = None,
         user_role: str | None = None,
         kb_uuid: str | None = None,
+        tenant: str | None = None,
         debug: bool = False,
     ) -> dict:
-        """Retrieval context packet előállítása chathez."""
-        if self.kb_service is None:
-            return {
-                "query_focus": {},
-                "top_assertions": [],
-                "evidence_sentences": [],
-                "source_chunks": [],
-                "related_entities": [],
-                "scoring_summary": {},
-            }
-        permission_subject = (
-            _PermissionSubject(id=user_id, role=user_role, is_active=True)
-            if user_id is not None
-            else None
+        return await self._retrieval_context_builder.build(
+            question=question,
+            user_id=user_id,
+            user_role=user_role,
+            kb_uuid=kb_uuid,
+            tenant=tenant,
+            debug=debug,
         )
-        if kb_uuid and user_id is not None and not self.kb_service.user_can_use(kb_uuid, user_id, permission_subject):
-            raise PermissionError("Nincs jogosultság a megadott tudástár használatához.")
-        t_parse = perf_counter()
-        parsed = self.query_parser.parse(question) if self.query_parser is not None else {"intent": "summary"}
-        parsed = self._enrich_parsed_query(question, parsed)
-        parsed["parse_time_ms"] = round((perf_counter() - t_parse) * 1000.0, 2)
-
-        if not kb_uuid and user_id is not None:
-            packet = await self._build_multi_kb_context_packet(
-                question=question,
-                user_id=user_id,
-                user_role=user_role,
-                permission_subject=permission_subject,
-                parsed=parsed,
-                debug=debug,
-            )
-            packet["query_focus"] = parsed
-            packet["parser_audit"] = parsed.get("parser_audit") or {}
-            packet.setdefault("scoring_summary", {})
-            packet.setdefault("scoring_summary", {}).setdefault("latency_ms", {})
-            packet["scoring_summary"]["latency_ms"]["parse"] = float(parsed.get("parse_time_ms") or 0.0)
-            packet["is_followup"] = self._is_followup(user_id, parsed)
-            return packet
-
-        if user_id is not None:
-            if self.retrieval_service is not None and hasattr(self.retrieval_service, "build_context_for_chat"):
-                packet = await self.retrieval_service.build_context_for_chat(
-                    question=question,
-                    current_user_id=user_id,
-                    current_user_role=user_role,
-                    parsed_query=parsed,
-                    kb_uuid=kb_uuid,
-                    debug=debug,
-                )
-                packet["query_focus"] = parsed
-                packet["parser_audit"] = parsed.get("parser_audit") or {}
-                packet.setdefault("scoring_summary", {})
-                packet.setdefault("scoring_summary", {}).setdefault("latency_ms", {})
-                packet["scoring_summary"]["latency_ms"]["parse"] = float(parsed.get("parse_time_ms") or 0.0)
-                packet["is_followup"] = self._is_followup(user_id, parsed)
-                return packet
-            if hasattr(self.kb_service, "build_context_for_chat"):
-                packet = await self.kb_service.build_context_for_chat(
-                    question=question,
-                    current_user_id=user_id,
-                    current_user_role=user_role,
-                    parsed_query=parsed,
-                    kb_uuid=kb_uuid,
-                )
-                packet["query_focus"] = parsed
-                packet["parser_audit"] = parsed.get("parser_audit") or {}
-                packet.setdefault("scoring_summary", {})
-                packet.setdefault("scoring_summary", {}).setdefault("latency_ms", {})
-                packet["scoring_summary"]["latency_ms"]["parse"] = float(parsed.get("parse_time_ms") or 0.0)
-                packet["is_followup"] = self._is_followup(user_id, parsed)
-                return packet
-            if hasattr(self.kb_service, "build_chat_context"):
-                packet = await self.kb_service.build_chat_context(
-                    question=question,
-                    current_user_id=user_id,
-                    current_user_role=user_role,
-                    parsed_query=parsed,
-                    kb_uuid=kb_uuid,
-                    debug=debug,
-                )
-                packet["query_focus"] = parsed
-                packet["parser_audit"] = parsed.get("parser_audit") or {}
-                packet.setdefault("scoring_summary", {})
-                packet.setdefault("scoring_summary", {}).setdefault("latency_ms", {})
-                packet["scoring_summary"]["latency_ms"]["parse"] = float(parsed.get("parse_time_ms") or 0.0)
-                packet["is_followup"] = self._is_followup(user_id, parsed)
-                return packet
-
-        assertions = []
-        if user_id is not None:
-            search_assertions = getattr(self.kb_service, "search_assertions", None)
-            if search_assertions is None:
-                return {
-                    "query_focus": parsed,
-                    "parser_audit": parsed.get("parser_audit") or {},
-                    "top_assertions": [],
-                    "evidence_sentences": [],
-                    "source_chunks": [],
-                    "related_entities": [],
-                    "scoring_summary": {"latency_ms": {"parse": float(parsed.get("parse_time_ms") or 0.0)}},
-                    "is_followup": self._is_followup(user_id, parsed),
-                }
-            assertions = search_assertions(
-                current_user_id=user_id,
-                current_user_role=user_role,
-                predicates=None,
-                entity_ids=None,
-                limit=18,
-            )
-        packet = (
-            self.context_builder.build_context_packet(assertions, [], [], [])
-            if self.context_builder is not None
-            else {"top_assertions": assertions}
-        )
-        packet["query_focus"] = parsed
-        packet["parser_audit"] = parsed.get("parser_audit") or {}
-        packet.setdefault("scoring_summary", {})
-        packet.setdefault("scoring_summary", {}).setdefault("latency_ms", {})
-        packet["scoring_summary"]["latency_ms"]["parse"] = float(parsed.get("parse_time_ms") or 0.0)
-        packet["is_followup"] = self._is_followup(user_id, parsed)
-        return packet
 
     async def _build_single_kb_context_packet(
         self,
@@ -1349,32 +926,45 @@ class ChatService:
         parsed: dict,
         kb_uuid: str,
         debug: bool,
+        tenant: str | None = None,
     ) -> dict:
         if self.retrieval_service is not None and hasattr(self.retrieval_service, "build_context_for_chat"):
-            return await self.retrieval_service.build_context_for_chat(
-                question=question,
-                current_user_id=user_id,
-                current_user_role=user_role,
-                parsed_query=parsed,
-                kb_uuid=kb_uuid,
-                debug=debug,
+            return await self._retrieval_context_builder._call_context_builder(
+                self.retrieval_service.build_context_for_chat,
+                tenant=tenant,
+                kwargs={
+                    "question": question,
+                    "current_user_id": user_id,
+                    "current_user_role": user_role,
+                    "parsed_query": parsed,
+                    "kb_uuid": kb_uuid,
+                    "debug": debug,
+                },
             )
         if hasattr(self.kb_service, "build_context_for_chat"):
-            return await self.kb_service.build_context_for_chat(
-                question=question,
-                current_user_id=user_id,
-                current_user_role=user_role,
-                parsed_query=parsed,
-                kb_uuid=kb_uuid,
+            return await self._retrieval_context_builder._call_context_builder(
+                self.kb_service.build_context_for_chat,
+                tenant=tenant,
+                kwargs={
+                    "question": question,
+                    "current_user_id": user_id,
+                    "current_user_role": user_role,
+                    "parsed_query": parsed,
+                    "kb_uuid": kb_uuid,
+                },
             )
         if hasattr(self.kb_service, "build_chat_context"):
-            return await self.kb_service.build_chat_context(
-                question=question,
-                current_user_id=user_id,
-                current_user_role=user_role,
-                parsed_query=parsed,
-                kb_uuid=kb_uuid,
-                debug=debug,
+            return await self._retrieval_context_builder._call_context_builder(
+                self.kb_service.build_chat_context,
+                tenant=tenant,
+                kwargs={
+                    "question": question,
+                    "current_user_id": user_id,
+                    "current_user_role": user_role,
+                    "parsed_query": parsed,
+                    "kb_uuid": kb_uuid,
+                    "debug": debug,
+                },
             )
         return {}
 
@@ -1384,7 +974,7 @@ class ChatService:
         question: str,
         user_id: int,
         user_role: str | None,
-        permission_subject: _PermissionSubject | None,
+        permission_subject: PermissionSubject | None,
         parsed: dict,
         debug: bool,
     ) -> dict:
@@ -1806,6 +1396,7 @@ class ChatService:
         user_id: int | None = None,
         user_role: str | None = None,
         kb_uuid: str | None = None,
+        tenant: str | None = None,
         debug: bool = False,
     ) -> tuple[str, bool]:
         """Hibatűrő context építés.
@@ -2375,13 +1966,19 @@ class ChatService:
         if self.audit_service is None or not hasattr(self.audit_service, "log"):
             return
         try:
+            sanitized_details = sanitize_log_data(details)
+            if isinstance(details, dict) and isinstance(sanitized_details, dict):
+                for safe_key in ("pii_items_created", "context_length_chars", "encoded_length_chars"):
+                    value = details.get(safe_key)
+                    if isinstance(value, (int, float)):
+                        sanitized_details[safe_key] = value
             self.audit_service.log(
                 _AUDIT_ACTION_KNOWLEDGE_PII_DEPERSONALIZED,
                 user_id=user_id if isinstance(user_id, int) else None,
                 target_type="corpus",
                 target_id=str(corpus_uuid or "").strip() or None,
                 outcome=str(outcome or "unknown"),
-                details=sanitize_log_data(details),
+                details=sanitized_details,
             )
         except Exception:
             logger.warning("PII encode audit log sikertelen.", exc_info=True)
@@ -2444,77 +2041,41 @@ class ChatService:
         raise PiiDepersonalizationUnavailableError(self._PII_ENCODE_UNAVAILABLE_DETAIL)
 
     # Ez a metódus felépíti a(z) messages logikáját.
-    @classmethod
+    @staticmethod
     def _build_messages(
-        cls,
         question: str,
         context_text: str = "",
         conversation_history: list[dict[str, str]] | None = None,
         retrieval_history: list[str] | None = None,
         pii_prompt_policy: str | None = None,
+        brand_voice: str | None = None,
+        channel_settings: dict[str, Any] | None = None,
+        safety_constraints: str | None = None,
+        citation_context: str | None = None,
     ) -> list[dict[str, str]]:
-        messages = [
-            {
-                "role": "system",
-                "content": (
-                    "Te egy segítőkész asszisztens vagy az AIPLAZA rendszerben. "
-                    "Úgy válaszolj, mintha a tudás a saját, belső tudásod lenne: természetesen, emberi hangon, "
-                    "közvetlenül, felesleges technikai körítés nélkül. "
-                    "Ne hivatkozz arra, hogy kontextust, dokumentumot vagy forrást kaptál. "
-                    "A választ mindig teljes, természetes mondattal kezdd; ne induljon töredékes vagy címkeszerű "
-                    "fordulattal (pl. 'X szerepel:' vagy 'A dokumentumban:'). "
-                    "Válaszolj röviden, legfeljebb 3-4 mondatban."
-                ),
-            }
-        ]
-        if pii_prompt_policy:
-            messages.append({"role": "system", "content": str(pii_prompt_policy or "").strip()})
-        history_context = cls._conversation_history_context(conversation_history)
-        if history_context:
-            messages.append(
-                {
-                    "role": "system",
-                    "content": (
-                        "Beszélgetési előzmény (kérdés-válasz párok), röviden. "
-                        "Ezt kizárólag a kérdés értelmezéséhez használd, ebből önmagában tilos új tényt állítani.\n\n"
-                        f"{history_context}"
-                    ),
-                }
-            )
-        retrieval_context = cls._retrieval_history_context(retrieval_history)
-        if retrieval_context:
-            messages.append(
-                {
-                    "role": "system",
-                    "content": (
-                        "Korábbi kérdésekből megtartott, releváns tudástári találati részletek. "
-                        "Ez segéd kontextus, nem elsődleges bizonyíték: tényt csak az aktuális tudástár-contexttel alátámasztva állíts.\n\n"
-                        f"{retrieval_context}"
-                    ),
-                }
-            )
-        if context_text:
-            messages.append(
-                {
-                    "role": "system",
-                    "content": (
-                        "A következő tudástár-context alapján válaszolj tömören, "
-                        "és csak akkor állíts tényt, ha a context alátámasztja. "
-                        "A válasz nyelve mindig egyezzen meg a felhasználó kérdésének nyelvével; "
-                        "magyar kérdésre magyarul válaszolj akkor is, ha a context belső címkéi angolul vannak. "
-                        "A belső címkéket, például Current facts, Historical vagy Vectoros találatok, ne idézd vissza. "
-                        "Ne használj meta-megfogalmazást, például: 'a context alapján', 'a megadott kontextus szerint'. "
-                        "Adj közvetlen, természetes választ, mintha a tényeket biztosan tudnád.\n\n"
-                        f"{context_text}"
-                    ),
-                }
-            )
-        messages.append({"role": "user", "content": question})
-        return messages
+        builder = PromptBuilder(
+            max_conversation_history_messages=ChatService._MAX_CONVERSATION_HISTORY_MESSAGES,
+            max_conversation_history_chars=ChatService._MAX_CONVERSATION_HISTORY_CHARS,
+            max_retrieval_history_items=ChatService._MAX_RETRIEVAL_HISTORY_ITEMS,
+            max_retrieval_history_chars=ChatService._MAX_RETRIEVAL_HISTORY_CHARS,
+            multi_kb_packet_score_threshold=ChatService._MULTI_KB_PACKET_SCORE_THRESHOLD,
+            multi_kb_block_score_threshold=ChatService._MULTI_KB_BLOCK_SCORE_THRESHOLD,
+            multi_kb_block_relative_floor_ratio=ChatService._MULTI_KB_BLOCK_RELATIVE_FLOOR_RATIO,
+        )
+        return builder.build_messages(
+            question=question,
+            context_text=context_text,
+            conversation_history=conversation_history,
+            retrieval_history=retrieval_history,
+            pii_prompt_policy=pii_prompt_policy,
+            brand_voice=brand_voice,
+            channel_settings=channel_settings,
+            safety_constraints=safety_constraints,
+            citation_context=citation_context,
+        )
 
-    @classmethod
     def _build_prompt_context_payload(
-        cls,
+        self,
         *,
         question: str,
         messages: list[dict[str, str]] | None,
@@ -2533,145 +2094,24 @@ class ChatService:
         raw_conversation_history_before_pii: list[dict[str, str]] | None = None,
         raw_retrieval_history_before_pii: list[str] | None = None,
     ) -> dict[str, Any]:
-        qa_context = cls._conversation_history_context(conversation_history)
-        retrieval_context = cls._retrieval_history_context(retrieval_history)
-        info_prompt = ""
-        if messages:
-            for msg in messages:
-                if str(msg.get("role") or "").strip() == "system":
-                    info_prompt = str(msg.get("content") or "").strip()
-                    if info_prompt:
-                        break
-        hits: list[dict[str, Any]] = []
-        for block in (packet.get("context_blocks") or packet.get("matched_semantic_blocks") or [])[:4]:
-            if not isinstance(block, dict):
-                continue
-            hits.append(
-                {
-                    "block_id": str(block.get("block_id") or block.get("id") or "").strip(),
-                    "source_id": str(block.get("source_id") or "").strip(),
-                    "subject": str(block.get("subject") or block.get("primary_subject") or "").strip(),
-                    "snippet": str(block.get("snippet") or block.get("text") or "").strip(),
-                }
-            )
-        evidence_rows = [
-            item
-            for item in (packet.get("evidence_summary") or [])
-            if isinstance(item, dict)
-        ]
-        answer_information_sources: list[dict[str, Any]] = []
-        seen_answer_source_ids: set[str] = set()
-        for row in evidence_rows:
-            source_id = str(row.get("source_id") or "").strip()
-            if not source_id or source_id in seen_answer_source_ids:
-                continue
-            seen_answer_source_ids.add(source_id)
-            answer_information_sources.append(
-                {
-                    "source_id": source_id,
-                    "claim_id": str(row.get("claim_id") or "").strip(),
-                    "sentence_id": str(row.get("sentence_id") or "").strip(),
-                    "claim_text": str(row.get("claim_text") or "").strip(),
-                    "sentence_text": str(row.get("sentence_text") or "").strip(),
-                }
-            )
-        raw_context_sent_to_llm = "\n\n".join(
-            f"[{str(msg.get('role') or '').strip()}]\n{str(msg.get('content') or '').strip()}"
-            for msg in (messages or [])
-            if isinstance(msg, dict) and str(msg.get("content") or "").strip()
-        ).strip()
-        matched_chunks_for_debug = [
-            chunk
-            for chunk in (packet.get("matched_chunks") or [])
-            if isinstance(chunk, dict)
-        ]
-        packet_retrieval_confidence = 0.0
-        try:
-            packet_retrieval_confidence = float(packet.get("retrieval_confidence") or 0.0)
-        except (TypeError, ValueError):
-            packet_retrieval_confidence = 0.0
-        if packet_retrieval_confidence <= 0 and matched_chunks_for_debug:
-            scores: list[float] = []
-            for chunk in matched_chunks_for_debug:
-                try:
-                    score = float(chunk.get("retrieval_confidence") or 0.0)
-                except (TypeError, ValueError):
-                    score = 0.0
-                if score > 0:
-                    scores.append(score)
-            if scores:
-                packet_retrieval_confidence = round(sum(scores) / len(scores), 4)
-        index_debug = {
-            "retrieval_confidence": packet_retrieval_confidence,
-            "timing_ms": packet.get("_chat_timing_ms") or {},
-            "query_profile": packet.get("query_profile") or packet.get("query_focus") or {},
-            "scoring_summary": packet.get("scoring_summary") or {},
-            "filtered_out_reason": packet.get("filtered_out_reason") or [],
-            "thresholds": {
-                "packet_score_threshold": cls._MULTI_KB_PACKET_SCORE_THRESHOLD,
-                "block_score_threshold": cls._MULTI_KB_BLOCK_SCORE_THRESHOLD,
-                "block_relative_floor_ratio": cls._MULTI_KB_BLOCK_RELATIVE_FLOOR_RATIO,
-                "dynamic_block_score_threshold": float(packet.get("dynamic_block_score_threshold") or 0.0),
-            },
-            "selected_blocks": [
-                {
-                    "kb_uuid": str(block.get("kb_uuid") or packet.get("kb_uuid") or "").strip(),
-                    "block_id": str(block.get("block_id") or block.get("id") or "").strip(),
-                    "source_id": str(block.get("source_id") or "").strip(),
-                    "match_score": float(block.get("match_score") or 0.0),
-                    "match_reason": block.get("match_reason") or {},
-                }
-                for block in (packet.get("context_blocks") or packet.get("matched_semantic_blocks") or [])[:8]
-                if isinstance(block, dict)
-            ],
-            "matched_chunks": [
-                {
-                    "profile_id": str(chunk.get("profile_id") or "").strip(),
-                    "entity_name": str(chunk.get("entity_name") or "").strip(),
-                    "retrieval_confidence": float(chunk.get("retrieval_confidence") or 0.0),
-                    "matched_claim_ids": list(chunk.get("matched_claim_ids") or []),
-                }
-                for chunk in matched_chunks_for_debug[:8]
-            ],
-            "multi_kb_diagnostics": packet.get("multi_kb_diagnostics") or {},
-        }
-        return {
-            "informational_prompt": info_prompt,
-            "qa_context": qa_context,
-            "retrieval_context": retrieval_context,
-            "latest_question": str(question or "").strip(),
-            "raw_context_sent_to_llm": raw_context_sent_to_llm,
-            "context_components": {
-                "alap_context": str(context_text or "").strip(),
-                "elozmenyek": qa_context,
-                "kerdes": str(question or "").strip(),
-                "valaszinformacio": {
-                    "answer_mode": str(packet.get("answer_mode") or "no_answer"),
-                    "evidence_summary": evidence_rows,
-                    "cited_source_ids": list(packet.get("cited_source_ids") or packet.get("source_ids") or []),
-                },
-            },
-            "raw_inputs_before_pii": {
-                "question": str(raw_question_before_pii if raw_question_before_pii is not None else question or "").strip(),
-                "context_text": str(raw_context_before_pii if raw_context_before_pii is not None else context_text or "").strip(),
-                "conversation_history": list(raw_conversation_history_before_pii or []),
-                "retrieval_history": list(raw_retrieval_history_before_pii or []),
-            },
-            "answer_information_sources": answer_information_sources,
-            "latest_hits": hits,
-            "llm_context_text": str(context_text or "").strip(),
-            "encoded_latest_question": str(encoded_question or question or "").strip(),
-            "encoded_llm_context_text": str(encoded_context_text or context_text or "").strip(),
-            "encoded_answer_text": str(encoded_answer_text or "").strip(),
-            "pii_prompt_policy": str(pii_prompt_policy or "").strip(),
-            "pii_applied": pii_applied,
-            "pii_reason": str(pii_reason or "").strip(),
-            "index_debug": index_debug,
-            "messages_sent_to_llm": [
-                {"role": str(msg.get("role") or ""), "content": str(msg.get("content") or "")}
-                for msg in (messages or [])
-            ],
-        }
+        return self._prompt_builder.build_prompt_context_payload(
+            question=question,
+            messages=messages,
+            conversation_history=conversation_history,
+            retrieval_history=retrieval_history,
+            packet=packet,
+            context_text=context_text,
+            encoded_question=encoded_question,
+            encoded_context_text=encoded_context_text,
+            pii_prompt_policy=pii_prompt_policy,
+            pii_applied=pii_applied,
+            pii_reason=pii_reason,
+            encoded_answer_text=encoded_answer_text,
+            raw_question_before_pii=raw_question_before_pii,
+            raw_context_before_pii=raw_context_before_pii,
+            raw_conversation_history_before_pii=raw_conversation_history_before_pii,
+            raw_retrieval_history_before_pii=raw_retrieval_history_before_pii,
+        )
 
     # Ez a metódus a(z) insufficient_context_answer logikáját valósítja meg.
     @classmethod
@@ -2684,6 +2124,7 @@ class ChatService:
         user_id: int | None = None,
         user_role: str | None = None,
         kb_uuid: str | None = None,
+        tenant: str | None = None,
         debug: bool = False,
         conversation_history: list[dict[str, str]] | None = None,
         retrieval_history: list[str] | None = None,
@@ -2705,33 +2146,11 @@ class ChatService:
                 conversation_history=conversation_history,
                 retrieval_history=retrieval_history,
             )
-            response = await asyncio.wait_for(
-                self.client.chat.completions.create(**self._chat_completion_kwargs(messages)),
-                timeout=self._chat_completion_timeout_sec,
-            )
-            answer = self._extract_response_text(response)
-            if not answer:
-                logger.warning("Üres válasz érkezett az OpenAI API-tól")
-                return "⚠️ Nem sikerült választ kapni a modellből."
+            answer = await self._llm_answer_service.complete_text_or_message(messages)
             answer = self._normalize_pii_policy_refusal(answer)
             if debug and context_text and not context_failed:
                 return f"{answer}\n\n[debug-context]\n{self._sanitize_debug_text(context_text)}"
             return str(answer or "")[: self._chat_max_answer_chars]
-        except RateLimitError as e:
-            logger.error(f"OpenAI rate limit hiba: {e}", exc_info=True)
-            return "⚠️ Túl sok kérés. Kérlek, próbáld újra később."
-        except APITimeoutError as e:
-            logger.error(f"OpenAI timeout hiba: {e}", exc_info=True)
-            return "⚠️ A válasz túl sokáig tartott. Kérlek, próbáld újra."
-        except APIConnectionError as e:
-            logger.error(f"OpenAI kapcsolati hiba: {e}", exc_info=True)
-            return "⚠️ Kapcsolati probléma történt. Kérlek, próbáld újra."
-        except APIError as e:
-            logger.error(f"OpenAI API hiba: {e}", exc_info=True)
-            return "⚠️ Nem sikerült választ kapni a modellből."
-        except asyncio.TimeoutError:
-            logger.error("LLM timeout: a modellhívás túllépte az időkorlátot.", exc_info=True)
-            return "⚠️ A modell válasza túl sokáig tartott. Próbáld újra rövidebb kérdéssel."
         except Exception as e:
             logger.error(f"Váratlan hiba a chat szolgáltatásban: {e}", exc_info=True)
             return "⚠️ Nem sikerült választ kapni a modellből."
@@ -2742,6 +2161,7 @@ class ChatService:
         user_id: int | None = None,
         user_role: str | None = None,
         kb_uuid: str | None = None,
+        tenant: str | None = None,
         debug: bool = False,
         conversation_history: list[dict[str, str]] | None = None,
         retrieval_history: list[str] | None = None,
@@ -2763,6 +2183,7 @@ class ChatService:
                     user_id=user_id,
                     user_role=user_role,
                     kb_uuid=kb_uuid,
+                    tenant=tenant,
                     debug=debug,
                 ),
                 timeout=self._chat_context_timeout_sec,
@@ -2981,12 +2402,27 @@ class ChatService:
                 raw_retrieval_history_before_pii=raw_retrieval_history_before_pii,
             )
         else:
+            brand_voice = str(packet.get("brand_voice") or packet.get("style") or "").strip() if isinstance(packet, dict) else ""
+            channel_settings = packet.get("channel_settings") if isinstance(packet, dict) and isinstance(packet.get("channel_settings"), dict) else None
+            safety_constraints = (
+                "Csak a tudástár-contexttel alátámasztott tény állítható. Bizonytalan esetben jelezd röviden, hogy nincs elég adat."
+                if context_text
+                else ""
+            )
+            citation_ids = packet.get("cited_source_ids") if isinstance(packet, dict) else None
+            citation_context = ""
+            if isinstance(citation_ids, list) and citation_ids:
+                citation_context = "Elérhető citation source id-k: " + ", ".join(str(item) for item in citation_ids if str(item).strip())
             messages = self._build_messages(
                 question=encoded_question,
                 context_text=encoded_prompt_context,
                 conversation_history=encoded_conversation_history,
                 retrieval_history=encoded_retrieval_history,
                 pii_prompt_policy=pii_prompt_policy,
+                brand_voice=brand_voice,
+                channel_settings=channel_settings,
+                safety_constraints=safety_constraints,
+                citation_context=citation_context,
             )
             prompt_context = self._build_prompt_context_payload(
                 question=question,
@@ -3017,55 +2453,30 @@ class ChatService:
                         "retrieval_history": raw_retrieval_history_before_pii,
                     },
                 )
-            try:
-                t_llm = perf_counter()
-                response = await asyncio.wait_for(
-                    self.client.chat.completions.create(**self._chat_completion_kwargs(messages)),
-                    timeout=self._chat_completion_timeout_sec,
+            answer, llm_ms = await self._llm_answer_service.complete_text_with_timing(messages)
+            encoded_answer_text = str(answer or "")
+            if pii_enabled and self.pii_depersonalization_service is not None and pii_corpus_uuid:
+                restored = self.pii_depersonalization_service.rehydrate_text(
+                    corpus_uuid=pii_corpus_uuid,
+                    text=str(answer or ""),
+                    enabled=True,
+                    allowed_tokens=allowed_rehydrate_tokens,
                 )
-                llm_ms = round((perf_counter() - t_llm) * 1000.0, 2)
-                answer = self._extract_response_text(response) or "⚠️ Nem sikerült választ kapni a modellből."
-                encoded_answer_text = str(answer or "")
-                if pii_enabled and self.pii_depersonalization_service is not None and pii_corpus_uuid:
-                    restored = self.pii_depersonalization_service.rehydrate_text(
-                        corpus_uuid=pii_corpus_uuid,
-                        text=str(answer or ""),
-                        enabled=True,
-                        allowed_tokens=allowed_rehydrate_tokens,
-                    )
-                    answer = restored.text
-                    restored_pii_spans = restored.restored_spans
-                answer = self._normalize_pii_policy_refusal(answer)
-                answer = str(answer or "")[: self._chat_max_answer_chars]
-            except RateLimitError as e:
-                llm_ms = round((perf_counter() - t_llm) * 1000.0, 2)
-                logger.error(f"LLM rate limit hiba: {e}", exc_info=True)
-                answer = "⚠️ Túl sok kérés. Kérlek, próbáld újra később."
-            except APITimeoutError as e:
-                llm_ms = round((perf_counter() - t_llm) * 1000.0, 2)
-                logger.error(f"LLM timeout hiba: {e}", exc_info=True)
-                answer = "⚠️ A válasz túl sokáig tartott. Kérlek, próbáld újra."
-            except APIConnectionError as e:
-                llm_ms = round((perf_counter() - t_llm) * 1000.0, 2)
-                logger.error(f"LLM kapcsolati hiba: {e}", exc_info=True)
-                answer = "⚠️ A lokális/remote LLM most nem elérhető. Ellenőrizd a provider URL-t és próbáld újra."
-            except APIError as e:
-                llm_ms = round((perf_counter() - t_llm) * 1000.0, 2)
-                logger.error(f"LLM API hiba: {e}", exc_info=True)
-                answer = "⚠️ Nem sikerült választ kapni a modellből."
-            except asyncio.TimeoutError:
-                llm_ms = round((perf_counter() - t_llm) * 1000.0, 2)
-                logger.error("LLM timeout: a modellhívás túllépte az időkorlátot.", exc_info=True)
-                answer = "⚠️ A modell válasza túl sokáig tartott. Próbáld újra rövidebb kérdéssel."
-            except Exception as e:
-                llm_ms = round((perf_counter() - t_llm) * 1000.0, 2)
-                logger.error(f"Váratlan LLM hiba: {e}", exc_info=True)
-                answer = "⚠️ Nem sikerült választ kapni a modellből."
+                answer = restored.text
+                restored_pii_spans = restored.restored_spans
+            answer = self._normalize_pii_policy_refusal(answer)
+            answer = str(answer or "")[: self._chat_max_answer_chars]
         packet["_chat_timing_ms"] = {
             "context_build": context_build_ms,
             "llm": llm_ms,
             "total": round((perf_counter() - t_total) * 1000.0, 2),
         }
+        timing_tags = {"channel": str(user_role or "user").strip().lower() or "user"}
+        total_ms = float(packet["_chat_timing_ms"]["total"])
+        increment_metric("chat_requests_total", 1.0, tags=timing_tags)
+        observe_metric("chat_latency_seconds", total_ms / 1000.0, unit="seconds", tags=timing_tags)
+        observe_metric("retrieval_latency_seconds", float(context_build_ms) / 1000.0, unit="seconds", tags=timing_tags)
+        observe_metric("llm_cost_estimate", 0.0, unit="usd", tags=timing_tags)
         if isinstance(prompt_context, dict):
             prompt_context["encoded_answer_text"] = str(encoded_answer_text or "").strip()
             index_debug = prompt_context.get("index_debug")
@@ -3226,6 +2637,19 @@ class ChatService:
                 question=encoded_question,
                 context_text=encoded_context_text,
                 pii_prompt_policy=pii_prompt_policy,
+                brand_voice=str(packet.get("brand_voice") or packet.get("style") or "").strip() if isinstance(packet, dict) else "",
+                channel_settings=packet.get("channel_settings") if isinstance(packet, dict) and isinstance(packet.get("channel_settings"), dict) else None,
+                safety_constraints=(
+                    "Csak a tudástár-contexttel alátámasztott tény állítható. Bizonytalan esetben jelezd röviden, hogy nincs elég adat."
+                    if encoded_context_text
+                    else ""
+                ),
+                citation_context=(
+                    "Elérhető citation source id-k: "
+                    + ", ".join(str(item) for item in (packet.get("cited_source_ids") or []) if str(item).strip())
+                    if isinstance(packet, dict) and isinstance(packet.get("cited_source_ids"), list) and packet.get("cited_source_ids")
+                    else ""
+                ),
             )
             response = await asyncio.wait_for(
                 self.client.chat.completions.create(**self._chat_completion_kwargs(messages)),

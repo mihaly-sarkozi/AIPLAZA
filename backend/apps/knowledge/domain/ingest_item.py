@@ -41,9 +41,17 @@ class IngestItem:
     duplicate_of_item_id: str | None = None
     duplicate_of_source_id: str | None = None
     pipeline_route: str = "source_parser"
+    pipeline_version: str = "source_parser.v1"
+    idempotency_key: str | None = None
     parser_job_id: str | None = None
     source_id: str | None = None
     content_hash: str | None = None
+    lease_owner: str | None = None
+    lease_expires_at: datetime | None = None
+    heartbeat_at: datetime | None = None
+    retry_count: int = 0
+    max_retries: int = 3
+    dead_letter_reason: str | None = None
     created_by: int | None = None
     created_at: datetime = field(default_factory=_utcnow)
     started_at: datetime | None = None

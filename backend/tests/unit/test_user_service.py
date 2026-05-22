@@ -5,9 +5,9 @@ from datetime import datetime, timedelta, timezone
 import pytest
 from passlib.hash import bcrypt_sha256 as pwd_hasher
 
-from core.capabilities.users.dto import InviteToken, User
-from core.capabilities.users.service import InviteService, UserService
-from core.capabilities.users.service.invite_errors import InviteTokenInvalidError
+from core.modules.users.domain.dto import InviteToken, User
+from core.modules.users.service import InviteService, UserService
+from core.modules.users.service.invite_errors import InviteTokenInvalidError
 
 
 pytestmark = pytest.mark.unit

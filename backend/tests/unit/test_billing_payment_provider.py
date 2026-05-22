@@ -4,7 +4,8 @@ from datetime import UTC, date, datetime
 
 import pytest
 
-from apps.billing.runtime import BillingService, PaymentExecutionResult
+from apps.billing.payment import PaymentExecutionResult
+from apps.billing.service import BillingService
 
 pytestmark = [pytest.mark.unit, pytest.mark.must_pass]
 

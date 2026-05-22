@@ -26,39 +26,36 @@ def forbid_imports(*roots: str):
         builtins.__import__ = original_import
 
 
-def test_platform_contract_imports_without_fastapi_or_sqlalchemy() -> None:
+def test_platform_interface_imports_without_fastapi_or_sqlalchemy() -> None:
     with forbid_imports("fastapi", "sqlalchemy"):
-        contract = importlib.import_module("core.platform.contract")
+        interface = importlib.import_module("core.kernel.interface")
 
-    assert contract.__all__ == [
-        "AppModule",
-        "BootstrapHook",
-        "LifecycleHook",
+    assert interface.__all__ == [
+        "BaseAppModule",
         "ModuleContext",
         "RouteRegistration",
-        "TenantSchemaRegistrar",
     ]
 
 
-def test_platform_contract_graph_imports_without_cycles() -> None:
+def test_platform_interface_graph_imports_without_cycles() -> None:
     with forbid_imports("fastapi", "sqlalchemy"):
-        contract = importlib.import_module("core.platform.contract")
-        composition = importlib.import_module("core.platform.composition")
-        manifest = importlib.import_module("core.platform.manifest")
+        interface = importlib.import_module("core.kernel.interface")
+        modules = importlib.import_module("core.kernel.interface")
+        app_manifest = importlib.import_module("core.kernel.app.app_manifest")
 
-    assert composition.AppModule is contract.AppModule
-    assert composition.ModuleContext is contract.ModuleContext
-    assert hasattr(manifest, "PlatformManifest")
-    assert hasattr(manifest, "AppManifest")
+    assert modules.BaseAppModule is interface.BaseAppModule
+    assert modules.ModuleContext is interface.ModuleContext
+    assert hasattr(app_manifest, "AppManifest")
 
 
 def test_platform_services_import_without_sqlalchemy() -> None:
     with forbid_imports("sqlalchemy"):
         modules = [
-            importlib.import_module("core.platform.brand.services"),
-            importlib.import_module("core.platform.domain.services"),
-            importlib.import_module("core.platform.settings.services"),
-            importlib.import_module("core.platform.lifecycle.services"),
+            importlib.import_module("core.modules.brand.domain"),
+            importlib.import_module("core.modules.brand.service.brand_service"),
+            importlib.import_module("core.kernel.domain.services"),
+            importlib.import_module("core.modules.settings.service.settings_service"),
+            importlib.import_module("core.kernel.lifecycle.lifecycle_service"),
         ]
 
-    assert len(modules) == 4
+    assert len(modules) == 5

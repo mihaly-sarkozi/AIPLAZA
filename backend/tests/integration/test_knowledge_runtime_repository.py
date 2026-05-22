@@ -18,8 +18,8 @@ from apps.knowledge.repositories.knowledge_runtime_repository import (
     SQLAlchemyQueryRunStore,
     SQLAlchemySourceStore,
 )
-from core.extensions.tenant.service import install_schema_tables
-from core.extensions.tenant.context.tenant_context import current_tenant_schema
+from core.modules.tenant.service import install_schema_tables
+from core.modules.tenant.context.tenant_context import current_tenant_schema
 from core.kernel.db.session import make_session_factory
 
 _root = Path(__file__).resolve().parent.parent.parent

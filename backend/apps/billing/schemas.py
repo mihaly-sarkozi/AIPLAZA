@@ -1,9 +1,13 @@
+# backend/apps/billing/schemas.py
+# Feladat: A billing app HTTP request és response Pydantic szerződéseit tartalmazza. Előfizetés, addon vásárlás, debug futtatás, számla, overview, access status és upgrade preview/complete payloadokat definiál validált bemenetekkel. Program-specifikus web schema réteg.
+# Sárközi Mihály - 2026.05.21
+
 from __future__ import annotations
 
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 DEFAULT_BILLING_CURRENCY = "EUR"
 
@@ -20,13 +24,31 @@ class BillingCatalogEntryResponse(BaseModel):
 
 
 class BillingSubscriptionUpdateRequest(BaseModel):
-    plan_code: str
+    plan_code: str = Field(..., min_length=1, max_length=64, pattern=r"^[a-z0-9][a-z0-9_-]*$")
     billing_period: str = "monthly"
+
+    @field_validator("billing_period")
+    @classmethod
+    def validate_billing_period(cls, value: str) -> str:
+        normalized = (value or "monthly").strip().lower()
+        if normalized not in {"monthly", "quarterly", "yearly"}:
+            raise ValueError("Invalid billing period.")
+        return normalized
+
+    @field_validator("plan_code")
+    @classmethod
+    def normalize_plan_code(cls, value: str) -> str:
+        return value.strip().lower()
 
 
 class BillingAddonPurchaseRequest(BaseModel):
-    addon_code: str
-    quantity: int = 1
+    addon_code: str = Field(..., min_length=1, max_length=64, pattern=r"^[a-z0-9][a-z0-9_-]*$")
+    quantity: int = Field(default=1, ge=1, le=100)
+
+    @field_validator("addon_code")
+    @classmethod
+    def normalize_addon_code(cls, value: str) -> str:
+        return value.strip().lower()
 
 
 class BillingDebugDateRequest(BaseModel):
@@ -41,6 +63,14 @@ class BillingDebugDateResponse(BaseModel):
 
 class BillingDebugBillingRunRequest(BaseModel):
     outcome: str
+
+    @field_validator("outcome")
+    @classmethod
+    def validate_outcome(cls, value: str) -> str:
+        normalized = (value or "").strip().lower()
+        if normalized not in {"success", "failed"}:
+            raise ValueError("Invalid billing debug outcome.")
+        return normalized
 
 
 class BillingDebugBillingRunResponse(BaseModel):

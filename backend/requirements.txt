@@ -56,7 +56,6 @@ reportlab~=4.2.0
 python-multipart~=0.0.20
 wrapt~=2.0.1
 portalocker~=2.10.1
-pytest~=8.3.0
 redis>=4.5.0,<6
 dnspython
 # PII: Presidio központú személyes adat felismerés és anonimizálás

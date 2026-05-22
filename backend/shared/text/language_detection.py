@@ -1,3 +1,7 @@
+# backend/shared/text/language_detection.py
+# Feladat: Egyszerű dokumentum- és chunk-szintű nyelvdetektálást ad. A langdetect könyvtárat opcionálisan használja, támogatott nyelveknél hu/es eredményt ad, minden más vagy hiba esetén en fallbacket választ. Shared text helper PII és knowledge pipeline-okhoz.
+# Sárközi Mihály - 2026.05.21
+
 from __future__ import annotations
 
 import re

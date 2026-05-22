@@ -7,9 +7,9 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
-# Lightweight imports only. Heavy imports (apps.core.di, container, config, etc.)
+# Lightweight imports only. Heavy imports (kernel DI, container, config, etc.)
 # are deferred inside test bodies or fixtures that need them.
-from core.capabilities.users.dto import User  # lightweight dataclass
+from core.modules.users.domain.dto import User  # lightweight dataclass
 
 pytestmark = pytest.mark.integration
 
@@ -121,7 +121,7 @@ def test_login_five_times_wrong_password_stays_blocked(client: TestClient):
 
 def test_login_step1_success_returns_two_factor_required(client: TestClient, mock_login_service):
     """Érvényes 1. lépés: service LoginTwoFactorRequired → 200, pending_token a válaszban."""
-    from core.capabilities.auth.dto import LoginTwoFactorRequired
+    from core.modules.auth.domain.dto import LoginTwoFactorRequired
     mock_login_service.result = LoginTwoFactorRequired(pending_token="pending-xyz")
     r = client.post(
         "/api/auth/login",
@@ -139,7 +139,7 @@ def test_login_step2_success_returns_tokens_and_cookie(
     client: TestClient, mock_login_service, sample_user: User
 ):
     """Érvényes 2. lépés: service LoginSuccess → 200, access_token, user; refresh csak cookie-ban (policy)."""
-    from core.capabilities.auth.dto import LoginSuccess
+    from core.modules.auth.domain.dto import LoginSuccess
     mock_login_service.result = LoginSuccess(
         access_token="access-abc",
         refresh_token="refresh-xyz",
@@ -243,10 +243,10 @@ def test_refresh_different_fingerprint_returns_re_2fa_required():
     """Ha a refresh más IP és más user-agenttal jön, mint a sessionben tárolt → RefreshFailed(re_2fa_required) + audit."""
     from datetime import datetime, timezone, timedelta
     from unittest.mock import MagicMock
-    from core.capabilities.auth.service.refresh_service import RefreshService
-    from core.capabilities.auth.service.refresh_result import RefreshFailed, RefreshFailReason
-    from core.capabilities.auth.dto.session import Session
-    from core.capabilities.audit.const.audit_log_action_const import AuditLogAction
+    from core.modules.auth.use_cases.refresh_service import RefreshService
+    from core.modules.auth.use_cases.refresh_result import RefreshFailed, RefreshFailReason
+    from core.modules.auth.domain.dto.session import Session
+    from core.infrastructure.audit.const.audit_log_action_const import AuditLogAction
 
     session_repo = MagicMock()
     tokens = MagicMock()
@@ -282,9 +282,9 @@ def test_refresh_same_fingerprint_not_re_2fa():
     """Ugyanaz az IP és user_agent mint a sessionben → nincs re_2fa_required (normál refresh folytatódik)."""
     from datetime import datetime, timezone, timedelta
     from unittest.mock import MagicMock
-    from core.capabilities.auth.service.refresh_service import RefreshService
-    from core.capabilities.auth.service.refresh_result import RefreshSuccess
-    from core.capabilities.auth.dto.session import Session
+    from core.modules.auth.use_cases.refresh_service import RefreshService
+    from core.modules.auth.use_cases.refresh_result import RefreshSuccess
+    from core.modules.auth.domain.dto.session import Session
 
     session_repo = MagicMock()
     tokens = MagicMock()
@@ -321,7 +321,7 @@ def test_refresh_same_fingerprint_not_re_2fa():
 
 def test_refresh_re_2fa_required_returns_401_with_code(client_with_refresh, mock_refresh_service):
     """Ha a refresh service RefreshFailed(re_2fa_required)-et ad → 401, detail.code re_2fa_required."""
-    from core.capabilities.auth.service.refresh_result import RefreshFailed, RefreshFailReason
+    from core.modules.auth.use_cases.refresh_result import RefreshFailed, RefreshFailReason
 
     mock_refresh_service.result = RefreshFailed(RefreshFailReason.RE_2FA_REQUIRED)
     mock_refresh_service.verify_payload = {"sub": "1", "typ": "refresh"}
@@ -379,7 +379,7 @@ def test_logout_success_returns_ok(client_authenticated: TestClient, mock_logout
 
 def test_forgot_password_returns_200(client: TestClient, mock_user_service, app):
     """POST /auth/forgot-password bármilyen emaillel → 200, { ok: true } (ne lehessen kideríteni, hogy létezik-e)."""
-    from core.capabilities.users.dependencies import get_user_service
+    from core.modules.users.dependencies import get_user_service
     app.dependency_overrides[get_user_service] = lambda: mock_user_service
     try:
         r = client.post("/api/auth/forgot-password", json={"email": "any@example.com"})
@@ -416,8 +416,8 @@ def test_change_password_wrong_current_returns_400(
     """Hibás jelenlegi jelszó → 400 (érvényes hash, de rossz jelszó)."""
     from dataclasses import replace
     from passlib.hash import bcrypt_sha256 as pwd_hasher
-    from core.platform.auth.auth_dependencies import get_current_user
-    from core.capabilities.users.dependencies import get_user_service
+    from core.modules.auth.web.dependencies.auth_dependencies import get_current_user
+    from core.modules.users.dependencies import get_user_service
     # Érvényes hash kell, különben passlib InvalidHashError-t dob; verify("wrong", hash) → False → 400
     user_with_hash = replace(sample_user, password_hash=pwd_hasher.hash("correct"))
     mock_user_service.change_password.side_effect = ValueError("current_password_wrong")
@@ -446,8 +446,8 @@ def test_change_password_success_returns_200(
     """Helyes jelenlegi + erős új jelszó → 200, { ok: true }."""
     from dataclasses import replace
     from passlib.hash import bcrypt_sha256 as pwd_hasher
-    from core.platform.auth.auth_dependencies import get_current_user
-    from core.capabilities.users.dependencies import get_user_service
+    from core.modules.auth.web.dependencies.auth_dependencies import get_current_user
+    from core.modules.users.dependencies import get_user_service
     user_with_pass = replace(sample_user, password_hash=pwd_hasher.hash("oldpass"))
     app.dependency_overrides[get_current_user] = lambda: user_with_pass
     app.dependency_overrides[get_user_service] = lambda: mock_user_service
@@ -471,8 +471,8 @@ def test_change_password_credentials_password_not_set_returns_400(
 ):
     from dataclasses import replace
     from passlib.hash import bcrypt_sha256 as pwd_hasher
-    from core.platform.auth.auth_dependencies import get_current_user
-    from core.capabilities.users.dependencies import get_user_service
+    from core.modules.auth.web.dependencies.auth_dependencies import get_current_user
+    from core.modules.users.dependencies import get_user_service
 
     user_without_credentials = replace(
         sample_user,
@@ -504,8 +504,8 @@ def test_change_password_user_not_found_returns_400(
 ):
     from dataclasses import replace
     from passlib.hash import bcrypt_sha256 as pwd_hasher
-    from core.platform.auth.auth_dependencies import get_current_user
-    from core.capabilities.users.dependencies import get_user_service
+    from core.modules.auth.web.dependencies.auth_dependencies import get_current_user
+    from core.modules.users.dependencies import get_user_service
 
     user_with_pass = replace(sample_user, password_hash=pwd_hasher.hash("oldpass"))
     mock_user_service.change_password.side_effect = ValueError("user_not_found")
@@ -531,8 +531,8 @@ def test_change_password_empty_current_password_returns_422(
 ):
     from dataclasses import replace
     from passlib.hash import bcrypt_sha256 as pwd_hasher
-    from core.platform.auth.auth_dependencies import get_current_user
-    from core.capabilities.users.dependencies import get_user_service
+    from core.modules.auth.web.dependencies.auth_dependencies import get_current_user
+    from core.modules.users.dependencies import get_user_service
 
     user_with_pass = replace(sample_user, password_hash=pwd_hasher.hash("oldpass"))
     app.dependency_overrides[get_current_user] = lambda: user_with_pass
@@ -556,8 +556,8 @@ def test_change_password_empty_new_password_returns_422(
 ):
     from dataclasses import replace
     from passlib.hash import bcrypt_sha256 as pwd_hasher
-    from core.platform.auth.auth_dependencies import get_current_user
-    from core.capabilities.users.dependencies import get_user_service
+    from core.modules.auth.web.dependencies.auth_dependencies import get_current_user
+    from core.modules.users.dependencies import get_user_service
 
     user_with_pass = replace(sample_user, password_hash=pwd_hasher.hash("oldpass"))
     app.dependency_overrides[get_current_user] = lambda: user_with_pass
@@ -581,8 +581,8 @@ def test_change_password_weak_new_password_returns_422(
 ):
     from dataclasses import replace
     from passlib.hash import bcrypt_sha256 as pwd_hasher
-    from core.platform.auth.auth_dependencies import get_current_user
-    from core.capabilities.users.dependencies import get_user_service
+    from core.modules.auth.web.dependencies.auth_dependencies import get_current_user
+    from core.modules.users.dependencies import get_user_service
 
     user_with_pass = replace(sample_user, password_hash=pwd_hasher.hash("oldpass"))
     app.dependency_overrides[get_current_user] = lambda: user_with_pass
@@ -606,8 +606,8 @@ def test_change_password_missing_fields_returns_422(
 ):
     from dataclasses import replace
     from passlib.hash import bcrypt_sha256 as pwd_hasher
-    from core.platform.auth.auth_dependencies import get_current_user
-    from core.capabilities.users.dependencies import get_user_service
+    from core.modules.auth.web.dependencies.auth_dependencies import get_current_user
+    from core.modules.users.dependencies import get_user_service
 
     user_with_pass = replace(sample_user, password_hash=pwd_hasher.hash("oldpass"))
     app.dependency_overrides[get_current_user] = lambda: user_with_pass
@@ -742,12 +742,12 @@ def test_login_step2_five_wrong_codes_then_sixth_returns_429(
     mock_user_repo, sample_user, app,
 ):
     """5 rossz 2FA kód után a 6. step2 hívás 429 (too many attempts); új login step1 kell."""
-    from core.di import get_login_service
-    from core.kernel.bootstrap.container import container
+    from core.kernel.deps.facade import get_login_service
+    from core.kernel.app.app_container import container
     from core.kernel.config.config_loader import settings
-    from core.extensions.tenant.dto import Tenant
-    from core.capabilities.auth.service.two_factor_service import TwoFactorService
-    from core.capabilities.auth.service.login_service import LoginService
+    from core.modules.tenant.dto import Tenant
+    from core.modules.auth.use_cases.two_factor_service import TwoFactorService
+    from core.modules.auth.use_cases.login_service import LoginService
     DEMO_TENANT = Tenant(id=1, slug="demo", name="Demo", created_at=datetime.now(timezone.utc))
     in_memory_attempt_repo = InMemory2FAAttemptRepo(max_attempts=5, window_minutes=15)
     mock_two_factor_repo = MagicMock()

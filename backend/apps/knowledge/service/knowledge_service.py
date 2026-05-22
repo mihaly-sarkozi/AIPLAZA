@@ -7,8 +7,8 @@ from typing import Any, Optional
 from apps.knowledge.domain.kb import KnowledgeBase
 from apps.knowledge.repositories.knowledge_base_repository import MySQLKnowledgeBaseRepository
 from apps.knowledge.ports.repositories import KbPermissionItem
-from core.capabilities.users.dto import User
-from core.platform.auth.auth_dependencies import has_permission
+from core.modules.users.domain.dto import User
+from core.modules.auth.web.dependencies.auth_dependencies import has_permission
 
 
 class KnowledgeBaseService:

@@ -8,7 +8,7 @@ from pathlib import Path
 
 BACKEND_ROOT = Path(__file__).resolve().parent.parent
 APPS_ROOT = BACKEND_ROOT / "apps"
-TEMPLATE_ROOT = APPS_ROOT / "_template"
+TEMPLATE_ROOT = BACKEND_ROOT / "scaffolding"
 NAME_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
 
 
@@ -23,7 +23,7 @@ def _validate_module_name(module_name: str) -> str:
             "Érvénytelen modulnév. Használj kisbetűt, számot és aláhúzást, "
             "és betűvel kezdődjön."
         )
-    if normalized in {"contracts", "_template"}:
+    if normalized in {"contracts", "template"}:
         raise SystemExit(f"Fenntartott modulnév: {normalized}")
     return normalized
 
@@ -57,6 +57,8 @@ def scaffold_module(module_name: str) -> list[Path]:
     for source_path in sorted(TEMPLATE_ROOT.rglob("*")):
         if "__pycache__" in source_path.parts:
             continue
+        if source_path.name == "README.md":
+            continue
         relative_path = source_path.relative_to(TEMPLATE_ROOT)
         target_path = target_root / _target_relative_path(relative_path, module_name)
 
@@ -73,7 +75,7 @@ def scaffold_module(module_name: str) -> list[Path]:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Scaffold a new backend app module from apps/_template.",
+        description="Scaffold a new backend app module from scaffolding.",
     )
     parser.add_argument("module_name", help="Új modul neve, például `notifications`.")
     args = parser.parse_args(argv)

@@ -34,6 +34,10 @@ celerybeat-schedule
 # macOS
 .DS_Store
 **/.DS_Store
+._*
+**/._*
+__MACOSX/
+**/__MACOSX/
 
 # IDE / eszközök
 .vscode/
@@ -51,7 +55,6 @@ ENV/
 .env.example
 
 # Archive / project noise
-__MACOSX/
 *.zip
 node_modules/
 frontend/node_modules/

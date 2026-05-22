@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 
 import pytest
 
-from core.extensions.tenant.signup import abuse_controls
+from core.modules.tenant.signup import abuse_controls
 
 pytestmark = [pytest.mark.unit, pytest.mark.must_pass]
 

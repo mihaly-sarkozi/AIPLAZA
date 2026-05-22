@@ -33,8 +33,3 @@ class KBPermissionsUpdate(BaseModel):
 
 class KBBatchPermissionsRequest(BaseModel):
     uuids: List[str] = Field(default_factory=list, max_length=100)
-
-
-class IngestTrainingTextRequest(BaseModel):
-    text: str = Field(..., min_length=1, description="Tanítandó szöveg")
-    title: Optional[str] = Field(default=None, max_length=200)

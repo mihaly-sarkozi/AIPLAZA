@@ -9,9 +9,9 @@ from fastapi import HTTPException
 from fastapi.responses import Response
 from starlette.requests import Request
 
-from core.capabilities.auth.dto.login_success_dto import LoginSuccess
-from core.capabilities.auth.router import demo_login_handler
-from core.capabilities.users.dto.user import User
+from core.modules.auth.domain.dto.login_success_dto import LoginSuccess
+from core.modules.auth.router import demo_login_handler
+from core.modules.users.domain.dto.user import User
 
 pytestmark = [pytest.mark.unit, pytest.mark.must_pass]
 

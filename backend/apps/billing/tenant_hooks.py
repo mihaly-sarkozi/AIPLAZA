@@ -1,6 +1,10 @@
+# backend/apps/billing/tenant_hooks.py
+# Feladat: Tenant signup hookot regisztrál a billing app számára. Új tenant létrejöttekor a kiválasztott plan és billing period alapján beállítja a kezdő előfizetést a BillingService-en keresztül. Program-specifikus tenant lifecycle integráció.
+# Sárközi Mihály - 2026.05.21
+
 from __future__ import annotations
 
-from core.platform.extensions.tenant_hooks import TenantSignupContext, register_tenant_signup_hook
+from core.modules.tenant.extensions.tenant_hooks import TenantSignupContext, register_tenant_signup_hook
 
 
 class BillingTenantSignupHook:

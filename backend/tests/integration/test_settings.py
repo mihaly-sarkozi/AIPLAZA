@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 import pytest
 from fastapi.testclient import TestClient
 
-from core.capabilities.users.dto import User  # lightweight dataclass
+from core.modules.users.domain.dto import User  # lightweight dataclass
 
 pytestmark = pytest.mark.integration
 
@@ -18,7 +18,7 @@ def test_get_settings_without_auth_returns_401(client: TestClient):
 def test_get_settings_non_owner_returns_403(client: TestClient, mock_settings_service, app):
     """GET /settings user/admin role-lal (nem owner) → 403."""
     from apps.settings.dependencies import get_settings_service
-    from core.platform.auth.auth_dependencies import get_current_user
+    from core.modules.auth.web.dependencies.auth_dependencies import get_current_user
     app.dependency_overrides[get_settings_service] = lambda: mock_settings_service
     non_owner = User(
         id=2,
@@ -40,7 +40,7 @@ def test_get_settings_non_owner_returns_403(client: TestClient, mock_settings_se
 def test_get_settings_success(client_authenticated: TestClient, mock_settings_service, app):
     """GET /settings ownerrel → 200, teljes settings payload."""
     from apps.settings.dependencies import get_settings_service
-    from core.di import get_permission_service
+    from core.kernel.deps.facade import get_permission_service
 
     get_permission_service().register_permissions(("settings.read", "settings.write"))
     app.dependency_overrides[get_settings_service] = lambda: mock_settings_service
@@ -66,7 +66,7 @@ def test_patch_settings_without_auth_returns_401(client: TestClient):
 def test_patch_settings_non_owner_returns_403(client: TestClient, mock_settings_service, app):
     """PATCH /settings nem ownerrel → 403."""
     from apps.settings.dependencies import get_settings_service
-    from core.platform.auth.auth_dependencies import get_current_user
+    from core.modules.auth.web.dependencies.auth_dependencies import get_current_user
     app.dependency_overrides[get_settings_service] = lambda: mock_settings_service
     non_owner = User(
         id=2,
@@ -88,7 +88,7 @@ def test_patch_settings_non_owner_returns_403(client: TestClient, mock_settings_
 def test_patch_settings_success(client_authenticated: TestClient, mock_settings_service, app):
     """PATCH /settings ownerrel → 200, részleges settings update."""
     from apps.settings.dependencies import get_settings_service
-    from core.di import get_permission_service
+    from core.kernel.deps.facade import get_permission_service
 
     get_permission_service().register_permissions(("settings.read", "settings.write"))
     app.dependency_overrides[get_settings_service] = lambda: mock_settings_service

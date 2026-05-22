@@ -1,4 +1,7 @@
-# Ez a fájl több modul által közösen használt backend segédlogikát tartalmaz.
+# backend/shared/utils/sanitization.py
+# Feladat: Log és audit payloadok érzékeny mezőinek rekurzív maszkolását végzi. Jelszó-, token-, secret-, auth-, email- és 2FA jellegű értékeket biztonságos reprezentációra cserél, miközben a nem érzékeny struktúrát megtartja. Shared security-adjacent utility naplózási és audit rétegekhez.
+# Sárközi Mihály - 2026.05.21
+
 from __future__ import annotations
 
 import re
@@ -7,11 +10,13 @@ from typing import Any
 REDACT_KEYS = frozenset({
     "password", "current_password", "new_password", "token", "refresh_token",
     "access_token", "pending_token", "two_factor_code", "code", "secret",
-    "authorization", "cookie", "api_key", "jwt",
+    "authorization", "cookie", "api_key", "jwt", "jwt_token", "api_secret",
+    "prompt", "full_prompt", "system_prompt", "user_prompt", "context_text",
+    "raw_content", "document_content", "text_content", "pii",
 })
 
 REDACT_KEY_PATTERN = re.compile(
-    r"^(.*)(password|token|secret|key|auth)(.*)$",
+    r"^(.*)(password|token|secret|key|auth|prompt|context_text|raw_content|document_content|text_content|pii)(.*)$",
     re.IGNORECASE,
 )
 

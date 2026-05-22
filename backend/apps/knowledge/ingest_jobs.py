@@ -4,9 +4,9 @@ import asyncio
 import logging
 from typing import Any
 
-from apps.contracts.service_keys import MODULE_KNOWLEDGE_SERVICE
-from apps.di import get_service as get_module_service
-from core.di import run_async_with_tenant_schema, run_with_tenant_schema
+from core.kernel.interface.app_keys import MODULE_KNOWLEDGE_SERVICE
+from core.kernel.http.app_dependencies import get_module_service
+from core.modules.tenant.context.tenant_context import run_with_tenant_schema
 
 logger = logging.getLogger(__name__)
 
@@ -33,14 +33,9 @@ def process_ingest_run_and_start_index_sync(
         index_profile_key="basic_chunk_v1",
         created_by=created_by,
     )
-    runner = getattr(effective_facade, "run_index_build_with_retry", None)
-    if not callable(runner):
-        runner = getattr(effective_facade, "run_index_build", None)
-    if callable(runner):
-        if asyncio.iscoroutinefunction(runner):
-            asyncio.run(run_async_with_tenant_schema(tenant_slug, runner, build.id))
-        else:
-            run_with_tenant_schema(tenant_slug, runner, build.id)
+    from apps.knowledge.api.background_jobs import enqueue_index_build_job
+
+    enqueue_index_build_job(tenant_slug=tenant_slug, build_id=build.id)
 
 
 async def process_ingest_run_and_start_index_async(

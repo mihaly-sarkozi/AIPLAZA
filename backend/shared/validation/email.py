@@ -1,6 +1,6 @@
-# Email formatum es hossz validacio kozponti hasznalatra.
-#
-# Fontos: ez best-effort szintu validacio, nem teljes RFC 5322 megfeleles.
+# backend/shared/validation/email.py
+# Feladat: Közös email formátum- és hosszvalidációt tartalmaz. Best-effort local@domain.tld ellenőrzést végez, nem teljes RFC 5322 megfelelést, ezért request DTO-k és admin belépési pontok alap ellenőrzésére való. Shared email validation utility.
+# Sárközi Mihály - 2026.05.21
 
 import re
 

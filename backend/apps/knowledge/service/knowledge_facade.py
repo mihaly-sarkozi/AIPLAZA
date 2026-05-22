@@ -7,11 +7,9 @@ import hashlib
 import re
 import time
 import threading
-import unicodedata
 import uuid as uuid_lib
-from html import unescape
-from dataclasses import dataclass, replace
-from datetime import datetime, timezone
+from dataclasses import replace
+from datetime import datetime
 from typing import Any
 
 from apps.knowledge.domain.context_profile import DEFAULT_CONTEXT_PROFILE, ContextProfile
@@ -37,19 +35,47 @@ from apps.knowledge.domain.sentence_interpretation import SentenceInterpretation
 from apps.knowledge.domain.semantic_block import semantic_block_to_json_dict
 from apps.knowledge.domain.source import Source
 from apps.knowledge.domain.space_time_frame import SpaceTimeFrame
+from apps.knowledge.service.facade_helpers import (
+    SentenceCandidate,
+    aggregate_ingest_item_quality as _aggregate_ingest_item_quality,
+    empty_claim_quality_summary as _empty_claim_quality_summary,
+    is_uuid_string as _is_uuid_string,
+    json_safe as _json_safe,
+    merge_claim_quality_summary as _merge_claim_quality_summary,
+    normalize_text_payload as _normalize_text_payload,
+    search_profile_from_trace_payload as _search_profile_from_trace_payload,
+    truncate_diagnostic_text as _truncate_diagnostic_text,
+    utcnow as _utcnow,
+)
 from apps.knowledge.service.claim_split import ClaimFineSplitter
 from apps.knowledge.service.claim_extraction_pipeline import run_v1_sentence_claim_pipeline
 from apps.knowledge.service.claim_extractor_v1 import ClaimExtractorV1
 from apps.knowledge.service.claim_quality_gate import ClaimQualityGate
 from apps.knowledge.service.claim_typing import debug_claim_type
+from apps.knowledge.service.chunking_service import ChunkingService
+from apps.knowledge.service.knowledge_audit_service import KnowledgeAuditService
+from apps.knowledge.service.knowledge_permission_service import KnowledgePermissionService
 from apps.knowledge.service.knowledge_trace_service import KnowledgeTraceService
 from apps.knowledge.service.entity_key_normalization import canonicalize_entity_key
 from apps.knowledge.service.language_rules import detect_language, fold_text, resolve_language
 from apps.knowledge.service.mention_extractor import MentionExtractor, debug_print as debug_print_mentions
 from apps.knowledge.service.local_resolver_v1 import LocalResolverV1, attach_local_resolver_metadata
+from apps.knowledge.service.semantic_block_selection import (
+    filter_relevant_semantic_blocks,
+    is_broad_function_query,
+    order_chunks_by_vector_hits,
+    query_phrase_for_blocks,
+    query_terms_for_blocks,
+    retrieval_chunks_from_vector_hits,
+    select_semantic_blocks_for_query,
+    semantic_block_search_text,
+    semantic_blocks_context,
+    semantic_blocks_from_vector_hits,
+)
 from apps.knowledge.service.space_time_extractor_v1 import SpaceTimeExtractorV1
 from apps.knowledge.service.subject_context_resolver_v1 import SubjectContextResolverV1
 from apps.knowledge.service.semantic_block_builder_v1 import SemanticBlockBuilderV1
+from apps.knowledge.service.url_fetch_service import UrlFetchService
 from apps.knowledge.service.technical_entity_builder_v1 import TechnicalEntityBuilderV1
 from apps.knowledge.domain.technical_entity import technical_entity_to_json_dict
 from apps.knowledge.service.technical_memory_chunk_builder_v1 import TechnicalMemoryChunkBuilderV1
@@ -70,8 +96,13 @@ from apps.knowledge.service.retrieval_chunk_index_v0 import build_retrieval_chun
 from apps.knowledge.service.semantic_block_index_v0 import build_semantic_block_index_rows
 from apps.knowledge.service.semantic_block_quality_v0 import enrich_semantic_blocks_with_quality
 from apps.knowledge.service.answer_verifier import verify_answer
+from apps.knowledge.service.ingest_run_service import IngestRunService
+from apps.knowledge.service.index_build_service import IndexBuildService
+from apps.knowledge.service.parser_orchestrator import ParserOrchestrator
+from apps.knowledge.service.source_storage_service import SourceStorageService
 from apps.knowledge.service.query_resolver_v0 import QueryResolverV0
 from apps.knowledge.service.query_aware_retrieval_v0 import QueryAwareRetrievalV0
+from apps.knowledge.service.retrieval_service import RetrievalService
 from apps.knowledge.service.explanation_builder_v0 import ExplanationBuilderV0
 from apps.knowledge.service.lineage_builder_v0 import LineageBuilderV0
 from apps.knowledge.service.knowledge_quality_report_v0 import KnowledgeQualityReportV0
@@ -104,9 +135,8 @@ from apps.knowledge.service.ports import (
 from apps.knowledge.repositories.pii_mapping_repository import KnowledgePiiMappingRepository
 from apps.knowledge.pii.pipeline import filter_pii
 from apps.knowledge.training_ingest import build_sentence_rows
-from core.capabilities.users.dto import User
-from core.platform.auth.auth_dependencies import has_permission
-from core.platform.contract.observability import (
+from core.modules.users.domain.dto import User
+from core.kernel.interface.observability import (
     increment_metric as increment_platform_metric,
     log_structured_event,
     observe_metric as observe_platform_metric,
@@ -115,7 +145,6 @@ from core.platform.contract.observability import (
 from core.kernel.config.config_loader import settings
 from shared.documents import ExtractedDocument, ExtractedParagraph, extract_document_from_upload, extract_text_from_upload
 from shared.object_storage.contracts import ObjectStoragePort
-import requests
 from sqlalchemy.exc import ProgrammingError
 
 logger = logging.getLogger(__name__)
@@ -123,234 +152,6 @@ logger = logging.getLogger(__name__)
 _RETRIEVAL_TIMEOUT_SECONDS = 3.0
 _RETRIEVAL_RETRY_ATTEMPTS = 2
 _RETRIEVAL_RETRY_BACKOFF_SECONDS = 0.05
-
-
-@dataclass(frozen=True)
-class SentenceCandidate:
-    text: str
-    confidence: float
-    split_reason: str
-    char_start_offset: int
-    char_end_offset: int
-
-
-def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
-
-
-def _is_uuid_string(value: str | None) -> bool:
-    if not value:
-        return False
-    try:
-        uuid_lib.UUID(str(value))
-    except ValueError:
-        return False
-    return True
-
-
-def _normalize_text_payload(value: str | None) -> str:
-    text = str(value or "")
-    # Keep user-visible content intact, but normalize technical encoding details.
-    text = text.removeprefix("\ufeff")
-    text = text.replace("\r\n", "\n").replace("\r", "\n")
-    return unicodedata.normalize("NFC", text)
-
-
-def _truncate_diagnostic_text(value: str | None, *, limit: int = 220) -> str:
-    text = " ".join(str(value or "").strip().split())
-    if len(text) <= limit:
-        return text
-    return text[: max(0, limit - 3)].rstrip() + "..."
-
-
-def _json_safe(value: Any) -> Any:
-    if isinstance(value, datetime):
-        return value.isoformat()
-    if isinstance(value, dict):
-        return {str(key): _json_safe(item) for key, item in value.items()}
-    if isinstance(value, list):
-        return [_json_safe(item) for item in value]
-    if isinstance(value, tuple | set):
-        return [_json_safe(item) for item in value]
-    return value
-
-
-def _empty_claim_quality_summary() -> dict[str, Any]:
-    return {
-        "skipped_sentence_count": 0,
-        "rejected_claim_count": 0,
-        "describes_claim_count": 0,
-        "low_confidence_claim_count": 0,
-        "bad_subject_claim_count": 0,
-        "question_sentence_count": 0,
-        "fragment_sentence_count": 0,
-        "noise_sentence_skipped_count": 0,
-        "noise_claim_rejected_count": 0,
-        "weak_auxiliary_claim_rejected_count": 0,
-        "duplicate_weak_claim_rejected_count": 0,
-        "skipped_sentences": [],
-        "rejected_claim_examples": [],
-    }
-
-
-def _merge_claim_quality_summary(summary: dict[str, Any], diagnostics: dict[str, Any] | None) -> dict[str, Any]:
-    if not diagnostics:
-        return summary
-
-    merged = {
-        **_empty_claim_quality_summary(),
-        **dict(summary or {}),
-    }
-    if diagnostics.get("skipped"):
-        merged["skipped_sentence_count"] = int(merged.get("skipped_sentence_count") or 0) + 1
-        sentence_reason = str(diagnostics.get("sentence_reason") or "")
-        if sentence_reason == "sentence_is_question":
-            merged["question_sentence_count"] = int(merged.get("question_sentence_count") or 0) + 1
-        elif sentence_reason in {"sentence_is_explicit_noise", "noise_sentence"}:
-            merged["noise_sentence_skipped_count"] = (
-                int(merged.get("noise_sentence_skipped_count") or 0) + 1
-            )
-        elif sentence_reason in {"sentence_is_fragment", "sentence_no_meaningful_content"}:
-            merged["fragment_sentence_count"] = int(merged.get("fragment_sentence_count") or 0) + 1
-        skipped_sentences = list(merged.get("skipped_sentences") or [])
-        if len(skipped_sentences) < 10:
-            skipped_sentences.append(
-                {
-                    "sentence_id": diagnostics.get("sentence_id"),
-                    "reason": sentence_reason or None,
-                    "language": diagnostics.get("language"),
-                    "text": _truncate_diagnostic_text(diagnostics.get("sentence_text")),
-                }
-            )
-        merged["skipped_sentences"] = skipped_sentences
-
-    rejected_claims = list(diagnostics.get("rejected_claims") or [])
-    merged["rejected_claim_count"] = int(merged.get("rejected_claim_count") or 0) + len(rejected_claims)
-    rejected_examples = list(merged.get("rejected_claim_examples") or [])
-    for item in rejected_claims:
-        reason = str(item.get("reason") or "")
-        if reason == "claim_fallback_describes":
-            merged["describes_claim_count"] = int(merged.get("describes_claim_count") or 0) + 1
-        elif reason == "claim_low_confidence":
-            merged["low_confidence_claim_count"] = int(merged.get("low_confidence_claim_count") or 0) + 1
-        elif reason == "claim_bad_subject":
-            merged["bad_subject_claim_count"] = int(merged.get("bad_subject_claim_count") or 0) + 1
-        elif reason == "claim_weak_auxiliary":
-            merged["weak_auxiliary_claim_rejected_count"] = (
-                int(merged.get("weak_auxiliary_claim_rejected_count") or 0) + 1
-            )
-        elif reason == "claim_duplicate_weak":
-            merged["duplicate_weak_claim_rejected_count"] = (
-                int(merged.get("duplicate_weak_claim_rejected_count") or 0) + 1
-            )
-        elif reason in {"sentence_is_explicit_noise", "noise_sentence"}:
-            merged["noise_claim_rejected_count"] = int(merged.get("noise_claim_rejected_count") or 0) + 1
-        elif reason == "sentence_is_question" and not diagnostics.get("skipped"):
-            merged["question_sentence_count"] = int(merged.get("question_sentence_count") or 0) + 1
-        elif reason in {"sentence_is_fragment", "sentence_no_meaningful_content"} and not diagnostics.get("skipped"):
-            merged["fragment_sentence_count"] = int(merged.get("fragment_sentence_count") or 0) + 1
-
-        if len(rejected_examples) < 20:
-            rejected_examples.append(
-                {
-                    "reason": reason or None,
-                    "subject_text": _truncate_diagnostic_text(item.get("subject_text"), limit=80),
-                    "predicate": _truncate_diagnostic_text(item.get("predicate"), limit=60),
-                    "object_text": _truncate_diagnostic_text(item.get("object_text"), limit=120),
-                    "claim_type": item.get("claim_type"),
-                    "confidence": item.get("confidence"),
-                }
-            )
-    merged["rejected_claim_examples"] = rejected_examples
-    return merged
-
-
-def _aggregate_ingest_item_quality(items: list[IngestItem]) -> dict[str, Any]:
-    summary = _empty_claim_quality_summary()
-    has_quality = False
-    for item in items:
-        metadata = dict(getattr(item, "metadata", {}) or {})
-        item_quality = metadata.get("interpretation_quality")
-        if not isinstance(item_quality, dict):
-            continue
-        has_quality = True
-        for key in (
-            "skipped_sentence_count",
-            "rejected_claim_count",
-            "describes_claim_count",
-            "low_confidence_claim_count",
-            "bad_subject_claim_count",
-            "question_sentence_count",
-            "fragment_sentence_count",
-            "noise_sentence_skipped_count",
-            "noise_claim_rejected_count",
-            "weak_auxiliary_claim_rejected_count",
-            "duplicate_weak_claim_rejected_count",
-        ):
-            summary[key] = int(summary.get(key) or 0) + int(item_quality.get(key) or 0)
-        skipped_sentences = list(summary.get("skipped_sentences") or [])
-        for row in list(item_quality.get("skipped_sentences") or []):
-            if len(skipped_sentences) >= 10:
-                break
-            skipped_sentences.append(row)
-        summary["skipped_sentences"] = skipped_sentences
-
-        rejected_examples = list(summary.get("rejected_claim_examples") or [])
-        for row in list(item_quality.get("rejected_claim_examples") or []):
-            if len(rejected_examples) >= 20:
-                break
-            rejected_examples.append(row)
-        summary["rejected_claim_examples"] = rejected_examples
-    if not has_quality:
-        summary["todo"] = "TODO: persist rejected claim diagnostics per ingest run."
-    return summary
-
-
-def _uuid_from_trace_value(value: Any) -> uuid_lib.UUID:
-    text = str(value or "").strip()
-    if text:
-        try:
-            return uuid_lib.UUID(text)
-        except ValueError:
-            return uuid_lib.uuid5(uuid_lib.NAMESPACE_URL, text)
-    return uuid_lib.uuid4()
-
-
-def _optional_uuid_from_trace_value(value: Any) -> uuid_lib.UUID | None:
-    text = str(value or "").strip()
-    if not text:
-        return None
-    return _uuid_from_trace_value(text)
-
-
-def _search_profile_from_trace_payload(payload: dict[str, Any]) -> SearchProfile | None:
-    if not isinstance(payload, dict):
-        return None
-    entity_name = str(payload.get("entity_name") or "").strip()
-    if not entity_name:
-        return None
-    return SearchProfile(
-        search_profile_id=_uuid_from_trace_value(payload.get("search_profile_id")),
-        run_id=_optional_uuid_from_trace_value(payload.get("run_id")),
-        source_id=_optional_uuid_from_trace_value(payload.get("source_id")),
-        technical_memory_chunk_id=_optional_uuid_from_trace_value(payload.get("technical_memory_chunk_id")),
-        technical_entity_id=_optional_uuid_from_trace_value(payload.get("technical_entity_id")),
-        local_entity_id=_optional_uuid_from_trace_value(payload.get("local_entity_id")),
-        entity_name=entity_name,
-        entity_type=str(payload.get("entity_type") or "unknown"),
-        normalized_key=str(payload.get("normalized_key") or ""),
-        canonical_key=str(payload.get("canonical_key") or payload.get("normalized_key") or ""),
-        canonical_text=str(payload.get("canonical_text") or ""),
-        search_text=str(payload.get("search_text") or ""),
-        aliases=[str(item) for item in payload.get("aliases") or []],
-        keywords=[str(item) for item in payload.get("keywords") or []],
-        claim_group_signals=dict(payload.get("claim_group_signals") or {}),
-        time_filters=dict(payload.get("time_filters") or {}),
-        space_filters=dict(payload.get("space_filters") or {}),
-        relation_filters=dict(payload.get("relation_filters") or {}),
-        evidence_refs=[dict(item) for item in payload.get("evidence_refs") or [] if isinstance(item, dict)],
-        builder_version=str(payload.get("builder_version") or "search_profile_builder_v1"),
-    )
 
 
 class KnowledgeFacade:
@@ -482,6 +283,7 @@ class KnowledgeFacade:
         vector_index_factory: VectorIndexFactory,
         metrics_store: MetricsStorePort,
         object_storage: ObjectStoragePort,
+        source_storage_service: SourceStorageService | None = None,
     ) -> None:
         self._corpus_store = corpus_store
         self._user_repo = user_repo
@@ -522,22 +324,85 @@ class KnowledgeFacade:
         self._index_build_store = index_build_store
         self._query_run_store = query_run_store
         self._chunk_builder = chunk_builder
+        self._chunking_service = ChunkingService(chunk_builder=chunk_builder)
         self._retrieval_engine = retrieval_engine
         self._context_builder = context_builder
         self._vector_index_factory = vector_index_factory
         self._metrics_store = metrics_store
         self._object_storage = object_storage
+        self._source_storage_service = source_storage_service or SourceStorageService(object_storage)
+        self._knowledge_audit_service = KnowledgeAuditService(ingest_event_store=self._ingest_event_store)
         self._feedback_events: list[dict[str, Any]] = []
         self._source_withdrawal_events: list[dict[str, Any]] = []
         self._index_build_locks: dict[str, threading.Lock] = {}
         self._index_build_locks_guard = threading.Lock()
         self._pii_mapping_store = self._init_pii_mapping_store(corpus_store)
+        self._url_fetch_service = UrlFetchService(text_normalizer=self._normalize_parser_text)
+        self._knowledge_permission_service = KnowledgePermissionService(
+            corpus_store=self._corpus_store,
+            user_repo_list_all=self._user_repo_list_all,
+            corpus_mapper=self._to_corpus,
+            list_all_unfiltered=self.list_all_unfiltered,
+        )
+        self._index_build_service = IndexBuildService(
+            corpus_store=self._corpus_store,
+            source_store=self._source_store,
+            index_build_store=self._index_build_store,
+            metrics_store=self._metrics_store,
+            vector_index_factory=self._vector_index_factory,
+            chunking_service=self._chunking_service,
+            default_index_profile=self._default_index_profile,
+            vector_size_for_profile=self._vector_size_for_profile,
+            load_existing_retrieval_chunks=lambda **kwargs: self._load_existing_retrieval_chunks(**kwargs),
+            load_existing_semantic_blocks=lambda **kwargs: self._load_existing_semantic_blocks(**kwargs),
+            log_step=self._log_step,
+            index_build_lock=self._index_build_lock,
+            retry_count=self._INDEX_BUILD_RETRY_COUNT,
+            retry_backoff_sec=self._INDEX_BUILD_RETRY_BACKOFF_SEC,
+            stale_after_sec=self._STALE_INDEX_BUILD_FAIL_AFTER_SEC,
+        )
+        self._retrieval_service = RetrievalService(
+            source_store=self._source_store,
+            document_store=self._document_store,
+            corpus_store=self._corpus_store,
+            retrieve_query=self.retrieve,
+            source_display_type=self._source_display_type,
+            source_created_by_label=self._source_created_by_label,
+        )
+        self._parser_orchestrator = ParserOrchestrator(
+            source_store=self._source_store,
+            parser_run_store=self._parser_run_store,
+            document_store=self._document_store,
+            paragraph_store=self._paragraph_store,
+            sentence_store=self._sentence_store,
+            extract_parser_document_from_source=self._extract_parser_document_from_source,
+            delete_source_parse_outputs=self._delete_source_parse_outputs,
+            normalize_parser_text=self._normalize_parser_text,
+            describe_empty_extraction=self._describe_empty_extraction,
+            split_paragraphs=self._split_paragraphs,
+            build_claim_refinement_budget=self._build_claim_refinement_budget,
+            build_sentence_units_for_paragraph_with_diagnostics=self._build_sentence_units_for_paragraph_with_diagnostics,
+            interpret_document=self._interpret_document,
+            truncate_error_message=self._truncate_error_message,
+            log_step=self._log_step,
+            parser_error_message_max=self._PARSER_ERROR_MESSAGE_MAX,
+            claim_fine_split_early_stop_after_blocks=self._CLAIM_FINE_SPLIT_EARLY_STOP_AFTER_BLOCKS,
+            claim_fine_split_min_hit_blocks_to_continue=self._CLAIM_FINE_SPLIT_MIN_HIT_BLOCKS_TO_CONTINUE,
+        )
 
     @staticmethod
     def _init_pii_mapping_store(corpus_store: CorpusStorePort) -> KnowledgePiiMappingRepository | None:
         session_factory = getattr(corpus_store, "_sf", None)
         if session_factory is None:
             return None
+
+    def _ingest_runs(self) -> IngestRunService:
+        return IngestRunService(
+            ingest_run_store=self._ingest_run_store,
+            ingest_item_store=self._ingest_item_store,
+            progress_summary_builder=self._build_run_progress_summary,
+            quality_diagnostics_builder=_aggregate_ingest_item_quality,
+        )
         try:
             return KnowledgePiiMappingRepository(session_factory)
         except Exception:
@@ -730,53 +595,19 @@ class KnowledgeFacade:
 
     @staticmethod
     def _semantic_block_search_text(block: dict[str, Any]) -> str:
-        parts = [
-            block.get("summary"),
-            block.get("primary_subject"),
-            block.get("primary_space"),
-            block.get("primary_time"),
-            block.get("text"),
-            " ".join(str(item or "") for item in block.get("predicates") or []),
-            " ".join(str(item or "") for item in block.get("space_values") or []),
-            " ".join(str(item or "") for item in block.get("time_values") or []),
-        ]
-        return fold_text(" ".join(str(part or "") for part in parts))
+        return semantic_block_search_text(block)
 
     @staticmethod
     def _query_terms_for_blocks(query_profile: dict[str, Any] | None, query: str | None) -> set[str]:
-        values: list[str] = [str(query or "")]
-        profile = dict(query_profile or {})
-        for key in ("query", "subject", "object", "expected_answer_type", "temporal_scope", "intent"):
-            values.append(str(profile.get(key) or ""))
-        for key in ("detected_entities", "keywords", "entity_keys", "space_values", "time_values"):
-            raw = profile.get(key)
-            if isinstance(raw, list):
-                values.extend(str(item or "") for item in raw)
-        terms: set[str] = set()
-        stopwords = {"hogy", "mert", "amikor", "mikor", "mit", "milyen", "csinal", "csinál", "az", "egy", "the", "and"}
-        for value in values:
-            for token in fold_text(str(value or "")).replace("_", " ").split():
-                token = token.strip(".,:;!?()[]{}\"'")
-                if len(token) >= 2 and token not in stopwords:
-                    terms.add(token)
-        return terms
+        return query_terms_for_blocks(query_profile, query)
 
     @staticmethod
     def _query_phrase_for_blocks(query: str | None) -> str:
-        stopwords = {"a", "az", "egy", "mit", "miket", "milyen", "hogyan", "hogy", "csinal", "csinál", "rendszer?"}
-        tokens: list[str] = []
-        for token in fold_text(str(query or "")).replace("_", " ").split():
-            cleaned = token.strip(".,:;!?()[]{}\"'")
-            if cleaned and cleaned not in stopwords:
-                tokens.append(cleaned)
-        return " ".join(tokens)
+        return query_phrase_for_blocks(query)
 
     @staticmethod
     def _is_broad_function_query(query: str | None, query_profile: dict[str, Any] | None) -> bool:
-        text = fold_text(str(query or ""))
-        profile = dict(query_profile or {})
-        expected = fold_text(str(profile.get("expected_answer_type") or ""))
-        return "mit csinal" in text or "mire valo" in text or expected in {"object", "summary"}
+        return is_broad_function_query(query, query_profile)
 
     @staticmethod
     def _select_semantic_blocks_for_query(
@@ -788,106 +619,18 @@ class KnowledgeFacade:
         query: str | None = None,
         max_blocks: int = 4,
     ) -> list[dict[str, Any]]:
-        claim_ids = {
-            str(claim.get("claim_id") or "").strip()
-            for claim in matched_claims
-            if str(claim.get("claim_id") or "").strip()
-        }
-        profile_source_ids = {
-            str(source_id or "").strip()
-            for chunk in matched_chunks
-            for source_id in (chunk.get("source_ids") or [])
-            if str(source_id or "").strip()
-        }
-        query_terms = KnowledgeFacade._query_terms_for_blocks(query_profile, query)
-        query_phrase = KnowledgeFacade._query_phrase_for_blocks(query)
-        broad_function_query = KnowledgeFacade._is_broad_function_query(query, query_profile)
-        scored: list[tuple[float, dict[str, Any]]] = []
-        for block in semantic_blocks:
-            block_status = str(block.get("block_status") or (block.get("metadata") or {}).get("block_status") or "draft").lower()
-            if block_status in {"rejected", "withdrawn"}:
-                continue
-            score = 0.0
-            block_claim_ids = {str(item or "").strip() for item in block.get("claim_ids") or [] if str(item or "").strip()}
-            if claim_ids and block_claim_ids.intersection(claim_ids):
-                score += 3.0
-            source_id = str(block.get("source_id") or "").strip()
-            if source_id and source_id in profile_source_ids:
-                score += 0.25
-            search_text = KnowledgeFacade._semantic_block_search_text(block)
-            sentence_count = int((block.get("metadata") or {}).get("sentence_count") or len(block.get("sentence_ids") or []) or 0)
-            exact_phrase_match = bool(query_phrase and len(query_phrase) >= 4 and query_phrase in search_text)
-            if exact_phrase_match:
-                score += 4.0
-            if query_terms:
-                matched_terms = {term for term in query_terms if term in search_text}
-                coverage = len(matched_terms) / max(1, len(query_terms))
-                score += min(4.0, len(matched_terms) * 0.8)
-                if coverage >= 0.75:
-                    score += 1.0
-            else:
-                matched_terms = set()
-            if broad_function_query and exact_phrase_match and sentence_count >= 3:
-                score += 4.0
-            elif broad_function_query and sentence_count >= 3 and query_terms and len(matched_terms) >= 2:
-                score += 2.0
-            if broad_function_query and sentence_count <= 1 and not exact_phrase_match:
-                score -= 0.5
-            if score > 0:
-                retrieval_weight = float(block.get("retrieval_weight") or (block.get("metadata") or {}).get("retrieval_weight") or 1.0)
-                quality_adjusted_score = score * max(0.0, retrieval_weight)
-                enriched = dict(block)
-                enriched["match_score"] = round(quality_adjusted_score, 4)
-                enriched["match_reason"] = {
-                    "claim_overlap": bool(claim_ids and block_claim_ids.intersection(claim_ids)),
-                    "source_overlap": bool(source_id and source_id in profile_source_ids),
-                    "exact_query_phrase": exact_phrase_match,
-                    "broad_function_query": broad_function_query,
-                    "sentence_count": sentence_count,
-                    "query_terms": sorted(matched_terms)[:12],
-                    "base_score": round(score, 4),
-                    "retrieval_weight": round(retrieval_weight, 4),
-                    "block_status": block_status,
-                    "source_reliability": block.get("source_reliability") or (block.get("metadata") or {}).get("source_reliability"),
-                    "conflict_count": block.get("conflict_count") or (block.get("metadata") or {}).get("conflict_count") or 0,
-                }
-                scored.append((quality_adjusted_score, enriched))
-        deduped: list[dict[str, Any]] = []
-        seen: set[str] = set()
-        for _score, block in sorted(scored, key=lambda item: (-item[0], int(item[1].get("order_start") or 0))):
-            block_id = str(block.get("id") or "")
-            if block_id in seen:
-                continue
-            seen.add(block_id)
-            deduped.append(block)
-            if len(deduped) >= max_blocks:
-                break
-        return deduped
+        return select_semantic_blocks_for_query(
+            semantic_blocks=semantic_blocks,
+            matched_claims=matched_claims,
+            matched_chunks=matched_chunks,
+            query_profile=query_profile,
+            query=query,
+            max_blocks=max_blocks,
+        )
 
     @staticmethod
     def _semantic_blocks_context(blocks: list[dict[str, Any]], *, max_chars: int = 6000) -> str:
-        parts: list[str] = []
-        total = 0
-        for index, block in enumerate(blocks, start=1):
-            text = str(block.get("text") or "").strip()
-            if not text:
-                continue
-            heading = str(block.get("summary") or block.get("primary_subject") or f"Semantic block {index}").strip()
-            subject = str(block.get("primary_subject") or "-").strip() or "-"
-            space = str(block.get("primary_space") or ", ".join(block.get("space_values") or []) or "-").strip() or "-"
-            time = str(block.get("primary_time") or ", ".join(block.get("time_values") or []) or "-").strip() or "-"
-            source_id = str(block.get("source_id") or "-").strip() or "-"
-            block_id = str(block.get("id") or "-").strip() or "-"
-            part = (
-                f"[Tudásblokk {index}: {heading}]\n"
-                f"block_id={block_id}; source_id={source_id}; alany={subject}; hely={space}; idő={time}\n"
-                f"{text}"
-            )
-            if total + len(part) > max_chars:
-                break
-            parts.append(part)
-            total += len(part)
-        return "\n\n".join(parts)
+        return semantic_blocks_context(blocks, max_chars=max_chars)
 
     @staticmethod
     def _filter_relevant_semantic_blocks(
@@ -897,129 +640,24 @@ class KnowledgeFacade:
         score_floor: float = 0.25,
         relative_floor_ratio: float = 0.8,
     ) -> list[dict[str, Any]]:
-        if not blocks:
-            return []
-        ordered = sorted(
+        return filter_relevant_semantic_blocks(
             blocks,
-            key=lambda item: float(item.get("match_score") or 0.0),
-            reverse=True,
+            max_blocks=max_blocks,
+            score_floor=score_floor,
+            relative_floor_ratio=relative_floor_ratio,
         )
-        top_score = float(ordered[0].get("match_score") or 0.0)
-        dynamic_floor = max(score_floor, top_score * relative_floor_ratio)
-        selected: list[dict[str, Any]] = []
-        for block in ordered:
-            score = float(block.get("match_score") or 0.0)
-            if score < dynamic_floor and selected:
-                continue
-            selected.append(block)
-            if len(selected) >= max_blocks:
-                break
-        return selected[:max_blocks]
 
     @staticmethod
     def _retrieval_chunks_from_vector_hits(hits: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        chunks: list[dict[str, Any]] = []
-        for hit in hits:
-            payload = dict(hit.get("payload") or {})
-            if payload.get("point_type") != "retrieval_chunk":
-                continue
-            metadata = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}
-            profile_id = str(payload.get("profile_id") or metadata.get("profile_id") or "").strip()
-            if not profile_id:
-                continue
-            chunks.append(
-                {
-                    "retrieval_chunk_id": metadata.get("retrieval_chunk_id") or f"retrieval_chunk:{profile_id}",
-                    "profile_id": profile_id,
-                    "entity_name": payload.get("entity_name"),
-                    "entity_type": payload.get("entity_type"),
-                    "canonical_key": payload.get("canonical_key") or metadata.get("canonical_key"),
-                    "retrieval_chunk_text": payload.get("text") or metadata.get("retrieval_chunk_text"),
-                    "structured_facts": metadata.get("structured_facts") or {},
-                    "evidence_ids": list(metadata.get("evidence_ids") or []),
-                    "source_ids": list(metadata.get("source_ids") or []),
-                    "conflicting": bool(metadata.get("conflicting")),
-                    "temporal_context_included": bool(metadata.get("temporal_context_included")),
-                    "vector_score": hit.get("fusion_score") or hit.get("score"),
-                }
-            )
-        return chunks
+        return retrieval_chunks_from_vector_hits(hits)
 
     @staticmethod
     def _semantic_blocks_from_vector_hits(hits: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        blocks: list[dict[str, Any]] = []
-        seen: set[str] = set()
-        for hit in hits:
-            payload = dict(hit.get("payload") or {})
-            if payload.get("point_type") != "semantic_block":
-                continue
-            metadata = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}
-            block_id = str(payload.get("block_id") or metadata.get("block_id") or "").strip()
-            if not block_id or block_id in seen:
-                continue
-            seen.add(block_id)
-            block = {
-                "id": block_id,
-                "corpus_uuid": metadata.get("corpus_uuid"),
-                "source_id": payload.get("source_id") or metadata.get("source_id"),
-                "document_id": payload.get("document_id") or metadata.get("document_id"),
-                "paragraph_ids": list(metadata.get("paragraph_ids") or []),
-                "sentence_ids": list(payload.get("sentence_ids") or metadata.get("sentence_ids") or []),
-                "claim_ids": list(payload.get("claim_ids") or metadata.get("claim_ids") or []),
-                "order_start": metadata.get("order_start") or 0,
-                "order_end": metadata.get("order_end") or 0,
-                "primary_subject": payload.get("subject") or metadata.get("primary_subject") or "",
-                "subject_key": payload.get("subject_key") or metadata.get("subject_key") or "",
-                "primary_space": payload.get("space") or metadata.get("primary_space") or "",
-                "space_key": payload.get("space_key") or metadata.get("space_key") or "",
-                "primary_time": payload.get("time") or metadata.get("primary_time") or "",
-                "time_key": payload.get("time_key") or metadata.get("time_key") or "",
-                "block_type": metadata.get("block_type") or "semantic_unit",
-                "text": metadata.get("text") or payload.get("raw_block_text") or payload.get("text") or "",
-                "summary": metadata.get("summary") or "",
-                "predicates": list(metadata.get("predicates") or []),
-                "entity_keys": list(payload.get("entity_keys") or metadata.get("entity_keys") or []),
-                "space_modes": list(payload.get("space_modes") or metadata.get("space_modes") or []),
-                "space_values": list(metadata.get("space_values") or []),
-                "time_modes": list(payload.get("time_modes") or metadata.get("time_modes") or []),
-                "time_values": list(metadata.get("time_values") or []),
-                "confidence": metadata.get("confidence") or 0.0,
-                "block_status": payload.get("block_status") or metadata.get("block_status") or "draft",
-                "source_reliability": payload.get("source_reliability") or metadata.get("source_reliability") or 0.0,
-                "retrieval_weight": payload.get("retrieval_weight") or metadata.get("retrieval_weight") or 1.0,
-                "conflict_count": payload.get("conflict_count") or metadata.get("conflict_count") or 0,
-                "conflicts": list(metadata.get("conflicts") or []),
-                "builder_version": metadata.get("builder_version") or "",
-                "metadata": dict(metadata.get("metadata") or {}),
-                "match_score": round(float(hit.get("fusion_score") or hit.get("score") or 0.0), 4),
-                "match_reason": {
-                    "vector_hit": True,
-                    "semantic_score": hit.get("semantic_score"),
-                    "lexical_score": hit.get("lexical_score"),
-                    "fusion_score": hit.get("fusion_score"),
-                    "quality_score": payload.get("quality_score_explanation") or {},
-                    "point_type": "semantic_block",
-                },
-            }
-            blocks.append(block)
-        return blocks
+        return semantic_blocks_from_vector_hits(hits)
 
     @staticmethod
     def _order_chunks_by_vector_hits(retrieval_chunks: list[dict[str, Any]], hits: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        vector_profile_ids = [
-            str((hit.get("payload") or {}).get("profile_id") or "").strip()
-            for hit in hits
-            if (hit.get("payload") or {}).get("point_type") == "retrieval_chunk"
-        ]
-        vector_profile_ids = [item for item in vector_profile_ids if item]
-        if not vector_profile_ids:
-            return retrieval_chunks
-        rank = {profile_id: index for index, profile_id in enumerate(vector_profile_ids)}
-        matched = [chunk for chunk in retrieval_chunks if str(chunk.get("profile_id") or "") in rank]
-        if not matched:
-            return KnowledgeFacade._retrieval_chunks_from_vector_hits(hits) or retrieval_chunks
-        remainder = [chunk for chunk in retrieval_chunks if str(chunk.get("profile_id") or "") not in rank]
-        return sorted(matched, key=lambda chunk: rank.get(str(chunk.get("profile_id") or ""), 9999)) + remainder
+        return order_chunks_by_vector_hits(retrieval_chunks, hits)
 
     @staticmethod
     def _compute_progress_percent(processed_parts: int | None, total_parts: int | None) -> int | None:
@@ -1329,6 +967,15 @@ class KnowledgeFacade:
     def _sha256_text(content: str) -> str:
         return hashlib.sha256(content.encode("utf-8")).hexdigest()
 
+    @staticmethod
+    def _ingest_pipeline_version() -> str:
+        return "source_parser.v1"
+
+    @classmethod
+    def _ingest_idempotency_key(cls, *, corpus_uuid: str, content_hash: str, pipeline_version: str | None = None) -> str:
+        version = pipeline_version or cls._ingest_pipeline_version()
+        return f"{corpus_uuid}:{version}:{content_hash}"
+
     def _record_ingest_event(
         self,
         *,
@@ -1340,28 +987,15 @@ class KnowledgeFacade:
         created_by: int | None = None,
         **details: Any,
     ) -> IngestEvent:
-        event = IngestEvent(
-            ingest_run_id=run_id,
-            ingest_item_id=item_id,
+        return self._knowledge_audit_service.record_ingest_event(
+            run_id=run_id,
             event_type=event_type,
             status=status,
+            item_id=item_id,
             message=message,
             created_by=created_by,
-            details=details,
+            **details,
         )
-        created = self._ingest_event_store.create(event)
-        log_structured_event(
-            "apps.knowledge.ingest",
-            event_type,
-            level=logging.INFO if status not in {"failed", "error"} else logging.ERROR,
-            event_type=event_type,
-            status=status,
-            ingest_run_id=run_id,
-            ingest_item_id=item_id,
-            details=details,
-            message=message,
-        )
-        return created
 
     @staticmethod
     def _normalize_parser_text(value: str | None) -> str:
@@ -2451,8 +2085,8 @@ class KnowledgeFacade:
 
     @staticmethod
     def _claim_extractor_version() -> str:
-        version = str(getattr(settings, "CLAIM_EXTRACTOR_VERSION", "legacy") or "legacy").strip().lower()
-        return version if version in {"legacy", "v1"} else "legacy"
+        version = str(getattr(settings, "CLAIM_EXTRACTOR_VERSION", "v1") or "v1").strip().lower()
+        return "v1" if version != "v1" else version
 
     @staticmethod
     def _resolve_sentence_language(
@@ -2585,29 +2219,8 @@ class KnowledgeFacade:
         document: Document | None = None,
         defer_space_time: bool = False,
     ) -> tuple[SentenceInterpretation, list[Claim], list[SpaceTimeFrame]]:
-        legacy_interpretation, legacy_claims = self._build_claim_for_sentence(sentence, mentions)
+        baseline_interpretation, _baseline_claims = self._build_claim_for_sentence(sentence, mentions)
         language = self._resolve_sentence_language(sentence, source=source, document=document)
-        version = self._claim_extractor_version()
-        if version != "v1":
-            logger.debug(
-                "[CLAIM PIPELINE]\nsentence_id=%s\nmention_count=%s\nclaim_count=%s",
-                sentence.id,
-                len(mentions),
-                len(legacy_claims),
-            )
-            return (
-                replace(
-                    legacy_interpretation,
-                    metadata={
-                        **legacy_interpretation.metadata,
-                        "claim_extractor_version": "legacy",
-                        "language": language,
-                    },
-                ),
-                legacy_claims,
-                [],
-            )
-
         claims, claim_quality = run_v1_sentence_claim_pipeline(
             sentence=sentence,
             mentions=mentions,
@@ -2649,9 +2262,9 @@ class KnowledgeFacade:
             )
             return (
                 replace(
-                    legacy_interpretation,
+                    baseline_interpretation,
                     metadata={
-                        **legacy_interpretation.metadata,
+                        **baseline_interpretation.metadata,
                         "claim_extractor_version": "v1",
                         "space_time_frame_status": "empty",
                         "language": language,
@@ -2665,12 +2278,12 @@ class KnowledgeFacade:
         if defer_space_time:
             primary_claim = claims[0]
             interpretation = replace(
-                legacy_interpretation,
-                claim_summary=primary_claim.claim_text or legacy_interpretation.claim_summary,
+                baseline_interpretation,
+                claim_summary=primary_claim.claim_text or baseline_interpretation.claim_summary,
                 claim_type=primary_claim.claim_type,
-                confidence=max(float(legacy_interpretation.confidence or 0.0), float(primary_claim.confidence or 0.0)),
+                confidence=max(float(baseline_interpretation.confidence or 0.0), float(primary_claim.confidence or 0.0)),
                 metadata={
-                    **legacy_interpretation.metadata,
+                    **baseline_interpretation.metadata,
                     "claim_extractor_version": "v1",
                     "space_time_frame_status": "pending",
                     "language": language,
@@ -2688,12 +2301,12 @@ class KnowledgeFacade:
         )
         primary_claim = claims[0]
         interpretation = replace(
-            legacy_interpretation,
-            claim_summary=primary_claim.claim_text or legacy_interpretation.claim_summary,
+            baseline_interpretation,
+            claim_summary=primary_claim.claim_text or baseline_interpretation.claim_summary,
             claim_type=primary_claim.claim_type,
-            confidence=max(float(legacy_interpretation.confidence or 0.0), float(primary_claim.confidence or 0.0)),
+            confidence=max(float(baseline_interpretation.confidence or 0.0), float(primary_claim.confidence or 0.0)),
             metadata={
-                **legacy_interpretation.metadata,
+                **baseline_interpretation.metadata,
                 "claim_extractor_version": "v1",
                 "space_time_frame_status": "created" if space_time_frames else "empty",
                 "space_time_frame_ids": [item.frame_id for item in space_time_frames],
@@ -3611,6 +3224,7 @@ class KnowledgeFacade:
                 metadata={"source_type": source.source_type, "extraction_engine": "manual_text_v1"},
             )
         if source.source_type == "file":
+            parse_started = time.perf_counter()
             bucket_name = str(source.metadata.get("bucket_name") or "")
             object_key = str(source.metadata.get("object_key") or "")
             filename = str(source.file_ref or source.title or "upload.txt")
@@ -3643,7 +3257,13 @@ class KnowledgeFacade:
                         "processed_bytes": loaded_size_bytes,
                     },
                 )
-            extracted = extract_document_from_upload(filename, stored.body)
+            try:
+                extracted = extract_document_from_upload(filename, stored.body)
+            except Exception:
+                increment_platform_metric("file_parse_failures_total", 1.0, tags={"source_type": "file"})
+                raise
+            finally:
+                observe_platform_metric("file_parse_duration_seconds", time.perf_counter() - parse_started, unit="seconds", tags={"source_type": "file"})
             normalized_text = self._normalize_parser_text(extracted.text_content)
             normalized_paragraphs = [
                 replace(paragraph, text=self._normalize_parser_text(paragraph.text))
@@ -3676,18 +3296,7 @@ class KnowledgeFacade:
             url = str(source.metadata.get("origin_url") or "")
             if not url:
                 raise ValueError("A hivatkozás forráshoz hiányzik az URL.")
-            response = requests.get(url, timeout=20)
-            response.raise_for_status()
-            html = unescape(response.text or "")
-            text = re.sub(r"<script[\s\S]*?</script>", " ", html, flags=re.IGNORECASE)
-            text = re.sub(r"<style[\s\S]*?</style>", " ", text, flags=re.IGNORECASE)
-            text = re.sub(r"<[^>]+>", " ", text)
-            normalized = self._normalize_parser_text(text)
-            return ExtractedDocument(
-                text_content=normalized,
-                paragraphs=[ExtractedParagraph(text=normalized)] if normalized else [],
-                metadata={"source_type": source.source_type, "origin_url": url, "extraction_engine": "html_strip_v1"},
-            )
+            return self._url_fetch_service.fetch_document(url, timeout=20)
         fallback_text = self._normalize_parser_text(source.raw_content)
         return ExtractedDocument(
             text_content=fallback_text,
@@ -3748,46 +3357,7 @@ class KnowledgeFacade:
         return bool(source_id) and self._is_stale_parser_processing(source_id, updated_at=item.updated_at)
 
     def _refresh_ingest_run(self, run_id: str) -> IngestRun:
-        run = self._ingest_run_store.get(run_id)
-        if run is None:
-            raise ValueError(f"Ingest run not found: {run_id}")
-        items = self._ingest_item_store.list_for_run(run_id)
-        queued = sum(1 for item in items if item.status in {"received", "validated", "queued"})
-        processing = sum(1 for item in items if item.status == "processing")
-        completed = sum(1 for item in items if item.status == "completed")
-        failed = sum(1 for item in items if item.status == "failed")
-        duplicate = sum(1 for item in items if item.status == "duplicate")
-        rejected = sum(1 for item in items if item.status == "rejected")
-        if processing:
-            status = "processing"
-        elif failed and (completed or duplicate):
-            status = "partial_success"
-        elif failed:
-            status = "failed"
-        elif queued:
-            status = "queued"
-        else:
-            status = "completed"
-        summary_run = replace(run, status=status)  # type: ignore[arg-type]
-        refreshed = replace(
-            run,
-            status=status,  # type: ignore[arg-type]
-            batch_size=len(items),
-            queued_count=queued,
-            processing_count=processing,
-            completed_count=completed,
-            failed_count=failed,
-            duplicate_count=duplicate,
-            rejected_count=rejected,
-            updated_at=_utcnow(),
-            completed_at=_utcnow() if status in {"completed", "partial_success", "failed"} and not queued and not processing else None,
-            metadata={
-                **dict(run.metadata or {}),
-                "progress_summary": self._build_run_progress_summary(summary_run, items),
-                "quality_diagnostics": _aggregate_ingest_item_quality(items),
-            },
-        )
-        return self._ingest_run_store.update(refreshed)
+        return self._ingest_runs().recalculate_progress(run_id)
 
     def _require_corpus(self, corpus_uuid: str) -> Corpus:
         raw = self._corpus_store.get_by_uuid(corpus_uuid)
@@ -3798,20 +3368,6 @@ class KnowledgeFacade:
     def _ensure_title(self, value: str | None, *, fallback: str) -> str:
         normalized = str(value or "").strip()
         return (normalized or fallback)[:200]
-
-    def _build_storage_key(self, *, tenant: str, run_id: str, item_id: str, filename: str) -> str:
-        tenant_slug = (tenant or "default").strip() or "default"
-        safe_filename = (filename or "upload.bin").strip().replace("/", "_")
-        return self._object_storage.build_key(
-            "tenants",
-            tenant_slug,
-            "knowledge",
-            "ingest",
-            run_id,
-            item_id,
-            "raw",
-            safe_filename,
-        )
 
     def _create_source_from_ingest_item(
         self,
@@ -3891,15 +3447,10 @@ class KnowledgeFacade:
         raise ValueError(f"Unsupported source type for ingest input: {ingest_input.input_type}")
 
     def list_all(self, current_user_id: int | None = None, current_user: User | None = None) -> list[Corpus]:
-        if current_user_id is None:
-            return []
-        if has_permission(current_user, "knowledge.write"):
-            all_kbs = [self._to_corpus(item) for item in self._corpus_store.list_all(include_deleted=True)]
-            return all_kbs
-        all_kbs = [self._to_corpus(item) for item in self._corpus_store.list_all()]
-        permission = "train" if has_permission(current_user, "knowledge.permissions.manage") else "use"
-        allowed_ids = set(self._corpus_store.get_kb_ids_with_permission(current_user_id, permission))
-        return [kb for kb in all_kbs if kb.id is not None and kb.id in allowed_ids]
+        return self._knowledge_permission_service.list_all(
+            current_user_id=current_user_id,
+            current_user=current_user,
+        )
 
     def list_all_unfiltered(self) -> list[Corpus]:
         return [self._to_corpus(item) for item in self._corpus_store.list_all()]
@@ -3992,9 +3543,7 @@ class KnowledgeFacade:
         return self._pii_mapping_store.resolve_tokens(corpus_uuid=corpus_uuid, tokens=tokens)
 
     def get_trainable_kb_ids(self, user_id: int, user: User | None) -> set[int]:
-        if has_permission(user, "knowledge.write"):
-            return {item.id for item in self.list_all_unfiltered() if item.id is not None}
-        return set(self._corpus_store.get_kb_ids_with_permission(user_id, "train"))
+        return self._knowledge_permission_service.get_trainable_kb_ids(user_id, user)
 
     def create(
         self,
@@ -4191,38 +3740,10 @@ class KnowledgeFacade:
         return result
 
     def get_permissions_with_users(self, kb_uuid: str) -> list[dict[str, Any]]:
-        perm_list = self._corpus_store.list_permissions(kb_uuid)
-        perm_by_user = {uid: perm for uid, perm in perm_list}
-        return [
-            {
-                "user_id": user.id,
-                "email": getattr(user, "email", "") or "",
-                "name": getattr(user, "name", None),
-                "permission": perm_by_user.get(user.id, "none"),
-                "role": getattr(user, "role", "user"),
-            }
-            for user in self._user_repo_list_all()
-            if getattr(user, "id", None) is not None
-        ]
+        return self._knowledge_permission_service.get_permissions_with_users(kb_uuid)
 
     def get_permissions_with_users_batch(self, kb_uuids: list[str]) -> dict[str, list[dict[str, Any]]]:
-        users = self._user_repo_list_all()
-        perms_by_kb = self._corpus_store.list_permissions_batch(kb_uuids)
-        result: dict[str, list[dict[str, Any]]] = {}
-        for kb_uuid in kb_uuids:
-            perm_by_user = {uid: perm for uid, perm in (perms_by_kb.get(kb_uuid) or [])}
-            result[kb_uuid] = [
-                {
-                    "user_id": user.id,
-                    "email": getattr(user, "email", "") or "",
-                    "name": getattr(user, "name", None),
-                    "permission": perm_by_user.get(user.id, "none"),
-                    "role": getattr(user, "role", "user"),
-                }
-                for user in users
-                if getattr(user, "id", None) is not None
-            ]
-        return result
+        return self._knowledge_permission_service.get_permissions_with_users_batch(kb_uuids)
 
     def set_permissions(
         self,
@@ -4230,31 +3751,23 @@ class KnowledgeFacade:
         permissions: list[tuple[int, str]],
         current_user_id: int | None = None,
     ) -> None:
-        if current_user_id is not None:
-            existing = self._corpus_store.list_permissions(kb_uuid)
-            existing_self = next((perm for uid, perm in existing if uid == current_user_id), "train")
-            filtered = [(uid, perm) for uid, perm in permissions if uid != current_user_id and perm and perm != "none"]
-            filtered.append((current_user_id, existing_self or "train"))
-            self._corpus_store.set_permissions(kb_uuid, filtered, actor_user_id=current_user_id)
-            return
-        filtered = [(uid, perm) for uid, perm in permissions if perm and perm != "none"]
-        self._corpus_store.set_permissions(kb_uuid, filtered, actor_user_id=0)
+        self._knowledge_permission_service.set_permissions(
+            kb_uuid,
+            permissions,
+            current_user_id=current_user_id,
+        )
 
     def user_can_use(self, kb_uuid: str, user_id: int, user: User | None) -> bool:
-        if has_permission(user, "knowledge.write"):
-            return True
-        kb = self._corpus_store.get_by_uuid(kb_uuid)
-        if not kb or getattr(kb, "id", None) is None:
-            return False
-        return getattr(kb, "id") in self._corpus_store.get_kb_ids_with_permission(user_id, "use")
+        return self._knowledge_permission_service.user_can_use(kb_uuid, user_id, user)
 
     def user_can_train(self, kb_uuid: str, user_id: int, user: User | None) -> bool:
-        if has_permission(user, "knowledge.write"):
-            return True
-        kb = self._corpus_store.get_by_uuid(kb_uuid)
-        if not kb or getattr(kb, "id", None) is None:
-            return False
-        return getattr(kb, "id") in self._corpus_store.get_kb_ids_with_permission(user_id, "train")
+        return self._knowledge_permission_service.user_can_train(kb_uuid, user_id, user)
+
+    def can_train_knowledge_base(self, user: User | None, kb: Corpus | None) -> bool:
+        return self._knowledge_permission_service.can_train_knowledge_base(user, kb)
+
+    def can_view_knowledge_metrics(self, user: User | None) -> bool:
+        return self._knowledge_permission_service.can_view_knowledge_metrics(user)
 
     def create_source(
         self,
@@ -4443,333 +3956,11 @@ class KnowledgeFacade:
         created_by: int | None = None,
         progress_callback: Callable[[str, dict[str, Any]], None] | None = None,
     ) -> ParserRun:
-        source = self._source_store.get(source_id)
-        if source is None:
-            raise ValueError("Source not found")
-
-        existing_document = self._document_store.get_for_source(source_id)
-        if existing_document is not None:
-            existing_run = self._parser_run_store.get_for_source(source_id)
-            if existing_run is not None and existing_run.status == "completed":
-                return existing_run
-            logger.warning(
-                "knowledge.parse_source.reset_incomplete_state",
-                extra={
-                    "source_id": source_id,
-                    "existing_document_id": existing_document.id,
-                    "existing_run_id": existing_run.id if existing_run is not None else None,
-                    "existing_run_status": existing_run.status if existing_run is not None else None,
-                },
-            )
-            self._delete_source_parse_outputs(source_id)
-
-        parser_run = self._parser_run_store.create(
-            ParserRun(
-                tenant=source.tenant,
-                corpus_uuid=source.corpus_uuid,
-                source_id=source.id,
-                status="processing",
-                parser_type="basic_text_v1",
-                created_by=created_by,
-                started_at=_utcnow(),
-                metadata={"source_type": source.source_type},
-            )
+        return self._parser_orchestrator.parse_source(
+            source_id,
+            created_by=created_by,
+            progress_callback=progress_callback,
         )
-        if progress_callback is not None:
-            progress_callback("parser_started", {"parser_run_id": parser_run.id})
-
-        try:
-            extracted_document = self._extract_parser_document_from_source(
-                source,
-                progress_callback=progress_callback,
-            )
-            raw_text = extracted_document.text_content
-            if not raw_text:
-                raise ValueError(self._describe_empty_extraction(extracted_document.metadata))
-
-            document = self._document_store.create(
-                Document(
-                    tenant=source.tenant,
-                    corpus_uuid=source.corpus_uuid,
-                    source_id=source.id,
-                    parser_run_id=parser_run.id,
-                    title=source.title,
-                    language="hu",
-                    text_content=raw_text,
-                    char_count=len(raw_text),
-                    status="ready",
-                    metadata={
-                        "source_type": source.source_type,
-                        **dict(extracted_document.metadata or {}),
-                    },
-                )
-            )
-
-            paragraph_blocks = [
-                paragraph
-                for paragraph in extracted_document.paragraphs
-                if self._normalize_parser_text(paragraph.text)
-            ]
-            if not paragraph_blocks:
-                paragraph_texts = self._split_paragraphs(raw_text)
-                if not paragraph_texts:
-                    paragraph_texts = [raw_text]
-                paragraph_blocks = [ExtractedParagraph(text=paragraph_text) for paragraph_text in paragraph_texts]
-
-            paragraphs: list[Paragraph] = []
-            sentences: list[Sentence] = []
-            cursor = 0
-            sentence_index = 1
-            current_header_text: str | None = None
-            current_header_paragraph_id: str | None = None
-            current_header_sentence_id: str | None = None
-            total_blocks = len(paragraph_blocks)
-            claim_refinement_state = {
-                "budget_blocks": self._build_claim_refinement_budget(total_blocks),
-                "attempted_blocks": 0,
-                "hit_blocks": 0,
-                "early_stop_after_blocks": self._CLAIM_FINE_SPLIT_EARLY_STOP_AFTER_BLOCKS,
-                "min_hit_blocks_to_continue": self._CLAIM_FINE_SPLIT_MIN_HIT_BLOCKS_TO_CONTINUE,
-            }
-            parser_block_stats = {
-                "total_blocks": total_blocks,
-                "blocks_started": 0,
-                "blocks_completed": 0,
-                "fine_split_budget_blocks": int(claim_refinement_state["budget_blocks"]),
-                "fine_split_run_blocks": 0,
-                "fine_split_not_run_blocks": 0,
-                "fine_split_hit_blocks": 0,
-            }
-            for paragraph_index, paragraph_block in enumerate(paragraph_blocks, start=1):
-                paragraph_text = self._normalize_parser_text(paragraph_block.text)
-                start = raw_text.find(paragraph_text, cursor)
-                if start < 0:
-                    start = cursor
-                end = start + len(paragraph_text)
-                paragraph = Paragraph(
-                    tenant=source.tenant,
-                    corpus_uuid=source.corpus_uuid,
-                    source_id=source.id,
-                    document_id=document.id,
-                    order_index=paragraph_index,
-                    text_content=paragraph_text,
-                    char_start=start,
-                    char_end=end,
-                    sentence_count=0,
-                    metadata={
-                        "block_type": paragraph_block.block_type,
-                        "header_context_text": current_header_text if paragraph_block.block_type != "heading" else None,
-                        "header_context_paragraph_id": current_header_paragraph_id if paragraph_block.block_type != "heading" else None,
-                        "header_context_sentence_id": current_header_sentence_id if paragraph_block.block_type != "heading" else None,
-                        "page_number": paragraph_block.page_number,
-                        "bbox": list(paragraph_block.bbox) if paragraph_block.bbox else None,
-                        "font_size": paragraph_block.font_size,
-                        "is_bold": paragraph_block.is_bold,
-                        **dict(paragraph_block.metadata or {}),
-                    },
-                )
-                parser_block_stats["blocks_started"] += 1
-                if progress_callback is not None:
-                    progress_callback(
-                        "parser_block_started",
-                        {
-                            "parser_run_id": parser_run.id,
-                            "document_id": document.id,
-                            "block_id": paragraph.id,
-                            "block_index": paragraph_index,
-                            "total_blocks": total_blocks,
-                            "block_type": paragraph_block.block_type,
-                            "char_start": start,
-                            "char_end": end,
-                            "text_preview": paragraph_text[:160],
-                            "current_step": "sentence_split",
-                            **parser_block_stats,
-                        },
-                    )
-                sentence_units, block_diagnostics = self._build_sentence_units_for_paragraph_with_diagnostics(
-                    paragraph_text,
-                    block_type=paragraph_block.block_type,
-                    paragraph_metadata=paragraph.metadata,
-                    refinement_state=claim_refinement_state,
-                )
-                if block_diagnostics["claim_refinement_attempts"] > 0:
-                    parser_block_stats["fine_split_run_blocks"] += 1
-                else:
-                    parser_block_stats["fine_split_not_run_blocks"] += 1
-                if block_diagnostics["claim_refinement_hits"] > 0:
-                    parser_block_stats["fine_split_hit_blocks"] += 1
-                if progress_callback is not None:
-                    progress_callback(
-                        "parser_block_units_ready",
-                        {
-                            "parser_run_id": parser_run.id,
-                            "document_id": document.id,
-                            "block_id": paragraph.id,
-                            "block_index": paragraph_index,
-                            "total_blocks": total_blocks,
-                            "block_type": paragraph_block.block_type,
-                            "sentence_unit_count": len(sentence_units),
-                            "current_step": "sentence_units_ready",
-                            **dict(block_diagnostics),
-                            **parser_block_stats,
-                        },
-                    )
-                paragraph = replace(paragraph, sentence_count=len(sentence_units))
-                paragraphs.append(paragraph)
-
-                paragraph_cursor = start
-                block_sentence_count = 0
-                for sentence_unit in sentence_units:
-                    sentence_text = str(sentence_unit.get("text") or "").strip()
-                    if not sentence_text:
-                        continue
-                    if "char_start_offset" in sentence_unit and "char_end_offset" in sentence_unit:
-                        sentence_start = start + int(sentence_unit["char_start_offset"])
-                        sentence_end = start + int(sentence_unit["char_end_offset"])
-                    else:
-                        sentence_start = raw_text.find(sentence_text, paragraph_cursor, end + 1)
-                        if sentence_start < 0:
-                            sentence_start = paragraph_cursor
-                        sentence_end = sentence_start + len(sentence_text)
-                    sentence_metadata = {
-                        "paragraph_order": paragraph_index,
-                        "block_type": paragraph_block.block_type,
-                        "page_number": paragraph_block.page_number,
-                        **dict(sentence_unit.get("metadata") or {}),
-                    }
-                    if paragraph_block.block_type != "heading" and current_header_text:
-                        sentence_metadata.update(
-                            {
-                                "header_context_text": current_header_text,
-                                "header_context_paragraph_id": current_header_paragraph_id,
-                                "header_context_sentence_id": current_header_sentence_id,
-                            }
-                        )
-                    sentence = Sentence(
-                        tenant=source.tenant,
-                        corpus_uuid=source.corpus_uuid,
-                        source_id=source.id,
-                        document_id=document.id,
-                        paragraph_id=paragraph.id,
-                        order_index=sentence_index,
-                        text_content=sentence_text,
-                        char_start=sentence_start,
-                        char_end=sentence_end,
-                        token_count=len([token for token in sentence_text.split() if token]),
-                        metadata={
-                            **sentence_metadata,
-                            "language": detect_language(
-                                sentence_text,
-                                preferred_language=document.language or source.metadata.get("language") if isinstance(source.metadata, dict) else None,
-                            ),
-                        },
-                    )
-                    sentences.append(sentence)
-                    if paragraph_block.block_type == "heading":
-                        current_header_text = sentence_text
-                        current_header_paragraph_id = paragraph.id
-                        current_header_sentence_id = sentence.id
-                    paragraph_cursor = sentence_end
-                    sentence_index += 1
-                    block_sentence_count += 1
-                cursor = end
-                parser_block_stats["blocks_completed"] += 1
-                if progress_callback is not None:
-                    progress_callback(
-                        "parser_block_completed",
-                        {
-                            "parser_run_id": parser_run.id,
-                            "document_id": document.id,
-                            "block_id": paragraph.id,
-                            "block_index": paragraph_index,
-                            "total_blocks": total_blocks,
-                            "block_type": paragraph_block.block_type,
-                            "sentence_count": block_sentence_count,
-                            "current_step": "sentence_records_built",
-                            **dict(block_diagnostics),
-                            **parser_block_stats,
-                        },
-                    )
-
-            self._paragraph_store.create_many(paragraphs)
-            created_sentences = self._sentence_store.create_many(sentences)
-            if progress_callback is not None:
-                progress_callback(
-                    "parser_completed",
-                    {
-                        "parser_run_id": parser_run.id,
-                        "document_id": document.id,
-                        "char_count": document.char_count,
-                        "paragraph_count": len(paragraphs),
-                        "sentence_count": len(created_sentences),
-                        **parser_block_stats,
-                    },
-                )
-            interpretation_run = self._interpret_document(
-                source=source,
-                document=document,
-                sentences=created_sentences,
-                created_by=created_by,
-                progress_callback=progress_callback,
-            )
-            self._source_store.update(replace(source, status="ingested", metadata={**source.metadata, "parser_status": "completed"}))
-            finished_run = self._parser_run_store.update(
-                replace(
-                    parser_run,
-                    status="completed",
-                    parser_type=str(extracted_document.metadata.get("extraction_engine") or parser_run.parser_type),
-                    language="hu",
-                    completed_at=_utcnow(),
-                    updated_at=_utcnow(),
-                    metadata={
-                        **parser_run.metadata,
-                        "document_id": document.id,
-                        "paragraph_count": len(paragraphs),
-                        "sentence_count": len(created_sentences),
-                        "interpretation_run_id": interpretation_run.id if interpretation_run is not None else None,
-                        "parser_type": str(extracted_document.metadata.get("extraction_engine") or parser_run.parser_type),
-                    },
-                )
-            )
-            self._log_step(
-                "parser.source.completed",
-                status="ok",
-                tenant=source.tenant,
-                corpus_uuid=source.corpus_uuid,
-                source_id=source.id,
-                document_id=document.id,
-                paragraph_count=len(paragraphs),
-                sentence_count=len(created_sentences),
-            )
-            return finished_run
-        except Exception as exc:
-            failed_run = self._parser_run_store.update(
-                replace(
-                    parser_run,
-                    status="failed",
-                    error_message=self._truncate_error_message(
-                        exc,
-                        max_length=self._PARSER_ERROR_MESSAGE_MAX,
-                    ),
-                    completed_at=_utcnow(),
-                    updated_at=_utcnow(),
-                )
-            )
-            self._source_store.update(replace(source, status="failed", metadata={**source.metadata, "parser_status": "failed"}))
-            if progress_callback is not None:
-                progress_callback(
-                    "parser_failed",
-                    {"parser_run_id": parser_run.id, "error_message": failed_run.error_message},
-                )
-            self._log_step(
-                "parser.source.failed",
-                status="error",
-                tenant=source.tenant,
-                corpus_uuid=source.corpus_uuid,
-                source_id=source.id,
-                error=str(exc),
-            )
-            return failed_run
 
     def create_text_ingest_run(
         self,
@@ -4784,18 +3975,14 @@ class KnowledgeFacade:
         payload = _normalize_text_payload(text)
         if not payload.strip():
             raise ValueError("Text input is required")
-        run = self._ingest_run_store.create(
-            IngestRun(
-                tenant=tenant,
-                corpus_uuid=corpus_uuid,
-                input_channel="text",
-                status="queued",
-                batch_size=1,
-                queued_count=1,
-                pipeline_route="source_parser",
-                created_by=created_by,
-                metadata={"input_types": ["text"]},
-            )
+        run = self._ingest_runs().create_run(
+            tenant=tenant,
+            corpus_uuid=corpus_uuid,
+            input_channel="text",
+            batch_size=1,
+            pipeline_route="source_parser",
+            created_by=created_by,
+            metadata={"input_types": ["text"]},
         )
         self._record_ingest_event(
             run_id=run.id,
@@ -4805,6 +3992,8 @@ class KnowledgeFacade:
             created_by=created_by,
             batch_size=1,
         )
+        pipeline_version = self._ingest_pipeline_version()
+        content_hash = self._sha256_text(payload)
         item = IngestItem(
             ingest_run_id=run.id,
             tenant=tenant,
@@ -4817,6 +4006,13 @@ class KnowledgeFacade:
             status="queued",
             progress_message="Várakozik a háttérfeldolgozásra.",
             pipeline_route="source_parser",
+            pipeline_version=pipeline_version,
+            content_hash=content_hash,
+            idempotency_key=self._ingest_idempotency_key(
+                corpus_uuid=corpus_uuid,
+                content_hash=content_hash,
+                pipeline_version=pipeline_version,
+            ),
             created_by=created_by,
             metadata={"char_count": len(payload), "text_preview": payload[:160], "text_encoding": "utf-8"},
         )
@@ -4853,19 +4049,16 @@ class KnowledgeFacade:
     ) -> IngestRun:
         self._require_corpus(corpus_uuid)
         if not files:
+            increment_platform_metric("file_upload_rejections_total", 1.0, tags={"reason": "empty_batch"})
             raise ValueError("At least one file is required")
-        run = self._ingest_run_store.create(
-            IngestRun(
-                tenant=tenant,
-                corpus_uuid=corpus_uuid,
-                input_channel="file",
-                status="queued",
-                batch_size=len(files),
-                queued_count=len(files),
-                pipeline_route="source_parser",
-                created_by=created_by,
-                metadata={"input_types": ["file"], "batch_size": len(files)},
-            )
+        run = self._ingest_runs().create_run(
+            tenant=tenant,
+            corpus_uuid=corpus_uuid,
+            input_channel="file",
+            batch_size=len(files),
+            pipeline_route="source_parser",
+            created_by=created_by,
+            metadata={"input_types": ["file"], "batch_size": len(files)},
         )
         self._record_ingest_event(
             run_id=run.id,
@@ -4878,17 +4071,27 @@ class KnowledgeFacade:
         try:
             items: list[IngestItem] = []
             inputs: list[IngestInput] = []
+            pipeline_version = self._ingest_pipeline_version()
+            seen_content_hashes: set[str] = set()
             for index, file_info in enumerate(files, start=1):
                 filename = str(file_info.get("filename") or f"upload-{index}.bin")
-                content = bytes(file_info.get("content") or b"")
-                if not content:
+                fileobj = file_info.get("fileobj")
+                content = bytes(file_info.get("content") or b"") if fileobj is None else b""
+                size_bytes = int(file_info.get("size_bytes") or 0)
+                if fileobj is None and not content:
+                    increment_platform_metric("file_upload_rejections_total", 1.0, tags={"reason": "empty_file"})
                     raise ValueError(f"Empty file input: {filename}")
-                size_bytes = len(content)
+                if fileobj is not None and size_bytes <= 0:
+                    increment_platform_metric("file_upload_rejections_total", 1.0, tags={"reason": "empty_file"})
+                    raise ValueError(f"Empty file input: {filename}")
                 estimated_char_count = int(
                     file_info.get("estimated_char_count")
                     or file_info.get("char_count")
                     or self._estimate_file_character_count_from_size(size_bytes)
                 )
+                checksum_sha256 = str(file_info.get("checksum_sha256") or "").strip()
+                if not checksum_sha256 and fileobj is None and content:
+                    checksum_sha256 = self._sha256_bytes(content)
                 item = IngestItem(
                     ingest_run_id=run.id,
                     tenant=tenant,
@@ -4901,6 +4104,17 @@ class KnowledgeFacade:
                     status="queued",
                     progress_message="Fájl rögzítve, háttérben feldolgozásra vár.",
                     pipeline_route="source_parser",
+                    pipeline_version=pipeline_version,
+                    content_hash=checksum_sha256 or None,
+                    idempotency_key=(
+                        self._ingest_idempotency_key(
+                            corpus_uuid=corpus_uuid,
+                            content_hash=checksum_sha256,
+                            pipeline_version=pipeline_version,
+                        )
+                        if checksum_sha256
+                        else None
+                    ),
                     created_by=created_by,
                     metadata={
                         "filename": filename,
@@ -4908,27 +4122,53 @@ class KnowledgeFacade:
                         "estimated_char_count": estimated_char_count,
                     },
                 )
-                object_key = self._build_storage_key(tenant=tenant, run_id=run.id, item_id=item.id, filename=filename)
-                stored = self._object_storage.put_bytes(
-                    key=object_key,
-                    content=content,
-                    content_type=str(file_info.get("mime_type") or "application/octet-stream"),
-                    metadata={"run_id": run.id, "item_id": item.id, "corpus_uuid": corpus_uuid},
-                )
+                try:
+                    stored_ref = self._source_storage_service.store_uploaded_source(
+                        tenant=tenant,
+                        corpus_uuid=corpus_uuid,
+                        run_id=run.id,
+                        item_id=item.id,
+                        filename=filename,
+                        mime_type=str(file_info.get("mime_type") or "application/octet-stream"),
+                        fileobj=fileobj,
+                        content=content,
+                        size_bytes=size_bytes,
+                        checksum_sha256=checksum_sha256,
+                        seen_content_hashes=seen_content_hashes,
+                    )
+                except ValueError as exc:
+                    if "Object storage adapter does not support streaming file uploads." in str(exc):
+                        increment_platform_metric("file_upload_rejections_total", 1.0, tags={"reason": "storage_adapter"})
+                    raise
+                checksum_sha256 = str(stored_ref.checksum_sha256 or checksum_sha256 or "").strip()
+                if checksum_sha256 and item.content_hash != checksum_sha256:
+                    item = replace(
+                        item,
+                        content_hash=checksum_sha256,
+                        idempotency_key=self._ingest_idempotency_key(
+                            corpus_uuid=corpus_uuid,
+                            content_hash=checksum_sha256,
+                            pipeline_version=pipeline_version,
+                        ),
+                    )
                 items.append(item)
                 inputs.append(
                     IngestInput(
                         ingest_item_id=item.id,
                         tenant=tenant,
                         input_type="file",
-                        storage_provider=stored.provider,
-                        bucket_name=stored.bucket,
-                        object_key=stored.key,
+                        storage_provider=stored_ref.storage_provider,
+                        bucket_name=stored_ref.bucket_name,
+                        object_key=stored_ref.object_key,
                         original_filename=filename,
-                        mime_type=str(file_info.get("mime_type") or stored.content_type or "application/octet-stream"),
-                        size_bytes=stored.size_bytes or size_bytes,
-                        checksum_sha256=self._sha256_bytes(content),
-                        metadata={"etag": stored.etag, "estimated_char_count": estimated_char_count},
+                        mime_type=stored_ref.mime_type,
+                        size_bytes=stored_ref.size_bytes or size_bytes,
+                        checksum_sha256=checksum_sha256,
+                        metadata={
+                            "etag": stored_ref.etag,
+                            "estimated_char_count": estimated_char_count,
+                            "source_metadata": stored_ref.source_metadata,
+                        },
                     )
                 )
             created_items = self._ingest_item_store.create_many(items)
@@ -4945,17 +4185,10 @@ class KnowledgeFacade:
                 )
             return self._refresh_ingest_run(run.id)
         except Exception as exc:
-            failed_run = self._ingest_run_store.update(
-                replace(
-                    run,
-                    status="failed",
-                    failed_count=len(files),
-                    queued_count=0,
-                    processing_count=0,
-                    updated_at=_utcnow(),
-                    completed_at=_utcnow(),
-                    metadata={**run.metadata, "error_message": str(exc)},
-                )
+            failed_run = self._ingest_runs().mark_run_failed(
+                run=run,
+                error_message=str(exc),
+                failed_count=len(files),
             )
             self._record_ingest_event(
                 run_id=run.id,
@@ -4984,18 +4217,14 @@ class KnowledgeFacade:
         normalized_urls = [item for item in urls if str(item.get("url") or "").strip()]
         if not normalized_urls:
             raise ValueError("At least one URL is required")
-        run = self._ingest_run_store.create(
-            IngestRun(
-                tenant=tenant,
-                corpus_uuid=corpus_uuid,
-                input_channel="url",
-                status="queued",
-                batch_size=len(normalized_urls),
-                queued_count=len(normalized_urls),
-                pipeline_route="source_parser",
-                created_by=created_by,
-                metadata={"input_types": ["url"], "batch_size": len(normalized_urls)},
-            )
+        run = self._ingest_runs().create_run(
+            tenant=tenant,
+            corpus_uuid=corpus_uuid,
+            input_channel="url",
+            batch_size=len(normalized_urls),
+            pipeline_route="source_parser",
+            created_by=created_by,
+            metadata={"input_types": ["url"], "batch_size": len(normalized_urls)},
         )
         self._record_ingest_event(
             run_id=run.id,
@@ -5007,9 +4236,11 @@ class KnowledgeFacade:
         )
         items: list[IngestItem] = []
         inputs: list[IngestInput] = []
+        pipeline_version = self._ingest_pipeline_version()
         for index, url_info in enumerate(normalized_urls, start=1):
-            url = str(url_info.get("url") or "").strip()
+            url = self._url_fetch_service.validate_target(str(url_info.get("url") or "").strip())
             display_name = str(url_info.get("title") or url)
+            content_hash = self._sha256_text(url)
             item = IngestItem(
                 ingest_run_id=run.id,
                 tenant=tenant,
@@ -5022,6 +4253,13 @@ class KnowledgeFacade:
                 status="queued",
                 progress_message="URL rögzítve, elérhetőség ellenőrzésre vár.",
                 pipeline_route="source_parser",
+                pipeline_version=pipeline_version,
+                content_hash=content_hash,
+                idempotency_key=self._ingest_idempotency_key(
+                    corpus_uuid=corpus_uuid,
+                    content_hash=content_hash,
+                    pipeline_version=pipeline_version,
+                ),
                 created_by=created_by,
                 metadata={"url": url},
             )
@@ -5287,6 +4525,15 @@ class KnowledgeFacade:
 
         self._parser_run_store.delete_for_source(source_id)
         self._source_store.delete(source_id)
+        log_structured_event(
+            "apps.knowledge.audit",
+            "knowledge_source_deleted",
+            level=logging.INFO,
+            knowledge_base_id=str(item.corpus_uuid or ""),
+            ingest_run_id=str(item.ingest_run_id or ""),
+            ingest_item_id=str(item.id or ""),
+            source_id=source_id,
+        )
 
     @staticmethod
     def _reset_reprocess_item_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
@@ -5334,6 +4581,12 @@ class KnowledgeFacade:
                 parser_job_id=None,
                 source_id=None,
                 content_hash=None,
+                idempotency_key=None,
+                lease_owner=None,
+                lease_expires_at=None,
+                heartbeat_at=None,
+                retry_count=0,
+                dead_letter_reason=None,
                 started_at=None,
                 completed_at=None,
                 updated_at=_utcnow(),
@@ -5360,16 +4613,11 @@ class KnowledgeFacade:
     ) -> bool:
         run_id = started_run.id
         if ingest_input is None:
-            failed_item = self._ingest_item_store.update(
-                replace(
-                    item,
-                    status="failed",
-                    error_code="missing_input",
-                    error_message="Nem található ingest input rekord.",
-                    progress_message="Hiányzó input rekord.",
-                    completed_at=_utcnow(),
-                    updated_at=_utcnow(),
-                )
+            failed_item = self._ingest_runs().mark_item_failed(
+                item,
+                error_code="missing_input",
+                error_message="Nem található ingest input rekord.",
+                progress_message="Hiányzó input rekord.",
             )
             failed_item = self._update_item_processing_summary(
                 failed_item,
@@ -5404,15 +4652,11 @@ class KnowledgeFacade:
             )
             return bool(started_run.continue_on_error)
 
-        current_item = self._ingest_item_store.update(
-            replace(
-                item,
-                status="processing",
-                progress_message="Validáció és route-előkészítés folyamatban.",
-                started_at=item.started_at or _utcnow(),
-                completed_at=None,
-                updated_at=_utcnow(),
-            )
+        current_item = self._ingest_runs().mark_item_processing(
+            item,
+            progress_message="Validáció és route-előkészítés folyamatban.",
+            lease_owner="outbox-worker",
+            lease_minutes=15,
         )
         current_item = self._update_item_processing_summary(
             current_item,
@@ -5460,9 +4704,7 @@ class KnowledgeFacade:
             elif ingest_input.input_type == "url":
                 if not ingest_input.origin_url:
                     raise ValueError("URL input is missing origin_url")
-                response = requests.head(ingest_input.origin_url, allow_redirects=True, timeout=15)
-                if response.status_code >= 400:
-                    raise ValueError(f"URL is not reachable ({response.status_code})")
+                response = self._url_fetch_service.request_head(ingest_input.origin_url, timeout=15)
                 content_hash = self._sha256_text(ingest_input.origin_url)
                 current_item = self._ingest_item_store.update(
                     replace(
@@ -5472,7 +4714,8 @@ class KnowledgeFacade:
                         metadata={
                             **current_item.metadata,
                             "url_status_code": response.status_code,
-                            "url_content_type": response.headers.get("content-type"),
+                            "url_content_type": response.content_type,
+                            "url_final_url": response.final_url,
                         },
                     )
                 )
@@ -5485,6 +4728,7 @@ class KnowledgeFacade:
                     corpus_uuid=current_item.corpus_uuid,
                     content_hash=content_hash,
                     exclude_item_id=current_item.id,
+                    pipeline_version=current_item.pipeline_version,
                 )
             if duplicate is not None:
                 finished_item = self._ingest_item_store.update(
@@ -5494,8 +4738,16 @@ class KnowledgeFacade:
                         content_hash=content_hash,
                         duplicate_of_item_id=duplicate.id,
                         duplicate_of_source_id=duplicate.source_id,
+                        idempotency_key=self._ingest_idempotency_key(
+                            corpus_uuid=current_item.corpus_uuid,
+                            content_hash=content_hash,
+                            pipeline_version=current_item.pipeline_version,
+                        ),
                         result_message="Duplikátumként jelölve.",
                         progress_message="Duplikált input, parser nem indul.",
+                        lease_owner=None,
+                        lease_expires_at=None,
+                        heartbeat_at=_utcnow(),
                         completed_at=_utcnow(),
                         updated_at=_utcnow(),
                     )
@@ -5551,6 +4803,11 @@ class KnowledgeFacade:
                         current_item,
                         status="processing",
                         content_hash=content_hash,
+                        idempotency_key=self._ingest_idempotency_key(
+                            corpus_uuid=current_item.corpus_uuid,
+                            content_hash=content_hash,
+                            pipeline_version=current_item.pipeline_version,
+                        ),
                         progress_message="Ingest lezárva, parserre vár.",
                         result_message="Sikeresen előkészítve a parser modulhoz.",
                         source_id=created_source.id,
@@ -6057,6 +5314,9 @@ class KnowledgeFacade:
                     replace(
                         finished_item,
                         status="completed",
+                        lease_owner=None,
+                        lease_expires_at=None,
+                        heartbeat_at=_utcnow(),
                         completed_at=_utcnow(),
                         updated_at=_utcnow(),
                     )
@@ -6084,16 +5344,11 @@ class KnowledgeFacade:
                 exc,
                 max_length=self._PARSER_ERROR_MESSAGE_MAX,
             )
-            failed_item = self._ingest_item_store.update(
-                replace(
-                    current_item,
-                    status="failed",
-                    error_code="processing_failed",
-                    error_message=safe_error_message,
-                    progress_message="Ingest feldolgozás közben hiba történt.",
-                    completed_at=_utcnow(),
-                    updated_at=_utcnow(),
-                )
+            failed_item = self._ingest_runs().mark_item_failed(
+                current_item,
+                error_code="processing_failed",
+                error_message=safe_error_message,
+                progress_message="Ingest feldolgozás közben hiba történt.",
             )
             failed_item = self._update_item_processing_summary(
                 failed_item,
@@ -6137,12 +5392,11 @@ class KnowledgeFacade:
             return bool(started_run.continue_on_error)
 
     def process_ingest_run(self, run_id: str, *, auto_refresh_semantic_index: bool = True) -> IngestRun:
+        run_started = time.perf_counter()
         run = self._ingest_run_store.get(run_id)
         if run is None:
             raise ValueError("Ingest run not found")
-        started_run = self._ingest_run_store.update(
-            replace(run, status="processing", started_at=run.started_at or _utcnow(), completed_at=None, updated_at=_utcnow())
-        )
+        started_run = self._ingest_runs().mark_run_processing(run)
         items = self._ingest_item_store.list_for_run(run_id)
         with observability_scope(ingest_run_id=run_id, corpus_uuid=started_run.corpus_uuid):
             for item in items:
@@ -6154,12 +5408,18 @@ class KnowledgeFacade:
                     ):
                         break
                 finally:
-                    started_run = self._refresh_ingest_run(run_id)
-        final_run = self._refresh_ingest_run(run_id)
+                    started_run = self._ingest_runs().recalculate_progress(run_id)
+        final_run = self._ingest_runs().mark_run_completed_if_ready(run_id)
         if auto_refresh_semantic_index:
             self._auto_refresh_semantic_block_index_after_ingest(final_run)
-        final_run = self._refresh_ingest_run(run_id)
+        final_run = self._ingest_runs().mark_run_completed_if_ready(run_id)
         self._log_ingest_trace_summary(run_id)
+        observe_platform_metric(
+            "ingest_job_duration_seconds",
+            time.perf_counter() - run_started,
+            unit="seconds",
+            tags={"status": str(final_run.status or "unknown")},
+        )
         return final_run
 
     def process_ingest_item(self, item_id: str) -> IngestRun:
@@ -6169,9 +5429,7 @@ class KnowledgeFacade:
         run = self._ingest_run_store.get(item.ingest_run_id)
         if run is None:
             raise ValueError("Ingest run not found")
-        started_run = self._ingest_run_store.update(
-            replace(run, status="processing", started_at=run.started_at or _utcnow(), completed_at=None, updated_at=_utcnow())
-        )
+        started_run = self._ingest_runs().mark_run_processing(run)
         with observability_scope(ingest_run_id=run.id, ingest_item_id=item.id, corpus_uuid=run.corpus_uuid):
             try:
                 self._process_single_ingest_item(
@@ -6181,10 +5439,10 @@ class KnowledgeFacade:
                     force_reprocess=True,
                 )
             finally:
-                self._refresh_ingest_run(run.id)
-        final_run = self._refresh_ingest_run(run.id)
+                self._ingest_runs().recalculate_progress(run.id)
+        final_run = self._ingest_runs().mark_run_completed_if_ready(run.id)
         self._auto_refresh_semantic_block_index_after_ingest(final_run)
-        final_run = self._refresh_ingest_run(run.id)
+        final_run = self._ingest_runs().mark_run_completed_if_ready(run.id)
         self._log_ingest_trace_summary(run.id)
         return final_run
 
@@ -6327,22 +5585,12 @@ class KnowledgeFacade:
         raise ValueError(f"Semantic block not found: {block_id}")
 
     def schedule_index_build(self, *, tenant: str, corpus_uuid: str, index_profile_key: str, created_by: int | None) -> IndexBuild:
-        profile = self._default_index_profile(index_profile_key)
-        corpus = self._corpus_store.get_by_uuid(corpus_uuid)
-        if not corpus:
-            raise ValueError("Corpus not found")
-        collection_name = f"{getattr(corpus, 'qdrant_collection_name')}__{profile.key}"
-        build = IndexBuild(
+        return self._index_build_service.schedule_index_build(
             tenant=tenant,
             corpus_uuid=corpus_uuid,
-            index_profile_key=profile.key,
-            collection_name=collection_name,
+            index_profile_key=index_profile_key,
             created_by=created_by,
-            metadata={"source_count": len(self._source_store.list_for_corpus(corpus_uuid))},
         )
-        self._metrics_store.increment("build_count", 1)
-        self._log_step("build.start", status="pending", tenant=tenant, build_id=build.id, corpus_uuid=corpus_uuid, profile=profile.key)
-        return self._index_build_store.create(build)
 
     def get_index_build(self, build_id: str) -> IndexBuild | None:
         return self._index_build_store.get(build_id)
@@ -6385,201 +5633,45 @@ class KnowledgeFacade:
         )
         return failed
 
-    def is_index_build_stale(self, build: IndexBuild) -> bool:
-        if build.status != "building":
-            return False
-        reference = build.started_at or build.created_at
-        if reference is None:
-            return False
-        return (_utcnow() - reference).total_seconds() >= self._STALE_INDEX_BUILD_FAIL_AFTER_SEC
-
-    def mark_index_build_failed_as_stale(self, build_id: str, *, reason: str) -> IndexBuild:
-        build = self._index_build_store.get(build_id)
-        if build is None:
-            raise ValueError("Index build not found")
-        if build.status != "building":
-            return build
-        metadata = dict(build.metadata or {})
-        metadata["stale_recovery_status"] = "failed"
-        metadata["stale_recovery_reason"] = reason
-        metadata["stale_recovery_at"] = _utcnow().isoformat()
-        failed = self._index_build_store.update(
+    def mark_ingest_run_enqueue_failed(self, run_id: str, *, reason: str) -> IngestRun:
+        run = self._ingest_run_store.get(run_id)
+        if run is None:
+            raise ValueError("Ingest run not found")
+        metadata = dict(run.metadata or {})
+        metadata["enqueue_status"] = "failed"
+        metadata["enqueue_error"] = reason
+        metadata["enqueue_failed_at"] = _utcnow().isoformat()
+        failed = self._ingest_run_store.update(
             replace(
-                build,
+                run,
                 status="failed",
-                error=reason,
+                queued_count=0,
+                processing_count=0,
+                failed_count=max(1, int(run.batch_size or 1)),
                 completed_at=_utcnow(),
+                updated_at=_utcnow(),
                 metadata=metadata,
             )
         )
-        self._metrics_store.increment("build_failed_count", 1)
-        self._log_step("build.stale_failed", status="error", tenant=failed.tenant, build_id=failed.id, error=reason)
+        self._record_ingest_event(
+            run_id=failed.id,
+            event_type="enqueue_failed",
+            status="failed",
+            message=reason,
+        )
         return failed
 
+    def is_index_build_stale(self, build: IndexBuild) -> bool:
+        return self._index_build_service.is_index_build_stale(build)
+
+    def mark_index_build_failed_as_stale(self, build_id: str, *, reason: str) -> IndexBuild:
+        return self._index_build_service.mark_index_build_failed_as_stale(build_id, reason=reason)
+
     async def run_index_build(self, build_id: str) -> IndexBuild:
-        build = self._index_build_store.get(build_id)
-        if build is None:
-            raise ValueError("Index build not found")
-        if build.status == "ready":
-            return build
-        if build.status == "building":
-            raise ValueError("Index build already in progress")
-        started = replace(build, status="building", started_at=_utcnow(), error=None)
-        self._index_build_store.update(started)
-        timer = time.perf_counter()
-        try:
-            sources = self._source_store.list_for_corpus(started.corpus_uuid)
-            vector_index = self._vector_index_factory()
-            profile = self._default_index_profile(started.index_profile_key)
-            vector_size = self._vector_size_for_profile(profile, vector_index)
-            started = self._index_build_store.update(
-                replace(
-                    started,
-                    metadata={
-                        **dict(started.metadata or {}),
-                        "index_progress_state": "embedding_started",
-                        "embedding_profile": profile.embedding_strategy,
-                    },
-                )
-            )
-            await vector_index.ensure_collection_schema_async(
-                started.collection_name,
-                vector_size=vector_size,
-            )
-
-            total_chunks = 0
-            for source in sources:
-                text = str(source.raw_content or "").strip()
-                if not text:
-                    continue
-                self._index_build_store.update(
-                    replace(
-                        started,
-                        metadata={
-                            **dict(started.metadata or {}),
-                            "index_progress_state": "embedding_batching",
-                            "active_source_id": source.id,
-                        },
-                    )
-                )
-                chunks = self._chunk_builder.build_chunks(text)
-                total_chunks += len(chunks)
-                rows = build_sentence_rows(chunks, source.title)
-                for row in rows:
-                    payload = row.setdefault("payload", {})
-                    payload["source_id"] = source.id
-                    payload["source_title"] = source.title
-                    payload["build_id"] = started.id
-                    payload["index_profile_key"] = profile.key
-                self._index_build_store.update(
-                    replace(
-                        started,
-                        metadata={
-                            **dict(started.metadata or {}),
-                            "index_progress_state": "embedding_upserting",
-                            "active_source_id": source.id,
-                        },
-                    )
-                )
-                await vector_index.upsert_sentence_points(started.collection_name, rows)
-                self._source_store.update(replace(source, status="ingested"))
-
-            retrieval_chunks = self._load_existing_retrieval_chunks(
-                corpus_uuid=started.corpus_uuid,
-                exclude_interpretation_run_id=None,
-            )
-            retrieval_chunk_rows = build_retrieval_chunk_index_rows(
-                retrieval_chunks,
-                build_id=started.id,
-                index_profile_key=profile.key,
-            )
-            upsert_retrieval_chunks = getattr(vector_index, "upsert_retrieval_chunk_points", None)
-            if callable(upsert_retrieval_chunks) and retrieval_chunk_rows:
-                await upsert_retrieval_chunks(started.collection_name, retrieval_chunk_rows)
-
-            semantic_blocks = self._load_existing_semantic_blocks(
-                corpus_uuid=started.corpus_uuid,
-                exclude_interpretation_run_id=None,
-            )
-            semantic_block_rows = build_semantic_block_index_rows(
-                semantic_blocks,
-                build_id=started.id,
-                index_profile_key=profile.key,
-            )
-            upsert_semantic_blocks = getattr(vector_index, "upsert_semantic_block_points", None)
-            if callable(upsert_semantic_blocks) and semantic_block_rows:
-                await upsert_semantic_blocks(started.collection_name, semantic_block_rows)
-
-            finished = replace(
-                started,
-                status="ready",
-                chunk_count=total_chunks,
-                completed_at=_utcnow(),
-                metadata={
-                    **started.metadata,
-                    "source_count": len(sources),
-                    "profile_key": profile.key,
-                    "embedding_strategy": profile.embedding_strategy,
-                    "vector_size": vector_size,
-                    "index_progress_state": "index_ready",
-                    "retrieval_chunk_count": len(retrieval_chunk_rows),
-                    "retrieval_chunk_indexed": bool(retrieval_chunk_rows),
-                    "semantic_block_count": len(semantic_block_rows),
-                    "semantic_block_indexed": bool(semantic_block_rows),
-                },
-            )
-            self._index_build_store.update(finished)
-            self._metrics_store.increment("build_success_count", 1)
-            self._metrics_store.increment("chunk_count", total_chunks)
-            self._metrics_store.record_timing("build_duration_ms", (time.perf_counter() - timer) * 1000.0)
-            self._log_step(
-                "build.ready",
-                status="ok",
-                tenant=finished.tenant,
-                build_id=finished.id,
-                duration_ms=(time.perf_counter() - timer) * 1000.0,
-                chunk_count=total_chunks,
-                source_count=len(sources),
-            )
-            return finished
-        except Exception as exc:
-            failed = replace(
-                started,
-                status="failed",
-                error=str(exc),
-                completed_at=_utcnow(),
-                metadata={
-                    **dict(started.metadata or {}),
-                    "index_progress_state": "index_failed",
-                },
-            )
-            self._index_build_store.update(failed)
-            self._metrics_store.increment("build_failed_count", 1)
-            self._log_step("build.failed", status="error", tenant=failed.tenant, build_id=failed.id, error=str(exc))
-            raise
+        return await self._index_build_service.run_index_build(build_id)
 
     async def run_index_build_with_retry(self, build_id: str) -> IndexBuild:
-        lock = self._index_build_lock(build_id)
-        if not lock.acquire(blocking=False):
-            current = self._index_build_store.get(build_id)
-            if current is None:
-                raise ValueError("Index build not found")
-            return current
-        try:
-            last_error: Exception | None = None
-            for attempt in range(1, self._INDEX_BUILD_RETRY_COUNT + 1):
-                try:
-                    return await self.run_index_build(build_id)
-                except Exception as exc:
-                    last_error = exc
-                    if attempt >= self._INDEX_BUILD_RETRY_COUNT:
-                        raise
-                    await asyncio.sleep(self._INDEX_BUILD_RETRY_BACKOFF_SEC * attempt)
-            if last_error is not None:
-                raise last_error
-            raise ValueError("Index build retry failed")
-        finally:
-            lock.release()
+        return await self._index_build_service.run_index_build_with_retry(build_id)
 
     def _resolve_builds(self, *, corpus_uuid: str, build_ids: list[str] | None = None) -> list[IndexBuild]:
         def is_ready_build(item: IndexBuild | None) -> bool:
@@ -7454,160 +6546,20 @@ class KnowledgeFacade:
         parsed_query: dict[str, Any] | None = None,
         debug: bool = False,
     ) -> dict[str, Any]:
-        effective_query = str(query or question or "").strip()
-        effective_corpus_uuid = str(corpus_uuid or kb_uuid or "").strip()
-        if not effective_query:
-            raise ValueError("Query is required for chat context build")
-        if not effective_corpus_uuid:
-            raise ValueError("Corpus UUID is required for chat context build")
-        run = await self.retrieve(
-            tenant=tenant or "",
-            corpus_uuid=effective_corpus_uuid,
-            query=effective_query,
+        return await self._retrieval_service.build_chat_context(
+            tenant=tenant,
+            corpus_uuid=corpus_uuid,
+            query=query,
             build_ids=build_ids,
             retrieval_profile=retrieval_profile,
             context_profile=context_profile,
-            compare_mode=len(build_ids or []) > 1,
+            question=question,
+            kb_uuid=kb_uuid,
+            current_user_id=current_user_id,
+            current_user_role=current_user_role,
+            parsed_query=parsed_query,
+            debug=debug,
         )
-        source_metadata_by_id: dict[str, Source] = {}
-        for source_id in run.metadata.get("cited_source_ids") or run.metadata.get("source_ids") or []:
-            source = self._source_store.get(str(source_id))
-            if source is not None:
-                source_metadata_by_id[source.id] = source
-        for block in run.metadata.get("context_blocks") or run.metadata.get("matched_semantic_blocks") or []:
-            if not isinstance(block, dict):
-                continue
-            source_id = str(block.get("source_id") or "").strip()
-            if not source_id or source_id in source_metadata_by_id:
-                continue
-            source = self._source_store.get(source_id)
-            if source is not None:
-                source_metadata_by_id[source.id] = source
-        for citation in run.citations:
-            if citation.source_id and citation.source_id not in source_metadata_by_id:
-                source = self._source_store.get(citation.source_id)
-                if source is not None:
-                    source_metadata_by_id[source.id] = source
-        source_chunks = [
-            {
-                "id": citation.chunk_id or f"source-{index}",
-                "kb_uuid": effective_corpus_uuid,
-                "source_point_id": citation.source_id or citation.chunk_id or f"source-{index}",
-                "source_id": citation.source_id or "",
-                "source_document_title": citation.title or "",
-                "text": citation.snippet,
-                "score": citation.score,
-                "build_id": citation.build_id,
-                "source_type": getattr(source_metadata_by_id.get(citation.source_id), "source_type", ""),
-                "file_ref": getattr(source_metadata_by_id.get(citation.source_id), "file_ref", None),
-                "display_type": (
-                    self._source_display_type(source_metadata_by_id[citation.source_id])
-                    if citation.source_id in source_metadata_by_id
-                    else ""
-                ),
-                "created_by": getattr(source_metadata_by_id.get(citation.source_id), "created_by", None),
-                "created_by_label": (
-                    self._source_created_by_label(source_metadata_by_id[citation.source_id])
-                    if citation.source_id in source_metadata_by_id
-                    else ""
-                ),
-                "created_at": (
-                    source_metadata_by_id[citation.source_id].created_at.isoformat()
-                    if citation.source_id in source_metadata_by_id and source_metadata_by_id[citation.source_id].created_at
-                    else None
-                ),
-            }
-            for index, citation in enumerate(run.citations, start=1)
-        ]
-        existing_source_chunk_ids = {
-            str(item.get("source_id") or item.get("source_point_id") or "").strip()
-            for item in source_chunks
-        }
-        for source_id, source in source_metadata_by_id.items():
-            if source_id in existing_source_chunk_ids:
-                continue
-            document = self._document_store.get_for_source(source_id)
-            source_chunks.append(
-                {
-                    "id": f"source-{source_id}",
-                    "kb_uuid": effective_corpus_uuid,
-                    "source_point_id": source_id,
-                    "source_id": source_id,
-                    "source_document_title": source.title,
-                    "text": (document.text_content if document is not None else str(source.raw_content or ""))[:400],
-                    "score": 0.0,
-                    "build_id": "",
-                    "source_type": source.source_type,
-                    "file_ref": source.file_ref,
-                    "display_type": self._source_display_type(source),
-                    "created_by": source.created_by,
-                    "created_by_label": self._source_created_by_label(source),
-                    "created_at": source.created_at.isoformat() if source.created_at else None,
-                }
-            )
-        corpus = self._corpus_store.get_by_uuid(effective_corpus_uuid)
-        return {
-            "query_run_id": run.id,
-            "kb_uuid": effective_corpus_uuid,
-            "corpus_uuid": effective_corpus_uuid,
-            "context_text": run.context_text,
-            "citations": [
-                {
-                    "source_id": item.source_id,
-                    "build_id": item.build_id,
-                    "snippet": item.snippet,
-                    "title": item.title,
-                    "score": item.score,
-                    "chunk_id": item.chunk_id,
-                }
-                for item in run.citations
-            ],
-            "build_ids": run.build_ids,
-            "retrieval_profile_key": run.retrieval_profile_key,
-            "context_profile_key": run.context_profile_key,
-            "query_profile": run.metadata.get("query_profile"),
-            "query_detected_entities": run.metadata.get("query_detected_entities") or [],
-            "query_intent": run.metadata.get("query_intent"),
-            "query_filters": run.metadata.get("query_filters") or {},
-            "query_resolution_confidence": run.metadata.get("query_resolution_confidence") or 0.0,
-            "query_aware_retrieval": run.metadata.get("query_aware_retrieval") or {},
-            "matched_chunks": run.metadata.get("matched_chunks") or [],
-            "matched_claims": run.metadata.get("matched_claims") or [],
-            "matched_semantic_blocks": run.metadata.get("matched_semantic_blocks") or [],
-            "filtered_out_reason": run.metadata.get("filtered_out_reason") or [],
-            "retrieval_confidence": run.metadata.get("retrieval_confidence") or 0.0,
-            "query_retrieval_match_count": run.metadata.get("query_retrieval_match_count") or 0,
-            "query_retrieval_filtered_count": run.metadata.get("query_retrieval_filtered_count") or 0,
-            "conflict_marker_included": bool(run.metadata.get("conflict_marker_included")),
-            "temporal_context_used": bool(run.metadata.get("temporal_context_used")),
-            "answer_text": run.metadata.get("answer_text") or "",
-            "answer_mode": run.metadata.get("answer_mode") or "no_answer",
-            "cited_claim_ids": run.metadata.get("cited_claim_ids") or [],
-            "cited_evidence_ids": run.metadata.get("cited_evidence_ids") or [],
-            "cited_sentence_ids": run.metadata.get("cited_sentence_ids") or [],
-            "cited_source_ids": run.metadata.get("cited_source_ids") or run.metadata.get("source_ids") or [],
-            "source_ids": run.metadata.get("source_ids") or [],
-            "evidence_summary": run.metadata.get("evidence_summary") or [],
-            "explanation": run.metadata.get("explanation") or {},
-            "lineage": run.metadata.get("lineage") or {},
-            "synthesis_confidence": run.metadata.get("synthesis_confidence") or 0.0,
-            "query_debug": run.metadata.get("query_debug") or {},
-            "no_ready_index_build": bool(run.metadata.get("no_ready_index_build")),
-            "top_assertions": [],
-            "evidence_sentences": [],
-            "source_chunks": source_chunks,
-            "related_entities": [],
-            "scoring_summary": {
-                "latency_ms": {"retrieve": run.latency_ms},
-                "result_count": run.result_count,
-            },
-            "query_focus": parsed_query or {},
-            "debug_enabled": debug,
-            "current_user_id": current_user_id,
-            "current_user_role": current_user_role,
-            "pii_depersonalization_enabled": bool(getattr(corpus, "pii_depersonalization_enabled", True)),
-            "personal_data_sensitivity": str(getattr(corpus, "personal_data_sensitivity", "medium") or "medium"),
-        }
 
     async def answer_support(
         self,
@@ -7617,17 +6569,12 @@ class KnowledgeFacade:
         query: str,
         build_ids: list[str] | None = None,
     ) -> dict[str, Any]:
-        packet = await self.build_chat_context(
+        return await self._retrieval_service.answer_support(
             tenant=tenant,
             corpus_uuid=corpus_uuid,
             query=query,
             build_ids=build_ids,
         )
-        return {
-            "question": query,
-            "context_text": packet["context_text"],
-            "citations": packet["citations"],
-        }
 
     def get_metrics(self) -> dict[str, object]:
         return self._metrics_store.snapshot()

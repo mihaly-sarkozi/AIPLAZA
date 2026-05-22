@@ -8,15 +8,15 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from core.capabilities.auth.dto.login_success_dto import LoginSuccess
-from core.capabilities.users.dependencies import get_user_service
-from core.capabilities.users.dto.user import User
-from core.capabilities.users.router.profile_router import router
-from core.di import get_login_service
-from core.extensions.tenant.context.request_tenant_context import RequestTenantContext
-from core.extensions.tenant.dto.tenant_config import TenantConfig
-from core.kernel.http_dependencies import require_tenant_context
-from core.platform.auth.auth_dependencies import get_current_user
+from core.modules.auth.domain.dto.login_success_dto import LoginSuccess
+from core.modules.users.dependencies import get_user_service
+from core.modules.users.domain.dto.user import User
+from core.modules.users.router.profile_router import router
+from core.kernel.deps.facade import get_login_service
+from core.modules.tenant.context.request_tenant_context import RequestTenantContext
+from core.modules.tenant.dto.tenant_config import TenantConfig
+from core.kernel.http.tenant_dependencies import require_tenant_context
+from core.modules.auth.web.dependencies.auth_dependencies import get_current_user
 
 pytestmark = [pytest.mark.unit, pytest.mark.must_pass]
 

@@ -7,7 +7,7 @@ import pytest
 from passlib.hash import bcrypt_sha256 as pwd_hasher
 
 from core.kernel.config.config_loader import settings
-from core.platform_admin.service import PlatformAdminService
+from admin.service.platform_admin_service import PlatformAdminService
 
 pytestmark = [pytest.mark.unit, pytest.mark.must_pass]
 
@@ -98,8 +98,8 @@ def test_platform_admin_mfa_lockout_invalidates_sessions_and_sends_alert(monkeyp
     svc = PlatformAdminService(repository=repo, token_service=_TokenServiceStub(), email_service=email)
 
     monkeypatch.setattr(settings, "platform_admin_login_alert_email", "ops@example.com", raising=False)
-    monkeypatch.setattr("core.platform_admin.service.allowlist_remove_by_user", lambda tenant, uid: None)
-    monkeypatch.setattr("core.platform_admin.service.LoginService.verify_authenticator_code", lambda secret, code: False)
+    monkeypatch.setattr("admin.service.platform_admin_service.allowlist_remove_by_user", lambda tenant, uid: None)
+    monkeypatch.setattr("admin.service.platform_admin_service.LoginService.verify_authenticator_code", lambda secret, code: False)
 
     with pytest.raises(ValueError, match="platform_admin_mfa_locked"):
         svc.login(

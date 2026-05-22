@@ -44,7 +44,7 @@ Feladata:
 Következő lépés:
 
 - `KnowledgeFacade.create_text_ingest_run()`
-- `_enqueue_ingest_pipeline_job()`
+- `enqueue_ingest_pipeline_job()`
 
 #### `create_file_ingest_run()`
 
@@ -53,14 +53,22 @@ Ez a fájl upload endpointja: `/knowledge/corpora/{corpus_uuid}/ingest/files`.
 Feladata:
 
 - Feltöltött fájlok validálása.
-- Upload policy, MIME, extension, méret és biztonsági feltételek ellenőrzése.
-- A fájlok byte tartalmának átadása a facade-nak.
-- A háttér ingest pipeline indítása.
+- Request oldali könnyű guardok: méretlimit, extension check, MIME/magic sniff, hash, malware scan, PDF/DOCX alap guard.
+- A fájlok streamelt spoolból object storage referenciává alakítása.
+- Ingest job létrehozása és outbox event enqueue.
+
+Nem feladata:
+
+- Tényleges text extraction.
+- OCR.
+- Embedding, chunkolás, index build vagy quality report.
+
+Megjegyzés: a legacy `/kb/{uuid}/ingest-training-file` útvonal megszűnt; minden új ingest flow a `/knowledge/corpora/{corpus_uuid}/ingest/...` endpointokon érhető el.
 
 Következő lépés:
 
+- `KnowledgeIngestApplicationService.create_file_run_and_enqueue()`
 - `KnowledgeFacade.create_file_ingest_run()`
-- `_enqueue_ingest_pipeline_job()`
 
 #### `create_url_ingest_run()`
 
@@ -75,15 +83,15 @@ Feladata:
 Következő lépés:
 
 - `KnowledgeFacade.create_url_ingest_run()`
-- `_enqueue_ingest_pipeline_job()`
+- `enqueue_ingest_pipeline_job()`
 
-#### `_enqueue_ingest_pipeline_job()`
+#### `enqueue_ingest_pipeline_job()`
 
 Feladata:
 
 - Az ingest futást háttérbe teszi.
-- Elsődlegesen platform outbox/event worker mechanizmust használ.
-- Ha ez nem elérhető, FastAPI `BackgroundTasks` fallbacket használ.
+- Kizárólag platform outbox/event worker mechanizmust használ.
+- Ha ez nem elérhető, az ingest run `failed` státuszba kerül és az API 503-at ad. FastAPI `BackgroundTasks` fallback nincs, mert a request process nem lehet job runner.
 
 Következő lépés:
 
@@ -113,6 +121,7 @@ Feladata:
 - Létrehoz `IngestRun` és `IngestItem` rekordokat.
 - A fájl byte tartalmát object storage-ba menti.
 - Az `IngestInput` nem feltétlenül tartalmazza a teljes szöveget, hanem `object_key`, checksum és metadata alapján hivatkozik a fájlra.
+- Productionben object storage kötelező (`object_storage_enabled=true`, `object_storage_provider=s3_compatible`, bucket és endpoint beállítva). A per-tenant path prefixet a storage key `tenants/<tenant>/knowledge/...` alakja adja.
 
 Kimenet:
 
@@ -135,14 +144,14 @@ Feladata:
 
 - Tenant schema kontextusban futtatja a feldolgozást.
 - Meghívja a facade `process_ingest_run()` metódusát.
-- Sikeres ingest után index buildet ütemez.
-- Majd elindítja az index buildet.
+- Sikeres ingest után index build rekordot hoz létre.
+- Az index buildet külön `knowledge.index_build` outbox eventként enqueue-zza.
 
 Következő lépés:
 
 - `KnowledgeFacade.process_ingest_run()`
 - `KnowledgeFacade.schedule_index_build()`
-- `KnowledgeFacade.run_index_build()`
+- `enqueue_index_build_job()`
 
 #### `process_ingest_run_and_start_index_async()`
 
@@ -218,7 +227,17 @@ Feladata input típus szerint:
   - Fájl byte-ok visszaolvasása object storage-ból.
   - Dokumentumszöveg kinyerése upload extractorral.
 - URL:
-  - URL tartalom előállítása és HTML/szöveg tisztítás.
+  - URL tartalom előállítása worker oldalon, majd HTML/szöveg tisztítás.
+  - Minden cél URL DNS/IP validáción megy át; request előtt újra resolve történik DNS rebinding ellen.
+  - Redirect policy: maximum 3 redirect, minden redirect target újravalidált, `https -> http` downgrade és userinfo tiltott, loop külön hibával áll meg.
+  - Content policy: HEAD alapján előszűrés, GET közben streaming byte limit, hiányzó Content-Type esetén első chunk szöveges/magic sniff jellegű ellenőrzés, tömörített válasznál is a kicsomagolt stream mérete számít.
+
+Production elvárás:
+
+- A URL fetch ne a web/API processben fusson. Az API csak ingest run/item/input rekordot és outbox eventet hoz létre.
+- A letöltést külön worker konténer végezze `INSTANCE_ROLE=worker` szerepkörben.
+- Az URL workerhez egress policy szükséges: csak 80/443 outbound, private/localhost/link-local/metadata/internal DNS tiltás, lehetőség szerint egress proxy vagy network policy/service mesh szinten.
+- Productionben `knowledge_url_ingest_enabled=true` csak `knowledge_url_ingest_worker_isolated=true` mellett engedélyezett.
 
 Kimenet:
 

@@ -1,15 +1,15 @@
 from __future__ import annotations
 
-from apps.contracts import module_key, module_route_tag
+from core.kernel.interface.app_conventions import module_key, module_route_tag
 from apps.settings.api.router import router as settings_router
 from apps.settings.contracts import SETTINGS_SERVICE
 from apps.settings.service.settings_facade import SettingsFacade
-from core.platform.contract import AppModule, ModuleContext, RouteRegistration
-from core.platform.service_keys import PLATFORM_SETTINGS_SERVICE
-from core.platform.settings.sections import list_settings_sections
+from core.kernel.interface import BaseAppModule, ModuleContext, RouteRegistration
+from core.kernel.interface.keys import PLATFORM_SETTINGS_SERVICE
+from core.modules.settings.registry.settings_section_registry import list_settings_sections
 
 
-class SettingsAppModule(AppModule):
+class SettingsAppModule(BaseAppModule):
     key = module_key("settings")
 
     def register(self, container: ModuleContext) -> None:
@@ -31,5 +31,5 @@ class SettingsAppModule(AppModule):
         return ("settings.read", "settings.write")
 
 
-def get_module() -> AppModule:
+def get_module() -> BaseAppModule:
     return SettingsAppModule()

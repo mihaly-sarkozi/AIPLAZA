@@ -4,8 +4,8 @@ from datetime import datetime, timezone
 
 import pytest
 
-from core.extensions.tenant.dto import TenantConfig, TenantDomain, TenantDomainInfo, TenantSnapshot, TenantStatus
-from core.platform.tenant_policy import DomainRoutingPolicy, TenantLifecyclePolicy
+from core.modules.tenant.dto import TenantConfig, TenantDomain, TenantDomainInfo, TenantSnapshot, TenantStatus
+from core.modules.tenant.domain.tenant_policy import DomainRoutingPolicy, TenantLifecyclePolicy
 
 
 def _snapshot(*, is_active: bool, suspended_reason: str | None = None) -> TenantSnapshot:

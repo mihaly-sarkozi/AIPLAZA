@@ -1,3 +1,7 @@
+# backend/apps/knowledge/service/knowledge_trace_service.py
+# Feladat: Knowledge ingest trace riportot épít futás, dokumentum, mondat, claim, entity és similarity diagnosztikákból. A szolgáltatás az orchestrationt tartja kézben, míg a trace metrikák és nézeti szűrések külön helper modulokba kerültek. Program-specifikus knowledge trace service.
+# Sárközi Mihály - 2026.05.21
+
 from __future__ import annotations
 
 import logging
@@ -19,6 +23,52 @@ from apps.knowledge.domain.candidate_selection import entity_candidate_to_json_d
 from apps.knowledge.service.similarity_engine_v1 import SimilarityEngineV1
 from apps.knowledge.domain.similarity_analysis import similarity_analysis_to_json_dict
 from apps.knowledge.domain.search_profile import SearchProfile
+from apps.knowledge.service.knowledge_trace_metrics import (
+    bad_subject_claim_examples as _bad_subject_claim_examples,
+    candidate_duplicate_removed_count as _candidate_duplicate_removed_count,
+    candidate_evidence as _candidate_evidence,
+    candidate_group_count as _candidate_group_count,
+    candidate_has_evidence as _candidate_has_evidence,
+    candidate_score as _candidate_score,
+    candidate_selection_ready as _candidate_selection_ready,
+    candidates_without_evidence_count as _candidates_without_evidence_count,
+    canonical_entity_merge_suggestion_count as _canonical_entity_merge_suggestion_count,
+    coerce_str_list as _coerce_str_list,
+    conflict_count as _conflict_count,
+    dedupe_candidate_selection_dicts as _dedupe_candidate_selection_dicts,
+    dedupe_similarity_analysis_dicts as _dedupe_similarity_analysis_dicts,
+    duplicate_memory_profile_count as _duplicate_memory_profile_count,
+    hard_conflict_count as _hard_conflict_count,
+    is_uuid_string as _is_uuid_string,
+    multilingual_alias_match_count as _multilingual_alias_match_count,
+    quality_summary_placeholder as _quality_summary_placeholder,
+    reason_values as _reason_values,
+    similarity_band_count as _similarity_band_count,
+    similarity_boost_reason_count as _similarity_boost_reason_count,
+    similarity_ready as _similarity_ready,
+    similarity_score as _similarity_score,
+    similarity_score_distribution as _similarity_score_distribution,
+    similarity_without_evidence_count as _similarity_without_evidence_count,
+    tension_band_count as _tension_band_count,
+    tension_type_count as _tension_type_count,
+    tension_without_evidence_count as _tension_without_evidence_count,
+    top_candidate_score as _top_candidate_score,
+    unknown_entity_type_examples as _unknown_entity_type_examples,
+)
+from apps.knowledge.service.knowledge_trace_view import (
+    apply_trace_log_level as _apply_trace_log_level,
+    attach_decisions_to_entity_rows as _attach_decisions_to_entity_rows,
+    decision_entity_fields as _decision_entity_fields,
+    global_profiles_from_dicts as _global_profiles_from_dicts,
+    merge_events as _merge_events,
+    normalize_trace_log_level as _normalize_trace_log_level,
+    score_value as _score_value,
+    sentences_without_claims as _sentences_without_claims,
+    short_local_entity as _short_local_entity,
+    top_candidates as _top_candidates,
+    top_entities as _top_entities,
+    top_problems as _top_problems,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -73,341 +123,6 @@ def _fallback_space_time_frame_for_claim(claim: Any) -> dict[str, Any] | None:
     }
 
 
-def _quality_summary_placeholder() -> dict[str, Any]:
-    return {
-        "skipped_sentence_count": 0,
-        "rejected_claim_count": 0,
-        "describes_claim_count": 0,
-        "low_confidence_claim_count": 0,
-        "bad_subject_claim_count": 0,
-        "question_sentence_count": 0,
-        "fragment_sentence_count": 0,
-        "skipped_sentences": [],
-        "rejected_claim_examples": [],
-        "todo": "TODO: persist rejected claim diagnostics per ingest run.",
-    }
-
-
-def _is_uuid_string(value: str | None) -> bool:
-    if not value:
-        return False
-    try:
-        UUID(str(value))
-        return True
-    except ValueError:
-        return False
-
-
-def _coerce_str_list(value: Any) -> list[str]:
-    if not value:
-        return []
-    return [str(item) for item in value]
-
-
-def _candidate_evidence(candidate: dict[str, Any]) -> dict[str, Any]:
-    evidence = candidate.get("evidence")
-    return dict(evidence) if isinstance(evidence, dict) else {}
-
-
-def _candidate_has_evidence(candidate: dict[str, Any]) -> bool:
-    evidence = _candidate_evidence(candidate)
-    return bool(evidence.get("claim_ids") or evidence.get("sentence_ids"))
-
-
-def _candidates_without_evidence_count(candidates: list[dict[str, Any]]) -> int:
-    return sum(1 for item in candidates if not _candidate_has_evidence(item))
-
-
-def _top_candidate_score(candidates: list[dict[str, Any]]) -> float:
-    scores = []
-    for item in candidates:
-        try:
-            scores.append(float(item.get("score") or item.get("candidate_score") or 0.0))
-        except (TypeError, ValueError):
-            continue
-    return max(scores, default=0.0)
-
-
-def _similarity_score_distribution(analyses: list[dict[str, Any]]) -> dict[str, Any]:
-    scores = [_similarity_score(item) for item in analyses]
-    if not scores:
-        return {"count": 0, "min": 0.0, "max": 0.0, "avg": 0.0, "high": 0, "medium": 0, "low": 0}
-    return {
-        "count": len(scores),
-        "min": round(min(scores), 4),
-        "max": round(max(scores), 4),
-        "avg": round(sum(scores) / len(scores), 4),
-        "high": _similarity_band_count(analyses, "high"),
-        "medium": _similarity_band_count(analyses, "medium"),
-        "low": _similarity_band_count(analyses, "low"),
-    }
-
-
-def _candidate_selection_ready(candidates: list[dict[str, Any]]) -> bool:
-    return _candidates_without_evidence_count(candidates) == 0
-
-
-def _similarity_without_evidence_count(analyses: list[dict[str, Any]]) -> int:
-    count = 0
-    for item in analyses:
-        evidence = item.get("evidence") if isinstance(item.get("evidence"), dict) else {}
-        if not (evidence.get("claim_ids") or evidence.get("sentence_ids")):
-            count += 1
-    return count
-
-
-def _similarity_band_count(analyses: list[dict[str, Any]], band: str) -> int:
-    return sum(1 for item in analyses if str(item.get("similarity_band") or "") == band)
-
-
-def _similarity_ready(analyses: list[dict[str, Any]]) -> bool:
-    return _similarity_without_evidence_count(analyses) == 0
-
-
-def _tension_without_evidence_count(analyses: list[dict[str, Any]]) -> int:
-    """Tension elemzés evidence ellenőrzés: csak high band tension-okat számoljuk evidence-hiányosnak."""
-    count = 0
-    for item in analyses:
-        band = str(item.get("tension_band") or "")
-        if band != "high":
-            continue
-        evidence = item.get("evidence") if isinstance(item.get("evidence"), dict) else {}
-        if not (evidence.get("claim_ids") or evidence.get("sentence_ids")):
-            count += 1
-    return count
-
-
-def _tension_band_count(analyses: list[dict[str, Any]], band: str) -> int:
-    return sum(1 for item in analyses if str(item.get("tension_band") or "") == band)
-
-
-def _tension_type_count(analyses: list[dict[str, Any]], tension_type: str) -> int:
-    return sum(1 for item in analyses if str(item.get("tension_type") or "") == tension_type)
-
-
-def _conflict_count(analyses: list[dict[str, Any]]) -> int:
-    return sum(
-        1
-        for item in analyses
-        if str(item.get("tension_type") or "") in {"hard_conflict", "contradiction"}
-    )
-
-
-def _hard_conflict_count(analyses: list[dict[str, Any]]) -> int:
-    return sum(1 for item in analyses if str(item.get("tension_type") or "") == "hard_conflict")
-
-
-def _reason_values(items: list[dict[str, Any]], key: str) -> list[str]:
-    reasons: list[str] = []
-    for item in items:
-        raw = item.get(key)
-        values = raw if isinstance(raw, list) else [raw] if raw else []
-        for value in values:
-            text = str(value or "").strip()
-            if text and text not in reasons:
-                reasons.append(text)
-    return reasons
-
-
-def _similarity_boost_reason_count(analyses: list[dict[str, Any]]) -> int:
-    return sum(
-        1
-        for reason in _reason_values(analyses, "similarity_reasons")
-        if "boost" in reason or reason.startswith("name:canonical")
-    )
-
-
-def _multilingual_alias_match_count(candidate_selections: list[dict[str, Any]], similarity_analyses: list[dict[str, Any]]) -> int:
-    count = 0
-    for reason in _reason_values(candidate_selections, "reasons"):
-        if reason.startswith("canonical_name_match"):
-            count += 1
-    for reason in _reason_values(similarity_analyses, "similarity_reasons"):
-        if reason.startswith("name:canonical_exact"):
-            count += 1
-    return count
-
-
-def _candidate_duplicate_removed_count(candidate_selections: list[dict[str, Any]]) -> int:
-    seen: set[str] = set()
-    duplicates = 0
-    for item in candidate_selections:
-        candidate_id = str(item.get("candidate_entity_id") or "")
-        if not candidate_id:
-            continue
-        if candidate_id in seen:
-            duplicates += 1
-            continue
-        seen.add(candidate_id)
-    return duplicates
-
-
-def _candidate_group_count(candidate_selections: list[dict[str, Any]]) -> int:
-    keys = {
-        str(item.get("candidate_canonical_key") or (item.get("merge_candidate_group") or {}).get("canonical_key") or "")
-        for item in candidate_selections
-    }
-    keys.discard("")
-    return len(keys)
-
-
-def _duplicate_memory_profile_count(candidate_selections: list[dict[str, Any]]) -> int:
-    count = 0
-    for item in candidate_selections:
-        group = item.get("merge_candidate_group")
-        if isinstance(group, dict):
-            try:
-                count += int(group.get("duplicate_memory_profile_count") or 0)
-            except (TypeError, ValueError):
-                continue
-    return count
-
-
-def _candidate_score(item: dict[str, Any]) -> float:
-    try:
-        return float(item.get("score") or item.get("candidate_score") or 0.0)
-    except (TypeError, ValueError):
-        return 0.0
-
-
-def _similarity_score(item: dict[str, Any]) -> float:
-    try:
-        return float(item.get("similarity_score") or item.get("total_similarity_score") or 0.0)
-    except (TypeError, ValueError):
-        return 0.0
-
-
-def _dedupe_candidate_selection_dicts(candidate_selections: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], int]:
-    by_key: dict[tuple[str, str], dict[str, Any]] = {}
-    removed = 0
-    passthrough: list[dict[str, Any]] = []
-    for item in candidate_selections:
-        profile_id = str(item.get("search_profile_id") or "")
-        candidate_id = str(item.get("candidate_entity_id") or "")
-        if not profile_id or not candidate_id:
-            passthrough.append(item)
-            continue
-        key = (profile_id, candidate_id)
-        current = by_key.get(key)
-        if current is None:
-            by_key[key] = item
-            continue
-        removed += 1
-        if _candidate_score(item) > _candidate_score(current):
-            by_key[key] = item
-    return [*passthrough, *by_key.values()], removed
-
-
-def _dedupe_similarity_analysis_dicts(similarity_analyses: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], int]:
-    by_key: dict[tuple[str, str], dict[str, Any]] = {}
-    passthrough: list[dict[str, Any]] = []
-    removed = 0
-    for item in similarity_analyses:
-        compared_entity_id = str(
-            item.get("technical_entity_id")
-            or item.get("compared_entity_id")
-            or item.get("search_profile_id")
-            or ""
-        )
-        candidate_id = str(item.get("candidate_entity_id") or "")
-        if not compared_entity_id or not candidate_id:
-            passthrough.append(item)
-            continue
-        key = (candidate_id, compared_entity_id)
-        current = by_key.get(key)
-        if current is None:
-            by_key[key] = item
-            continue
-        removed += 1
-        if _similarity_score(item) > _similarity_score(current):
-            by_key[key] = item
-    return [*passthrough, *by_key.values()], removed
-
-
-def _canonical_entity_merge_suggestion_count(similarity_analyses: list[dict[str, Any]]) -> int:
-    count = 0
-    for item in similarity_analyses:
-        band = str(item.get("similarity_band") or "")
-        if band not in {"medium", "high"}:
-            continue
-        reasons = [str(reason or "") for reason in item.get("similarity_reasons") or []]
-        if any(reason.startswith("name:canonical") for reason in reasons):
-            count += 1
-    return count
-
-
-def _unknown_entity_type_examples(local_entities: list[dict[str, Any]], *, limit: int = 5) -> list[str]:
-    examples: list[str] = []
-    for item in local_entities:
-        if str(item.get("entity_type") or "") != "unknown":
-            continue
-        name = str(item.get("canonical_name") or item.get("normalized_key") or "").strip()
-        if name and name not in examples:
-            examples.append(name)
-        if len(examples) >= limit:
-            break
-    return examples
-
-
-def _bad_subject_claim_examples(quality_summary: dict[str, Any], *, limit: int = 5) -> list[dict[str, Any]]:
-    raw_items = quality_summary.get("bad_subject_claim_examples")
-    if isinstance(raw_items, list) and raw_items:
-        examples = [dict(item) for item in raw_items if isinstance(item, dict)][:limit]
-        for item in examples:
-            item["reason"] = str(item.get("reason") or "claim_bad_subject")
-        return examples
-    examples: list[dict[str, Any]] = []
-    candidates = []
-    for key in ("rejected_claims", "rejected_claim_examples"):
-        raw = quality_summary.get(key)
-        if isinstance(raw, list):
-            candidates.extend(item for item in raw if isinstance(item, dict))
-    for item in candidates:
-        reason = str(item.get("reason") or item.get("rejection_reason") or item.get("raw_reason") or "")
-        if reason != "claim_bad_subject" and "bad_subject" not in reason:
-            continue
-        examples.append(
-            {
-                "reason": reason,
-                "subject_text": str(item.get("subject_text") or ""),
-                "predicate": str(item.get("predicate") or item.get("predicate_text") or ""),
-                "object_text": item.get("object_text"),
-                "claim_type": str(item.get("claim_type") or ""),
-            }
-        )
-        if len(examples) >= limit:
-            break
-    if not examples and int(quality_summary.get("bad_subject_claim_count") or 0) > 0:
-        examples.append(
-            {
-                "reason": "missing_bad_subject_claim_examples",
-                "subject_text": "",
-                "predicate": "",
-                "object_text": None,
-                "claim_type": "",
-            }
-        )
-    return examples
-
-
-def _normalize_trace_log_level(log_level: str | None, *, debug: bool = False) -> str:
-    if debug:
-        return "FULL_TRACE"
-    value = str(log_level or "FULL_TRACE").strip().upper()
-    aliases = {"DEBUG": "FULL_TRACE", "FULL": "FULL_TRACE", "TRACE": "FULL_TRACE"}
-    value = aliases.get(value, value)
-    return value if value in {"SUMMARY", "INSPECT", "FULL_TRACE"} else "SUMMARY"
-
-
-def _score_value(item: dict[str, Any], *keys: str) -> float:
-    for key in keys:
-        try:
-            return float(item.get(key) or 0.0)
-        except (TypeError, ValueError):
-            continue
-    return 0.0
-
-
 def _uuid_or_none(value: Any) -> UUID | None:
     if not value:
         return None
@@ -440,207 +155,6 @@ def _search_profile_from_dict(item: dict[str, Any]) -> SearchProfile:
         evidence_refs=[dict(value) for value in item.get("evidence_refs") or [] if isinstance(value, dict)],
         builder_version=str(item.get("builder_version") or "search_profile_builder_v1"),
     )
-
-
-def _top_entities(local_entities: list[dict[str, Any]], *, limit: int = 5) -> list[dict[str, Any]]:
-    rows = sorted(
-        local_entities,
-        key=lambda item: (
-            len(item.get("claim_ids") or []),
-            _score_value(item, "coherence_score"),
-            _score_value(item, "confidence"),
-        ),
-        reverse=True,
-    )
-    return [
-        {
-            "canonical_name": item.get("canonical_name"),
-            "canonical_key": item.get("canonical_key") or item.get("normalized_key"),
-            "entity_type": item.get("entity_type"),
-            "claim_count": len(item.get("claim_ids") or []),
-            "coherence_score": item.get("coherence_score"),
-            "alias_match_reason": item.get("alias_match_reason"),
-        }
-        for item in rows[:limit]
-    ]
-
-
-def _top_candidates(candidate_selections: list[dict[str, Any]], *, limit: int = 5) -> list[dict[str, Any]]:
-    rows = sorted(candidate_selections, key=lambda item: _score_value(item, "score", "candidate_score"), reverse=True)
-    return [
-        {
-            "candidate_entity_id": item.get("candidate_entity_id"),
-            "candidate_name": item.get("candidate_name"),
-            "candidate_type": item.get("candidate_type"),
-            "score": item.get("score") or item.get("candidate_score"),
-            "reasons": list(item.get("reasons") or item.get("candidate_reason") or [])[:3],
-        }
-        for item in rows[:limit]
-    ]
-
-
-def _top_problems(summary: dict[str, Any]) -> list[dict[str, Any]]:
-    quality = summary.get("quality") if isinstance(summary.get("quality"), dict) else {}
-    candidates = [
-        ("unknown_entity_type", summary.get("unknown_entity_type_count"), summary.get("unknown_entity_type_examples")),
-        ("bad_subject_claim", quality.get("bad_subject_claim_count"), quality.get("bad_subject_claim_examples")),
-        ("rejected_noise_sentence", quality.get("rejected_noise_sentence_count"), quality.get("skipped_sentences")),
-        ("low_similarity", summary.get("low_similarity_count"), None),
-        ("contradiction", summary.get("contradiction_count"), None),
-    ]
-    out: list[dict[str, Any]] = []
-    for kind, count, examples in candidates:
-        count_int = int(count or 0)
-        if count_int <= 0:
-            continue
-        out.append({"problem": kind, "count": count_int, "examples": examples or []})
-    return sorted(out, key=lambda item: int(item.get("count") or 0), reverse=True)[:5]
-
-
-def _merge_events(similarity_analyses: list[dict[str, Any]], decision_analyses: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    events: list[dict[str, Any]] = []
-    for item in similarity_analyses:
-        reasons = [str(reason or "") for reason in item.get("similarity_reasons") or item.get("reasons") or []]
-        if not any(reason.startswith("name:canonical") or "boost" in reason for reason in reasons):
-            continue
-        events.append(
-            {
-                "type": "canonical_similarity",
-                "search_profile_id": item.get("search_profile_id"),
-                "candidate_entity_id": item.get("candidate_entity_id"),
-                "candidate_name": item.get("candidate_name"),
-                "score": item.get("total_similarity_score"),
-                "band": item.get("similarity_band"),
-                "reasons": reasons[:3],
-            }
-        )
-    for item in decision_analyses:
-        if str(item.get("decision") or "") in {"attach_existing", "merge", "keep_separate"}:
-            events.append({"type": "decision", "decision": item.get("decision"), "reason": item.get("decision_reason")})
-    return events[:10]
-
-
-def _decision_entity_fields(decision: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "decision_type": decision.get("decision_type") or decision.get("decision"),
-        "selected_candidate_id": decision.get("selected_candidate_id") or decision.get("candidate_entity_id"),
-        "selected_candidate_score": decision.get("selected_candidate_score"),
-        "decision_reason": decision.get("decision_reason"),
-    }
-
-
-def _attach_decisions_to_entity_rows(rows: list[dict[str, Any]], decision_analyses: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    if not rows or not decision_analyses:
-        return rows
-    decisions_by_local_id = {
-        str(item.get("local_entity_id") or ""): item
-        for item in decision_analyses
-        if str(item.get("local_entity_id") or "")
-    }
-    decisions_by_technical_id = {
-        str(item.get("technical_entity_id") or ""): item
-        for item in decision_analyses
-        if str(item.get("technical_entity_id") or "")
-    }
-    decisions_by_profile_id = {
-        str(item.get("search_profile_id") or ""): item
-        for item in decision_analyses
-        if str(item.get("search_profile_id") or "")
-    }
-    annotated: list[dict[str, Any]] = []
-    for row in rows:
-        decision = (
-            decisions_by_local_id.get(str(row.get("local_entity_id") or ""))
-            or decisions_by_technical_id.get(str(row.get("technical_entity_id") or ""))
-            or decisions_by_profile_id.get(str(row.get("search_profile_id") or ""))
-        )
-        if decision is None:
-            annotated.append(row)
-            continue
-        annotated.append({**row, **_decision_entity_fields(decision)})
-    return annotated
-
-
-def _global_profiles_from_dicts(decision_analyses: list[dict[str, Any]], search_profiles: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    profiles_by_id = {str(item.get("search_profile_id") or ""): item for item in search_profiles}
-    rows: list[dict[str, Any]] = []
-    for decision in decision_analyses:
-        profile_id = decision.get("selected_profile_id") or decision.get("created_profile_id")
-        if not profile_id:
-            continue
-        profile = profiles_by_id.get(str(decision.get("search_profile_id") or ""), {})
-        rows.append(
-            {
-                "profile_id": profile_id,
-                "source_decision_id": decision.get("decision_analysis_id"),
-                "decision": decision.get("decision"),
-                "entity_name": profile.get("entity_name") or decision.get("candidate_name"),
-                "entity_type": profile.get("entity_type") or decision.get("candidate_type"),
-                "canonical_key": profile.get("canonical_key") or profile.get("normalized_key"),
-                "selected_profile_id": decision.get("selected_profile_id"),
-                "created_profile_id": decision.get("created_profile_id"),
-                "decision_confidence": decision.get("decision_confidence"),
-                "decision_reason": decision.get("decision_reason"),
-                "manual_review_required": decision.get("manual_review_required"),
-                "evidence": decision.get("evidence") if isinstance(decision.get("evidence"), dict) else {},
-                "builder_version": "global_profile_builder_v0",
-            }
-        )
-    return rows
-
-
-def _short_local_entity(item: dict[str, Any]) -> dict[str, Any]:
-    return {
-        **item,
-        "claim_ids": list(item.get("claim_ids") or [])[:2],
-        "sentence_ids": list(item.get("sentence_ids") or [])[:2],
-        "evidence_refs": list(item.get("evidence_refs") or [])[:2],
-    }
-
-
-def _sentences_without_claims(sentences: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    return [{**row, "claims": []} for row in sentences]
-
-
-def _apply_trace_log_level(trace: dict[str, Any], log_level: str) -> dict[str, Any]:
-    level = _normalize_trace_log_level(log_level)
-    out = dict(trace)
-    out["log_level"] = level
-    out["top_entities"] = _top_entities(list(trace.get("local_entities") or []))
-    out["top_candidates"] = _top_candidates(list(trace.get("candidate_selections") or []))
-    out["top_problems"] = _top_problems(dict(trace.get("summary") or {}))
-    out["merge_events"] = _merge_events(list(trace.get("similarity_analyses") or []), list(trace.get("decision_analyses") or []))
-    if level == "FULL_TRACE":
-        return out
-
-    out["search_profiles"] = []
-    out["technical_entities"] = []
-    out["technical_memory_chunks"] = []
-    out["decision_analyses"] = []
-    out["local_resolver_trace"] = None
-    out["similarity_analyses"] = list(trace.get("similarity_analyses") or [])[:5]
-    out["tension_analyses"] = list(trace.get("tension_analyses") or [])[:5]
-    out["retrieval_chunks"] = list(trace.get("retrieval_chunks") or [])[:5]
-
-    if level == "SUMMARY":
-        out["sentences"] = []
-        out["local_entities"] = []
-        out["local_entity_clusters"] = []
-        out["candidate_selections"] = list(trace.get("candidate_selections") or [])[:5]
-        return out
-
-    quality = dict((trace.get("summary") or {}).get("quality") or {})
-    out["sentences"] = _sentences_without_claims(list(trace.get("sentences") or []))
-    out["local_entities"] = [_short_local_entity(item) for item in list(trace.get("local_entities") or [])]
-    out["local_entity_clusters"] = []
-    out["candidate_selections"] = list(trace.get("candidate_selections") or [])
-    out["inspect"] = {
-        "bad_subject_claim_examples": quality.get("bad_subject_claim_examples") or [],
-        "rejected_claim_examples": quality.get("rejected_claim_examples") or quality.get("rejected_claims") or [],
-        "noise_examples": quality.get("skipped_sentences") or [],
-        "candidate_shortlist": list(trace.get("candidate_selections") or []),
-    }
-    return out
 
 
 def _timeline_compatibility_reasons(analyses: list[dict[str, Any]]) -> list[str]:

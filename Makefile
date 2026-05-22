@@ -4,7 +4,7 @@
 # test-unit: csak tests/unit – nem tölti a tests/integration/conftest app/DB fixture-ét.
 # test-integration: HTTP/TestClient/PostgreSQL igényű tesztek.
 
-.PHONY: lint test-unit test-integration test-slow test-all install \
+.PHONY: lint format typecheck test test-unit test-integration test-slow test-all install install-dev package check-no-runtime-ddl check-import-boundaries \
 	claim-regression claim-regression-hu claim-regression-en claim-regression-es \
 	knowledge-dirty-check
 
@@ -12,8 +12,21 @@ install:
 	cd backend && pip install -r requirements.txt
 	cd backend && pip install -e .
 
+install-dev:
+	cd backend && pip install -r requirements-dev.txt
+	cd backend && pip install -e ".[test]"
+
 lint:
-	cd backend && ruff check . --output-format=concise || true
+	cd backend && ruff check . --output-format=concise
+
+format:
+	cd backend && ruff format .
+
+typecheck:
+	cd backend && mypy
+
+test:
+	cd backend && pytest
 
 test-unit:
 	cd backend && pytest tests/unit -v --tb=short
@@ -26,6 +39,15 @@ test-slow:
 
 test-all:
 	cd backend && pytest tests/ -v --tb=short
+
+package:
+	./scripts/package_backend.sh
+
+check-no-runtime-ddl:
+	python3 scripts/check_no_runtime_ddl.py
+
+check-import-boundaries:
+	python3 scripts/check_import_boundaries.py
 
 # Refaktor sorrend (13.): nyelvenként claim regresszió, majd local resolver füst.
 claim-regression:

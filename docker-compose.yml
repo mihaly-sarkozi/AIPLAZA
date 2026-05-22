@@ -46,6 +46,10 @@ services:
       context: .
       dockerfile: docker/backend.Dockerfile
     container_name: aiplaza-backend
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
     env_file:
       - .env
     environment:
@@ -68,8 +72,6 @@ services:
     working_dir: /app/backend
     ports:
       - "8001:8001"
-    volumes:
-      - .:/app
     healthcheck:
       test:
         [
@@ -93,6 +95,10 @@ services:
       context: .
       dockerfile: docker/frontend.Dockerfile
     container_name: aiplaza-frontend
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
     environment:
       VITE_DEV_PROXY_TARGET: http://host.docker.internal:8001
       VITE_TENANT_DOMAIN: lvh.me
@@ -103,10 +109,6 @@ services:
     working_dir: /app/frontend
     ports:
       - "5173:5173"
-    volumes:
-      - .:/app
-      - frontend_node_modules:/app/frontend/node_modules
-      - frontend_pnpm_store:/root/.local/share/pnpm/store
     depends_on:
       backend:
         condition: service_healthy
@@ -115,5 +117,3 @@ volumes:
   postgres_data:
   qdrant_data:
   minio_data:
-  frontend_node_modules:
-  frontend_pnpm_store:

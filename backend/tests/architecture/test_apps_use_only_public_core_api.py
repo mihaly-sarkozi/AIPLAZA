@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from apps.contracts.public_api import PUBLIC_CORE_API_PREFIXES
+from core.kernel.interface.public_api import PUBLIC_CORE_API_PREFIXES
 from tests.architecture._helpers import (
     APPS_ROOT,
     collect_imports,

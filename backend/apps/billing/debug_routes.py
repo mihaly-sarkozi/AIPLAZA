@@ -1,14 +1,19 @@
+# backend/apps/billing/debug_routes.py
+# Feladat: Nem production billing debug endpointokat regisztrál dátumszimulációhoz és kézi előfizetés-billing futtatáshoz. Minden route owner jogosultságot, környezeti debug kapcsolót és rate limitet használ, prod környezetben 404-et ad. Program-specifikus fejlesztői HTTP adapter.
+# Sárközi Mihály - 2026.05.21
+
 from __future__ import annotations
 
 from collections.abc import Callable
 from datetime import date
 from typing import Any
 
-from fastapi import APIRouter, Body, Depends, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException, Request
 
-from core.di import RequiredTenantContextDep
-from core.platform.auth.auth_dependencies import require_role
-from core.capabilities.users.dto import User
+from core.kernel.http.tenant_dependencies import RequiredTenantContextDep
+from core.kernel.security.rate_limit import limiter
+from core.modules.auth.web.dependencies.auth_dependencies import require_role
+from core.modules.users.domain.dto import User
 
 
 def register_debug_billing_routes(
@@ -16,26 +21,33 @@ def register_debug_billing_routes(
     *,
     get_billing_service: Callable[..., Any],
     ensure_debug_enabled: Callable[[], None],
+    audit_debug_action: Callable[..., None],
     debug_date_request_model: type[Any],
     debug_date_response_model: type[Any],
     debug_run_request_model: type[Any],
     debug_run_response_model: type[Any],
 ) -> None:
     @router.get("/billing/debug/simulated-date", response_model=debug_date_response_model)
+    @limiter.limit("10/minute")
     def get_billing_debug_simulated_date(
+        request: Request,
         svc: Any = Depends(get_billing_service),
         current_user: User = Depends(require_role("owner")),
     ):
         ensure_debug_enabled()
+        audit_debug_action("get_simulated_date", request=request, current_user=current_user)
         return svc.get_debug_simulated_date()
 
     @router.put("/billing/debug/simulated-date", response_model=debug_date_response_model)
+    @limiter.limit("5/minute")
     def set_billing_debug_simulated_date(
+        request: Request,
         body: debug_date_request_model = Body(...),
         svc: Any = Depends(get_billing_service),
         current_user: User = Depends(require_role("owner")),
     ):
         ensure_debug_enabled()
+        audit_debug_action("set_simulated_date", request=request, current_user=current_user)
         raw = (body.simulated_date or "").strip()
         if not raw:
             return svc.set_debug_simulated_date(None)
@@ -46,21 +58,27 @@ def register_debug_billing_routes(
         return svc.set_debug_simulated_date(parsed)
 
     @router.delete("/billing/debug/simulated-date", response_model=debug_date_response_model)
+    @limiter.limit("5/minute")
     def clear_billing_debug_simulated_date(
+        request: Request,
         svc: Any = Depends(get_billing_service),
         current_user: User = Depends(require_role("owner")),
     ):
         ensure_debug_enabled()
+        audit_debug_action("clear_simulated_date", request=request, current_user=current_user)
         return svc.set_debug_simulated_date(None)
 
     @router.post("/billing/debug/run-subscription-billing", response_model=debug_run_response_model)
+    @limiter.limit("3/minute")
     def run_billing_debug_subscription_billing(
+        request: Request,
         tenant: RequiredTenantContextDep,
         body: debug_run_request_model = Body(...),
         svc: Any = Depends(get_billing_service),
         current_user: User = Depends(require_role("owner")),
     ):
         ensure_debug_enabled()
+        audit_debug_action("run_subscription_billing", request=request, current_user=current_user, tenant=tenant)
         try:
             return svc.complete_subscription_billing(
                 tenant,

@@ -22,6 +22,7 @@ class ChatGateway(Protocol):
         user_id: int | None = None,
         user_role: str | None = None,
         kb_uuid: str | None = None,
+        tenant: str | None = None,
         debug: bool = False,
     ) -> dict: ...
     # Ez az aszinkron metódus a(z) chat_stream logikáját valósítja meg.

@@ -1,6 +1,10 @@
+# backend/shared/object_storage/s3_compatible.py
+# Feladat: S3-kompatibilis object storage adaptert valósít meg boto3 klienssel. Bucket létezést ellenőriz/létrehoz, byte/text feltöltést, letöltést, statot, törlést és normalizált object key építést biztosít az ObjectStoragePort contract szerint. Shared storage implementáció MinIO/S3-kompatibilis backendekhez.
+# Sárközi Mihály - 2026.05.21
+
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, BinaryIO
 
 import boto3
 from botocore.client import Config
@@ -9,6 +13,19 @@ from botocore.exceptions import ClientError
 from shared.object_storage.config import ObjectStorageConfig
 from shared.object_storage.contracts import ObjectStoragePort
 from shared.object_storage.models import StoredObjectData, StoredObjectRef
+
+MAX_OBJECT_KEY_LENGTH = 1024
+
+
+def sanitize_object_key_part(value: str) -> str:
+    normalized = str(value or "").strip()
+    if not normalized or normalized in {".", ".."}:
+        raise ValueError("Invalid object key segment")
+    if any(ord(ch) < 32 or ord(ch) == 127 for ch in normalized):
+        raise ValueError("Invalid control character in object key segment")
+    if "/" in normalized or "\\" in normalized:
+        raise ValueError("Path separators are not allowed in object key segment")
+    return normalized
 
 
 class S3CompatibleObjectStorage(ObjectStoragePort):
@@ -71,6 +88,34 @@ class S3CompatibleObjectStorage(ObjectStoragePort):
             metadata=dict(head.get("Metadata") or {}),
         )
 
+    def put_fileobj(
+        self,
+        *,
+        key: str,
+        fileobj: BinaryIO,
+        bucket: str | None = None,
+        content_type: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> StoredObjectRef:
+        resolved_bucket = self._resolve_bucket(bucket)
+        self._ensure_bucket_exists(resolved_bucket)
+        extra_args: dict[str, Any] = {}
+        if content_type:
+            extra_args["ContentType"] = content_type
+        if metadata:
+            extra_args["Metadata"] = {str(k): str(v) for k, v in metadata.items()}
+        self._client.upload_fileobj(fileobj, resolved_bucket, key, ExtraArgs=extra_args or None)
+        head = self._client.head_object(Bucket=resolved_bucket, Key=key)
+        return StoredObjectRef(
+            provider=self._config.provider,
+            bucket=resolved_bucket,
+            key=key,
+            etag=str(head.get("ETag") or "").strip('"') or None,
+            size_bytes=int(head.get("ContentLength") or 0),
+            content_type=head.get("ContentType"),
+            metadata=dict(head.get("Metadata") or {}),
+        )
+
     def put_text(
         self,
         *,
@@ -124,7 +169,16 @@ class S3CompatibleObjectStorage(ObjectStoragePort):
         self._client.delete_object(Bucket=resolved_bucket, Key=key)
 
     def build_key(self, *parts: str) -> str:
-        return "/".join(str(part or "").strip("/").replace("\\", "/") for part in parts if str(part or "").strip("/"))
+        segments: list[str] = []
+        for raw_part in parts:
+            normalized_part = str(raw_part or "").strip().replace("\\", "/")
+            split_segments = normalized_part.split("/")
+            for segment in split_segments:
+                segments.append(sanitize_object_key_part(segment))
+        key = "/".join(segments)
+        if len(key) > MAX_OBJECT_KEY_LENGTH:
+            raise ValueError(f"Object key exceeds maximum length ({MAX_OBJECT_KEY_LENGTH})")
+        return key
 
 
-__all__ = ["S3CompatibleObjectStorage"]
+__all__ = ["MAX_OBJECT_KEY_LENGTH", "S3CompatibleObjectStorage", "sanitize_object_key_part"]

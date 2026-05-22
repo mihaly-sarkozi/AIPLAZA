@@ -3,11 +3,11 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
-from core.extensions.tenant.dto import TenantDomainInfo, TenantStatus
-from core.platform.brand.services import BrandService
-from core.platform.domain.policies import DomainPolicy
-from core.platform.domain.services import DomainService
-from core.platform.lifecycle.services import LifecycleService
+from core.modules.tenant.dto import TenantDomainInfo, TenantStatus
+from core.modules.brand.service.brand_service import BrandService
+from core.kernel.domain.policies import DomainPolicy
+from core.kernel.domain.services import DomainService
+from core.kernel.lifecycle.lifecycle_service import LifecycleService
 
 
 class _BrandRepoStub:
@@ -73,8 +73,40 @@ class _LifecycleProbeStub:
     def check_cache(self) -> str:
         return "ok"
 
+    def check_redis(self) -> str:
+        return "ok"
+
+    def check_object_storage(self) -> str:
+        return "ok"
+
+    def check_migrations(self) -> str:
+        return "ok"
+
+    def check_url_ingest_isolation_guard(self) -> str:
+        return "ok"
+
+    def check_outbox_queue(self) -> str:
+        return "ok"
+
+    def check_smtp(self) -> str:
+        return "ok"
+
     def check_background_worker(self) -> str:
         return "running"
+
+    def outbox_queue_snapshot(self) -> dict[str, object]:
+        return {
+            "pending": 12,
+            "running": 2,
+            "failed": 1,
+            "dead_letter": 0,
+            "stuck_leases": 0,
+            "oldest_pending_seconds": 42.0,
+            "average_attempts": 1.5,
+            "worker_status": "running",
+            "worker_heartbeat_at": "2026-05-22T10:00:00+00:00",
+            "worker_heartbeat_age_seconds": 3.0,
+        }
 
 
 def test_brand_service_returns_defaults_without_row():
@@ -134,12 +166,39 @@ def test_lifecycle_service_tracks_startup_and_readiness():
     assert liveness.startup_completed is True
     assert readiness.status == "ready"
     assert readiness.checks["startup"] == "ok"
-    assert readiness.checks["database"] == "ok"
+    assert readiness.checks["db"] == "ok"
     assert readiness.checks["cache"] == "ok"
-    assert readiness.checks["background_worker"] == "running"
+    assert readiness.checks["redis"] == "ok"
+    assert readiness.checks["object_storage"] == "ok"
+    assert readiness.checks["migrations"] == "ok"
+    assert readiness.checks["url_ingest_isolation"] == "ok"
+    assert readiness.checks["outbox"] == "ok"
+    assert readiness.checks["smtp"] == "ok"
+    assert readiness.checks["outbox_worker"] == "running"
     assert health.status == "ok"
     assert status.startup_runs == 1
     assert status.startup_completed_at is not None
+    outbox = service.outbox_snapshot()
+    assert outbox.pending == 12
+    assert outbox.running == 2
+    assert outbox.oldest_pending_seconds == 42.0
+    assert outbox.worker_status == "running"
+
+
+def test_lifecycle_service_reports_degraded_when_critical_dependency_fails(monkeypatch):
+    class _Probe(_LifecycleProbeStub):
+        def check_migrations(self) -> str:
+            raise RuntimeError("migrations_missing:abc123")
+
+    monkeypatch.setenv("APP_ENV", "production")
+    service = LifecycleService(probe_repository=_Probe())
+    service.mark_startup_begin()
+    service.mark_startup_complete()
+
+    readiness = service.readiness()
+
+    assert readiness.status == "degraded"
+    assert str(readiness.checks["migrations"]).startswith("error:")
 
 
 def test_domain_service_deletes_custom_domain():

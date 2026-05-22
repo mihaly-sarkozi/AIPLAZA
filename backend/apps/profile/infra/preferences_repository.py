@@ -21,27 +21,9 @@ class ProfilePreferencesRepository:
     def __init__(self, engine) -> None:
         self._engine = engine
 
-    def _ensure_table(self, *, tenant_slug: str) -> None:
-        schema = _safe_schema_name(tenant_slug)
-        with self._engine.begin() as conn:
-            conn.execute(
-                text(
-                    f"""
-                    CREATE TABLE IF NOT EXISTS "{schema}"."{_TABLE_NAME}" (
-                        user_id INTEGER PRIMARY KEY,
-                        dashboard_layout VARCHAR(32) NOT NULL DEFAULT 'comfortable',
-                        show_tips BOOLEAN NOT NULL DEFAULT TRUE,
-                        created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-                        updated_at TIMESTAMP NOT NULL DEFAULT NOW()
-                    )
-                    """
-                )
-            )
-
     def get_for_user(self, *, tenant_slug: str, user_id: int) -> ProfilePreferences:
         schema = _safe_schema_name(tenant_slug)
         table_name = f'"{schema}"."{_TABLE_NAME}"'
-        self._ensure_table(tenant_slug=tenant_slug)
         with self._engine.begin() as conn:
             row = conn.execute(
                 text(
@@ -72,7 +54,6 @@ class ProfilePreferencesRepository:
     ) -> ProfilePreferences:
         schema = _safe_schema_name(tenant_slug)
         table_name = f'"{schema}"."{_TABLE_NAME}"'
-        self._ensure_table(tenant_slug=tenant_slug)
         with self._engine.begin() as conn:
             conn.execute(
                 text(

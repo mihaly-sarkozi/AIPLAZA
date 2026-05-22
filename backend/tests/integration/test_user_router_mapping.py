@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 import pytest
 from fastapi.testclient import TestClient
 
-from core.capabilities.users.dto import User
+from core.modules.users.domain.dto import User
 
 pytestmark = [pytest.mark.integration, pytest.mark.must_pass]
 

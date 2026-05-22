@@ -1,40 +1,48 @@
 from __future__ import annotations
 
 import os
-from functools import lru_cache
-from pathlib import Path
 
-from dotenv import load_dotenv
-
-_PROJECT_ROOT = Path(__file__).resolve().parents[3]
-_ALLOWED_ENVS = {"dev", "prod"}
-
-
-def _resolve_env_path() -> Path:
-    candidates = (
-        _PROJECT_ROOT / ".env",
-        _PROJECT_ROOT.parent / ".env",
-    )
-    for candidate in candidates:
-        if candidate.exists():
-            return candidate
-    return candidates[0]
+_ENV_ALIASES = {
+    "dev": "local",
+    "prod": "production",
+}
+_ALLOWED_ENVS = {"local", "test", "staging", "production"}
 
 
-@lru_cache(maxsize=1)
-def load_project_env() -> Path:
-    env_path = _resolve_env_path()
-    load_dotenv(env_path)
-    return env_path
-
-
-def get_app_env() -> str:
-    load_project_env()
-    env = (os.getenv("APP_ENV") or "dev").strip().lower()
+def normalize_app_env(value: str | None = None) -> str:
+    env = str(value if value is not None else os.getenv("APP_ENV", "local")).strip().lower()
+    env = _ENV_ALIASES.get(env, env)
     if env not in _ALLOWED_ENVS:
         allowed = ", ".join(sorted(_ALLOWED_ENVS))
         raise ValueError(f"APP_ENV csak a következők egyike lehet: {allowed}. Kapott érték: {env!r}")
     return env
 
 
-__all__ = ["get_app_env", "load_project_env"]
+def is_local_env(env: str | None = None) -> bool:
+    return normalize_app_env(env) == "local"
+
+
+def is_test_env(env: str | None = None) -> bool:
+    return normalize_app_env(env) == "test"
+
+
+def is_staging_env(env: str | None = None) -> bool:
+    return normalize_app_env(env) == "staging"
+
+
+def is_production_env(env: str | None = None) -> bool:
+    return normalize_app_env(env) == "production"
+
+
+def is_deployed_env(env: str | None = None) -> bool:
+    return normalize_app_env(env) in {"staging", "production"}
+
+
+__all__ = [
+    "is_deployed_env",
+    "is_local_env",
+    "is_production_env",
+    "is_staging_env",
+    "is_test_env",
+    "normalize_app_env",
+]

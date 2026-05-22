@@ -1,4 +1,7 @@
-# Ez a fájl több modul által közösen használt backend segédlogikát tartalmaz.
+# backend/shared/presentation/localized_presenter_base.py
+# Feladat: Lokalizált HTTP detail payload építő presentation helper osztályt tartalmaz. Requestből Accept-Language alapján hu/en/es nyelvet választ, majd ErrorCode és get_message segítségével `{code, message}` formátumú választ állít elő. Shared router utility auth, users és jövőbeli app endpointok számára.
+# Sárközi Mihály - 2026.05.21
+
 from lang.messages import ErrorCode, get_message, lang_from_request
 
 

@@ -3,19 +3,19 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-from core.capabilities.audit.const.audit_log_action_const import AuditLogAction
+from core.infrastructure.audit.const.audit_log_action_const import AuditLogAction
 
 
 _SERVICE_FILES = [
-    Path("core/capabilities/auth/service/login_service.py"),
-    Path("core/capabilities/auth/service/refresh_service.py"),
-    Path("core/capabilities/auth/service/logout_service.py"),
-    Path("core/capabilities/users/service/user_service.py"),
-    Path("core/capabilities/users/service/invite_service.py"),
-    Path("core/platform/settings/services.py"),
-    Path("core/platform/brand/services.py"),
-    Path("core/platform_admin/router.py"),
-    Path("core/extensions/tenant/signup/new_demo_signup.py"),
+    Path("core/modules/auth/use_cases/login_service.py"),
+    Path("core/modules/auth/use_cases/refresh_service.py"),
+    Path("core/modules/auth/use_cases/logout_service.py"),
+    Path("core/modules/users/service/user_service.py"),
+    Path("core/modules/users/service/invite_service.py"),
+    Path("core/modules/settings/service/settings_service.py"),
+    Path("core/modules/brand/service/brand_service.py"),
+    Path("admin/router/admin_router.py"),
+    Path("core/modules/tenant/signup/new_demo_signup.py"),
 ]
 
 
@@ -67,5 +67,20 @@ def test_all_audit_action_enum_members_are_accounted_for_in_service_usage():
     enum_names = {member.name for member in AuditLogAction}
     unused = enum_names - used_names
 
-    # Legacy compatibility constants: defined, de jelenleg nincs aktív service kibocsátójuk.
-    assert unused == {"LOGOUT_ERROR", "KNOWLEDGE_PII_DEPERSONALIZED"}
+    # Compatibility/public contract constants: defined, de jelenleg nincs mindegyikhez aktív service kibocsátó.
+    assert unused == {
+        "ADMIN_ACTION",
+        "API_CREDENTIAL_CREATED",
+        "API_CREDENTIAL_REVOKED",
+        "API_CREDENTIAL_ROTATED",
+        "INTERNAL_ENDPOINT_ACCESSED",
+        "KNOWLEDGE_PII_DEPERSONALIZED",
+        "KNOWLEDGE_SOURCE_DELETED",
+        "KNOWLEDGE_TRAINING_STARTED",
+        "KNOWLEDGE_UPLOAD_REJECTED",
+        "KNOWLEDGE_URL_INGEST_REJECTED",
+        "LOGIN_2FA_SUCCESS",
+        "LOGOUT_ERROR",
+        "PERMISSION_DENIED",
+        "SIGNED_REQUEST_REJECTED",
+    }

@@ -9,9 +9,9 @@ pytestmark = [pytest.mark.architecture, pytest.mark.must_pass]
 PURE_LAYER_FILES = (
     *sorted((BACKEND_ROOT / "core" / "platform").glob("*/services.py")),
     *sorted((BACKEND_ROOT / "core" / "platform").glob("*/policies.py")),
-    BACKEND_ROOT / "core" / "platform" / "auth" / "authorization_policy.py",
-    BACKEND_ROOT / "core" / "platform" / "auth" / "security_policy.py",
-    BACKEND_ROOT / "core" / "platform" / "tenant_policy.py",
+    BACKEND_ROOT / "core" / "modules" / "auth" / "domain" / "authorization_policy.py",
+    BACKEND_ROOT / "core" / "kernel" / "security" / "auth_policy_guards.py",
+    BACKEND_ROOT / "core" / "modules" / "tenant" / "domain" / "tenant_policy.py",
 )
 
 

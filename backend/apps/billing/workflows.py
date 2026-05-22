@@ -1,3 +1,7 @@
+# backend/apps/billing/workflows.py
+# Feladat: A billing előfizetés lifecycle use case-eit és state machine-jét tartalmazza. Renewal, restriction, invoicing és due cycle feldolgozást választ le a nagy BillingService-ről, hogy a számlázási ciklus döntései tesztelhetőbbek legyenek. Program-specifikus workflow réteg.
+# Sárközi Mihály - 2026.05.21
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -5,7 +9,7 @@ from datetime import datetime, timedelta
 from enum import StrEnum
 from typing import Any
 
-from core.kernel.clock import Clock
+from core.kernel.runtime.clock import Clock
 
 
 class SubscriptionStatus(StrEnum):

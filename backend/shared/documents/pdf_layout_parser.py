@@ -1,3 +1,7 @@
+# backend/shared/documents/pdf_layout_parser.py
+# Feladat: PDF dokumentumok layout alapú szövegkinyerését végzi pdfplumber segítségével. Oldalszéli zajt, ismétlődő fejléc/lábléc sorokat, headingeket, listákat, táblázatszerű sorokat és oldaltörésen átnyúló bekezdéseket heuristikusan csoportosít ExtractedParagraph blokkokká. Shared PDF utility, néhány jogi/magyar dokumentumokra hangolt heurisztikával.
+# Sárközi Mihály - 2026.05.21
+
 from __future__ import annotations
 
 import io

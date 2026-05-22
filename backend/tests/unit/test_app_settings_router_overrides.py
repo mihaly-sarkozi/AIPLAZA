@@ -10,9 +10,9 @@ from fastapi.testclient import TestClient
 
 from apps.settings.api.router import router
 from apps.settings.dependencies import get_settings_facade
-from core.capabilities.users.dto import User
-from core.platform.auth import auth_dependencies
-from core.platform.auth.auth_dependencies import get_current_user
+from core.modules.users.domain.dto import User
+from core.modules.auth.web.dependencies import auth_dependencies
+from core.modules.auth.web.dependencies.auth_dependencies import get_current_user
 
 pytestmark = [pytest.mark.unit, pytest.mark.must_pass]
 

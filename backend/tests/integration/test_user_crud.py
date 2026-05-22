@@ -5,7 +5,7 @@ from unittest.mock import MagicMock
 import pytest
 from fastapi.testclient import TestClient
 
-from core.capabilities.users.dto import User
+from core.modules.users.domain.dto import User
 
 pytestmark = pytest.mark.integration
 
@@ -37,7 +37,7 @@ def test_list_users_with_users_returns_data(client_superuser: TestClient, mock_u
 
 def test_list_users_non_superuser_returns_403(client_superuser: TestClient, app):
     """GET /users nem superuserrel → 403."""
-    from core.platform.auth.auth_dependencies import get_current_user
+    from core.modules.auth.web.dependencies.auth_dependencies import get_current_user
     non_admin = User(
         id=2,
         email="user@example.com",

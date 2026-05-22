@@ -47,7 +47,7 @@ def _load_collections(conn, tenant_schema: str) -> list[str]:
             ) c
             WHERE collection_name IS NOT NULL
               AND collection_name <> ''
-              AND collection_name LIKE 'kb\_%' ESCAPE '\\'
+              AND collection_name LIKE 'kb\\_%' ESCAPE '\\'
             """
         )
     ).all()
@@ -102,7 +102,6 @@ def main() -> None:
     args = parser.parse_args()
 
     load_dotenv(_resolve_env_path())
-    from core.kernel.config import app_settings
     from core.kernel.config.config_loader import settings
 
     tenant_schema = str(args.tenant_schema).strip()
@@ -110,7 +109,7 @@ def main() -> None:
         raise ValueError("tenant-schema kotelezo.")
 
     engine = create_engine(settings.database_url, future=True)
-    qdrant = _qdrant_client(app_settings)
+    qdrant = _qdrant_client(settings)
 
     with engine.begin() as conn:
         collections = _load_collections(conn, tenant_schema)

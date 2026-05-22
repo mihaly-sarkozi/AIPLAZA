@@ -1,3 +1,7 @@
+# backend/shared/text/chunking.py
+# Feladat: Hosszabb szövegek tréninghez vagy ingesthez használható darabolását végzi. A bemenetet normalizálja, bekezdés- és mondathatárok mentén bontja, majd túl hosszú mondatoknál fix méretű szeletekre esik vissza. Shared text helper knowledge ingest és runtime store folyamatokhoz.
+# Sárközi Mihály - 2026.05.21
+
 from __future__ import annotations
 
 import re

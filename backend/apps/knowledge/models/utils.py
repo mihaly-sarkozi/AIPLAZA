@@ -1,7 +1,7 @@
 # Ez a fájl az adott terület adatmodelljeit és kapcsolódó struktúráit tartalmazza.
 from datetime import datetime
 
-from core.kernel.clock import utc_now_naive
+from core.kernel.runtime.clock import utc_now_naive
 
 
 def _utcnow_naive() -> datetime:

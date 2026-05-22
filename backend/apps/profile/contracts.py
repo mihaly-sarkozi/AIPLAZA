@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from apps.contracts.service_keys import MODULE_PROFILE_SERVICE
+from core.kernel.interface.app_keys import MODULE_PROFILE_SERVICE
 
 PROFILE_SERVICE = MODULE_PROFILE_SERVICE
 

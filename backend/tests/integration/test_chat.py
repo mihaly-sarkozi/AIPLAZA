@@ -83,13 +83,13 @@ def test_chat_returns_sources_when_available(client_authenticated: TestClient, m
 
 def test_chat_returns_pii_contract_fields(client_authenticated: TestClient, mock_chat_service, app, allow_chat_usage, monkeypatch):
     from apps.chat.dependencies import get_chat_service
-    from core.platform.service_keys import PLATFORM_TENANT_USAGE_SERVICE
-    import apps.chat.router.chat_router as chat_router
+    from core.kernel.interface.keys import PLATFORM_TENANT_USAGE_SERVICE
+    import apps.chat.service.chat_http_use_cases as chat_use_cases
 
     allow_chat_usage.can_consume_question.return_value = (True, None)
-    original_get_service = chat_router.get_service
+    original_get_service = chat_use_cases.get_service
     monkeypatch.setattr(
-        chat_router,
+        chat_use_cases,
         "get_service",
         lambda key: allow_chat_usage if str(key) == str(PLATFORM_TENANT_USAGE_SERVICE) else original_get_service(key),
     )

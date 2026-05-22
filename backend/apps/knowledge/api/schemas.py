@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field
 
 
 class SourceCreateTextRequest(BaseModel):
@@ -17,7 +17,7 @@ class IngestCreateTextRequest(BaseModel):
 
 
 class IngestCreateUrlItem(BaseModel):
-    url: str = Field(..., min_length=1, max_length=1024)
+    url: AnyHttpUrl = Field(..., max_length=1024)
     title: str | None = Field(default=None, max_length=200)
 
 
@@ -38,6 +38,7 @@ class IngestFileEstimateResponse(BaseModel):
     total_storage_bytes: int
     can_start: bool
     reason: str | None = None
+    is_estimate: bool = True
     items: list[IngestFileEstimateItemResponse] = Field(default_factory=list)
 
 
@@ -68,8 +69,16 @@ class IngestItemResponse(BaseModel):
     error_message: str | None = None
     duplicate_of_item_id: str | None = None
     pipeline_route: str
+    pipeline_version: str = "source_parser.v1"
+    idempotency_key: str | None = None
     content_hash: str | None = None
     source_id: str | None = None
+    lease_owner: str | None = None
+    lease_expires_at: datetime | None = None
+    heartbeat_at: datetime | None = None
+    retry_count: int = 0
+    max_retries: int = 3
+    dead_letter_reason: str | None = None
     created_at: datetime
     started_at: datetime | None = None
     completed_at: datetime | None = None

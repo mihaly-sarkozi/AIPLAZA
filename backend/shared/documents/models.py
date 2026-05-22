@@ -1,3 +1,7 @@
+# backend/shared/documents/models.py
+# Feladat: A dokumentum szövegkinyerés közös adatmodelljeit definiálja. Az ExtractedParagraph bekezdés, listaelem, heading, table_row vagy metadata blokkot ír le layout mezőkkel, az ExtractedDocument pedig teljes text_contentet, blokkokat és extraction metadatát hordoz. Shared contract core és app modulok számára.
+# Sárközi Mihály - 2026.05.21
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field

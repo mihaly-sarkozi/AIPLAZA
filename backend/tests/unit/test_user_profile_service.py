@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from core.capabilities.users.dto import User
-from core.capabilities.users.service.profile_service import UserProfileService
-from core.extensions.tenant.context.request_tenant_context import RequestTenantContext
-from core.extensions.tenant.dto import TenantConfig, TenantStatus
+from core.modules.users.domain.dto import User
+from core.modules.users.service.profile_service import UserProfileService
+from core.modules.tenant.context.request_tenant_context import RequestTenantContext
+from core.modules.tenant.dto import TenantConfig, TenantStatus
 
 
 class _UserRepo:

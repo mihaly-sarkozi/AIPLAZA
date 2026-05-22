@@ -1,3 +1,7 @@
+# backend/shared/utils/slug.py
+# Feladat: URL- és tenantbarát slug normalizálást és validációt ad. Nevekből biztonságos, rövid, kisbetűs slugot képez, illetve ellenőrzi a megengedett karaktereket és hosszt. Shared slug utility tenant signup és router validációhoz.
+# Sárközi Mihály - 2026.05.21
+
 from __future__ import annotations
 
 import re

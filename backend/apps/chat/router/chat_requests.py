@@ -46,10 +46,12 @@ class ChatFeedbackRequest(BaseModel):
 class ChannelCredentialCreateRequest(BaseModel):
     channel_type: str = Field(default="widget", description="widget vagy api")
     name: str = Field(..., min_length=1, max_length=120)
-    allowed_kb_uuids: list[str] = Field(default_factory=list)
-    daily_limit: int = Field(default=200, ge=1, le=100000)
-    per_minute_limit: int = Field(default=30, ge=1, le=10000)
+    allowed_kb_uuids: list[str] = Field(default_factory=list, description="Credential scope: engedélyezett tudástár UUID-k")
+    daily_limit: int = Field(default=200, ge=1, le=100000, description="Credential scope: napi rate limit policy")
+    per_minute_limit: int = Field(default=30, ge=1, le=10000, description="Credential scope: percenkénti rate limit policy")
     allowed_origins: list[str] = Field(default_factory=list, description="Widget esetén origin host lista")
+    allowed_ip_ranges: list[str] = Field(default_factory=list, description="API credential IP allowlist CIDR lista")
+    require_signed_requests: bool = Field(default=False, description="Credential scope: API credential HMAC signature + nonce replay védelem")
     expires_at: str | None = Field(default=None, description="ISO dátum/idő opcionális")
 
     @model_validator(mode="after")
@@ -60,6 +62,9 @@ class ChannelCredentialCreateRequest(BaseModel):
                 raise ValueError("Widget credentialhez legalább egy allowed_origin kötelező.")
             if any("*" in str(item or "") for item in self.allowed_origins):
                 raise ValueError("Wildcard origin nem engedélyezett.")
+        if channel_type == "api":
+            if not list(self.allowed_ip_ranges or []) and not bool(self.require_signed_requests):
+                raise ValueError("API credentialhez allowed_ip_ranges vagy require_signed_requests kötelező.")
         return self
 
 
@@ -68,6 +73,8 @@ class ChannelCredentialPolicyUpdateRequest(BaseModel):
     daily_limit: int | None = Field(default=None, ge=1, le=100000)
     per_minute_limit: int | None = Field(default=None, ge=1, le=10000)
     allowed_origins: list[str] | None = None
+    allowed_ip_ranges: list[str] | None = None
+    require_signed_requests: bool | None = None
     expires_at: str | None = None
 
     @model_validator(mode="after")

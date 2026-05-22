@@ -1,9 +1,13 @@
+# backend/core/kernel/logging/telemetry.py
+# Feladat: Runtime telemetry integrációkat kapcsol be best-effort módon. Settings alapján inicializálja a Sentryt és az OpenTelemetry FastAPI instrumentationt, dependency hiány esetén pedig csak warningot ír. Core observability bootstrap, amelyet az app factory hív az alkalmazás indításakor.
+# Sárközi Mihály - 2026.05.21
+
 from __future__ import annotations
 
 import logging
 from typing import Any
 
-from core.kernel.config.environment import get_app_env
+from core.kernel.config.config_loader import get_app_env
 
 _log = logging.getLogger("core.telemetry")
 _CONFIGURED = False

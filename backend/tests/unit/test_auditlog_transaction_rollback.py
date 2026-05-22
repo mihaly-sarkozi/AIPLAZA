@@ -7,10 +7,10 @@ from datetime import datetime, timedelta, timezone
 import pytest
 from passlib.hash import bcrypt_sha256 as pwd_hasher
 
-from core.capabilities.auth.dto import LoginInput
-from core.capabilities.auth.service.login_service import LoginService
-from core.capabilities.users.service.user_service import UserService
-from core.capabilities.users.dto.user import User
+from core.modules.auth.domain.dto import LoginInput
+from core.modules.auth.use_cases.login_service import LoginService
+from core.modules.users.service.user_service import UserService
+from core.modules.users.domain.dto.user import User
 
 
 pytestmark = pytest.mark.unit

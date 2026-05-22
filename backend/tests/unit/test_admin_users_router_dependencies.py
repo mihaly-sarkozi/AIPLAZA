@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 from fastapi.routing import APIRoute
 
-from core.capabilities.users.router.admin_users_router import router
+from core.modules.users.router.admin_users_router import router
 
 pytestmark = [pytest.mark.unit, pytest.mark.must_pass]
 

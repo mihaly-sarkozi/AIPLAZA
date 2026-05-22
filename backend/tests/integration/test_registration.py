@@ -2,7 +2,7 @@
 import pytest
 from fastapi.testclient import TestClient
 
-from core.capabilities.users.service.invite_errors import InviteTokenExpiredError, InviteTokenInvalidError
+from core.modules.users.service.invite_errors import InviteTokenExpiredError, InviteTokenInvalidError
 
 pytestmark = pytest.mark.integration
 

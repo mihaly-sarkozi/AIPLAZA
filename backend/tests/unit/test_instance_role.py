@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from core.kernel.config.instance_role import (
+from core.kernel.runtime.instance_role import (
     InstanceRole,
     get_instance_role,
     should_run_background_workers,

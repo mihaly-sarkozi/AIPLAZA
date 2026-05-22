@@ -1,6 +1,9 @@
+# backend/apps/chat/channel_access.py
+# Feladat: Channel credential, origin-ellenőrzés, kvóta, usage, feedback és analytics repository/service logikát tartalmaz. A credential policy és quota reservation rész külön modulokba került, itt az adat-hozzáférési és orchestration felület marad. Program-specifikus channel access réteg.
+# Sárközi Mihály - 2026.05.21
+
 from __future__ import annotations
 
-import hashlib
 import secrets
 import threading
 from collections.abc import Callable
@@ -8,19 +11,28 @@ from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
-from urllib.parse import urlparse
 
 from sqlalchemy import and_, desc, func, text
 
+from apps.chat.channel_policy import (
+    hash_channel_secret,
+    normalize_ip_ranges,
+    normalize_list,
+    normalize_widget_origin,
+    normalize_widget_origins,
+    origin_value,
+    remote_ip_allowed,
+    verify_channel_signature,
+)
+from apps.chat.channel_quota import (
+    release_usage_slot as release_channel_usage_slot,
+    reserve_usage_slot as reserve_channel_usage_slot,
+)
 from apps.chat.channel_models import (
     ChannelCredentialORM,
     ChannelFeedbackEventORM,
     ChannelUsageEventORM,
 )
-from core.kernel.config.environment import get_app_env
-from core.kernel.config import app_settings
-from core.kernel.db.model_bases import PublicBase
-from core.kernel.security.rate_limit import get_rate_limit_redis
 
 
 def _utcnow() -> datetime:
@@ -40,6 +52,11 @@ class ChannelPrincipal:
     daily_limit: int
     per_minute_limit: int
     allowed_origins: list[str]
+    allowed_ip_ranges: list[str]
+    require_signed_requests: bool
+    presented_secret: str
+    secret_version: str = "active"
+    expires_at: datetime | None = None
 
 
 class ChannelAccessRepository:
@@ -50,96 +67,84 @@ class ChannelAccessRepository:
 
     @staticmethod
     def _normalize_list(values: list[str] | None) -> list[str]:
-        out: list[str] = []
-        seen: set[str] = set()
-        for item in values or []:
-            value = str(item or "").strip()
-            if not value:
-                continue
-            key = value.lower()
-            if key in seen:
-                continue
-            seen.add(key)
-            out.append(value)
-        return out
+        return normalize_list(values)
 
     @classmethod
     def _normalize_widget_origin(cls, value: str) -> str:
-        text_value = str(value or "").strip().lower()
-        if not text_value:
-            raise ValueError("Az allowed_origins nem tartalmazhat üres elemet.")
-        if "*" in text_value:
-            raise ValueError("Wildcard origin nem engedélyezett widget credentialnél.")
-        if "://" not in text_value:
-            text_value = f"https://{text_value}"
-        parsed = urlparse(text_value)
-        scheme = str(parsed.scheme or "").strip().lower()
-        host = str(parsed.hostname or "").strip().lower()
-        port = parsed.port
-        if scheme not in {"http", "https"}:
-            raise ValueError("Widget origin csak http vagy https lehet.")
-        if not host:
-            raise ValueError("Widget origin host kötelező.")
-        if parsed.path not in {"", "/"} or parsed.params or parsed.query or parsed.fragment:
-            raise ValueError("Widget origin csak protocol+host formátum lehet (útvonal nélkül).")
-        if parsed.username or parsed.password:
-            raise ValueError("Widget origin nem tartalmazhat userinfo részt.")
-        if ":" in host and not host.startswith("["):
-            # Nyers IPv6 vagy hibás host; urlparse hostname ilyenkor már normalizál.
-            raise ValueError("Widget origin host formátuma érvénytelen.")
-        if port is not None:
-            return f"{scheme}://{host}:{int(port)}"
-        return f"{scheme}://{host}"
+        return normalize_widget_origin(value)
 
     @classmethod
     def _normalize_widget_origins(cls, values: list[str] | None) -> list[str]:
-        out: list[str] = []
-        seen: set[str] = set()
-        for item in values or []:
-            normalized = cls._normalize_widget_origin(str(item or ""))
-            if normalized in seen:
-                continue
-            seen.add(normalized)
-            out.append(normalized)
-        return out
+        return normalize_widget_origins(values)
 
     @staticmethod
     def _hash_secret(secret: str) -> str:
-        pepper = str(getattr(app_settings, "jwt_secret", "") or "aiplaza").strip()
-        payload = f"{pepper}:{secret}".encode("utf-8")
-        return hashlib.sha256(payload).hexdigest()
+        return hash_channel_secret(secret)
 
     @staticmethod
     def _origin_value(origin: str | None) -> str:
-        text_value = str(origin or "").strip()
-        if not text_value:
-            return ""
-        try:
-            parsed = urlparse(text_value)
-            scheme = str(parsed.scheme or "").strip().lower()
-            host = str(parsed.hostname or "").strip().lower()
-            port = parsed.port
-            if scheme not in {"http", "https"} or not host:
-                return ""
-            if port is not None:
-                return f"{scheme}://{host}:{int(port)}"
-            return f"{scheme}://{host}"
-        except Exception:
-            return ""
+        return origin_value(origin)
+
+    @staticmethod
+    def _normalize_ip_ranges(values: list[str] | None) -> list[str]:
+        return normalize_ip_ranges(values)
+
+    @staticmethod
+    def _active_secret_hash(row: ChannelCredentialORM) -> str:
+        return str(getattr(row, "active_secret_hash", "") or getattr(row, "secret_hash", "") or "")
+
+    @classmethod
+    def _promote_next_secret_if_due(cls, row: ChannelCredentialORM, *, now: datetime) -> bool:
+        rotating_until = getattr(row, "rotating_until", None)
+        next_prefix = str(getattr(row, "next_key_prefix", "") or "").strip().lower()
+        next_hash = str(getattr(row, "next_secret_hash", "") or "")
+        if not rotating_until or rotating_until > now:
+            return False
+        if not next_prefix or not next_hash:
+            row.next_key_prefix = None
+            row.next_secret_hash = None
+            row.rotating_until = None
+            row.secret_version = "active"
+            return True
+        row.key_prefix = next_prefix
+        row.active_secret_hash = next_hash
+        row.secret_hash = next_hash
+        row.next_key_prefix = None
+        row.next_secret_hash = None
+        row.rotating_until = None
+        row.secret_version = "active"
+        return True
+
+    @staticmethod
+    def _resolve_secret_version(
+        *,
+        prefix: str,
+        incoming_hash: str,
+        active_prefix: str,
+        active_hash: str,
+        next_prefix: str,
+        next_hash: str,
+        rotating_until: datetime | None,
+        now: datetime,
+    ) -> str | None:
+        active_matches = bool(active_hash) and prefix == active_prefix and secrets.compare_digest(active_hash, incoming_hash)
+        next_matches = (
+            bool(next_hash)
+            and prefix == next_prefix
+            and rotating_until is not None
+            and rotating_until >= now
+            and secrets.compare_digest(next_hash, incoming_hash)
+        )
+        if active_matches:
+            return "active"
+        if next_matches:
+            return "next"
+        return None
 
     def ensure_storage(self) -> None:
-        tables = (
-            ChannelCredentialORM.__table__,
-            ChannelUsageEventORM.__table__,
-            ChannelFeedbackEventORM.__table__,
-        )
-        PublicBase.metadata.create_all(bind=self._sf.engine, tables=list(tables))
-        with self._sf.engine.connect() as conn:
-            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_channel_credentials_key_prefix ON public.channel_credentials(key_prefix)"))
-            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_channel_feedback_events_trace_id ON public.channel_feedback_events(trace_id)"))
-            commit = getattr(conn, "commit", None)
-            if callable(commit):
-                commit()
+        # Runtime repositoryk nem végezhetnek DDL-t. A public channel táblák és indexek
+        # a core.modules.tenant.schema.public migrációs/bootstrap lépésben jönnek létre.
+        return None
 
     def create_credential(
         self,
@@ -151,8 +156,10 @@ class ChannelAccessRepository:
         daily_limit: int,
         per_minute_limit: int,
         allowed_origins: list[str],
-        expires_at: datetime | None,
-        created_by: int | None,
+        allowed_ip_ranges: list[str] | None = None,
+        require_signed_requests: bool = False,
+        expires_at: datetime | None = None,
+        created_by: int | None = None,
     ) -> dict[str, Any]:
         prefix = f"ck_{secrets.token_urlsafe(6)}".lower()
         secret_tail = secrets.token_urlsafe(24)
@@ -165,17 +172,25 @@ class ChannelAccessRepository:
         )
         if normalized_channel_type == "widget" and not normalized_allowed_origins:
             raise ValueError("Widget credential esetén az allowed_origins megadása kötelező.")
+        normalized_allowed_ip_ranges = self._normalize_ip_ranges(allowed_ip_ranges)
+        require_signature = bool(require_signed_requests)
+        if normalized_channel_type == "api" and not normalized_allowed_ip_ranges and not require_signature:
+            raise ValueError("API credential esetén allowed_ip_ranges vagy require_signed_requests kötelező.")
         row = ChannelCredentialORM(
             tenant_id=tenant_id,
             channel_type=normalized_channel_type,
             name=str(name or "Unnamed").strip() or "Unnamed",
             key_prefix=prefix,
+            active_secret_hash=self._hash_secret(secret_value),
             secret_hash=self._hash_secret(secret_value),
+            secret_version="active",
             status="active",
             allowed_kb_uuids=self._normalize_list(allowed_kb_uuids),
             daily_limit=max(1, int(daily_limit)),
             per_minute_limit=max(1, int(per_minute_limit)),
             allowed_origins=normalized_allowed_origins,
+            allowed_ip_ranges=normalized_allowed_ip_ranges,
+            require_signed_requests=require_signature,
             expires_at=expires_at,
             created_by=created_by,
             updated_by=created_by,
@@ -192,11 +207,20 @@ class ChannelAccessRepository:
             "name": row.name,
             "key_prefix": row.key_prefix,
             "secret": secret_value,
+            "active_secret": secret_value,
             "status": row.status,
+            "secret_version": str(getattr(row, "secret_version", "active") or "active"),
             "allowed_kb_uuids": list(row.allowed_kb_uuids or []),
             "daily_limit": int(row.daily_limit or 0),
             "per_minute_limit": int(row.per_minute_limit or 0),
             "allowed_origins": list(row.allowed_origins or []),
+            "allowed_ip_ranges": list(row.allowed_ip_ranges or []),
+            "require_signed_requests": bool(row.require_signed_requests),
+            "can_use_signed_request": bool(row.require_signed_requests),
+            "rate_limit_policy": {
+                "daily_limit": int(row.daily_limit or 0),
+                "per_minute_limit": int(row.per_minute_limit or 0),
+            },
             "expires_at": row.expires_at,
             "created_at": row.created_at,
         }
@@ -220,10 +244,19 @@ class ChannelAccessRepository:
                     "name": row.name,
                     "key_prefix": row.key_prefix,
                     "status": row.status,
+                    "secret_version": str(getattr(row, "secret_version", "active") or "active"),
                     "allowed_kb_uuids": list(row.allowed_kb_uuids or []),
                     "daily_limit": int(row.daily_limit or 0),
                     "per_minute_limit": int(row.per_minute_limit or 0),
                     "allowed_origins": list(row.allowed_origins or []),
+                    "allowed_ip_ranges": list(row.allowed_ip_ranges or []),
+                    "require_signed_requests": bool(row.require_signed_requests),
+                    "can_use_signed_request": bool(row.require_signed_requests),
+                    "rotating_until": row.rotating_until,
+                    "rate_limit_policy": {
+                        "daily_limit": int(row.daily_limit or 0),
+                        "per_minute_limit": int(row.per_minute_limit or 0),
+                    },
                     "expires_at": row.expires_at,
                     "last_used_at": row.last_used_at,
                     "created_at": row.created_at,
@@ -241,8 +274,10 @@ class ChannelAccessRepository:
         daily_limit: int | None,
         per_minute_limit: int | None,
         allowed_origins: list[str] | None,
-        updated_by: int | None,
-        expires_at: datetime | None,
+        allowed_ip_ranges: list[str] | None = None,
+        require_signed_requests: bool | None = None,
+        updated_by: int | None = None,
+        expires_at: datetime | None = None,
     ) -> dict[str, Any] | None:
         with self._sf() as db:
             db.execute(text("SET search_path TO public"))
@@ -270,6 +305,13 @@ class ChannelAccessRepository:
                     row.allowed_origins = normalized_allowed_origins
                 else:
                     row.allowed_origins = self._normalize_list(allowed_origins)
+            if allowed_ip_ranges is not None:
+                row.allowed_ip_ranges = self._normalize_ip_ranges(allowed_ip_ranges)
+            if require_signed_requests is not None:
+                row.require_signed_requests = bool(require_signed_requests)
+            if str(row.channel_type or "widget").strip().lower() == "api":
+                if not list(row.allowed_ip_ranges or []) and not bool(row.require_signed_requests):
+                    raise ValueError("API credential esetén allowed_ip_ranges vagy require_signed_requests kötelező.")
             row.expires_at = expires_at
             row.updated_by = updated_by
             row.updated_at = _utcnow()
@@ -281,6 +323,8 @@ class ChannelAccessRepository:
                 "daily_limit": int(row.daily_limit or 0),
                 "per_minute_limit": int(row.per_minute_limit or 0),
                 "allowed_origins": list(row.allowed_origins or []),
+                "allowed_ip_ranges": list(row.allowed_ip_ranges or []),
+                "require_signed_requests": bool(row.require_signed_requests),
                 "expires_at": row.expires_at,
                 "updated_at": row.updated_at,
             }
@@ -310,6 +354,7 @@ class ChannelAccessRepository:
         prefix = f"ck_{secrets.token_urlsafe(6)}".lower()
         secret_tail = secrets.token_urlsafe(24)
         secret_value = f"{prefix}.{secret_tail}"
+        rotating_until = _utcnow() + timedelta(days=7)
         with self._sf() as db:
             db.execute(text("SET search_path TO public"))
             row = (
@@ -322,8 +367,10 @@ class ChannelAccessRepository:
             )
             if row is None:
                 return None
-            row.key_prefix = prefix
-            row.secret_hash = self._hash_secret(secret_value)
+            row.next_key_prefix = prefix
+            row.next_secret_hash = self._hash_secret(secret_value)
+            row.rotating_until = rotating_until
+            row.secret_version = "rotating"
             row.status = "active"
             row.revoked_at = None
             row.revoked_by = None
@@ -334,9 +381,97 @@ class ChannelAccessRepository:
             return {
                 "id": row.id,
                 "key_prefix": row.key_prefix,
-                "secret": secret_value,
+                "next_key_prefix": row.next_key_prefix,
+                "next_secret": secret_value,
+                "secret_version": str(getattr(row, "secret_version", "rotating") or "rotating"),
+                "rotating_until": row.rotating_until,
                 "updated_at": row.updated_at,
             }
+
+    def authenticate_with_reason(
+        self,
+        *,
+        tenant_id: int,
+        presented_secret: str,
+        origin: str | None,
+    ) -> tuple[ChannelPrincipal | None, str]:
+        presented_secret = str(presented_secret or "").strip()
+        if not presented_secret or "." not in presented_secret:
+            return None, "invalid_credential"
+        prefix = presented_secret.split(".", 1)[0].strip().lower()
+        if not prefix:
+            return None, "invalid_credential"
+        now = _utcnow()
+        with self._sf() as db:
+            db.execute(text("SET search_path TO public"))
+            row = (
+                db.query(ChannelCredentialORM)
+                .filter(
+                    ChannelCredentialORM.tenant_id == tenant_id,
+                    (
+                        (ChannelCredentialORM.key_prefix == prefix)
+                        | (ChannelCredentialORM.next_key_prefix == prefix)
+                    ),
+                )
+                .first()
+            )
+            if row is None:
+                return None, "invalid_credential"
+            status = str(row.status or "").strip().lower()
+            if status == "revoked":
+                return None, "credential_revoked"
+            if status != "active":
+                return None, "invalid_credential"
+            if row.expires_at is not None and row.expires_at <= now:
+                return None, "credential_expired"
+            promoted = self._promote_next_secret_if_due(row, now=now)
+            expected_hash = self._active_secret_hash(row)
+            incoming_hash = self._hash_secret(presented_secret)
+            active_prefix = str(row.key_prefix or "").strip().lower()
+            next_prefix = str(getattr(row, "next_key_prefix", "") or "").strip().lower()
+            next_hash = str(getattr(row, "next_secret_hash", "") or "")
+            rotating_until = getattr(row, "rotating_until", None)
+            secret_version = self._resolve_secret_version(
+                prefix=prefix,
+                incoming_hash=incoming_hash,
+                active_prefix=active_prefix,
+                active_hash=expected_hash,
+                next_prefix=next_prefix,
+                next_hash=next_hash,
+                rotating_until=rotating_until,
+                now=now,
+            )
+            if not secret_version:
+                return None, "invalid_credential"
+            allowed_origins = [str(item).lower() for item in (row.allowed_origins or []) if str(item or "").strip()]
+            if row.channel_type == "widget":
+                if not allowed_origins:
+                    return None, "invalid_origin"
+                origin_value = self._origin_value(origin)
+                if not origin_value or origin_value not in allowed_origins:
+                    return None, "invalid_origin"
+            row.last_used_at = now
+            row.secret_version = secret_version
+            if promoted:
+                row.updated_at = now
+            db.commit()
+            return (
+                ChannelPrincipal(
+                    tenant_id=tenant_id,
+                    credential_id=int(row.id),
+                    channel_type=str(row.channel_type or "widget"),
+                    allowed_kb_uuids=[str(item) for item in (row.allowed_kb_uuids or []) if str(item or "").strip()],
+                    daily_limit=max(1, int(row.daily_limit or 1)),
+                    per_minute_limit=max(1, int(row.per_minute_limit or 1)),
+                    allowed_origins=list(row.allowed_origins or []),
+                    allowed_ip_ranges=list(row.allowed_ip_ranges or []),
+                    require_signed_requests=bool(row.require_signed_requests),
+                    presented_secret=presented_secret,
+                    secret_version=secret_version,
+                    expires_at=row.expires_at,
+                ),
+                "",
+            )
 
     def authenticate(
         self,
@@ -345,50 +480,48 @@ class ChannelAccessRepository:
         presented_secret: str,
         origin: str | None,
     ) -> ChannelPrincipal | None:
-        presented_secret = str(presented_secret or "").strip()
-        if not presented_secret or "." not in presented_secret:
-            return None
-        prefix = presented_secret.split(".", 1)[0].strip().lower()
-        if not prefix:
-            return None
-        now = _utcnow()
-        with self._sf() as db:
-            db.execute(text("SET search_path TO public"))
-            row = (
-                db.query(ChannelCredentialORM)
-                .filter(
-                    ChannelCredentialORM.tenant_id == tenant_id,
-                    ChannelCredentialORM.key_prefix == prefix,
-                    ChannelCredentialORM.status == "active",
-                )
-                .first()
+        principal, _ = self.authenticate_with_reason(
+            tenant_id=tenant_id,
+            presented_secret=presented_secret,
+            origin=origin,
+        )
+        return principal
+
+    def authorize_api_request(
+        self,
+        principal: ChannelPrincipal,
+        *,
+        remote_ip: str | None,
+        method: str,
+        path: str,
+        body: bytes,
+        timestamp: str | None,
+        nonce: str | None,
+        signature: str | None,
+        body_hash: str | None = None,
+    ) -> tuple[bool, str]:
+        if str(principal.channel_type or "widget").strip().lower() != "api":
+            return True, ""
+        ip_ranges = [str(item) for item in (principal.allowed_ip_ranges or []) if str(item or "").strip()]
+        signature_required = bool(principal.require_signed_requests)
+        ip_allowed = remote_ip_allowed(remote_ip, ip_ranges) if ip_ranges else False
+        if ip_ranges and not ip_allowed:
+            return False, "missing_ip_allowlist: Channel API credential IP allowlist rejected this request."
+        if signature_required:
+            return verify_channel_signature(
+                secret=principal.presented_secret,
+                method=method,
+                path=path,
+                body=body,
+                timestamp=timestamp,
+                nonce=nonce,
+                signature=signature,
+                body_hash=body_hash,
+                credential_id=principal.credential_id,
             )
-            if row is None:
-                return None
-            if row.expires_at is not None and row.expires_at <= now:
-                return None
-            expected_hash = str(row.secret_hash or "")
-            incoming_hash = self._hash_secret(presented_secret)
-            if not secrets.compare_digest(expected_hash, incoming_hash):
-                return None
-            allowed_origins = [str(item).lower() for item in (row.allowed_origins or []) if str(item or "").strip()]
-            if row.channel_type == "widget":
-                if not allowed_origins:
-                    return None
-                origin_value = self._origin_value(origin)
-                if not origin_value or origin_value not in allowed_origins:
-                    return None
-            row.last_used_at = now
-            db.commit()
-            return ChannelPrincipal(
-                tenant_id=tenant_id,
-                credential_id=int(row.id),
-                channel_type=str(row.channel_type or "widget"),
-                allowed_kb_uuids=[str(item) for item in (row.allowed_kb_uuids or []) if str(item or "").strip()],
-                daily_limit=max(1, int(row.daily_limit or 1)),
-                per_minute_limit=max(1, int(row.per_minute_limit or 1)),
-                allowed_origins=list(row.allowed_origins or []),
-            )
+        if not ip_ranges:
+            return False, "missing_ip_allowlist: Channel API credential requires IP allowlist or signed requests."
+        return True, ""
 
     def current_usage(self, *, tenant_id: int, credential_id: int) -> dict[str, int]:
         now = _utcnow()
@@ -433,173 +566,26 @@ class ChannelAccessRepository:
     ) -> tuple[bool, str, dict[str, Any] | None]:
         now = _utcnow()
         day_key = _period_key(now)
-        minute_key = now.strftime("%Y-%m-%dT%H:%M")
-        burst_10s_key = str(int(now.timestamp()) // 10)
-        normalized_daily_limit = max(1, int(daily_limit or 1))
-        normalized_minute_limit = max(1, int(per_minute_limit or 1))
-        session_scope = str(session_key or "").strip() or ""
-        normalized_session_per_minute_limit = max(1, int(session_per_minute_limit or 1))
-        normalized_session_burst_10s_limit = max(1, int(session_burst_10s_limit or 1))
-        session_limit_enabled = bool(session_scope and session_per_minute_limit and session_burst_10s_limit)
-        fail_closed = bool(getattr(app_settings, "channel_quota_fail_closed_without_redis", True))
-        try:
-            env = get_app_env()
-        except Exception:
-            env = "dev"
-
-        redis_client = get_rate_limit_redis()
-        if redis_client is None and fail_closed and env == "prod":
-            return False, "Channel quota szolgáltatás átmenetileg nem elérhető.", None
-        if redis_client is not None:
-            day_counter_key = f"quota:channel:day:{tenant_id}:{credential_id}:{day_key}"
-            minute_counter_key = f"quota:channel:minute:{tenant_id}:{credential_id}:{minute_key}"
-            session_minute_counter_key = (
-                f"quota:channel:session:minute:{tenant_id}:{credential_id}:{session_scope}:{minute_key}"
-                if session_limit_enabled
-                else ""
-            )
-            session_burst_counter_key = (
-                f"quota:channel:session:burst10s:{tenant_id}:{credential_id}:{session_scope}:{burst_10s_key}"
-                if session_limit_enabled
-                else ""
-            )
-            try:
-                pipe = redis_client.pipeline()
-                pipe.incr(day_counter_key, 1)
-                pipe.expire(day_counter_key, 3 * 24 * 3600)
-                pipe.incr(minute_counter_key, 1)
-                pipe.expire(minute_counter_key, 180)
-                if session_limit_enabled:
-                    pipe.incr(session_minute_counter_key, 1)
-                    pipe.expire(session_minute_counter_key, 180)
-                    pipe.incr(session_burst_counter_key, 1)
-                    pipe.expire(session_burst_counter_key, 60)
-                results = pipe.execute()
-                day_count = int(results[0] or 0)
-                minute_count = int(results[2] or 0)
-                session_minute_count = int(results[4] or 0) if session_limit_enabled else 0
-                session_burst_count = int(results[6] or 0) if session_limit_enabled else 0
-                if (
-                    day_count > normalized_daily_limit
-                    or minute_count > normalized_minute_limit
-                    or (
-                        session_limit_enabled
-                        and (
-                            session_minute_count > normalized_session_per_minute_limit
-                            or session_burst_count > normalized_session_burst_10s_limit
-                        )
-                    )
-                ):
-                    rollback_pipe = redis_client.pipeline()
-                    rollback_pipe.decr(day_counter_key, 1)
-                    rollback_pipe.decr(minute_counter_key, 1)
-                    if session_limit_enabled:
-                        rollback_pipe.decr(session_minute_counter_key, 1)
-                        rollback_pipe.decr(session_burst_counter_key, 1)
-                    rollback_pipe.execute()
-                    if day_count > normalized_daily_limit:
-                        return False, "Napi kérdéslimit elérve.", None
-                    if minute_count > normalized_minute_limit:
-                        return False, "Túl sok kérés rövid idő alatt.", None
-                    return False, "Túl sok kérés ebből a munkamenetből rövid idő alatt.", None
-                return True, "", {
-                    "backend": "redis",
-                    "day_counter_key": day_counter_key,
-                    "minute_counter_key": minute_counter_key,
-                    "session_minute_counter_key": session_minute_counter_key,
-                    "session_burst_counter_key": session_burst_counter_key,
-                }
-            except Exception:
-                if fail_closed and env == "prod":
-                    return False, "Channel quota szolgáltatás átmenetileg nem elérhető.", None
-
-        day_counter_key = f"quota:channel:day:{tenant_id}:{credential_id}:{day_key}"
-        minute_counter_key = f"quota:channel:minute:{tenant_id}:{credential_id}:{minute_key}"
-        session_minute_counter_key = (
-            f"quota:channel:session:minute:{tenant_id}:{credential_id}:{session_scope}:{minute_key}"
-            if session_limit_enabled
-            else ""
+        return reserve_channel_usage_slot(
+            tenant_id=tenant_id,
+            credential_id=credential_id,
+            daily_limit=daily_limit,
+            per_minute_limit=per_minute_limit,
+            now=now,
+            period_key=day_key,
+            quota_lock=self._quota_lock,
+            quota_fallback_counters=self._quota_fallback_counters,
+            session_key=session_key,
+            session_per_minute_limit=session_per_minute_limit,
+            session_burst_10s_limit=session_burst_10s_limit,
         )
-        session_burst_counter_key = (
-            f"quota:channel:session:burst10s:{tenant_id}:{credential_id}:{session_scope}:{burst_10s_key}"
-            if session_limit_enabled
-            else ""
-        )
-        with self._quota_lock:
-            day_count = int(self._quota_fallback_counters.get(day_counter_key, 0)) + 1
-            minute_count = int(self._quota_fallback_counters.get(minute_counter_key, 0)) + 1
-            session_minute_count = (
-                int(self._quota_fallback_counters.get(session_minute_counter_key, 0)) + 1
-                if session_limit_enabled
-                else 0
-            )
-            session_burst_count = (
-                int(self._quota_fallback_counters.get(session_burst_counter_key, 0)) + 1
-                if session_limit_enabled
-                else 0
-            )
-            if day_count > normalized_daily_limit:
-                return False, "Napi kérdéslimit elérve.", None
-            if minute_count > normalized_minute_limit:
-                return False, "Túl sok kérés rövid idő alatt.", None
-            if session_limit_enabled and (
-                session_minute_count > normalized_session_per_minute_limit
-                or session_burst_count > normalized_session_burst_10s_limit
-            ):
-                return False, "Túl sok kérés ebből a munkamenetből rövid idő alatt.", None
-            self._quota_fallback_counters[day_counter_key] = day_count
-            self._quota_fallback_counters[minute_counter_key] = minute_count
-            if session_limit_enabled:
-                self._quota_fallback_counters[session_minute_counter_key] = session_minute_count
-                self._quota_fallback_counters[session_burst_counter_key] = session_burst_count
-        return True, "", {
-            "backend": "memory",
-            "day_counter_key": day_counter_key,
-            "minute_counter_key": minute_counter_key,
-            "session_minute_counter_key": session_minute_counter_key,
-            "session_burst_counter_key": session_burst_counter_key,
-        }
 
     def release_usage_slot(self, reservation: dict[str, Any] | None) -> None:
-        if not reservation:
-            return
-        day_counter_key = str(reservation.get("day_counter_key") or "").strip()
-        minute_counter_key = str(reservation.get("minute_counter_key") or "").strip()
-        session_minute_counter_key = str(reservation.get("session_minute_counter_key") or "").strip()
-        session_burst_counter_key = str(reservation.get("session_burst_counter_key") or "").strip()
-        if not day_counter_key or not minute_counter_key:
-            return
-        backend = str(reservation.get("backend") or "").strip().lower()
-        if backend == "redis":
-            redis_client = get_rate_limit_redis()
-            if redis_client is None:
-                return
-            try:
-                pipe = redis_client.pipeline()
-                pipe.decr(day_counter_key, 1)
-                pipe.decr(minute_counter_key, 1)
-                if session_minute_counter_key:
-                    pipe.decr(session_minute_counter_key, 1)
-                if session_burst_counter_key:
-                    pipe.decr(session_burst_counter_key, 1)
-                pipe.execute()
-            except Exception:
-                return
-            return
-        with self._quota_lock:
-            for key in (
-                day_counter_key,
-                minute_counter_key,
-                session_minute_counter_key,
-                session_burst_counter_key,
-            ):
-                if not key:
-                    continue
-                current = int(self._quota_fallback_counters.get(key, 0))
-                if current <= 1:
-                    self._quota_fallback_counters.pop(key, None)
-                else:
-                    self._quota_fallback_counters[key] = current - 1
+        release_channel_usage_slot(
+            reservation,
+            quota_lock=self._quota_lock,
+            quota_fallback_counters=self._quota_fallback_counters,
+        )
 
     def record_usage(
         self,
@@ -826,6 +812,44 @@ class ChannelAccessService:
 
     def authenticate(self, *, tenant_id: int, secret: str, origin: str | None) -> ChannelPrincipal | None:
         return self._repo.authenticate(tenant_id=tenant_id, presented_secret=secret, origin=origin)
+
+    def authenticate_with_reason(
+        self,
+        *,
+        tenant_id: int,
+        secret: str,
+        origin: str | None,
+    ) -> tuple[ChannelPrincipal | None, str]:
+        return self._repo.authenticate_with_reason(
+            tenant_id=tenant_id,
+            presented_secret=secret,
+            origin=origin,
+        )
+
+    def authorize_api_request(
+        self,
+        principal: ChannelPrincipal,
+        *,
+        remote_ip: str | None,
+        method: str,
+        path: str,
+        body: bytes,
+        timestamp: str | None,
+        nonce: str | None,
+        signature: str | None,
+        body_hash: str | None = None,
+    ) -> tuple[bool, str]:
+        return self._repo.authorize_api_request(
+            principal,
+            remote_ip=remote_ip,
+            method=method,
+            path=path,
+            body=body,
+            timestamp=timestamp,
+            nonce=nonce,
+            signature=signature,
+            body_hash=body_hash,
+        )
 
     def can_consume_question(self, principal: ChannelPrincipal) -> tuple[bool, str]:
         usage = self._repo.current_usage(tenant_id=principal.tenant_id, credential_id=principal.credential_id)

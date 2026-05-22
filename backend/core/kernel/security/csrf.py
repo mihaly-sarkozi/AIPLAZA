@@ -1,5 +1,6 @@
-# CSRF double-submit: token in cookie + X-CSRF-Token header; state-changing requests must match.
-# 2026 - Sárközi Mihály
+# backend/core/kernel/security/csrf.py
+# Feladat: Double-submit CSRF token generálást, cookie beállítást és request validációs helperöket ad. A token cookie és az X-CSRF-Token header egyezését ellenőrzi, külön platform-admin cookie scope-pal. Core HTTP security helper, amelyet auth/admin routerek és a CSRF middleware használnak.
+# Sárközi Mihály - 2026.05.21
 
 from __future__ import annotations
 

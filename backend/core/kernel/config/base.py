@@ -1,32 +1,48 @@
-# Beállítások: alapértékek ITT, felülírás a .env-ből (loader tölti).
-# Mindkettő kell: base.py = mezők + fallback, .env = tényleges érték ha megadod.
-# 2026.02.14 - Sárközi Mihály
+# backend/core/kernel/config/base.py
+# Feladat: Az alkalmazás központi settings modelljét definiálja. Itt találhatóak az AppSettings/BaseConfig mezői, típusai és a Pydantic model szintű validátorok bekötései; a hosszabb validációs logika külön settings_*_validators.py fájlokban van. A config_loader tölti be, és a teljes backend ezt a settings szerződést használja, ezért ez core/framework szintű konfigurációs modell.
+# Sárközi Mihály - 2026.05.21
 
-import os
-import re
 import secrets
-from pathlib import Path
 from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-_DEFAULT_DATABASE_URL = "postgresql+psycopg2://localhost:5432/aiplaza"
-_DEFAULT_SMTP_HOST = ""
-_DEFAULT_SMTP_PORT = 587
-_DEFAULT_SMTP_USER = ""
-_DEFAULT_SMTP_FROM_EMAIL = ""
-_DEFAULT_SMTP_FROM_NAME = ""
-_DOMAIN_LABEL_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$")
+from core.kernel.config.settings_constants import (
+    DEFAULT_SMTP_FROM_EMAIL,
+    DEFAULT_SMTP_FROM_NAME,
+    DEFAULT_SMTP_HOST,
+    DEFAULT_SMTP_PORT,
+    DEFAULT_SMTP_USER,
+)
+from core.kernel.config.settings_validators import (
+    validate_2fa,
+    validate_cookie_samesite,
+    validate_embedding,
+    validate_observability,
+    validate_password_policy_level,
+    validate_rate_limits,
+    validate_ttl,
+    validate_upload_security,
+)
 
 
 class BaseConfig(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="", case_sensitive=False)
 
+    # App metadata: FastAPI dokumentáció és publikus verzió.
+    app_name: str
+    app_description: str
+    app_version: str
+    openapi_enabled: bool = True
+    docs_url: str | None = "/docs"
+    redoc_url: str | None = "/redoc"
+    openapi_url: str | None = "/openapi.json"
+
     # API (api_host = bind cím, pl. 0.0.0.0; port pl. 8001)
-    api_host: str = "0.0.0.0"
-    api_port: int = 8001
+    api_host: str
+    api_port: int
 
     # CORS: frontend origin(s), vesszővel elválasztva. acme.local esetén pl. :5173 (Vite)
-    cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
+    cors_origins: str
     cors_origin_regex: str = r"https?://[^.]+\.app\.test(:\d+)?"
     csrf_refresh_allowed_origins: str = ""
     
@@ -38,15 +54,15 @@ class BaseConfig(BaseSettings):
 
     # Multi-tenant: base domain a Host-ból (acme.local → base=local → slug=acme)
     multi_tenant_enabled: bool = True
-    tenant_base_domain: str = "app.test"
-    install_host: str = "localhost"
-    single_tenant_slug: str = "demo"
-    trusted_hosts: str = "localhost,127.0.0.1,*.app.test"
+    tenant_base_domain: str
+    install_host: str
+    single_tenant_slug: str
+    trusted_hosts: str
 
     # DB: élesben .env-ben (database_url – jelszó ne legyen kódban). PostgreSQL.
-    database_url: str = _DEFAULT_DATABASE_URL
+    database_url: str
     # pool_pre_ping: kapcsolat ellenőrzés használat előtt (élesben True). Dev-ben False = kevesebb round-trip, gyorsabb.
-    database_pool_pre_ping: bool = True
+    database_pool_pre_ping: bool
     database_pool_size: int = 10
     database_max_overflow: int = 20
     database_pool_timeout_sec: int = 30
@@ -56,11 +72,11 @@ class BaseConfig(BaseSettings):
     redis_url: str = ""
     # Metrics endpoint védelem: prod-ban csak allowlistelt IP + token.
     metrics_access_token: str = ""
-    metrics_allowed_ips: str = "127.0.0.1,::1"
+    metrics_allowed_ips: str
     metrics_require_token_in_prod: bool = True
     metrics_require_ip_allowlist_in_prod: bool = True
     # Observability export / tracing
-    observability_service_name: str = "aiplaza-backend"
+    observability_service_name: str = "brainbankcenter-backend"
     observability_metrics_histogram_buckets_ms: str = "5,10,25,50,75,100,150,250,500,750,1000,2000,5000,10000"
     observability_trace_enabled: bool = False
     observability_trace_sample_ratio: float = 0.1
@@ -69,16 +85,20 @@ class BaseConfig(BaseSettings):
     sentry_dsn: str = ""
     sentry_environment: str = ""
     sentry_traces_sample_rate: float = 0.05
+    log_level: str
+    security_csp_extra_connect_src: str = ""
+    security_csp_extra_img_src: str = ""
+    security_csp_extra_frame_src: str = ""
 
     # Auth/JWT: élesben .env-ben JWT_SECRET kötelező (pl. openssl rand -hex 64)
     jwt_secret: str = secrets.token_hex(64)
     # jwt_issuer: "iss" claim (TokenService); prod-ban policy ellenőrzi (security_policy).
-    jwt_issuer: str = "AIPLAZA"
+    jwt_issuer: str
     # jwt_audience: "aud" claim; dev-ben opcionális, prod-ban kötelező (startup + Pydantic).
     jwt_audience: str = ""
     # Cookie: Secure = csak HTTPS (élesben True); SameSite = lax | strict (subdomain izoláció + CSRF)
     # Domain NINCS beállítva → host-only: demo.local cookie nem megy acme.local-ra (tenant → tenant nem szivárog).
-    cookie_secure: bool = True
+    cookie_secure: bool
     cookie_samesite: str = "lax"  # lax | strict
     access_ttl_min: int = 15
     refresh_ttl_days: int = 30  # auto_login esetén a refresh cookie max_age (nap)
@@ -96,6 +116,7 @@ class BaseConfig(BaseSettings):
     platform_event_handler_timeout_sec: int = 15
     # Lejárt lock után más worker újra claimelheti a sort (összeomlott feldolgozó).
     platform_event_outbox_stale_lock_sec: int = 300
+    platform_event_outbox_lease_sec: int = 300
     # Üres = hostname:pid; több workerben állíts egyedi értéket (pl. Kubernetes pod name).
     platform_event_outbox_worker_instance_id: str = ""
 
@@ -109,7 +130,7 @@ class BaseConfig(BaseSettings):
     platform_admin_mfa_required: bool = True
     platform_admin_login_alert_email: str = ""
     platform_admin_ip_allowlist_enabled: bool = False
-    platform_admin_allowed_ips: str = "127.0.0.1,::1"
+    platform_admin_allowed_ips: str
 
     # 2FA policy: max próbálkozás / ablak, lock (központi réteg).
     two_fa_max_attempts: int = 5
@@ -140,6 +161,15 @@ class BaseConfig(BaseSettings):
     ws_chat_max_connections_per_user: int = 3
 
     # LLM abuse guard: tenant + channel scoped budget
+    openai_api_key: str = ""
+    chat_provider: str
+    chat_model: str
+    ollama_url: str
+    ollama_model: str = "qwen2.5:7b-instruct"
+    ollama_api_key: str = "ollama"
+    qdrant_url: str
+    qdrant_api_key: str
+    qdrant_timeout_sec: int = 120
     llm_budget_request_limit_per_minute: int = 120
     llm_budget_prompt_chars_per_minute: int = 120000
     llm_budget_concurrency_limit: int = 8
@@ -180,6 +210,7 @@ class BaseConfig(BaseSettings):
     channel_session_min_interval_ms: int = 1500
     channel_session_wait_max_ms: int = 900
     channel_session_cookie_max_age_sec: int = 86400
+    channel_signature_max_skew_sec: int = 300
 
     # Demo signup abuse guard
     demo_signups_enabled: bool = True
@@ -206,10 +237,14 @@ class BaseConfig(BaseSettings):
     embedding_vector_size: int = 1024
     embedding_batch_size: int = 16
     embedding_worker_concurrency: int = 2
-    legacy_knowledge_ingest_enabled: bool = False
+    knowledge_ingest_backgroundtasks_fallback_enabled: bool = False
     knowledge_url_ingest_enabled: bool = False
+    knowledge_url_ingest_requires_isolated_worker: bool = True
+    knowledge_url_ingest_worker_isolated: bool = False
     upload_magic_sniff_enabled: bool = True
+    upload_spool_max_memory_bytes: int = 1024 * 1024
     upload_parser_timeout_sec: int = 20
+    upload_parser_memory_limit_mb: int = 256
     upload_pdf_max_pages: int = 200
     upload_docx_max_zip_entries: int = 5000
     upload_docx_max_decompressed_bytes: int = 30 * 1024 * 1024
@@ -218,6 +253,51 @@ class BaseConfig(BaseSettings):
     upload_malware_scan_required_in_prod: bool = True
     upload_malware_scan_timeout_sec: int = 5
     upload_clamav_unix_socket_path: str = "/var/run/clamav/clamd.ctl"
+    kb_upload_max_mb: int = 40
+    kb_store_raw_content: bool = False
+    pii_encryption_key: str = ""
+    pii_retention_days: int = 90
+    pii_allow_legacy_plaintext_read: bool = False
+    rerank_semantic_match_weight: float = 0.22
+    rerank_entity_match_weight: float = 0.20
+    rerank_lexical_match_weight: float = 0.08
+    rerank_time_match_weight: float = 0.16
+    rerank_place_match_weight: float = 0.08
+    rerank_graph_proximity_weight: float = 0.10
+    rerank_strength_weight: float = 0.10
+    rerank_confidence_weight: float = 0.10
+    rerank_recency_weight: float = 0.04
+    rerank_status_weight: float = 1.0
+    rerank_relation_confidence_weight: float = 0.06
+    qdrant_fusion_semantic_weight: float = 0.72
+    qdrant_fusion_lexical_weight: float = 0.28
+    qdrant_lexical_overlap_weight: float = 0.72
+    qdrant_lexical_substring_weight: float = 0.28
+    kb_max_seed_assertions: int = 8
+    kb_max_expanded_assertions: int = 12
+    kb_max_relation_hops: int = 2
+    kb_min_confidence: float = 0.20
+    kb_min_current_strength: float = 0.03
+    kb_context_token_budget: int = 2200
+    kb_context_max_evidence_per_assertion: int = 2
+    kb_context_max_key_assertions: int = 8
+    kb_context_max_supporting_assertions: int = 10
+    kb_context_max_source_chunks: int = 3
+    kb_context_include_conflicts: bool = True
+    kb_context_include_superseded: bool = False
+    kb_debug_trace_persist: bool = True
+    kb_debug_trace_path: str = "logs/retrieval_traces.jsonl"
+
+    # Object storage (knowledge fájlok és mellékletek).
+    object_storage_enabled: bool = True
+    object_storage_provider: str = "s3_compatible"
+    object_storage_endpoint: str
+    object_storage_region: str = "us-east-1"
+    object_storage_access_key: str = ""
+    object_storage_secret_key: str = ""
+    object_storage_bucket: str
+    object_storage_secure: bool = False
+    object_storage_force_path_style: bool = True
 
     # Mention pipeline debug: True esetén minden sentence után részletes mention debug print fut.
     debug_mention: bool = False
@@ -225,7 +305,7 @@ class BaseConfig(BaseSettings):
     debug_claim: bool = False
     # Space-time pipeline debug: True esetén a frame extractor részletes debug printet ír.
     debug_space_time: bool = False
-    # Claim extractor verzió: "legacy" = jelenlegi út, "v1" = új extractor.
+    # Claim extractor verzió: csak "v1" támogatott; legacy pipeline nem visszakapcsolható runtime flaggel.
     claim_extractor_version: str = "v1"
 
     # Auth light path: path prefixek, ahol NINCS DB user fetch (token+allowlist+role elég).
@@ -233,24 +313,24 @@ class BaseConfig(BaseSettings):
     auth_light_paths: str = ""
 
     # Email (SMTP): jelszót .env-ben (smtp_password)
-    smtp_host: str = _DEFAULT_SMTP_HOST
-    smtp_port: int = _DEFAULT_SMTP_PORT
-    smtp_user: str = _DEFAULT_SMTP_USER
+    smtp_host: str = DEFAULT_SMTP_HOST
+    smtp_port: int = DEFAULT_SMTP_PORT
+    smtp_user: str = DEFAULT_SMTP_USER
     smtp_password: str = ""
-    smtp_from_email: str = _DEFAULT_SMTP_FROM_EMAIL
-    smtp_from_name: str = _DEFAULT_SMTP_FROM_NAME
+    smtp_from_email: str = DEFAULT_SMTP_FROM_EMAIL
+    smtp_from_name: str = DEFAULT_SMTP_FROM_NAME
 
     # Számlakiállító adatai. Élesben .env-ből töltsd (invoice_issuer_*).
-    invoice_issuer_name: str = "BrainBankCenter"
-    invoice_issuer_tax_id: str = ""
-    invoice_issuer_address_line: str = ""
-    invoice_issuer_postal_code: str = ""
-    invoice_issuer_city: str = ""
-    invoice_issuer_region: str = ""
-    invoice_issuer_country: str = ""
-    invoice_issuer_phone: str = ""
-    invoice_issuer_website: str = ""
-    invoice_issuer_email: str = ""
+    invoice_issuer_name: str
+    invoice_issuer_tax_id: str
+    invoice_issuer_address_line: str
+    invoice_issuer_postal_code: str
+    invoice_issuer_city: str
+    invoice_issuer_region: str
+    invoice_issuer_country: str
+    invoice_issuer_phone: str
+    invoice_issuer_website: str
+    invoice_issuer_email: str
 
     # ---------------------------------------------------------------------------
     # Biztonsági konfiguráció validátorok (Pydantic model szint)
@@ -265,425 +345,46 @@ class BaseConfig(BaseSettings):
     @model_validator(mode="after")
     def validate_password_policy_level_field(self) -> "BaseConfig":
         """Jelszó policy szint: csak megengedett értékek."""
-        level = (self.password_security_level or "").strip().lower()
-        if level not in {"basic", "standard", "high"}:
-            raise ValueError(
-                f"password_security_level érvénytelen: {level!r}. "
-                "Megengedett értékek: basic, standard, high."
-            )
+        validate_password_policy_level(self)
         return self
 
     @model_validator(mode="after")
     def validate_cookie_samesite_field(self) -> "BaseConfig":
         """cookie_samesite: csak lax, strict vagy none fogadható el."""
-        samesite = (self.cookie_samesite or "").strip().lower()
-        if samesite not in {"lax", "strict", "none"}:
-            raise ValueError(
-                f"cookie_samesite érvénytelen érték: {samesite!r}. "
-                "Megengedett értékek: lax, strict, none."
-            )
-        if samesite == "none" and self.cookie_secure is False:
-            raise ValueError(
-                "cookie_samesite='none' csak cookie_secure=True esetén érvényes "
-                "(a böngésző különben elutasítja a cookie-t)."
-            )
+        validate_cookie_samesite(self)
         return self
 
     @model_validator(mode="after")
     def validate_upload_security_settings(self) -> "BaseConfig":
-        if int(self.upload_parser_timeout_sec) <= 0:
-            raise ValueError("upload_parser_timeout_sec pozitívnak kell lennie.")
-        if int(self.upload_pdf_max_pages) <= 0:
-            raise ValueError("upload_pdf_max_pages pozitívnak kell lennie.")
-        if int(self.upload_docx_max_zip_entries) <= 0:
-            raise ValueError("upload_docx_max_zip_entries pozitívnak kell lennie.")
-        if int(self.upload_docx_max_decompressed_bytes) <= 0:
-            raise ValueError("upload_docx_max_decompressed_bytes pozitívnak kell lennie.")
-        if float(self.upload_docx_max_compression_ratio) <= 1.0:
-            raise ValueError("upload_docx_max_compression_ratio értéke legyen > 1.0.")
-        provider = str(self.upload_malware_scan_provider or "none").strip().lower()
-        if provider not in {"none", "clamav"}:
-            raise ValueError("upload_malware_scan_provider értéke: none vagy clamav.")
-        if int(self.upload_malware_scan_timeout_sec) <= 0:
-            raise ValueError("upload_malware_scan_timeout_sec pozitívnak kell lennie.")
-        socket_path = str(self.upload_clamav_unix_socket_path or "").strip()
-        if provider == "clamav" and not socket_path:
-            raise ValueError("clamav providerhez upload_clamav_unix_socket_path kötelező.")
-        if provider == "clamav" and socket_path:
-            # Path check csak formai, tényleges elérhetőség runtime.
-            _ = Path(socket_path)
+        validate_upload_security(self)
         return self
 
     @model_validator(mode="after")
     def validate_observability_settings(self) -> "BaseConfig":
-        if not (0.0 <= float(self.observability_trace_sample_ratio) <= 1.0):
-            raise ValueError("observability_trace_sample_ratio értéke 0.0 és 1.0 között legyen.")
-        if not (0.0 <= float(self.sentry_traces_sample_rate) <= 1.0):
-            raise ValueError("sentry_traces_sample_rate értéke 0.0 és 1.0 között legyen.")
-        buckets_raw = str(self.observability_metrics_histogram_buckets_ms or "").strip()
-        if not buckets_raw:
-            raise ValueError("observability_metrics_histogram_buckets_ms nem lehet üres.")
-        try:
-            parsed = [float(item.strip()) for item in buckets_raw.split(",") if item.strip()]
-        except Exception as exc:
-            raise ValueError("observability_metrics_histogram_buckets_ms csak számokat tartalmazhat.") from exc
-        if not parsed or any(value <= 0 for value in parsed):
-            raise ValueError("observability histogram bucket értékek legyenek pozitív számok.")
-        if parsed != sorted(parsed):
-            raise ValueError("observability histogram bucket lista legyen növekvő sorrendben.")
+        validate_observability(self)
         return self
 
     @model_validator(mode="after")
     def validate_ttl_fields(self) -> "BaseConfig":
         """Token TTL értékek alapszintű szanity check-je."""
-        if self.access_ttl_min <= 0:
-            raise ValueError(f"access_ttl_min értéke {self.access_ttl_min}, de pozitívnak kell lennie.")
-        if self.refresh_ttl_days <= 0:
-            raise ValueError(f"refresh_ttl_days értéke {self.refresh_ttl_days}, de pozitívnak kell lennie.")
-        if self.refresh_ttl_session_hours <= 0:
-            raise ValueError(
-                f"refresh_ttl_session_hours értéke {self.refresh_ttl_session_hours}, de pozitívnak kell lennie."
-            )
-        refresh_in_min = self.refresh_ttl_days * 24 * 60
-        if self.access_ttl_min >= refresh_in_min:
-            raise ValueError(
-                f"access_ttl_min ({self.access_ttl_min} perc) >= refresh_ttl_days "
-                f"({self.refresh_ttl_days} nap = {refresh_in_min} perc). "
-                "Az access token élettartama rövidebb kell legyen a refresh tokenénél."
-            )
+        validate_ttl(self)
         return self
 
     @model_validator(mode="after")
     def validate_rate_limit_field(self) -> "BaseConfig":
         """Rate limit alapszintű szanity check-je."""
-        if self.rate_limit_login_per_minute <= 0:
-            raise ValueError(
-                f"rate_limit_login_per_minute értéke {self.rate_limit_login_per_minute}, "
-                "de pozitívnak kell lennie."
-            )
-        if self.rate_limit_login_step1_per_email_per_hour <= 0:
-            raise ValueError("rate_limit_login_step1_per_email_per_hour pozitívnak kell lennie.")
-        if self.rate_limit_login_burst_per_10s <= 0:
-            raise ValueError("rate_limit_login_burst_per_10s pozitívnak kell lennie.")
-        if self.rate_limit_login_failure_ban_threshold <= 0:
-            raise ValueError("rate_limit_login_failure_ban_threshold pozitívnak kell lennie.")
-        if self.rate_limit_login_failure_ban_window_sec <= 0:
-            raise ValueError("rate_limit_login_failure_ban_window_sec pozitívnak kell lennie.")
-        if self.rate_limit_login_failure_ban_hours <= 0:
-            raise ValueError("rate_limit_login_failure_ban_hours pozitívnak kell lennie.")
-        if self.platform_admin_max_failed_login_attempts <= 0:
-            raise ValueError("platform_admin_max_failed_login_attempts pozitívnak kell lennie.")
-        if self.platform_admin_mfa_attempt_window_minutes <= 0:
-            raise ValueError("platform_admin_mfa_attempt_window_minutes pozitívnak kell lennie.")
-        if self.platform_admin_mfa_lock_minutes <= 0:
-            raise ValueError("platform_admin_mfa_lock_minutes pozitívnak kell lennie.")
-        if self.platform_admin_mfa_totp_max_attempts_per_user <= 0:
-            raise ValueError("platform_admin_mfa_totp_max_attempts_per_user pozitívnak kell lennie.")
-        if self.platform_admin_mfa_totp_max_attempts_per_ip <= 0:
-            raise ValueError("platform_admin_mfa_totp_max_attempts_per_ip pozitívnak kell lennie.")
-        if self.platform_admin_mfa_recovery_max_attempts_per_user <= 0:
-            raise ValueError("platform_admin_mfa_recovery_max_attempts_per_user pozitívnak kell lennie.")
-        if self.platform_admin_mfa_recovery_max_attempts_per_ip <= 0:
-            raise ValueError("platform_admin_mfa_recovery_max_attempts_per_ip pozitívnak kell lennie.")
-        if self.ws_chat_max_messages_per_10s <= 0:
-            raise ValueError("ws_chat_max_messages_per_10s pozitívnak kell lennie.")
-        if self.ws_chat_max_message_chars <= 0:
-            raise ValueError("ws_chat_max_message_chars pozitívnak kell lennie.")
-        if self.ws_chat_idle_timeout_sec <= 0:
-            raise ValueError("ws_chat_idle_timeout_sec pozitívnak kell lennie.")
-        if self.ws_chat_max_connections_per_tenant <= 0:
-            raise ValueError("ws_chat_max_connections_per_tenant pozitívnak kell lennie.")
-        if self.ws_chat_max_connections_per_user <= 0:
-            raise ValueError("ws_chat_max_connections_per_user pozitívnak kell lennie.")
-        if self.llm_budget_request_limit_per_minute <= 0:
-            raise ValueError("llm_budget_request_limit_per_minute pozitívnak kell lennie.")
-        if self.llm_budget_prompt_chars_per_minute <= 0:
-            raise ValueError("llm_budget_prompt_chars_per_minute pozitívnak kell lennie.")
-        if self.llm_budget_concurrency_limit <= 0:
-            raise ValueError("llm_budget_concurrency_limit pozitívnak kell lennie.")
-        if self.llm_budget_tenant_daily_tokens <= 0:
-            raise ValueError("llm_budget_tenant_daily_tokens pozitívnak kell lennie.")
-        if self.llm_budget_tenant_monthly_tokens <= 0:
-            raise ValueError("llm_budget_tenant_monthly_tokens pozitívnak kell lennie.")
-        if self.llm_budget_demo_daily_tokens <= 0:
-            raise ValueError("llm_budget_demo_daily_tokens pozitívnak kell lennie.")
-        if self.llm_budget_demo_monthly_tokens <= 0:
-            raise ValueError("llm_budget_demo_monthly_tokens pozitívnak kell lennie.")
-        if self.llm_budget_starter_monthly_tokens <= 0:
-            raise ValueError("llm_budget_starter_monthly_tokens pozitívnak kell lennie.")
-        if self.llm_budget_global_daily_spend_usd <= 0:
-            raise ValueError("llm_budget_global_daily_spend_usd pozitívnak kell lennie.")
-        if self.llm_budget_input_cost_per_1k_tokens_usd <= 0:
-            raise ValueError("llm_budget_input_cost_per_1k_tokens_usd pozitívnak kell lennie.")
-        if self.llm_budget_output_cost_per_1k_tokens_usd <= 0:
-            raise ValueError("llm_budget_output_cost_per_1k_tokens_usd pozitívnak kell lennie.")
-        if self.llm_budget_estimated_completion_tokens <= 0:
-            raise ValueError("llm_budget_estimated_completion_tokens pozitívnak kell lennie.")
-        if self.chat_max_answer_chars <= 0:
-            raise ValueError("chat_max_answer_chars pozitívnak kell lennie.")
-        if self.chat_max_input_chars <= 0:
-            raise ValueError("chat_max_input_chars pozitívnak kell lennie.")
-        if self.chat_max_history_items <= 0:
-            raise ValueError("chat_max_history_items pozitívnak kell lennie.")
-        if self.chat_max_history_chars <= 0:
-            raise ValueError("chat_max_history_chars pozitívnak kell lennie.")
-        if self.chat_max_retrieval_items <= 0:
-            raise ValueError("chat_max_retrieval_items pozitívnak kell lennie.")
-        if self.chat_max_retrieval_chars <= 0:
-            raise ValueError("chat_max_retrieval_chars pozitívnak kell lennie.")
-        if self.chat_default_max_sources <= 0:
-            raise ValueError("chat_default_max_sources pozitívnak kell lennie.")
-        if self.chat_starter_max_sources <= 0:
-            raise ValueError("chat_starter_max_sources pozitívnak kell lennie.")
-        if self.chat_demo_max_sources <= 0:
-            raise ValueError("chat_demo_max_sources pozitívnak kell lennie.")
-        if self.chat_demo_max_question_chars <= 0:
-            raise ValueError("chat_demo_max_question_chars pozitívnak kell lennie.")
-        if self.chat_demo_max_history_items <= 0:
-            raise ValueError("chat_demo_max_history_items pozitívnak kell lennie.")
-        if self.chat_demo_max_history_chars <= 0:
-            raise ValueError("chat_demo_max_history_chars pozitívnak kell lennie.")
-        if self.chat_demo_max_retrieval_items <= 0:
-            raise ValueError("chat_demo_max_retrieval_items pozitívnak kell lennie.")
-        if self.chat_demo_max_retrieval_chars <= 0:
-            raise ValueError("chat_demo_max_retrieval_chars pozitívnak kell lennie.")
-        if self.channel_default_max_daily_limit <= 0:
-            raise ValueError("channel_default_max_daily_limit pozitívnak kell lennie.")
-        if self.channel_default_max_per_minute_limit <= 0:
-            raise ValueError("channel_default_max_per_minute_limit pozitívnak kell lennie.")
-        if self.channel_demo_max_daily_limit <= 0:
-            raise ValueError("channel_demo_max_daily_limit pozitívnak kell lennie.")
-        if self.channel_demo_max_per_minute_limit <= 0:
-            raise ValueError("channel_demo_max_per_minute_limit pozitívnak kell lennie.")
-        if self.channel_session_max_per_minute <= 0:
-            raise ValueError("channel_session_max_per_minute pozitívnak kell lennie.")
-        if self.channel_session_max_burst_10s <= 0:
-            raise ValueError("channel_session_max_burst_10s pozitívnak kell lennie.")
-        if self.channel_session_min_interval_ms <= 0:
-            raise ValueError("channel_session_min_interval_ms pozitívnak kell lennie.")
-        if self.channel_session_wait_max_ms < 0:
-            raise ValueError("channel_session_wait_max_ms nem lehet negatív.")
-        if self.channel_session_cookie_max_age_sec <= 0:
-            raise ValueError("channel_session_cookie_max_age_sec pozitívnak kell lennie.")
-        if self.platform_event_outbox_backlog_soft_limit <= 0:
-            raise ValueError("platform_event_outbox_backlog_soft_limit pozitívnak kell lennie.")
-        if self.platform_event_handler_timeout_sec <= 0:
-            raise ValueError("platform_event_handler_timeout_sec pozitívnak kell lennie.")
-        if self.demo_signup_max_per_day <= 0:
-            raise ValueError("demo_signup_max_per_day pozitívnak kell lennie.")
-        if self.demo_signup_max_per_ip_per_day <= 0:
-            raise ValueError("demo_signup_max_per_ip_per_day pozitívnak kell lennie.")
-        if self.demo_signup_max_per_ip_email_per_day <= 0:
-            raise ValueError("demo_signup_max_per_ip_email_per_day pozitívnak kell lennie.")
-        if self.demo_signup_max_per_session_per_day <= 0:
-            raise ValueError("demo_signup_max_per_session_per_day pozitívnak kell lennie.")
-        if self.demo_signup_max_per_email <= 0:
-            raise ValueError("demo_signup_max_per_email pozitívnak kell lennie.")
-        if self.demo_trial_days <= 0:
-            raise ValueError("demo_trial_days pozitívnak kell lennie.")
-        provider = (self.demo_signup_captcha_provider or "").strip().lower()
-        if provider not in {"none", "turnstile", "recaptcha"}:
-            raise ValueError("demo_signup_captcha_provider értéke: none, turnstile vagy recaptcha lehet.")
-        if self.demo_signup_require_captcha and provider == "none":
-            raise ValueError("demo_signup_require_captcha=True esetén demo_signup_captcha_provider nem lehet 'none'.")
+        validate_rate_limits(self)
         return self
 
     @model_validator(mode="after")
     def validate_embedding_fields(self) -> "BaseConfig":
-        provider = (self.embedding_provider or "").strip().lower()
-        if provider not in {"local", "openai"}:
-            raise ValueError("embedding_provider érvénytelen. Megengedett értékek: local, openai.")
-        if self.embedding_vector_size <= 0:
-            raise ValueError("embedding_vector_size pozitívnak kell lennie.")
-        if self.embedding_batch_size <= 0:
-            raise ValueError("embedding_batch_size pozitívnak kell lennie.")
-        if self.embedding_worker_concurrency <= 0:
-            raise ValueError("embedding_worker_concurrency pozitívnak kell lennie.")
+        validate_embedding(self)
         return self
 
     @model_validator(mode="after")
     def validate_2fa_fields(self) -> "BaseConfig":
         """2FA konfiguráció alapszintű konzisztencia ellenőrzés."""
-        if self.two_fa_max_attempts <= 0:
-            raise ValueError(f"two_fa_max_attempts pozitívnak kell lennie, kapott: {self.two_fa_max_attempts}.")
-        if self.two_fa_attempt_window_minutes <= 0:
-            raise ValueError(
-                f"two_fa_attempt_window_minutes pozitívnak kell lennie, kapott: {self.two_fa_attempt_window_minutes}."
-            )
-        if self.two_fa_code_expiry_minutes <= 0:
-            raise ValueError(
-                f"two_fa_code_expiry_minutes pozitívnak kell lennie, kapott: {self.two_fa_code_expiry_minutes}."
-            )
-        if self.two_fa_code_expiry_minutes >= self.two_fa_attempt_window_minutes:
-            raise ValueError(
-                f"two_fa_code_expiry_minutes ({self.two_fa_code_expiry_minutes}) "
-                f">= two_fa_attempt_window_minutes ({self.two_fa_attempt_window_minutes}). "
-                "A 2FA kód lejárata rövidebb kell legyen a kísérlet ablaknál."
-            )
-        return self
-
-    @model_validator(mode="after")
-    def validate_production_security(self) -> "BaseConfig":
-        """Production-specifikus kritikus biztonsági ellenőrzések."""
-        env = os.getenv("APP_ENV", "dev").lower()
-        origins = [o.strip() for o in (self.cors_origins or "").split(",") if o.strip()]
-
-        if env != "prod":
-            return self
-
-        # --- JWT secret ---
-        env_secret = (os.getenv("JWT_SECRET") or "").strip()
-        if not env_secret:
-            raise ValueError(
-                "Production környezetben a JWT_SECRET környezeti változó megadása kötelező. "
-                "Generálj egyet: openssl rand -hex 64"
-            )
-        if len(env_secret) < 64:
-            raise ValueError(
-                f"Production JWT_SECRET legalább 64 karakter hosszú kell legyen "
-                f"(jelenlegi: {len(env_secret)} karakter). "
-                "Generálj egyet: openssl rand -hex 64"
-            )
-        if len(set(env_secret)) < 16:
-            raise ValueError(
-                "JWT_SECRET entrópiája elégtelen production-ben (túl sok ismétlődő karakter). "
-                "Generálj egyet: openssl rand -hex 64"
-            )
-
-        # --- Frontend URL ---
-        if not self.frontend_base_url:
-            raise ValueError("frontend_base_url kötelező production környezetben.")
-
-        # --- SMTP ---
-        if not self.smtp_password:
-            raise ValueError("smtp_password kötelező production környezetben.")
-        if not (self.smtp_host or "").strip():
-            raise ValueError("smtp_host kötelező production környezetben.")
-        if not (self.smtp_user or "").strip():
-            raise ValueError("smtp_user kötelező production környezetben.")
-        if not (self.smtp_from_email or "").strip():
-            raise ValueError("smtp_from_email kötelező production környezetben.")
-        if not (self.smtp_from_name or "").strip():
-            raise ValueError("smtp_from_name kötelező production környezetben.")
-
-        # --- Database ---
-        if not self.database_url or self.database_url == _DEFAULT_DATABASE_URL:
-            raise ValueError("database_url kötelező és nem lehet default productionben.")
-
-        # --- Cookie ---
-        if not self.cookie_secure:
-            raise ValueError("cookie_secure nem lehet False production környezetben.")
-
-        # --- CORS ---
-        if "*" in origins:
-            raise ValueError("CORS wildcard origin ('*') nem engedélyezett production környezetben.")
-        if any(origin.startswith("http://") for origin in origins):
-            raise ValueError("Production CORS origin-ekhez kötelező a HTTPS.")
-
-        # --- Trusted hosts ---
-        if not (self.trusted_hosts or "").strip():
-            raise ValueError("trusted_hosts kötelező production környezetben.")
-        hosts = [h.strip() for h in (self.trusted_hosts or "").split(",") if h.strip()]
-        if "*" in hosts:
-            raise ValueError("Wildcard '*' trusted_hosts production-ben nem engedélyezett.")
-
-        # --- Tenant base domain / CORS regex policy ---
-        base_domain = (self.tenant_base_domain or "").strip().lower()
-        if not base_domain:
-            raise ValueError("tenant_base_domain kötelező production környezetben.")
-        if base_domain in {"local", "localhost"}:
-            raise ValueError("tenant_base_domain='local/localhost' production-ben nem engedélyezett.")
-        if any(token in base_domain for token in ("*", "/", "\\", ":", " ")):
-            raise ValueError("tenant_base_domain production-ben csak tiszta hostname lehet.")
-        labels = [part for part in base_domain.split(".") if part]
-        if len(labels) < 2:
-            raise ValueError(
-                "tenant_base_domain production-ben teljes domain kell legyen (pl. app.example.com)."
-            )
-        if any(not _DOMAIN_LABEL_RE.fullmatch(label) for label in labels):
-            raise ValueError("tenant_base_domain nem RFC-kompatibilis hostname formátum.")
-
-        # --- Password policy ---
-        if (self.password_security_level or "").strip().lower() == "basic":
-            raise ValueError(
-                "password_security_level='basic' production-ben nem engedélyezett. "
-                "Legalább 'standard' szintet kell használni."
-            )
-
-        # --- Rate limit production korlát ---
-        if self.rate_limit_login_per_minute > 30:
-            raise ValueError(
-                f"rate_limit_login_per_minute={self.rate_limit_login_per_minute} "
-                "production-ben túl magas (ajánlott maximum: 30/perc)."
-            )
-
-        # --- JWT issuer / audience (domain szerződés) ---
-        issuer = (self.jwt_issuer or "").strip()
-        if len(issuer) < 3:
-            raise ValueError(
-                f"jwt_issuer túl rövid ({issuer!r}). Legalább 3 karakteres azonosítót adj meg."
-            )
-        audience = (self.jwt_audience or "").strip()
-        if not audience:
-            raise ValueError(
-                "jwt_audience production-ben kötelező (egyértelmű API vagy erőforrás azonosító, pl. https://api.example.com)."
-            )
-        if audience == issuer:
-            raise ValueError(
-                "jwt_audience és jwt_issuer nem lehet azonos. Használj különböző iss és aud értékeket."
-            )
-
-        # --- Redis: rate limit tároló + token allowlist több példánynál ---
-        if not (self.redis_url or "").strip():
-            raise ValueError(
-                "redis_url kötelező production környezetben (rate limit megosztott tároló és token allowlist)."
-            )
-
-        # --- CSRF / debug bypass env-ek productionben ne legyenek beállítva ---
-        disable_csrf_raw = (os.getenv("DISABLE_CSRF") or "").strip()
-        if disable_csrf_raw:
-            raise ValueError(
-                "DISABLE_CSRF production-ben nem lehet beállítva. "
-                "Távolítsd el az env-ből (ne 0-ra állítsd, hanem töröld)."
-            )
-        billing_debug_routes_raw = (os.getenv("BILLING_DEBUG_ROUTES_ENABLED") or "").strip()
-        if billing_debug_routes_raw:
-            raise ValueError(
-                "BILLING_DEBUG_ROUTES_ENABLED production-ben nem lehet beállítva. "
-                "A debug route-ok maradjanak rejtve."
-            )
-        billing_disabled_raw = (os.getenv("BILLING_DISABLED") or "").strip()
-        if billing_disabled_raw:
-            raise ValueError(
-                "BILLING_DISABLED production-ben nem lehet beállítva. "
-                "Ez megkerülheti a kérdéskeret-védelmet."
-            )
-        billing_provider_raw = (os.getenv("BILLING_PROVIDER") or "manual").strip().lower()
-        if billing_provider_raw in {"simulated", "stripe_test"}:
-            raise ValueError(
-                f"BILLING_PROVIDER={billing_provider_raw!r} production-ben nem engedélyezett. "
-                "Amíg nincs éles payment provider, manual módot használj."
-            )
-        billing_mode_raw = (os.getenv("BILLING_MODE") or "manual").strip().lower()
-        if billing_mode_raw != "manual":
-            raise ValueError(
-                f"BILLING_MODE={billing_mode_raw!r} production-ben nem engedélyezett. "
-                "Állítsd BILLING_MODE=manual értékre."
-            )
-        pii_legacy_plaintext_raw = (os.getenv("PII_ALLOW_LEGACY_PLAINTEXT_READ") or "").strip().lower()
-        if pii_legacy_plaintext_raw in {"1", "true", "yes", "on"}:
-            raise ValueError(
-                "PII_ALLOW_LEGACY_PLAINTEXT_READ production-ben nem engedélyezett. "
-                "Futtasd le a PII migrációt, majd állítsd false értékre."
-            )
-
-        # --- Access TTL production korlát ---
-        if self.access_ttl_min > 60:
-            raise ValueError(
-                f"access_ttl_min={self.access_ttl_min} perc production-ben túl hosszú "
-                "(ajánlott maximum: 60 perc)."
-            )
-
+        validate_2fa(self)
         return self
 
     @property
@@ -700,4 +401,9 @@ class BaseConfig(BaseSettings):
 
     @property
     def CLAIM_EXTRACTOR_VERSION(self) -> str:
-        return str(self.claim_extractor_version or "legacy").strip().lower() or "legacy"
+        version = str(self.claim_extractor_version or "v1").strip().lower()
+        return version if version == "v1" else "v1"
+
+
+# Beszédesebb alias: a projekt egyetlen központi settings modellje.
+AppSettings = BaseConfig

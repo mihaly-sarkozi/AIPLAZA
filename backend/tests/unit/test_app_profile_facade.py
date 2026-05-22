@@ -5,9 +5,9 @@ from datetime import datetime, timezone
 import pytest
 
 from apps.profile.service.profile_facade import ProfileFacade
-from core.capabilities.users.dto import User
-from core.extensions.tenant.context.request_tenant_context import RequestTenantContext
-from core.extensions.tenant.dto import TenantConfig, TenantStatus
+from core.modules.users.domain.dto import User
+from core.modules.tenant.context.request_tenant_context import RequestTenantContext
+from core.modules.tenant.dto import TenantConfig, TenantStatus
 
 pytestmark = [pytest.mark.unit, pytest.mark.must_pass]
 
@@ -16,6 +16,7 @@ class _CoreProfileService:
     def __init__(self) -> None:
         self.updated_payload: dict[str, object] | None = None
         self.update_calls = 0
+        self.invalidations: list[tuple[str | None, int]] = []
 
     def get_me(self, *, user, tenant, training_status_reader=None) -> dict[str, object]:
         return {
@@ -47,6 +48,9 @@ class _CoreProfileService:
             preferred_theme=preferred_theme,
         )
         return self.get_me(user=updated_user, tenant=None)
+
+    def invalidate_cache(self, tenant_slug: str | None, user_id: int) -> None:
+        self.invalidations.append((tenant_slug, user_id))
 
 
 class _PreferencesService:
@@ -126,11 +130,9 @@ def test_get_profile_combines_core_payload_with_app_preferences() -> None:
 def test_update_profile_updates_core_fields_and_preferences() -> None:
     core_service = _CoreProfileService()
     prefs_service = _PreferencesService()
-    invalidations: list[tuple[str | None, int]] = []
     facade = ProfileFacade(
         core_profile_service=core_service,
         preferences_service=prefs_service,
-        user_cache_invalidator=lambda tenant_slug, user_id: invalidations.append((tenant_slug, user_id)),
     )
 
     payload = facade.update_profile(
@@ -155,7 +157,7 @@ def test_update_profile_updates_core_fields_and_preferences() -> None:
         "dashboard_layout": "compact",
         "show_tips": False,
     }
-    assert invalidations == [("demo_tenant", 11)]
+    assert core_service.invalidations == [("demo_tenant", 11)]
 
 
 def test_update_profile_with_only_app_preferences_skips_core_update() -> None:

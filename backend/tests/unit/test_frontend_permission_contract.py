@@ -5,10 +5,9 @@ from pathlib import Path
 
 import pytest
 
-from apps import load_enabled_app_modules
-from core.platform.bootstrap.manifest import configure_app_modules_loader, load_app_manifest
-from core.platform.manifest import merge_app_manifest
-from core.platform.registry import load_core_platform_manifest
+from apps.registry import load_app_modules
+
+from core.kernel.app.app_manifest import AppManifest
 
 pytestmark = [pytest.mark.unit, pytest.mark.must_pass]
 
@@ -36,8 +35,9 @@ def _collect_frontend_required_permissions() -> set[str]:
 
 
 def _collect_backend_known_permissions() -> set[str]:
-    configure_app_modules_loader(load_enabled_app_modules)
-    manifest = merge_app_manifest(load_core_platform_manifest(), load_app_manifest())
+    manifest = AppManifest.init_app().add_modules(
+        load_app_modules(),
+    )
     return set(manifest.permissions)
 
 

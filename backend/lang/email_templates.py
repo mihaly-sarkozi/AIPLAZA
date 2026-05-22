@@ -1,5 +1,6 @@
-# Email sablonok többnyelvűen. Kulcs: template_id (pl. "2fa", "set_password"), nyelv: "hu", "en", stb.
-# A body placeholdereket a hívó tölti ki: {code}, {token_block}, {expiry_minutes}, {set_password_link}, stb.
+# backend/lang/email_templates.py
+# Feladat: Többnyelvű email subject/body sablonokat ad 2FA, set-password, demo login és demo set-password folyamatokhoz. Hu/en/es nyelvkódokra azonos template kulcsokat és placeholdereket tart, fallbackkel a default magyar nyelvre, valamint nyelvenkénti signature értékeket kezel. Email lokalizációs contract az EmailService számára.
+# Sárközi Mihály - 2026.05.21
 
 from typing import Any
 
@@ -141,10 +142,78 @@ Best regards,
 {signature}""",
         },
     },
+    "es": {
+        "2fa": {
+            "subject": "AIPLAZA - Código de autenticación de dos factores",
+            "body": """Estimado/a usuario/a:
+
+Tu código de autenticación de dos factores:
+
+{code}
+
+Este código es válido durante {expiry_minutes} minutos.
+
+Si no solicitaste este inicio de sesión, ignora este correo.
+
+Saludos,
+{signature}""",
+        },
+        "2fa_token_block": "Token necesario para completar el inicio de sesión (paso 2, úsalo junto con el código):\n\n{pending_token}\n\n",
+        "set_password": {
+            "subject": "AIPLAZA - Configura tu contraseña",
+            "body": """Estimado/a usuario/a:
+
+Tu cuenta de AIPLAZA ha sido creada. Para iniciar sesión, configura tu contraseña en el siguiente enlace (dentro de 24 horas):
+
+{set_password_link}
+
+La contraseña debe tener al menos 6 caracteres e incluir minúsculas, mayúsculas y un número.
+
+Si no solicitaste este registro, ignora este correo.
+
+Saludos,
+{signature}""",
+        },
+        "demo_login": {
+            "subject": "BrainBankCenter demo - Tu entorno está listo",
+            "body": """Hola:
+
+Tu entorno demo está listo y puedes iniciar sesión inmediatamente con este enlace:
+
+{demo_login_link}
+
+El acceso demo es válido exactamente hasta:
+{demo_expires_at}
+
+Si no solicitaste esta demo, ignora este correo.
+
+Saludos,
+{signature}""",
+        },
+        "demo_set_password": {
+            "subject": "BrainBankCenter demo - Configura tu contraseña",
+            "body": """Hola:
+
+Tu entorno demo está listo. Para continuar, configura tu contraseña en el siguiente enlace:
+
+{set_password_link}
+
+Cuando hayas configurado tu contraseña, podrás empezar a probar tu sistema.
+
+El acceso demo es válido exactamente hasta:
+{demo_expires_at}
+
+Si no solicitaste esta demo, ignora este correo.
+
+Saludos,
+{signature}""",
+        },
+    },
 }
 
 DEFAULT_SIGNATURE = "AIPLAZA csapata"
 DEFAULT_SIGNATURE_EN = "AIPLAZA Team"
+DEFAULT_SIGNATURE_ES = "Equipo de AIPLAZA"
 
 
 # Ez a függvény visszaadja a(z) lang logikáját.
@@ -168,7 +237,12 @@ def get_email_template(
     if template_id not in templates or "subject" not in templates[template_id]:
         raise ValueError(f"Unknown email template: {template_id}")
     t = templates[template_id]
-    kwargs.setdefault("signature", DEFAULT_SIGNATURE if lang == "hu" else DEFAULT_SIGNATURE_EN)
+    signatures = {
+        "hu": DEFAULT_SIGNATURE,
+        "en": DEFAULT_SIGNATURE_EN,
+        "es": DEFAULT_SIGNATURE_ES,
+    }
+    kwargs.setdefault("signature", signatures.get(lang, DEFAULT_SIGNATURE))
     subject = t["subject"]
     body = t["body"].format(**kwargs)
     return subject, body

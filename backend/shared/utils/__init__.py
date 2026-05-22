@@ -1,4 +1,7 @@
-# Ez a fájl a(z) shared/utils csomag exportjait és inicializálási pontjait fogja össze.
+# backend/shared/utils/__init__.py
+# Feladat: A shared utils csomag publikus exportfelülete. Időkezelési, UTC normalizálási, hash, log sanitization és slug helper funkciókat ad tovább core, infrastructure és app moduloknak. Általános, modulfuggetlen utility belépési pont.
+# Sárközi Mihály - 2026.05.21
+
 """
 Altalanos, modulfuggetlen segedek gyujto csomagja.
 """

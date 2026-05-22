@@ -1,4 +1,7 @@
-# Ez a fájl az adott terület szolgáltatás- és üzleti logikáját tartalmazza.
+# backend/core/kernel/db/transactional_service.py
+# Feladat: Szolgáltatásosztályoknak ad opcionális tranzakciós context helper mixint. Ha van transaction_manager, azon keresztül futtatja a műveletet, különben no-op contextet ad vissza, így a service-ek egységes mintával írhatók. Core helper, mert általános tranzakciókezelési szerződést ad üzleti logika nélkül.
+# Sárközi Mihály - 2026.05.21
+
 from __future__ import annotations
 
 from contextlib import nullcontext

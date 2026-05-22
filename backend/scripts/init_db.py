@@ -26,14 +26,12 @@ load_dotenv(_resolve_env_path())
 
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import make_url
-from apps import load_enabled_app_modules
-from core.platform.bootstrap.manifest import configure_app_modules_loader, load_app_manifest
+from apps.registry import load_app_modules
 from core.kernel.config.config_loader import settings
-from core.platform.manifest import merge_app_manifest
-from core.platform.registry import load_core_platform_manifest
 
-configure_app_modules_loader(load_enabled_app_modules)
-from core.extensions.tenant.service.tenant_schema_service import (
+from core.kernel.app.app_manifest import AppManifest
+
+from core.modules.tenant.service.tenant_schema_service import (
     register_manifest_tenant_schema_hooks,
     sync_existing_tenant_schemas,
     upgrade_public_schema,
@@ -62,7 +60,9 @@ def main() -> None:
     ensure_database_exists(settings.database_url)
     engine = create_engine(settings.database_url, future=True)
     register_manifest_tenant_schema_hooks(
-        merge_app_manifest(load_core_platform_manifest(), load_app_manifest())
+        AppManifest.init_app().add_modules(
+            load_app_modules(),
+        )
     )
     upgrade_public_schema(engine)
     print("Public migrációk lefuttatva.")

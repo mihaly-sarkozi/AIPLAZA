@@ -5,7 +5,7 @@ from unittest.mock import MagicMock
 import pytest
 from fastapi.testclient import TestClient
 
-from core.capabilities.users.dto import User  # lightweight dataclass
+from core.modules.users.domain.dto import User  # lightweight dataclass
 
 pytestmark = pytest.mark.integration
 
@@ -35,9 +35,9 @@ def mock_kb_service():
 def client_kb(app, client, sample_user, mock_kb_service):
     """Client + admin user (owner) + KB service mock."""
     from apps.knowledge.dependencies import get_kb_service
-    from core.di import get_service, register_service
-    from core.platform.auth.auth_dependencies import get_current_user
-    from core.platform.service_keys import PLATFORM_TENANT_USAGE_SERVICE
+    from core.kernel.deps.facade import get_service, register_service
+    from core.modules.auth.web.dependencies.auth_dependencies import get_current_user
+    from core.kernel.interface.keys import PLATFORM_TENANT_USAGE_SERVICE
 
     previous_usage_service = get_service(PLATFORM_TENANT_USAGE_SERVICE)
     usage_service = MagicMock()
@@ -73,7 +73,7 @@ def test_get_kb_without_auth_returns_401(client: TestClient):
 @pytest.mark.smoke_only
 def test_get_kb_user_returns_200_filtered_list(client, sample_user_role_user, app):
     """GET /kb user szerepkörrel → 200, lista (csak use/train jogosult KB-k; mock üres repo → üres lista)."""
-    from core.platform.auth.auth_dependencies import get_current_user
+    from core.modules.auth.web.dependencies.auth_dependencies import get_current_user
     app.dependency_overrides[get_current_user] = lambda: sample_user_role_user
     try:
         r = client.get("/api/kb")

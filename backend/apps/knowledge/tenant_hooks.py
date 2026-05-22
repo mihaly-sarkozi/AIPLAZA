@@ -24,14 +24,14 @@ from apps.knowledge.models import (
 )
 from apps.knowledge.repository.models.local_entity_cluster_orm import KnowledgeLocalEntityClusterORM
 from apps.knowledge.service.knowledge_facade import KnowledgeFacade
-from core.extensions.tenant.service import (
+from core.modules.tenant.service import (
     TenantSchemaHook,
     install_schema_tables,
     register_tenant_schema_hooks,
     run_schema_statements,
 )
-from core.extensions.tenant.slug.policy import initial_demo_knowledge_base_name
-from core.platform.extensions.tenant_hooks import TenantSignupContext, register_tenant_signup_hook
+from core.modules.tenant.slug.policy import initial_demo_knowledge_base_name
+from core.modules.tenant.extensions.tenant_hooks import TenantSignupContext, register_tenant_signup_hook
 
 
 # Ez a függvény telepíti a(z) knowledge séma logikáját.
@@ -78,6 +78,16 @@ def _install_knowledge_schema(engine, slug: str) -> None:
             'ALTER TABLE "{schema}".kb_user_permission ADD COLUMN IF NOT EXISTS created_by INTEGER',
             'ALTER TABLE "{schema}".kb_user_permission ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW()',
             'ALTER TABLE "{schema}".kb_user_permission ADD COLUMN IF NOT EXISTS updated_by INTEGER',
+            'ALTER TABLE "{schema}".knowledge_ingest_items ADD COLUMN IF NOT EXISTS pipeline_version VARCHAR(64) NOT NULL DEFAULT \'source_parser.v1\'',
+            'ALTER TABLE "{schema}".knowledge_ingest_items ADD COLUMN IF NOT EXISTS idempotency_key VARCHAR(192)',
+            'ALTER TABLE "{schema}".knowledge_ingest_items ADD COLUMN IF NOT EXISTS lease_owner VARCHAR(128)',
+            'ALTER TABLE "{schema}".knowledge_ingest_items ADD COLUMN IF NOT EXISTS lease_expires_at TIMESTAMP',
+            'ALTER TABLE "{schema}".knowledge_ingest_items ADD COLUMN IF NOT EXISTS heartbeat_at TIMESTAMP',
+            'ALTER TABLE "{schema}".knowledge_ingest_items ADD COLUMN IF NOT EXISTS retry_count INTEGER NOT NULL DEFAULT 0',
+            'ALTER TABLE "{schema}".knowledge_ingest_items ADD COLUMN IF NOT EXISTS max_retries INTEGER NOT NULL DEFAULT 3',
+            'ALTER TABLE "{schema}".knowledge_ingest_items ADD COLUMN IF NOT EXISTS dead_letter_reason VARCHAR(1024)',
+            'CREATE INDEX IF NOT EXISTS ix_knowledge_ingest_items_worker_lease ON "{schema}".knowledge_ingest_items (status, lease_expires_at)',
+            'CREATE INDEX IF NOT EXISTS ix_knowledge_ingest_items_idempotency ON "{schema}".knowledge_ingest_items (corpus_uuid, pipeline_version, content_hash)',
             'ALTER TABLE "{schema}".knowledge_local_entity_clusters ADD COLUMN IF NOT EXISTS explanation_json JSONB NOT NULL DEFAULT \'{{}}\'::jsonb',
         ),
     )
@@ -89,7 +99,7 @@ def register_knowledge_tenant_hooks() -> None:
         [
             TenantSchemaHook(
                 name="knowledge",
-                revision="knowledge.block_memory.v2",
+                revision="knowledge.schema.worker_first_ingest.v4",
                 install=_install_knowledge_schema,
                 table_names=(
                     "knowledge_bases",

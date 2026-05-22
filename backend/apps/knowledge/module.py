@@ -1,13 +1,13 @@
 # Ez a fájl egy modul regisztrációját, wiringját és publikus integrációját tartalmazza.
 from __future__ import annotations
 
-from apps.contracts import module_key
+from core.kernel.interface.app_conventions import module_key
 from apps.knowledge.api.router import router as knowledge_router
 from apps.knowledge.tenant_hooks import register_knowledge_tenant_hooks, register_knowledge_tenant_signup_hook
 from apps.knowledge.infrastructure import build_knowledge_infrastructure
 from apps.state_keys import CTX_STATE_KNOWLEDGE_INFRASTRUCTURE
-from core.platform.contract import AppModule, ModuleContext, RouteRegistration
-from apps.contracts.service_keys import (
+from core.kernel.interface import BaseAppModule, ModuleContext, RouteRegistration
+from core.kernel.interface.app_keys import (
     MODULE_KNOWLEDGE_EVENT_CHANNEL,
     MODULE_KNOWLEDGE_EMBEDDING_SERVICE_FACTORY,
     MODULE_KNOWLEDGE_QDRANT_FACTORY,
@@ -16,7 +16,7 @@ from apps.contracts.service_keys import (
 )
 
 
-class KnowledgeModule(AppModule):
+class KnowledgeModule(BaseAppModule):
     key = module_key("knowledge")
 
     # Ez a metódus regisztrálja a(z) register logikáját.
@@ -60,5 +60,5 @@ class KnowledgeModule(AppModule):
 
 
 # Ez a függvény visszaadja a(z) modul logikáját.
-def get_module() -> AppModule:
+def get_module() -> BaseAppModule:
     return KnowledgeModule()

@@ -1,3 +1,4 @@
+# Felelosseg: Csomag exportfelulet es lazy importok definicioja.
 # Ez a fájl a(z) core csomag exportjait és inicializálási pontjait fogja össze.
 """
 A rendszer szintu komponensek gyujto csomagja.

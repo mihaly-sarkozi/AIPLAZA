@@ -1,20 +1,27 @@
-"""Billing app modul – helyes contract-alapú minta.
+# backend/apps/billing/module.py
+# Feladat: A billing app BaseAppModule assembly implementációja. Létrehozza a BillingService-t, regisztrálja a tenant usage service kulcson, beköti a routert, startupkor storage/catalog inicializálást és due cycle futtatást végez, valamint background workert indít. Program-specifikus modulösszeszerelés.
+# Sárközi Mihály - 2026.05.21
 
-Importálás: kizárólag core.platform.contract-ból (stabil platformfelület).
+"""Billing app modul – helyes interface-alapú minta.
+
+Importálás: kizárólag core.kernel.interface-ből (stabil platformfelület).
 Raw string service lookup-ok NINCSENEK – typed accessorok és konstansok.
 """
 from __future__ import annotations
 
-from apps.contracts import module_key
-from apps.billing.runtime import BillingRepository, BillingService, BillingWorker, router as billing_router
+from core.kernel.interface.app_conventions import module_key
+from apps.billing.repositories import BillingRepository
+from apps.billing.router import router as billing_router
+from apps.billing.service import BillingService
 from apps.billing.tenant_hooks import register_billing_tenant_signup_hook
-from core.kernel.config.instance_role import should_run_background_workers
-from core.platform.contract import AppModule, ModuleContext, RouteRegistration
-from core.platform.service_keys import PLATFORM_CLOCK, PLATFORM_TENANT_USAGE_SERVICE
-from core.platform.settings.sections import SettingsSection, register_settings_section
+from apps.billing.worker import BillingWorker
+from core.kernel.interface import BaseAppModule, ModuleContext, RouteRegistration
+from core.kernel.interface.keys import PLATFORM_CLOCK, PLATFORM_TENANT_USAGE_SERVICE
+from core.kernel.process import should_run_background_workers
+from core.modules.settings.registry.settings_section_registry import SettingsSection, register_settings_section
 
 
-class BillingAppModule(AppModule):
+class BillingAppModule(BaseAppModule):
     key = module_key("billing")
 
     def service_dependencies(self) -> tuple[str, ...]:
@@ -71,5 +78,5 @@ class BillingAppModule(AppModule):
         return ("billing.read", "billing.write")
 
 
-def get_module() -> AppModule:
+def get_module() -> BaseAppModule:
     return BillingAppModule()

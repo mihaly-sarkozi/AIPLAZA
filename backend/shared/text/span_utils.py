@@ -1,3 +1,7 @@
+# backend/shared/text/span_utils.py
+# Feladat: Szövegen belüli karaktertartomány találatok közös kezelését tartalmazza. Az átfedő találatokból a hosszabbat tartja meg, majd kezdőpozíció szerint rendezve adja vissza az eredményt. Shared span utility PII detektálás és sanitization folyamatokhoz.
+# Sárközi Mihály - 2026.05.21
+
 from __future__ import annotations
 
 from typing import List, Tuple

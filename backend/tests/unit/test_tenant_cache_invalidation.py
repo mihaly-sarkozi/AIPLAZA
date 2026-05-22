@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from core.extensions.tenant.repositories.tenant_repository import TenantRepository
+from core.modules.tenant.repositories.tenant_repository import TenantRepository
 
 
 class _FakeQuery:
@@ -107,7 +107,7 @@ def test_activate_invalidates_tenant_snapshot_cache():
     db = _FakeDb(tenant_row=_tenant_row())
     repo = TenantRepository(_FakeSessionFactory(db))
 
-    with patch("core.extensions.tenant.repositories.tenant_write_repository.invalidate_tenant_cache") as invalidate_tenant:
+    with patch("core.modules.tenant.repositories.tenant_write_repository.invalidate_tenant_cache") as invalidate_tenant:
         repo.activate(7, updated_by=99)
 
     invalidate_tenant.assert_called_once_with("acme")
@@ -117,7 +117,7 @@ def test_increment_security_version_invalidates_tenant_snapshot_cache():
     db = _FakeDb(tenant_row=_tenant_row())
     repo = TenantRepository(_FakeSessionFactory(db))
 
-    with patch("core.extensions.tenant.repositories.tenant_write_repository.invalidate_tenant_cache") as invalidate_tenant:
+    with patch("core.modules.tenant.repositories.tenant_write_repository.invalidate_tenant_cache") as invalidate_tenant:
         repo.increment_security_version(7, updated_by=99)
 
     invalidate_tenant.assert_called_once_with("acme")
@@ -127,7 +127,7 @@ def test_create_config_invalidates_tenant_snapshot_cache():
     db = _FakeDb(tenant_row=_tenant_row(), config_row=None)
     repo = TenantRepository(_FakeSessionFactory(db))
 
-    with patch("core.extensions.tenant.repositories.tenant_write_repository.invalidate_tenant_cache") as invalidate_tenant:
+    with patch("core.modules.tenant.repositories.tenant_write_repository.invalidate_tenant_cache") as invalidate_tenant:
         repo.create_config(
             7,
             slug="acme",
@@ -144,7 +144,7 @@ def test_create_domain_invalidates_domain_cache():
     db = _FakeDb(domain_row=None)
     repo = TenantRepository(_FakeSessionFactory(db))
 
-    with patch("core.extensions.tenant.repositories.tenant_write_repository.invalidate_domain2tenant_cache") as invalidate_domain:
+    with patch("core.modules.tenant.repositories.tenant_write_repository.invalidate_domain2tenant_cache") as invalidate_domain:
         repo.create_domain(7, "Portal.Acme.Test", created_by=99)
 
     invalidate_domain.assert_called_once_with("portal.acme.test")
@@ -154,7 +154,7 @@ def test_verify_domain_invalidates_domain_cache():
     db = _FakeDb(domain_row=_domain_row())
     repo = TenantRepository(_FakeSessionFactory(db))
 
-    with patch("core.extensions.tenant.repositories.tenant_write_repository.invalidate_domain2tenant_cache") as invalidate_domain:
+    with patch("core.modules.tenant.repositories.tenant_write_repository.invalidate_domain2tenant_cache") as invalidate_domain:
         repo.verify_domain("Portal.Acme.Test", verified_at=datetime.now(timezone.utc), updated_by=99)
 
     invalidate_domain.assert_called_once_with("portal.acme.test")
@@ -168,8 +168,8 @@ def test_delete_by_slug_invalidates_tenant_and_domain_caches():
     repo = TenantRepository(_FakeSessionFactory(db))
 
     with (
-        patch("core.extensions.tenant.repositories.tenant_write_repository.invalidate_tenant_cache") as invalidate_tenant,
-        patch("core.extensions.tenant.repositories.tenant_write_repository.invalidate_domain2tenant_cache") as invalidate_domain,
+        patch("core.modules.tenant.repositories.tenant_write_repository.invalidate_tenant_cache") as invalidate_tenant,
+        patch("core.modules.tenant.repositories.tenant_write_repository.invalidate_domain2tenant_cache") as invalidate_domain,
     ):
         repo.delete_by_slug("acme")
 

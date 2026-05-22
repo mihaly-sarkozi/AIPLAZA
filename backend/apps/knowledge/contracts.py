@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from apps.contracts.service_keys import MODULE_KNOWLEDGE_SERVICE
+from core.kernel.interface.app_keys import MODULE_KNOWLEDGE_SERVICE
 
 KNOWLEDGE_SERVICE = MODULE_KNOWLEDGE_SERVICE
 

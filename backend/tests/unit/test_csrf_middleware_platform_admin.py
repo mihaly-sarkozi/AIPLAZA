@@ -6,7 +6,7 @@ from starlette.responses import JSONResponse
 from starlette.routing import Route
 from starlette.testclient import TestClient
 
-from core.kernel.middleware.security.csrf_middleware import CSRFMiddleware
+from core.kernel.security.csrf_middleware import CSRFMiddleware
 
 pytestmark = [pytest.mark.unit, pytest.mark.must_pass]
 

@@ -6,8 +6,8 @@ from datetime import datetime, timezone
 import pytest
 from passlib.hash import bcrypt_sha256 as pwd_hasher
 
-from core.capabilities.auth.dto import LoginInput, LoginSuccess, LoginTwoFactorRequired, TenantAuthContext
-from core.capabilities.auth.service.login_service import LoginService
+from core.modules.auth.domain.dto import LoginInput, LoginSuccess, LoginTwoFactorRequired, TenantAuthContext
+from core.modules.auth.use_cases.login_service import LoginService
 
 pytestmark = [pytest.mark.unit, pytest.mark.must_pass]
 

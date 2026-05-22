@@ -36,28 +36,9 @@ class MySQLKnowledgeBaseRepository:
     def __init__(self, session_factory):
         self._sf = session_factory
 
-    @staticmethod
-    def _ensure_deleted_at_column(session) -> None:
-        session.execute(text("ALTER TABLE knowledge_bases ALTER COLUMN name TYPE VARCHAR(200)"))
-        session.execute(text("ALTER TABLE knowledge_bases ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP"))
-        session.execute(text("ALTER TABLE knowledge_bases ADD COLUMN IF NOT EXISTS deleted_display_name VARCHAR(200)"))
-        session.execute(
-            text(
-                "ALTER TABLE knowledge_bases "
-                "ADD COLUMN IF NOT EXISTS pii_depersonalization_enabled BOOLEAN NOT NULL DEFAULT TRUE"
-            )
-        )
-        session.execute(
-            text(
-                "ALTER TABLE knowledge_bases "
-                "ADD COLUMN IF NOT EXISTS deleted_training_char_count BIGINT NOT NULL DEFAULT 0"
-            )
-        )
-
     # Ez a metódus listázza a(z) all logikáját.
     def list_all(self, *, include_deleted: bool = False) -> list[KnowledgeBase]:
         with self._sf() as session:
-            self._ensure_deleted_at_column(session)
             stmt = select(KBORM)
             if not include_deleted:
                 stmt = stmt.where(KBORM.deleted_at.is_(None))
@@ -142,28 +123,24 @@ class MySQLKnowledgeBaseRepository:
     # Ez a metódus visszaadja a(z) by uuid logikáját.
     def get_by_uuid(self, uuid: str) -> KnowledgeBase | None:
         with self._sf() as session:
-            self._ensure_deleted_at_column(session)
             row = session.execute(select(KBORM).where(KBORM.uuid == uuid, KBORM.deleted_at.is_(None))).scalar_one_or_none()
             return _to_domain(row) if row else None
 
     # Ez a metódus visszaadja a(z) by id logikáját.
     def get_by_id(self, kb_id: int) -> KnowledgeBase | None:
         with self._sf() as session:
-            self._ensure_deleted_at_column(session)
             row = session.get(KBORM, kb_id)
             return _to_domain(row) if row and row.deleted_at is None else None
 
     # Ez a metódus visszaadja a(z) by name logikáját.
     def get_by_name(self, name: str) -> KnowledgeBase | None:
         with self._sf() as session:
-            self._ensure_deleted_at_column(session)
             row = session.execute(select(KBORM).where(KBORM.name == name, KBORM.deleted_at.is_(None))).scalar_one_or_none()
             return _to_domain(row) if row else None
 
     # Ez a metódus létrehozza a(z) create logikáját.
     def create(self, kb: KnowledgeBase, *, actor_user_id: int) -> KnowledgeBase:
         with self._sf() as session:
-            self._ensure_deleted_at_column(session)
             row = KBORM(
                 uuid=kb.uuid,
                 name=kb.name,
@@ -183,7 +160,6 @@ class MySQLKnowledgeBaseRepository:
     # Ez a metódus frissíti a(z) update logikáját.
     def update(self, kb: KnowledgeBase, *, actor_user_id: int) -> KnowledgeBase:
         with self._sf() as session:
-            self._ensure_deleted_at_column(session)
             row = session.execute(select(KBORM).where(KBORM.uuid == kb.uuid, KBORM.deleted_at.is_(None))).scalar_one_or_none()
             if row is None:
                 raise ValueError(f"Knowledge base not found: {kb.uuid}")
@@ -200,7 +176,6 @@ class MySQLKnowledgeBaseRepository:
     # Ez a metódus törli a(z) delete logikáját.
     def delete(self, uuid: str, *, training_char_count: int = 0) -> None:
         with self._sf() as session:
-            self._ensure_deleted_at_column(session)
             kb_row = session.execute(select(KBORM).where(KBORM.uuid == uuid, KBORM.deleted_at.is_(None))).scalar_one_or_none()
             if kb_row is None:
                 return
@@ -215,7 +190,6 @@ class MySQLKnowledgeBaseRepository:
     # Ez a metódus listázza a(z) permissions logikáját.
     def list_permissions(self, kb_uuid: str) -> list[KbPermissionItem]:
         with self._sf() as session:
-            self._ensure_deleted_at_column(session)
             kb_id = session.execute(select(KBORM.id).where(KBORM.uuid == kb_uuid, KBORM.deleted_at.is_(None))).scalar_one_or_none()
             if kb_id is None:
                 return []
@@ -233,7 +207,6 @@ class MySQLKnowledgeBaseRepository:
             return {}
 
         with self._sf() as session:
-            self._ensure_deleted_at_column(session)
             kb_rows = session.execute(
                 select(KBORM.id, KBORM.uuid).where(KBORM.uuid.in_(unique_uuids), KBORM.deleted_at.is_(None))
             ).all()
@@ -258,7 +231,6 @@ class MySQLKnowledgeBaseRepository:
     # Ez a metódus beállítja a(z) permissions logikáját.
     def set_permissions(self, kb_uuid: str, permissions: list[KbPermissionItem], *, actor_user_id: int) -> None:
         with self._sf() as session:
-            self._ensure_deleted_at_column(session)
             kb_id = session.execute(select(KBORM.id).where(KBORM.uuid == kb_uuid, KBORM.deleted_at.is_(None))).scalar_one_or_none()
             if kb_id is None:
                 raise ValueError(f"Knowledge base not found: {kb_uuid}")
@@ -284,7 +256,6 @@ class MySQLKnowledgeBaseRepository:
     def get_kb_ids_with_permission(self, user_id: int, permission: str) -> list[int]:
         allowed_permissions = {"train"} if permission == "train" else {"use", "train"}
         with self._sf() as session:
-            self._ensure_deleted_at_column(session)
             rows = session.execute(
                 select(KbUserPermissionORM.kb_id)
                 .join(KBORM, KBORM.id == KbUserPermissionORM.kb_id)

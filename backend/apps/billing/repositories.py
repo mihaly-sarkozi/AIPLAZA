@@ -1,3 +1,7 @@
+# backend/apps/billing/repositories.py
+# Feladat: A billing app public schema repository rétege. DML-only adat-hozzáférési adapterként seedeli a catalogot, kezeli az előfizetéseket, usage számlálókat, számlákat, debug state-et és aktív tenant listázást; a táblák/indexek létrehozása public schema migrációban történik. Program-specifikus perzisztencia adapter.
+# Sárközi Mihály - 2026.05.22
+
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -11,13 +15,13 @@ from apps.billing.models import (
     BillingCatalogEntryORM,
     BillingDebugStateORM,
     BillingInvoiceORM,
+    BillingPaymentEventORM,
     BillingQuestionUsageORM,
     BillingSubscriptionORM,
     BillingTrainingUsageORM,
     _utcnow,
 )
-from core.extensions.tenant.models.tenant_orm import TenantORM
-from core.kernel.db.model_bases import PublicBase
+from core.modules.tenant.models.tenant_orm import TenantORM
 
 
 class BillingRepository:
@@ -25,36 +29,9 @@ class BillingRepository:
         self._sf = session_factory
 
     def ensure_storage(self) -> None:
-        tables = (
-            BillingCatalogEntryORM.__table__,
-            BillingSubscriptionORM.__table__,
-            BillingQuestionUsageORM.__table__,
-            BillingTrainingUsageORM.__table__,
-            BillingInvoiceORM.__table__,
-            BillingDebugStateORM.__table__,
-        )
-        engine = self._sf.engine
-        PublicBase.metadata.create_all(bind=engine, tables=list(tables))
-        with engine.connect() as conn:
-            conn.execute(
-                text(
-                    """
-                    CREATE INDEX IF NOT EXISTS ix_billing_question_usage_tenant_period
-                    ON public.billing_question_usage (tenant_id, period_key)
-                    """
-                )
-            )
-            conn.execute(
-                text(
-                    """
-                    CREATE INDEX IF NOT EXISTS ix_billing_invoices_tenant_issued
-                    ON public.billing_invoices (tenant_id, issued_at DESC)
-                    """
-                )
-            )
-            commit = getattr(conn, "commit", None)
-            if callable(commit):
-                commit()
+        # Runtime repositoryk nem végezhetnek DDL-t. A billing public táblák és indexek
+        # a core.modules.tenant.schema.public migrációs/bootstrap lépésben jönnek létre.
+        return None
 
     def seed_catalog(self, rows: list[dict[str, Any]]) -> None:
         with self._sf() as db:
@@ -357,6 +334,40 @@ class BillingRepository:
                 .order_by(BillingInvoiceORM.issued_at.desc())
                 .first()
             )
+
+    def record_payment_event_once(
+        self,
+        *,
+        provider: str,
+        event_id: str,
+        event_type: str,
+        tenant_id: int | None,
+        payload: dict[str, Any],
+    ) -> tuple[BillingPaymentEventORM, bool]:
+        with self._sf() as db:
+            db.execute(text("SET search_path TO public"))
+            row = (
+                db.query(BillingPaymentEventORM)
+                .filter(
+                    BillingPaymentEventORM.provider == provider,
+                    BillingPaymentEventORM.event_id == event_id,
+                )
+                .first()
+            )
+            if row is not None:
+                return row, False
+            row = BillingPaymentEventORM(
+                provider=provider,
+                event_id=event_id,
+                event_type=event_type,
+                tenant_id=tenant_id,
+                payload=payload,
+                status="processed",
+            )
+            db.add(row)
+            db.commit()
+            db.refresh(row)
+            return row, True
 
     def list_active_tenants(self) -> list[TenantORM]:
         with self._sf() as db:

@@ -1,4 +1,7 @@
-# Ez a fájl a(z) qdrant_wrapper modul backend logikáját tartalmazza.
+# backend/apps/knowledge/qdrant/qdrant_wrapper.py
+# Feladat: Qdrant kliens wrapper a knowledge retrieval/index műveletekhez. Collection schema kezelést, batch upsertet, filterezett keresést, fusion scoringot és törléseket orkessztrál; a lexical scoring helper logika külön modulba került. Program-specifikus Qdrant adapter.
+# Sárközi Mihály - 2026.05.21
+
 import logging
 
 from qdrant_client import QdrantClient
@@ -9,9 +12,20 @@ _log = logging.getLogger(__name__)
 from typing import Any
 import asyncio
 import uuid as uuid_lib
-import re
 from apps.knowledge.ai.embedding_provider import EmbeddingProvider
-from core.kernel.config import app_settings
+from apps.knowledge.qdrant.filters import build_payload_filter
+from apps.knowledge.qdrant.lexical import (
+    expanded_lexical_tokens,
+    lexical_tokens,
+    near_exact_phrase_score,
+    normalize_lexical_text,
+    normalize_point_id,
+    payload_lexical_text,
+    rare_term_score,
+    token_shape_boost,
+    weighted_overlap_score,
+)
+from core.kernel.config.config_loader import settings
 
 
 class QdrantUnavailableError(Exception):
@@ -45,139 +59,47 @@ class QdrantClientWrapper:
 
     @staticmethod
     def _normalize_point_id(raw_id: Any, *, point_type: str | None = None) -> str:
-        """
-        Qdrant point ID csak unsigned integer vagy UUID lehet.
-        A belső azonosítóink (pl. sentence-71) ezért determinisztikus UUID-vá alakulnak.
-        """
-        text = str(raw_id or "").strip()
-        if not text:
-            return str(uuid_lib.uuid4())
-        try:
-            return str(uuid_lib.UUID(text))
-        except Exception:
-            namespace_text = f"{point_type or 'point'}:{text}"
-            return str(uuid_lib.uuid5(uuid_lib.NAMESPACE_URL, namespace_text))
+        return normalize_point_id(raw_id, point_type=point_type)
 
     # Ez a metódus normalizálja a(z) lexical text logikáját.
     @staticmethod
     def _normalize_lexical_text(text: str) -> str:
-        lowered = str(text or "").lower()
-        # Egyszerű punctuation cleanup + whitespace normalizálás.
-        cleaned = re.sub(r"[^\wáéíóöőúüű\s-]", " ", lowered, flags=re.IGNORECASE)
-        cleaned = re.sub(r"\s+", " ", cleaned).strip()
-        return cleaned
+        return normalize_lexical_text(text)
 
     # Ez a metódus a(z) expanded_lexical_tokens logikáját valósítja meg.
     @classmethod
     def _expanded_lexical_tokens(cls, text: str) -> list[str]:
-        normalized = cls._normalize_lexical_text(text)
-        if not normalized:
-            return []
-        base_tokens = re.findall(r"[a-z0-9áéíóöőúüű_-]+", normalized)
-        expanded: list[str] = []
-        seen: set[str] = set()
-        for token in base_tokens:
-            candidates = [token]
-            if "-" in token or "_" in token:
-                candidates.extend(part for part in re.split(r"[-_]+", token) if part)
-            for candidate in candidates:
-                item = str(candidate or "").strip()
-                if len(item) < 2 or item in seen:
-                    continue
-                seen.add(item)
-                expanded.append(item)
-        return expanded
+        return expanded_lexical_tokens(text)
 
     # Ez a metódus a(z) lexical_tokens logikáját valósítja meg.
     @classmethod
     def _lexical_tokens(cls, text: str) -> list[str]:
-        # Duplikált tokenek kezelése: query oldalon egyedi készletet használunk.
-        return cls._expanded_lexical_tokens(text)
+        return lexical_tokens(text)
 
     # Ez a metódus a(z) token_shape_boost logikáját valósítja meg.
     @staticmethod
     def _token_shape_boost(token: str) -> float:
-        if any(ch.isdigit() for ch in token) or "-" in token or "_" in token:
-            return 1.0
-        if len(token) >= 10:
-            return 0.92
-        if len(token) >= 8:
-            return 0.78
-        return 0.45
+        return token_shape_boost(token)
 
     # Ez a metódus a(z) payload_lexical_text logikáját valósítja meg.
     @classmethod
     def _payload_lexical_text(cls, payload: dict[str, Any]) -> str:
-        parts: list[str] = []
-        for key in ("text", "canonical_text", "canonical_name", "predicate"):
-            value = str(payload.get(key) or "").strip()
-            if value:
-                parts.append(value)
-        for key in ("aliases", "place_keys", "place_hierarchy_keys"):
-            for value in (payload.get(key) or []):
-                item = str(value or "").strip()
-                if item:
-                    parts.append(item)
-        return cls._normalize_lexical_text(" ".join(parts))
+        return payload_lexical_text(payload)
 
     # Ez a metódus a(z) near_exact_phrase_score logikáját valósítja meg.
     @classmethod
     def _near_exact_phrase_score(cls, query_text: str, payload_text: str) -> float:
-        q = cls._normalize_lexical_text(query_text)
-        p = cls._normalize_lexical_text(payload_text)
-        if not q or not p:
-            return 0.0
-        if q == p:
-            return 1.0
-        if q in p or p in q:
-            shorter = min(len(q), len(p))
-            longer = max(len(q), len(p))
-            return max(0.0, min(0.96, shorter / max(1, longer)))
-        q_compact = q.replace(" ", "")
-        p_compact = p.replace(" ", "")
-        if q_compact and p_compact and (q_compact in p_compact or p_compact in q_compact):
-            shorter = min(len(q_compact), len(p_compact))
-            longer = max(len(q_compact), len(p_compact))
-            return max(0.0, min(0.92, shorter / max(1, longer)))
-        return 0.0
+        return near_exact_phrase_score(query_text, payload_text)
 
     # Ez a metódus a(z) weighted_overlap_score logikáját valósítja meg.
     @classmethod
     def _weighted_overlap_score(cls, query_tokens: list[str], text_tokens: list[str]) -> float:
-        if not query_tokens or not text_tokens:
-            return 0.0
-        text_token_set = set(text_tokens)
-        total_weight = 0.0
-        matched_weight = 0.0
-        for token in query_tokens:
-            weight = cls._token_shape_boost(token)
-            total_weight += weight
-            if token in text_token_set:
-                matched_weight += weight
-        if total_weight <= 0.0:
-            return 0.0
-        return max(0.0, min(1.0, matched_weight / total_weight))
+        return weighted_overlap_score(query_tokens, text_tokens)
 
     # Ez a metódus a(z) rare_term_score logikáját valósítja meg.
     @classmethod
     def _rare_term_score(cls, rare_terms: list[str], payload_text: str, payload_tokens: list[str]) -> float:
-        rare_tokens = cls._lexical_tokens(" ".join(rare_terms or []))
-        if not rare_tokens:
-            return 0.0
-        text_norm = cls._normalize_lexical_text(payload_text)
-        payload_token_set = set(payload_tokens)
-        total = 0.0
-        matched = 0.0
-        for token in rare_tokens:
-            weight = 0.7 + (0.3 * cls._token_shape_boost(token))
-            total += weight
-            if token in payload_token_set:
-                matched += weight
-            elif token in text_norm:
-                matched += weight * 0.82
-        if total <= 0.0:
-            return 0.0
-        return max(0.0, min(1.0, matched / total))
+        return rare_term_score(rare_terms, payload_text, payload_tokens)
 
     async def embed_text(self, text: str) -> list[float]:
         """Szöveg embedding generálása konfigurált providerrel."""
@@ -384,41 +306,7 @@ class QdrantClientWrapper:
 
     # Ez a metódus felépíti a(z) filter logikáját.
     def _build_filter(self, payload_filter: dict[str, Any] | None = None) -> qm.Filter | None:
-        if not payload_filter:
-            return None
-        must: list[qm.FieldCondition] = []
-        for key, value in payload_filter.items():
-            if value is None:
-                continue
-            if isinstance(value, list):
-                must.append(
-                    qm.FieldCondition(
-                        key=key,
-                        match=qm.MatchAny(any=value),
-                    )
-                )
-            elif isinstance(value, dict) and any(k in value for k in ["gte", "lte", "gt", "lt"]):
-                must.append(
-                    qm.FieldCondition(
-                        key=key,
-                        range=qm.Range(
-                            gte=value.get("gte"),
-                            lte=value.get("lte"),
-                            gt=value.get("gt"),
-                            lt=value.get("lt"),
-                        ),
-                    )
-                )
-            else:
-                must.append(
-                    qm.FieldCondition(
-                        key=key,
-                        match=qm.MatchValue(value=value),
-                    )
-                )
-        if not must:
-            return None
-        return qm.Filter(must=must)
+        return build_payload_filter(payload_filter)
 
     async def search_points(
         self,
@@ -531,8 +419,8 @@ class QdrantClientWrapper:
                     exact_phrase_hits / max(1, len(exact_phrase_terms))
                     if exact_phrase_terms else 0.0
                 )
-                overlap_w = float(getattr(app_settings, "qdrant_lexical_overlap_weight", 0.72))
-                substring_w = float(getattr(app_settings, "qdrant_lexical_substring_weight", 0.28))
+                overlap_w = float(getattr(settings, "qdrant_lexical_overlap_weight", 0.72))
+                substring_w = float(getattr(settings, "qdrant_lexical_substring_weight", 0.28))
                 # Robusztusabb lexical komponens: token + exact phrase + rare token + ngram.
                 lexical_score = (
                     (0.24 * token_overlap)
@@ -579,12 +467,12 @@ class QdrantClientWrapper:
         semantic_w = float(
             fusion_semantic_weight
             if fusion_semantic_weight is not None
-            else getattr(app_settings, "qdrant_fusion_semantic_weight", 0.72)
+            else getattr(settings, "qdrant_fusion_semantic_weight", 0.72)
         )
         lexical_w = float(
             fusion_lexical_weight
             if fusion_lexical_weight is not None
-            else getattr(app_settings, "qdrant_fusion_lexical_weight", 0.28)
+            else getattr(settings, "qdrant_fusion_lexical_weight", 0.28)
         )
         total_w = max(1e-9, semantic_w + lexical_w)
         semantic_w = semantic_w / total_w

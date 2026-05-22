@@ -1,3 +1,7 @@
+# backend/shared/object_storage/service.py
+# Feladat: Default object storage adapter factoryt ad a backend számára. LRU cache-elt singletonként betölti a konfigurációt, ellenőrzi az engedélyezést és provider típust, majd S3CompatibleObjectStorage példányt hoz létre. Shared runtime factory app infrastruktúra assemblyhez.
+# Sárközi Mihály - 2026.05.21
+
 from __future__ import annotations
 
 from functools import lru_cache

@@ -111,7 +111,7 @@ services:
       STRIPE_TEST_SECRET_KEY: ${STRIPE_TEST_SECRET_KEY:-}
       REDIS_URL: redis://redis:6379/0
       redis_url: redis://redis:6379/0
-    command: sh -c "python3 -m core.platform.events"
+    command: sh -c "python3 -m core.kernel.events"
     restart: unless-stopped
     depends_on:
       postgres:

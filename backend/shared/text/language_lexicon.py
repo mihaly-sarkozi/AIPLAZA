@@ -1,3 +1,7 @@
+# backend/shared/text/language_lexicon.py
+# Feladat: Többnyelvű, szabályalapú text lexikont tartalmaz hu/en/es nyelvekre és generic fallbackre. Kérdésszavakat, stopwordöket, idő- és helyjelölőket, állapot- és relációmarkereket ad a query, claim és chat feldolgozó rétegeknek. Shared lexikon utility, amely nem kötődik konkrét app domain modellhez.
+# Sárközi Mihály - 2026.05.21
+
 from __future__ import annotations
 
 from collections import OrderedDict

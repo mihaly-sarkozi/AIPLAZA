@@ -1,3 +1,7 @@
+# backend/shared/object_storage/models.py
+# Feladat: Az object storage műveletek közös adatmodelljeit definiálja. A StoredObjectRef provider, bucket, key, etag, méret, content-type és metadata információt hordoz, a StoredObjectData pedig a ref mellett a letöltött byte tartalmat. Shared DTO contract storage adapterek és app service-ek között.
+# Sárközi Mihály - 2026.05.21
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field

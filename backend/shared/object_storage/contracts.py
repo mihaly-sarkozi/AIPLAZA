@@ -1,6 +1,10 @@
+# backend/shared/object_storage/contracts.py
+# Feladat: Az object storage backendek közös port contractját definiálja. Byte és text feltöltést, letöltést, stat műveletet, törlést és biztonságos kulcsépítést ír elő StoredObjectRef/StoredObjectData modellekkel. Shared adapter contract app és core modulok számára.
+# Sárközi Mihály - 2026.05.21
+
 from __future__ import annotations
 
-from typing import Any, Protocol
+from typing import Any, BinaryIO, Protocol
 
 from shared.object_storage.models import StoredObjectData, StoredObjectRef
 
@@ -11,6 +15,16 @@ class ObjectStoragePort(Protocol):
         *,
         key: str,
         content: bytes,
+        bucket: str | None = None,
+        content_type: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> StoredObjectRef: ...
+
+    def put_fileobj(
+        self,
+        *,
+        key: str,
+        fileobj: BinaryIO,
         bucket: str | None = None,
         content_type: str | None = None,
         metadata: dict[str, Any] | None = None,

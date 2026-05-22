@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from core.extensions.tenant.service.tenant_domain_verification_service import TenantDomainVerificationService
-from core.platform.domain.errors import DomainDnsVerificationFailedError
+from core.modules.tenant.service.tenant_domain_verification_service import TenantDomainVerificationService
+from core.kernel.domain.errors import DomainDnsVerificationFailedError
 
 pytestmark = [pytest.mark.unit, pytest.mark.must_pass]
 
@@ -31,8 +31,8 @@ def test_verify_domain_marks_verified_when_dns_target_matches(monkeypatch: pytes
         "_resolve_txt_values",
         lambda _record_name: {svc.challenge_for_domain("example.com", tenant_id=11)[1]},
     )
-    monkeypatch.setattr("core.extensions.tenant.service.tenant_domain_verification_service.settings.install_host", "lvh.me")
-    monkeypatch.setattr("core.extensions.tenant.service.tenant_domain_verification_service.settings.tenant_base_domain", "lvh.me")
+    monkeypatch.setattr("core.modules.tenant.service.tenant_domain_verification_service.settings.install_host", "lvh.me")
+    monkeypatch.setattr("core.modules.tenant.service.tenant_domain_verification_service.settings.tenant_base_domain", "lvh.me")
 
     result = svc.verify_domain("example.com", tenant_id=11, actor_user_id=7)
 
@@ -54,8 +54,8 @@ def test_verify_domain_rejects_when_dns_target_mismatch(monkeypatch: pytest.Monk
         "_resolve_txt_values",
         lambda _record_name: {svc.challenge_for_domain("wrong.example.com", tenant_id=11)[1]},
     )
-    monkeypatch.setattr("core.extensions.tenant.service.tenant_domain_verification_service.settings.install_host", "lvh.me")
-    monkeypatch.setattr("core.extensions.tenant.service.tenant_domain_verification_service.settings.tenant_base_domain", "lvh.me")
+    monkeypatch.setattr("core.modules.tenant.service.tenant_domain_verification_service.settings.install_host", "lvh.me")
+    monkeypatch.setattr("core.modules.tenant.service.tenant_domain_verification_service.settings.tenant_base_domain", "lvh.me")
 
     with pytest.raises(DomainDnsVerificationFailedError) as exc:
         svc.verify_domain("wrong.example.com", tenant_id=11, actor_user_id=7)
@@ -70,8 +70,8 @@ def test_verify_domain_rejects_when_txt_token_missing(monkeypatch: pytest.Monkey
 
     monkeypatch.setattr(svc, "_resolve_txt_values", lambda _record_name: {"wrong-token"})
     monkeypatch.setattr(svc, "_resolve_ips", lambda _host: {"10.0.0.1"})
-    monkeypatch.setattr("core.extensions.tenant.service.tenant_domain_verification_service.settings.install_host", "lvh.me")
-    monkeypatch.setattr("core.extensions.tenant.service.tenant_domain_verification_service.settings.tenant_base_domain", "lvh.me")
+    monkeypatch.setattr("core.modules.tenant.service.tenant_domain_verification_service.settings.install_host", "lvh.me")
+    monkeypatch.setattr("core.modules.tenant.service.tenant_domain_verification_service.settings.tenant_base_domain", "lvh.me")
 
     with pytest.raises(DomainDnsVerificationFailedError) as exc:
         svc.verify_domain("example.com", tenant_id=11, actor_user_id=7)

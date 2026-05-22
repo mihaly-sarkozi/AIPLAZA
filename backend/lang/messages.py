@@ -1,5 +1,6 @@
-# Hibakódok és felhasználói üzenetek többnyelvűen. API detail / frontend üzenetekhez.
-# Használat: get_message(ErrorCode.TENANT_REQUIRED, lang="hu") -> "Használd a céges aldomaint..."
+# backend/lang/messages.py
+# Feladat: Többnyelvű API/user-facing hibaüzeneteket és az ErrorCode enumot tartalmazza. Accept-Language alapján hu/en/es nyelvkódot normalizál, majd hibakódhoz tartozó üzenetet ad vissza fallbackkel a default magyar szövegre. Lokalizációs contract API detail és frontend megjelenítés számára.
+# Sárközi Mihály - 2026.05.21
 
 from enum import Enum
 from typing import Optional, TYPE_CHECKING
@@ -79,6 +80,25 @@ _MESSAGES: dict[str, dict[str, str]] = {
         ErrorCode.CREDENTIALS_ALREADY_SET.value: "A password is already set. Use change password.",
         ErrorCode.NOT_DEMO_TENANT.value: "This action is only available in the demo environment.",
         ErrorCode.DEMO_LOGIN_PASSWORD_SET.value: "You have set a password. Log in with email and password; the quick login link is no longer valid.",
+    },
+    "es": {
+        ErrorCode.TENANT_REQUIRED.value: "Usa el subdominio del tenant para acceder (por ejemplo, demo.local, acme.local).",
+        ErrorCode.ALREADY_LOGGED_IN.value: "Ya has iniciado sesión. Cierra la sesión primero (POST /api/auth/logout) y vuelve a intentarlo.",
+        ErrorCode.TWO_FACTOR_EMAIL_FAILED.value: "No hemos podido enviar el correo con el código de dos factores. Revisa la configuración SMTP o inténtalo más tarde.",
+        ErrorCode.LOGIN_ERROR.value: "Error de inicio de sesión. Inténtalo de nuevo más tarde.",
+        ErrorCode.INVALID_CREDENTIALS.value: "Credenciales no válidas.",
+        ErrorCode.TWO_FACTOR_TOO_MANY_ATTEMPTS.value: "Demasiados intentos fallidos de 2FA. Inicia sesión de nuevo desde el paso 1 (email y contraseña).",
+        ErrorCode.NO_REFRESH_TOKEN.value: "No hay refresh token. El refresh token solo se acepta en una cookie HttpOnly (cookie refresh_token).",
+        ErrorCode.INVALID_OR_REVOKED_REFRESH.value: "Refresh token no válido o revocado.",
+        ErrorCode.PERMISSIONS_CHANGED.value: "Tus permisos han cambiado. Inicia sesión de nuevo.",
+        ErrorCode.RE_2FA_REQUIRED.value: "La solicitud proviene de otro dispositivo o navegador. Inicia sesión de nuevo (email, contraseña y 2FA).",
+        ErrorCode.AUTH_RATE_LIMIT.value: "Demasiados intentos. Inténtalo de nuevo más tarde.",
+        ErrorCode.EMAIL_ALREADY_EXISTS.value: "Esta dirección de email ya está en uso.",
+        ErrorCode.CURRENT_PASSWORD_WRONG.value: "La contraseña actual es incorrecta. No se aplicó el cambio.",
+        ErrorCode.CREDENTIALS_PASSWORD_NOT_SET.value: "Todavía no has configurado una contraseña. Usa la opción \"Configurar contraseña\".",
+        ErrorCode.CREDENTIALS_ALREADY_SET.value: "La contraseña ya está configurada. Usa el cambio de contraseña.",
+        ErrorCode.NOT_DEMO_TENANT.value: "Esta acción solo está disponible en el entorno demo.",
+        ErrorCode.DEMO_LOGIN_PASSWORD_SET.value: "Ya has configurado una contraseña. Inicia sesión con email y contraseña; el enlace de acceso rápido ya no es válido.",
     },
 }
 

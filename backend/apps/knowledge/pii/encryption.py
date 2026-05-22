@@ -6,7 +6,6 @@ import hashlib
 
 from cryptography.fernet import Fernet, InvalidToken
 
-from core.kernel.config import app_settings
 from core.kernel.config.config_loader import settings
 
 
@@ -22,11 +21,11 @@ def _derive_key_from_secret(secret: str) -> str:
 class PiiEncryptor:
     # Ez a metódus a Python-specifikus speciális működést valósítja meg.
     def __init__(self) -> None:
-        cfg_key = (getattr(app_settings, "pii_encryption_key", "") or "").strip()
+        cfg_key = (getattr(settings, "pii_encryption_key", "") or "").strip()
         key = cfg_key if cfg_key else _derive_key_from_secret(getattr(settings, "jwt_secret", ""))
         self._fernet = Fernet(key.encode("utf-8"))
         self._allow_legacy_plaintext = bool(
-            getattr(app_settings, "pii_allow_legacy_plaintext_read", False)
+            getattr(settings, "pii_allow_legacy_plaintext_read", False)
         )
 
     # Ez a metódus a(z) encrypt logikáját valósítja meg.

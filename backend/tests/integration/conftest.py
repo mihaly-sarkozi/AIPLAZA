@@ -16,14 +16,11 @@ def ensure_demo_test_tenant():
     try:
         from sqlalchemy import create_engine, text
 
-        from apps import load_enabled_app_modules
-        from core.platform.bootstrap.manifest import configure_app_modules_loader, load_app_manifest
+        from apps.registry import load_app_modules
         from core.kernel.config.config_loader import settings
-        from core.platform.manifest import merge_app_manifest
-        from core.platform.registry import load_core_platform_manifest
+        from core.kernel.app.app_manifest import AppManifest
 
-        configure_app_modules_loader(load_enabled_app_modules)
-        from core.extensions.tenant.service.tenant_schema_service import (
+        from core.modules.tenant.service.tenant_schema_service import (
             create_tenant_schema,
             register_manifest_tenant_schema_hooks,
             upgrade_public_schema,
@@ -39,7 +36,9 @@ def ensure_demo_test_tenant():
         pytest.skip(f"DB nem elérhető demo teszt-tenant bootstraphoz: {exc}")
 
     register_manifest_tenant_schema_hooks(
-        merge_app_manifest(load_core_platform_manifest(), load_app_manifest())
+        AppManifest.init_app().add_modules(
+            load_app_modules(),
+        )
     )
     upgrade_public_schema(engine)
     with engine.begin() as conn:
@@ -67,7 +66,7 @@ def app():
 
 @pytest.fixture
 def sample_user():
-    from core.capabilities.users.dto import User
+    from core.modules.users.domain.dto import User
 
     return User(
         id=1,
@@ -109,9 +108,9 @@ def client(app, mock_login_service, mock_user_repo, ensure_demo_test_tenant):
     from sqlalchemy import create_engine, text
 
     from core.kernel.config.config_loader import settings
-    from core.di import get_login_service, get_user_repository
-    from core.kernel.bootstrap.container import container
-    from core.extensions.tenant.dto import Tenant, TenantConfig, TenantDomainInfo, TenantSnapshot, TenantStatus
+    from core.kernel.deps.facade import get_login_service, get_user_repository
+    from core.kernel.app.app_container import container
+    from core.modules.tenant.dto import Tenant, TenantConfig, TenantDomainInfo, TenantSnapshot, TenantStatus
 
     tenant_id = 1
     try:
@@ -169,7 +168,7 @@ def client(app, mock_login_service, mock_user_repo, ensure_demo_test_tenant):
 
 @pytest.fixture
 def client_with_refresh(app, client, mock_refresh_service):
-    from core.di import get_refresh_service
+    from core.kernel.deps.facade import get_refresh_service
 
     app.dependency_overrides[get_refresh_service] = lambda: mock_refresh_service
     yield client
@@ -183,8 +182,8 @@ def mock_logout_service():
 
 @pytest.fixture
 def allow_chat_usage():
-    from core.di import get_service, register_service
-    from core.platform.service_keys import PLATFORM_TENANT_USAGE_SERVICE
+    from core.kernel.deps.facade import get_service, register_service
+    from core.kernel.interface.keys import PLATFORM_TENANT_USAGE_SERVICE
 
     previous_service = get_service(PLATFORM_TENANT_USAGE_SERVICE)
     usage_service = MagicMock()
@@ -199,10 +198,10 @@ def allow_chat_usage():
 
 @pytest.fixture
 def client_authenticated(app, client, sample_user, mock_logout_service, mock_user_repo):
-    from core.capabilities.users.dependencies import get_user_profile_service
-    from core.capabilities.users.service.profile_service import UserProfileService
-    from core.di import get_logout_service
-    from core.platform.auth.auth_dependencies import get_current_user
+    from core.modules.users.dependencies import get_user_profile_service
+    from core.modules.users.service.profile_service import UserProfileService
+    from core.kernel.deps.facade import get_logout_service
+    from core.modules.auth.web.dependencies.auth_dependencies import get_current_user
 
     app.dependency_overrides[get_current_user] = lambda: sample_user
     app.dependency_overrides[get_logout_service] = lambda: mock_logout_service
@@ -215,7 +214,7 @@ def client_authenticated(app, client, sample_user, mock_logout_service, mock_use
 
 @pytest.fixture
 def mock_user_service(sample_user):
-    from core.capabilities.users.dto import User
+    from core.modules.users.domain.dto import User
 
     svc = MagicMock()
     svc.list_all.return_value = []
@@ -250,10 +249,10 @@ def mock_user_service(sample_user):
 
 @pytest.fixture
 def client_superuser(app, client, sample_user, mock_user_service, mock_logout_service):
-    from core.capabilities.users.dependencies import get_invite_service, get_user_service
-    from core.di import get_logout_service, get_service, register_service
-    from core.platform.auth.auth_dependencies import get_current_user
-    from core.platform.service_keys import PLATFORM_TENANT_USAGE_SERVICE
+    from core.modules.users.dependencies import get_invite_service, get_user_service
+    from core.kernel.deps.facade import get_logout_service, get_service, register_service
+    from core.modules.auth.web.dependencies.auth_dependencies import get_current_user
+    from core.kernel.interface.keys import PLATFORM_TENANT_USAGE_SERVICE
 
     previous_usage_service = get_service(PLATFORM_TENANT_USAGE_SERVICE)
     usage_service = MagicMock()

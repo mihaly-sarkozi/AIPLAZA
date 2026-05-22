@@ -14,14 +14,17 @@ COPY backend/requirements.txt ./requirements.txt
 RUN pip install --upgrade pip && pip install -r requirements.txt
 
 COPY backend/pyproject.toml ./pyproject.toml
+COPY backend/pytest.ini ./pytest.ini
 COPY backend/apps ./apps
 COPY backend/config ./config
 COPY backend/core ./core
 COPY backend/lang ./lang
 COPY backend/main.py ./main.py
+COPY backend/run_test.py ./run_test.py
 COPY backend/scripts ./scripts
 COPY backend/shared ./shared
 COPY backend/storage ./storage
+COPY backend/tests ./tests
 
 EXPOSE 8001
 

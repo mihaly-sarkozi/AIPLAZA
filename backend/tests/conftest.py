@@ -10,13 +10,60 @@ Fixture-ök és HTTP/DB specifikus mockok: ``tests/integration/conftest.py``.
 from __future__ import annotations
 
 import os
+import pytest
 
 # Izolált unit gyűjtéshez: ne hiányozzanak env-ek import előtt
-os.environ.setdefault("RATE_LIMIT_LOGIN_PER_MINUTE", "100")
-os.environ.setdefault("DISABLE_CSRF", "1")
-os.environ.setdefault("QDRANT_URL", "http://localhost:6333")
-os.environ.setdefault("QDRANT_API_KEY", "")
-os.environ.setdefault("OPENAI_API_KEY", "test-openai-api-key")
+_TEST_ENV_DEFAULTS = {
+    "APP_ENV": "test",
+    "JWT_SECRET": "test-secret-with-enough-length-01234567890123456789",
+    "JWT_ISSUER": "test",
+    "JWT_AUDIENCE": "test",
+    "RATE_LIMIT_LOGIN_PER_MINUTE": "100",
+    "DISABLE_CSRF": "1",
+    "QDRANT_URL": "http://localhost:6333",
+    "QDRANT_API_KEY": "test-qdrant-key",
+    "OPENAI_API_KEY": "test-openai-api-key",
+    "APP_NAME": "AIPLAZA Test",
+    "APP_DESCRIPTION": "Unit test settings",
+    "APP_VERSION": "test",
+    "API_HOST": "127.0.0.1",
+    "API_PORT": "8000",
+    "CORS_ORIGINS": "http://localhost:3000",
+    "FRONTEND_BASE_URL": "http://localhost:3000",
+    "TENANT_BASE_DOMAIN": "app.test",
+    "INSTALL_HOST": "app.test",
+    "SINGLE_TENANT_SLUG": "demo",
+    "TRUSTED_HOSTS": "localhost,127.0.0.1,app.test",
+    "DATABASE_URL": "sqlite+pysqlite:///:memory:",
+    "DATABASE_POOL_PRE_PING": "false",
+    "METRICS_ALLOWED_IPS": "127.0.0.1",
+    "LOG_LEVEL": "INFO",
+    "COOKIE_SECURE": "false",
+    "PLATFORM_ADMIN_ALLOWED_IPS": "127.0.0.1/32",
+    "CHAT_PROVIDER": "openai",
+    "CHAT_MODEL": "gpt-4o-mini",
+    "OLLAMA_URL": "http://localhost:11434",
+    "OBJECT_STORAGE_ENDPOINT": "http://localhost:9000",
+    "OBJECT_STORAGE_BUCKET": "aiplaza-test",
+    "REDIS_URL": "",
+    "SMTP_HOST": "localhost",
+    "SMTP_USER": "test",
+    "SMTP_PASSWORD": "test",
+    "SMTP_FROM_EMAIL": "noreply@example.test",
+    "INVOICE_ISSUER_NAME": "Test Issuer",
+    "INVOICE_ISSUER_TAX_ID": "12345678-1-12",
+    "INVOICE_ISSUER_ADDRESS_LINE": "Test utca 1.",
+    "INVOICE_ISSUER_POSTAL_CODE": "1111",
+    "INVOICE_ISSUER_CITY": "Budapest",
+    "INVOICE_ISSUER_REGION": "HU-BU",
+    "INVOICE_ISSUER_COUNTRY": "HU",
+    "INVOICE_ISSUER_PHONE": "+3610000000",
+    "INVOICE_ISSUER_WEBSITE": "https://example.test",
+    "INVOICE_ISSUER_EMAIL": "billing@example.test",
+}
+
+for _key, _value in _TEST_ENV_DEFAULTS.items():
+    os.environ.setdefault(_key, _value)
 
 from unittest.mock import MagicMock
 
@@ -31,7 +78,7 @@ class MockLoginService:
 
     def login(self, inp):
         if self.raise_2fa_too_many and getattr(inp, "pending_token", None) and getattr(inp, "two_factor_code", None):
-            from core.capabilities.auth.exceptions import TwoFactorTooManyAttemptsError
+            from core.modules.auth.domain.exceptions import TwoFactorTooManyAttemptsError
 
             raise TwoFactorTooManyAttemptsError()
         return self.result
@@ -45,7 +92,7 @@ class MockRefreshService:
         self.tokens.verify.side_effect = lambda rt: self.verify_payload
 
     def refresh(self, refresh_token: str, ip=None, ua=None, tenant=None, **kwargs):
-        from core.capabilities.auth.service.refresh_result import (
+        from core.modules.auth.use_cases.refresh_result import (
             RefreshFailed,
             RefreshFailReason,
             RefreshSuccess,
@@ -75,6 +122,13 @@ class MockLogoutService:
 
     def logout(self, refresh_token: str, ip=None, ua=None, *, tenant=None, **kwargs):
         return self.result
+
+
+@pytest.fixture(autouse=True)
+def test_env(monkeypatch: pytest.MonkeyPatch):
+    for key, value in _TEST_ENV_DEFAULTS.items():
+        monkeypatch.setenv(key, value)
+    yield
 
 
 __all__ = ["MockLoginService", "MockLogoutService", "MockRefreshService"]

@@ -1,4 +1,6 @@
-# Hot-path bontott timing: request szintű span-ek (token_verify, allowlist_check, user_cache_*, user_db_fetch, refresh_session_lookup, email_send).
+# backend/core/kernel/logging/request_timing.py
+# Feladat: Request scope timing spaneket és DB query statisztikákat gyűjt ContextVar alapon. A HTTP middleware, auth/tenant middleware és DB instrumentation innen rögzít részidőket, majd metrikát és strukturált timing logot ír. Core observability helper API hot-path teljesítményvizsgálathoz.
+# Sárközi Mihály - 2026.05.21
 
 from __future__ import annotations
 
@@ -6,6 +8,8 @@ import contextvars
 import logging
 import os
 from typing import List, Tuple
+
+from core.kernel.config.environment import is_production_env
 
 from core.kernel.logging.observability import increment_metric, log_structured_event, observe_metric
 
@@ -60,9 +64,11 @@ def record_request_metric(
         "path_group": path_group or "api",
     }
     increment_metric("platform.request.count", 1.0, tags=tags)
+    increment_metric("http_requests_total", 1.0, tags=tags)
     if status_family in {"2xx", "4xx", "5xx"}:
         increment_metric(f"platform.request.status.{status_family}.count", 1.0)
     observe_metric("platform.request.latency.ms", elapsed_ms, unit="ms", tags=tags)
+    observe_metric("http_request_duration_seconds", float(elapsed_ms) / 1000.0, unit="seconds", tags=tags)
 
 
 # Ez a függvény a(z) record_db_query logikáját valósítja meg.
@@ -106,7 +112,7 @@ def clear_request_timing() -> None:
 
 # Ez a függvény a(z) should_emit_timing_logs logikáját valósítja meg.
 def should_emit_timing_logs() -> bool:
-    return os.getenv("APP_ENV", "dev").strip().lower() != "prod"
+    return not is_production_env(os.getenv("APP_ENV", "local"))
 
 
 # Ez a függvény a(z) log_timing_debug logikáját valósítja meg.

@@ -1,8 +1,9 @@
 import json
 
-from core.capabilities.audit.service.audit_service import AuditService
-from core.capabilities.audit.const.audit_log_action_const import AuditLogAction
-from core.capabilities.audit.repositories.audit_log_repository import AuditLogRepository
+from core.infrastructure.audit.service.audit_service import AuditService
+from core.infrastructure.audit.const.audit_log_action_const import AuditLogAction
+from core.infrastructure.audit.repositories.audit_log_repository import AuditLogRepository
+from core.kernel.audit import AuditAction, AuditEventFactory, AuditPort
 from core.kernel.logging.observability import bind_observability_context, reset_observability_context
 
 
@@ -161,3 +162,47 @@ def test_audit_repository_keeps_empty_details_distinct_from_null():
 
     row = session.added[0]
     assert json.loads(row.details) == {}
+
+
+def test_public_audit_factory_builds_and_emits_event_via_port() -> None:
+    repo = _FakeRepo()
+    service = AuditService(repo)
+    assert isinstance(service, AuditPort)
+    factory = AuditEventFactory()
+
+    event = factory.build(
+        AuditAction.API_CREDENTIAL_CREATED,
+        user_id=7,
+        target_type="channel_credential",
+        target_id="cred-1",
+        details={"tenant_id": 3},
+    )
+    factory.emit(service, event)
+
+    assert repo.entries[0]["action"] == AuditAction.API_CREDENTIAL_CREATED
+    assert repo.entries[0]["user_id"] == 7
+    assert repo.entries[0]["target_type"] == "channel_credential"
+    assert repo.entries[0]["details"] == {"tenant_id": 3}
+
+
+def test_audit_action_covers_security_and_knowledge_events() -> None:
+    expected = {
+        "LOGIN_SUCCESS",
+        "LOGIN_FAILED",
+        "LOGIN_2FA_SUCCESS",
+        "LOGIN_2FA_FAILED",
+        "API_CREDENTIAL_CREATED",
+        "API_CREDENTIAL_ROTATED",
+        "API_CREDENTIAL_REVOKED",
+        "SIGNED_REQUEST_REJECTED",
+        "SETTINGS_SECURITY_UPDATED",
+        "USER_ROLE_CHANGED",
+        "KNOWLEDGE_TRAINING_STARTED",
+        "KNOWLEDGE_SOURCE_DELETED",
+        "KNOWLEDGE_URL_INGEST_REJECTED",
+        "KNOWLEDGE_UPLOAD_REJECTED",
+        "PERMISSION_DENIED",
+        "ADMIN_ACTION",
+    }
+
+    assert expected <= {member.name for member in AuditAction}

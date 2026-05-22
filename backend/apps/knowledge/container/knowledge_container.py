@@ -5,7 +5,7 @@ from dataclasses import dataclass
 
 from apps.knowledge.service.knowledge_service import KnowledgeBaseService
 from apps.knowledge.repositories.knowledge_base_repository import MySQLKnowledgeBaseRepository
-from core.capabilities.users.repositories.user_repository import UserRepository
+from core.modules.users.repository.persistence.user_repository import UserRepository
 
 
 @dataclass(frozen=True)

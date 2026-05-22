@@ -82,6 +82,15 @@ class _FakeQdrantClient:
 
 
 def _import_qdrant_wrapper_class():
+    module_names = (
+        "qdrant_client",
+        "qdrant_client.models",
+        "qdrant_client.http.exceptions",
+        "openai",
+        "core.kernel.config",
+        "core.kernel.config.config_loader",
+    )
+    original_modules = {name: sys.modules.get(name) for name in module_names}
     qdrant_client_module = types.ModuleType("qdrant_client")
     qdrant_client_module.QdrantClient = object
     models_module = types.ModuleType("qdrant_client.models")
@@ -146,20 +155,35 @@ def _import_qdrant_wrapper_class():
     openai_module = types.ModuleType("openai")
     openai_module.AsyncOpenAI = object
 
-    config_module = types.ModuleType("core.kernel.config")
-    config_module.app_settings = types.SimpleNamespace(
+    config_loader_module = types.ModuleType("core.kernel.config.config_loader")
+    qdrant_settings = types.SimpleNamespace(
         qdrant_lexical_overlap_weight=0.72,
         qdrant_lexical_substring_weight=0.28,
         qdrant_fusion_semantic_weight=0.72,
         qdrant_fusion_lexical_weight=0.28,
     )
+    config_loader_module.settings = qdrant_settings
+    config_loader_module.get_settings = lambda: qdrant_settings
+    config_loader_module.get_app_env = lambda: "dev"
+    config_module = types.ModuleType("core.kernel.config")
+    config_module.settings = qdrant_settings
+    config_module.get_settings = lambda: qdrant_settings
+    config_module.get_app_env = lambda: "dev"
 
-    sys.modules["qdrant_client"] = qdrant_client_module
-    sys.modules["qdrant_client.models"] = models_module
-    sys.modules["qdrant_client.http.exceptions"] = http_exc_module
-    sys.modules["openai"] = openai_module
-    sys.modules["core.kernel.config"] = config_module
-    module = importlib.import_module("apps.knowledge.qdrant.qdrant_wrapper")
+    try:
+        sys.modules["qdrant_client"] = qdrant_client_module
+        sys.modules["qdrant_client.models"] = models_module
+        sys.modules["qdrant_client.http.exceptions"] = http_exc_module
+        sys.modules["openai"] = openai_module
+        sys.modules["core.kernel.config"] = config_module
+        sys.modules["core.kernel.config.config_loader"] = config_loader_module
+        module = importlib.import_module("apps.knowledge.qdrant.qdrant_wrapper")
+    finally:
+        for name, original in original_modules.items():
+            if original is None:
+                sys.modules.pop(name, None)
+            else:
+                sys.modules[name] = original
     return module.QdrantClientWrapper
 
 

@@ -1,18 +1,17 @@
 from __future__ import annotations
 
-from apps.contracts import module_key, module_route_tag
 from apps.profile.api.router import router
 from apps.profile.contracts import PROFILE_SERVICE
 from apps.profile.infra.preferences_repository import ProfilePreferencesRepository
 from apps.profile.service.preferences_service import ProfilePreferencesService
 from apps.profile.service.profile_facade import ProfileFacade
 from apps.profile.tenant_hooks import register_profile_tenant_hooks
-from core.kernel.middleware.security import invalidate_user_cache
-from core.platform.contract import AppModule, ModuleContext, RouteRegistration
-from core.platform.service_keys import PLATFORM_TENANT_USAGE_SERVICE, PLATFORM_USERS_PROFILE_SERVICE
+from core.kernel.interface import BaseAppModule, ModuleContext, RouteRegistration
+from core.kernel.interface.app_conventions import module_key, module_route_tag
+from core.kernel.interface.keys import PLATFORM_TENANT_USAGE_SERVICE, PLATFORM_USERS_PROFILE_SERVICE
 
 
-class ProfileAppModule(AppModule):
+class ProfileAppModule(BaseAppModule):
     key = module_key("profile")
 
     def service_dependencies(self) -> tuple[str, ...]:
@@ -28,7 +27,6 @@ class ProfileAppModule(AppModule):
             core_profile_service=container.get_platform_service(PLATFORM_USERS_PROFILE_SERVICE),
             preferences_service=preferences_service,
             training_status_reader=container.get_optional_service(PLATFORM_TENANT_USAGE_SERVICE),
-            user_cache_invalidator=invalidate_user_cache,
         )
         container.register_service(PROFILE_SERVICE, facade)
 
@@ -42,5 +40,5 @@ class ProfileAppModule(AppModule):
         return ("profile.read", "profile.write")
 
 
-def get_module() -> AppModule:
+def get_module() -> BaseAppModule:
     return ProfileAppModule()
