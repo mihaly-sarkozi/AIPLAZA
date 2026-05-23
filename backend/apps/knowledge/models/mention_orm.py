@@ -1,4 +1,4 @@
-from sqlalchemy import Column, DateTime, Float, Integer, String, Text
+from sqlalchemy import Column, DateTime, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB
 
 from .base import TenantSchemaBase
@@ -12,8 +12,7 @@ class KnowledgeMentionORM(TenantSchemaBase):
     corpus_uuid = Column(String(36), nullable=False, index=True)
     source_id = Column(String(36), nullable=False, index=True)
     document_id = Column(String(36), nullable=False, index=True)
-    # TODO: promote this to an actual ForeignKey via migration when the schema is updated.
-    sentence_id = Column(String(36), nullable=False, index=True)
+    sentence_id = Column(String(36), ForeignKey("knowledge_sentences.id", ondelete="CASCADE"), nullable=False, index=True)
     interpretation_run_id = Column(String(36), nullable=False, index=True)
     # Kept as String for compatibility; no enum migration is required yet.
     mention_type = Column(String(32), nullable=False, default="unknown", index=True)

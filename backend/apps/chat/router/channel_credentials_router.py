@@ -8,7 +8,7 @@ import json
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from apps.chat.dependencies import get_chat_service
-from apps.chat.router.channel_support import (
+from apps.chat.application.channel_request_policy import (
     channel_access_service_or_503 as _channel_access_service_or_503,
     parse_iso_datetime as _parse_iso_datetime,
     tenant_required_id as _tenant_required_id,
@@ -17,8 +17,8 @@ from apps.chat.router.chat_requests import (
     ChannelCredentialCreateRequest,
     ChannelCredentialPolicyUpdateRequest,
 )
-from apps.chat.router.payload_policy import tenant_chat_limits as _tenant_chat_limits
-from apps.chat.service.chat_http_use_cases import (
+from apps.chat.application.chat_payload_policy import tenant_chat_limits as _tenant_chat_limits
+from apps.chat.application.http_use_cases import (
     audit_channel_credential_created,
     audit_channel_credential_revoked,
     audit_channel_credential_rotated,

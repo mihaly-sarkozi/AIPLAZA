@@ -9,9 +9,10 @@ from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket, WebSo
 from fastapi.responses import Response
 
 from apps.chat.dependencies import get_chat_service
-from apps.chat.router.payload_policy import (
+from apps.chat.application.chat_payload_policy import (
     tenant_chat_limits as _tenant_chat_limits,
 )
+from apps.chat.errors import ChatPermissionDenied
 from apps.chat.router.websocket_limits import (
     ws_allow_message as _ws_allow_message,
     ws_enabled as _ws_enabled,
@@ -38,7 +39,7 @@ from apps.chat.router.chat_requests import (
     ChatFeedbackRequest,
 )
 from apps.chat.router.chat_response import AskResponse
-from apps.chat.service.chat_http_use_cases import (
+from apps.chat.application.http_use_cases import (
     handle_chat_request,
     handle_ws_chat_message,
 )
@@ -135,6 +136,8 @@ async def chat_source_download(
             user_id=current_user.id,
             user_role=current_user.role,
         )
+    except ChatPermissionDenied:
+        raise
     except PermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     if download is None:
@@ -164,6 +167,8 @@ async def chat_context_download(
             user_id=current_user.id,
             user_role=current_user.role,
         )
+    except ChatPermissionDenied:
+        raise
     except PermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     if download is None:

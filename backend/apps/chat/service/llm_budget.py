@@ -45,6 +45,60 @@ class LlmBudgetManager:
         self._state = state if state is not None else {}
         self._redis_getter = redis_getter
 
+    @classmethod
+    def from_settings(
+        cls,
+        *,
+        chat_max_tokens: int,
+        lock: threading.Lock | None = None,
+        state: dict[tuple[str, str], dict[str, int]] | None = None,
+        redis_getter: Callable[[], Any] = get_rate_limit_redis,
+    ) -> LlmBudgetManager:
+        return cls(
+            config=LlmBudgetConfig(
+                request_limit_per_minute=max(
+                    1,
+                    int(getattr(settings, "llm_budget_request_limit_per_minute", 120) or 120),
+                ),
+                prompt_chars_per_minute=max(
+                    1,
+                    int(getattr(settings, "llm_budget_prompt_chars_per_minute", 120000) or 120000),
+                ),
+                concurrency_limit=max(
+                    1,
+                    int(getattr(settings, "llm_budget_concurrency_limit", 8) or 8),
+                ),
+                tenant_daily_tokens=max(
+                    1,
+                    int(getattr(settings, "llm_budget_tenant_daily_tokens", 120_000) or 120_000),
+                ),
+                tenant_monthly_tokens=max(
+                    1,
+                    int(getattr(settings, "llm_budget_tenant_monthly_tokens", 2_000_000) or 2_000_000),
+                ),
+                estimated_completion_tokens=max(
+                    1,
+                    int(getattr(settings, "llm_budget_estimated_completion_tokens", 220) or 220),
+                ),
+                input_cost_per_1k_tokens_usd=max(
+                    0.00001,
+                    float(getattr(settings, "llm_budget_input_cost_per_1k_tokens_usd", 0.003) or 0.003),
+                ),
+                output_cost_per_1k_tokens_usd=max(
+                    0.00001,
+                    float(getattr(settings, "llm_budget_output_cost_per_1k_tokens_usd", 0.006) or 0.006),
+                ),
+                global_daily_spend_usd=max(
+                    0.01,
+                    float(getattr(settings, "llm_budget_global_daily_spend_usd", 15.0) or 15.0),
+                ),
+                chat_max_tokens=chat_max_tokens,
+            ),
+            lock=lock,
+            state=state,
+            redis_getter=redis_getter,
+        )
+
     @staticmethod
     def rollback_redis_budget(
         redis_client,

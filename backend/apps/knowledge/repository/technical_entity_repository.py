@@ -12,9 +12,9 @@ def _parse_uuid(value: str | UUID) -> UUID:
 class TechnicalEntityRepository:
     """Runtime-only TechnicalEntity repository.
 
-    TODO: ha a Technical Entity perzisztens termékfelület lesz, kapjon saját ORM modellt,
-    tenant hook táblát és DB-backed repository implementációt. Jelenleg nincs migration:
-    a builder kimenete runtime / trace rétegben tartható.
+    Deferred by design: technical entities are currently derived interpretation
+    artifacts, not user-managed records. They stay in-memory until a persistent
+    product surface needs history, ownership and tenant-schema migration support.
     """
 
     def __init__(self) -> None:

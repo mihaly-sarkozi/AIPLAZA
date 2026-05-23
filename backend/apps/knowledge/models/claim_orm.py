@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Column, DateTime, Float, String, Text
+from sqlalchemy import Column, DateTime, Float, ForeignKey, String, Text
 from sqlalchemy.dialects.postgresql import JSONB
 
 from .base import TenantSchemaBase
@@ -12,10 +12,9 @@ class KnowledgeClaimORM(TenantSchemaBase):
 
     id = Column(String(36), primary_key=True)
     corpus_uuid = Column(String(36), nullable=False, index=True)
-    # TODO: add nullable FK constraints for source_id/sentence_id and dedicated claim metadata columns via migration.
-    source_id = Column(String(36), nullable=False, index=True)
+    source_id = Column(String(36), ForeignKey("knowledge_sources.id", ondelete="CASCADE"), nullable=False, index=True)
     document_id = Column(String(36), nullable=False, index=True)
-    sentence_id = Column(String(36), nullable=False, index=True)
+    sentence_id = Column(String(36), ForeignKey("knowledge_sentences.id", ondelete="CASCADE"), nullable=False, index=True)
     interpretation_run_id = Column(String(36), nullable=False, index=True)
     subject_text = Column(Text, nullable=False, default="")
     predicate_text = Column(Text, nullable=False, default="")

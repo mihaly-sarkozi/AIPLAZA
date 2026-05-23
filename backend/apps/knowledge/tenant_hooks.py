@@ -93,6 +93,117 @@ def _install_knowledge_schema(engine, slug: str) -> None:
     )
 
 
+def _install_knowledge_fk_constraints(engine, slug: str) -> None:
+    run_schema_statements(
+        engine,
+        slug,
+        (
+            """
+            DO $$
+            BEGIN
+                IF to_regclass('"{schema}".knowledge_claims') IS NOT NULL
+                   AND to_regclass('"{schema}".knowledge_sources') IS NOT NULL
+                   AND NOT EXISTS (
+                    SELECT 1 FROM pg_constraint
+                    WHERE conname = 'fk_knowledge_claims_source_id'
+                      AND conrelid = to_regclass('"{schema}".knowledge_claims')
+                ) THEN
+                    ALTER TABLE "{schema}".knowledge_claims
+                    ADD CONSTRAINT fk_knowledge_claims_source_id
+                    FOREIGN KEY (source_id) REFERENCES "{schema}".knowledge_sources(id)
+                    ON DELETE CASCADE NOT VALID;
+                END IF;
+            END $$;
+            """,
+            """
+            DO $$
+            BEGIN
+                IF to_regclass('"{schema}".knowledge_claims') IS NOT NULL
+                   AND to_regclass('"{schema}".knowledge_sentences') IS NOT NULL
+                   AND NOT EXISTS (
+                    SELECT 1 FROM pg_constraint
+                    WHERE conname = 'fk_knowledge_claims_sentence_id'
+                      AND conrelid = to_regclass('"{schema}".knowledge_claims')
+                ) THEN
+                    ALTER TABLE "{schema}".knowledge_claims
+                    ADD CONSTRAINT fk_knowledge_claims_sentence_id
+                    FOREIGN KEY (sentence_id) REFERENCES "{schema}".knowledge_sentences(id)
+                    ON DELETE CASCADE NOT VALID;
+                END IF;
+            END $$;
+            """,
+            """
+            DO $$
+            BEGIN
+                IF to_regclass('"{schema}".knowledge_mentions') IS NOT NULL
+                   AND to_regclass('"{schema}".knowledge_sentences') IS NOT NULL
+                   AND NOT EXISTS (
+                    SELECT 1 FROM pg_constraint
+                    WHERE conname = 'fk_knowledge_mentions_sentence_id'
+                      AND conrelid = to_regclass('"{schema}".knowledge_mentions')
+                ) THEN
+                    ALTER TABLE "{schema}".knowledge_mentions
+                    ADD CONSTRAINT fk_knowledge_mentions_sentence_id
+                    FOREIGN KEY (sentence_id) REFERENCES "{schema}".knowledge_sentences(id)
+                    ON DELETE CASCADE NOT VALID;
+                END IF;
+            END $$;
+            """,
+            """
+            DO $$
+            BEGIN
+                IF to_regclass('"{schema}".knowledge_space_time_frames') IS NOT NULL
+                   AND to_regclass('"{schema}".knowledge_claims') IS NOT NULL
+                   AND NOT EXISTS (
+                    SELECT 1 FROM pg_constraint
+                    WHERE conname = 'fk_knowledge_space_time_frames_claim_id'
+                      AND conrelid = to_regclass('"{schema}".knowledge_space_time_frames')
+                ) THEN
+                    ALTER TABLE "{schema}".knowledge_space_time_frames
+                    ADD CONSTRAINT fk_knowledge_space_time_frames_claim_id
+                    FOREIGN KEY (claim_id) REFERENCES "{schema}".knowledge_claims(id)
+                    ON DELETE CASCADE NOT VALID;
+                END IF;
+            END $$;
+            """,
+            """
+            DO $$
+            BEGIN
+                IF to_regclass('"{schema}".knowledge_space_time_frames') IS NOT NULL
+                   AND to_regclass('"{schema}".knowledge_sentences') IS NOT NULL
+                   AND NOT EXISTS (
+                    SELECT 1 FROM pg_constraint
+                    WHERE conname = 'fk_knowledge_space_time_frames_sentence_id'
+                      AND conrelid = to_regclass('"{schema}".knowledge_space_time_frames')
+                ) THEN
+                    ALTER TABLE "{schema}".knowledge_space_time_frames
+                    ADD CONSTRAINT fk_knowledge_space_time_frames_sentence_id
+                    FOREIGN KEY (sentence_id) REFERENCES "{schema}".knowledge_sentences(id)
+                    ON DELETE CASCADE NOT VALID;
+                END IF;
+            END $$;
+            """,
+            """
+            DO $$
+            BEGIN
+                IF to_regclass('"{schema}".knowledge_space_time_frames') IS NOT NULL
+                   AND to_regclass('"{schema}".knowledge_sources') IS NOT NULL
+                   AND NOT EXISTS (
+                    SELECT 1 FROM pg_constraint
+                    WHERE conname = 'fk_knowledge_space_time_frames_source_id'
+                      AND conrelid = to_regclass('"{schema}".knowledge_space_time_frames')
+                ) THEN
+                    ALTER TABLE "{schema}".knowledge_space_time_frames
+                    ADD CONSTRAINT fk_knowledge_space_time_frames_source_id
+                    FOREIGN KEY (source_id) REFERENCES "{schema}".knowledge_sources(id)
+                    ON DELETE CASCADE NOT VALID;
+                END IF;
+            END $$;
+            """,
+        ),
+    )
+
+
 # Ez a függvény regisztrálja a(z) knowledge tenant hookok logikáját.
 def register_knowledge_tenant_hooks() -> None:
     register_tenant_schema_hooks(
@@ -123,6 +234,11 @@ def register_knowledge_tenant_hooks() -> None:
                     "knowledge_query_runs",
                     "knowledge_pii_mappings",
                 ),
+            ),
+            TenantSchemaHook(
+                name="knowledge_fk_constraints",
+                revision="knowledge.schema.worker_first_ingest.v5.referential_integrity",
+                install=_install_knowledge_fk_constraints,
             )
         ]
     )

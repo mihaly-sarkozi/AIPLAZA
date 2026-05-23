@@ -426,7 +426,7 @@ def get_ingest_run(
     run = facade.get_ingest_run(run_id)
     if run is None:
         raise HTTPException(status_code=404, detail="Ingest run not found")
-    if not facade.user_can_train(run.corpus_uuid, current_user.id, current_user):
+    if not facade.can_view_ingest_run(current_user, run):
         raise HTTPException(status_code=403, detail="No permission to view this ingest run")
     run_items = facade.enrich_ingest_items_with_document_metrics(facade.list_ingest_items(run.id))
     return build_ingest_run_response(
@@ -456,7 +456,7 @@ def get_ingest_run_trace(
     run = facade.get_ingest_run(run_id)
     if run is None:
         raise HTTPException(status_code=404, detail="Ingest run not found")
-    if not facade.user_can_train(run.corpus_uuid, current_user.id, current_user):
+    if not facade.can_view_ingest_run(current_user, run):
         raise HTTPException(status_code=403, detail="No permission to view this ingest run")
     trace = facade.get_ingest_run_trace(run_id, log_level=log_level, debug=debug)
     if trace is None:
@@ -476,7 +476,7 @@ def get_ingest_item_raw(
     item = facade.get_ingest_item(item_id)
     if item is None:
         raise HTTPException(status_code=404, detail="Ingest item not found")
-    if not facade.user_can_train(item.corpus_uuid, current_user.id, current_user):
+    if not facade.can_view_ingest_item(current_user, item):
         raise HTTPException(status_code=403, detail="No permission to view this ingest item")
 
     ingest_input = facade.get_ingest_input_for_item(item_id)
@@ -522,7 +522,7 @@ def reprocess_ingest_item(
     item = facade.get_ingest_item(item_id)
     if item is None:
         raise HTTPException(status_code=404, detail="Ingest item not found")
-    if not facade.user_can_train(item.corpus_uuid, current_user.id, current_user):
+    if not facade.can_reprocess_ingest_item(current_user, item):
         raise HTTPException(status_code=403, detail="No permission to reprocess this ingest item")
     _ensure_training_mfa(current_user)
     try:
@@ -607,7 +607,8 @@ def start_index_build(
     facade: KnowledgeFacadeDep,
     current_user: CurrentKnowledgeUserDep,
 ):
-    if not facade.user_can_train(body.corpus_uuid, current_user.id, current_user):
+    kb = facade.get(body.corpus_uuid)
+    if not facade.can_start_index_build(current_user, kb):
         raise HTTPException(status_code=403, detail="No permission to build this corpus")
     _ensure_training_mfa(current_user)
     build = facade.schedule_index_build(

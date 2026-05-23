@@ -37,10 +37,27 @@ SKIP_PATH_PARTS = {
 }
 
 ALLOWED_PREFIXES = (
+    # Canonical schema/migration/provisioning locations. Runtime repository and
+    # service code must stay outside this list.
     "backend/core/modules/tenant/schema/",
     "backend/migrations/",
     "backend/scripts/",
     "scripts/",
+)
+
+ALLOWED_EXACT_PATHS = {
+    # Public/platform schema migration helpers. These are invoked during
+    # provisioning/upgrade flows, not as request-time repository repair.
+    "backend/admin/repository/schema_migrations.py",
+    "backend/core/kernel/events/outbox_sql.py",
+}
+
+ALLOWED_PATH_PATTERNS: tuple[re.Pattern[str], ...] = (
+    # Tenant schema hooks are the explicit extension point for tenant-table
+    # installation and tenant-schema upgrades.
+    re.compile(r"^backend/core/modules/[^/]+/tenant_hooks\.py$"),
+    re.compile(r"^backend/core/infrastructure/[^/]+/tenant_hooks\.py$"),
+    re.compile(r"^backend/apps/[^/]+/tenant_hooks\.py$"),
 )
 
 DDL_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
@@ -61,7 +78,11 @@ def _is_allowed_path(path: Path) -> bool:
     rel = _normalized_rel_path(path)
     if any(part in SKIP_PATH_PARTS for part in path.parts):
         return True
-    return any(rel.startswith(prefix) for prefix in ALLOWED_PREFIXES)
+    return (
+        rel in ALLOWED_EXACT_PATHS
+        or any(rel.startswith(prefix) for prefix in ALLOWED_PREFIXES)
+        or any(pattern.match(rel) for pattern in ALLOWED_PATH_PATTERNS)
+    )
 
 
 def _should_scan(path: Path) -> bool:
@@ -114,7 +135,10 @@ def main() -> int:
         print(f" - {item}")
     print(
         "\nAllowed paths: "
-        "backend/core/modules/tenant/schema/, backend/migrations/, backend/scripts/, scripts/"
+        "backend/core/modules/*/tenant_hooks.py, backend/core/infrastructure/*/tenant_hooks.py, "
+        "backend/apps/*/tenant_hooks.py, backend/core/kernel/events/outbox_sql.py, "
+        "backend/admin/repository/schema_migrations.py, backend/core/modules/tenant/schema/, "
+        "backend/migrations/, backend/scripts/, scripts/"
     )
     return 1
 

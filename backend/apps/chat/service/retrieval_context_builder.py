@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from time import perf_counter
 from typing import Any, Awaitable, Callable
 
+from apps.chat.errors import ChatPermissionDenied
+
 logger = logging.getLogger(__name__)
 
 
@@ -82,7 +84,7 @@ class RetrievalContextBuilder:
             }
         permission_subject = PermissionSubject(id=user_id, role=user_role, is_active=True) if user_id is not None else None
         if kb_uuid and user_id is not None and not self.kb_service.user_can_use(kb_uuid, user_id, permission_subject):
-            raise PermissionError("Nincs jogosultság a megadott tudástár használatához.")
+            raise ChatPermissionDenied("Nincs jogosultság a megadott tudástár használatához.")
         t_parse = perf_counter()
         parsed = self.query_parser.parse(question) if self.query_parser is not None else {"intent": "summary"}
         parsed = self._enrich_parsed_query(question, parsed)
@@ -312,7 +314,7 @@ class RetrievalContextBuilder:
                     tenant=tenant,
                     debug=debug,
                 )
-            except PermissionError:
+            except ChatPermissionDenied:
                 diagnostics["permission_skipped_kb_count"] += 1
                 continue
             except Exception:

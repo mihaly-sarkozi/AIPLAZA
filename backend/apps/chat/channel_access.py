@@ -14,6 +14,7 @@ from typing import Any
 
 from sqlalchemy import and_, desc, func, text
 
+from apps.chat.errors import ChannelCredentialPolicyInvalid
 from apps.chat.channel_policy import (
     hash_channel_secret,
     normalize_ip_ranges,
@@ -171,11 +172,11 @@ class ChannelAccessRepository:
             else self._normalize_list(allowed_origins)
         )
         if normalized_channel_type == "widget" and not normalized_allowed_origins:
-            raise ValueError("Widget credential esetén az allowed_origins megadása kötelező.")
+            raise ChannelCredentialPolicyInvalid("Widget credential esetén az allowed_origins megadása kötelező.")
         normalized_allowed_ip_ranges = self._normalize_ip_ranges(allowed_ip_ranges)
         require_signature = bool(require_signed_requests)
         if normalized_channel_type == "api" and not normalized_allowed_ip_ranges and not require_signature:
-            raise ValueError("API credential esetén allowed_ip_ranges vagy require_signed_requests kötelező.")
+            raise ChannelCredentialPolicyInvalid("API credential esetén allowed_ip_ranges vagy require_signed_requests kötelező.")
         row = ChannelCredentialORM(
             tenant_id=tenant_id,
             channel_type=normalized_channel_type,
@@ -301,7 +302,7 @@ class ChannelAccessRepository:
                 if str(row.channel_type or "widget").strip().lower() == "widget":
                     normalized_allowed_origins = self._normalize_widget_origins(allowed_origins)
                     if not normalized_allowed_origins:
-                        raise ValueError("Widget credential esetén az allowed_origins nem lehet üres.")
+                        raise ChannelCredentialPolicyInvalid("Widget credential esetén az allowed_origins nem lehet üres.")
                     row.allowed_origins = normalized_allowed_origins
                 else:
                     row.allowed_origins = self._normalize_list(allowed_origins)
@@ -311,7 +312,7 @@ class ChannelAccessRepository:
                 row.require_signed_requests = bool(require_signed_requests)
             if str(row.channel_type or "widget").strip().lower() == "api":
                 if not list(row.allowed_ip_ranges or []) and not bool(row.require_signed_requests):
-                    raise ValueError("API credential esetén allowed_ip_ranges vagy require_signed_requests kötelező.")
+                    raise ChannelCredentialPolicyInvalid("API credential esetén allowed_ip_ranges vagy require_signed_requests kötelező.")
             row.expires_at = expires_at
             row.updated_by = updated_by
             row.updated_at = _utcnow()

@@ -195,3 +195,34 @@ def test_knowledge_permission_service_centralizes_train_policy() -> None:
 
     assert service.can_train_knowledge_base(SimpleNamespace(id=11, role="user"), store.kbs[0]) is True
     assert service.can_train_knowledge_base(SimpleNamespace(id=12, role="user"), store.kbs[0]) is False
+
+
+def test_knowledge_permission_service_names_kb_operation_policies() -> None:
+    store = _CorpusStore()
+    service = _knowledge_permission_service(store)
+    trainer = SimpleNamespace(id=11, role="user")
+    viewer = SimpleNamespace(id=12, role="user")
+
+    assert service.can_view_knowledge_base(trainer, store.kbs[0]) is True
+    assert service.can_delete_knowledge_base(trainer, store.kbs[0]) is True
+    assert service.can_start_index_build(trainer, store.kbs[0]) is True
+    assert service.can_view_knowledge_base(viewer, store.kbs[1]) is True
+    assert service.can_train_knowledge_base(viewer, store.kbs[1]) is False
+    assert service.can_start_index_build(viewer, store.kbs[1]) is False
+
+
+def test_knowledge_permission_service_names_ingest_and_source_policies() -> None:
+    store = _CorpusStore()
+    service = _knowledge_permission_service(store)
+    trainer = SimpleNamespace(id=11, role="user")
+    viewer = SimpleNamespace(id=12, role="user")
+    run = SimpleNamespace(corpus_uuid="kb-1")
+    item = SimpleNamespace(corpus_uuid="kb-1")
+    source = SimpleNamespace(corpus_uuid="kb-1")
+
+    assert service.can_view_ingest_run(trainer, run) is True
+    assert service.can_view_ingest_item(trainer, item) is True
+    assert service.can_reprocess_ingest_item(trainer, item) is True
+    assert service.can_delete_source(trainer, source) is True
+    assert service.can_view_ingest_run(viewer, run) is False
+    assert service.can_reprocess_ingest_item(viewer, item) is False

@@ -7,6 +7,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from apps.chat.errors import ChatPermissionDenied
+
 
 @dataclass(frozen=True)
 class PermissionSubject:
@@ -65,7 +67,7 @@ class AnswerDownloadService:
             return
         subject = PermissionSubject(id=user_id, role=user_role, is_active=True)
         if not kb_service.user_can_use(corpus_uuid, user_id, subject):
-            raise PermissionError("Nincs jogosultság a megadott tudástár használatához.")
+            raise ChatPermissionDenied("Nincs jogosultság a megadott tudástár használatához.")
 
 
 __all__ = ["AnswerDownloadService", "PermissionSubject"]

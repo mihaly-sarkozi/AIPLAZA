@@ -1,4 +1,4 @@
-from sqlalchemy import Column, DateTime, Float, String
+from sqlalchemy import Column, DateTime, Float, ForeignKey, String
 
 from .base import TenantSchemaBase
 from .utils import _utcnow_naive
@@ -8,10 +8,9 @@ class KnowledgeSpaceTimeFrameORM(TenantSchemaBase):
     __tablename__ = "knowledge_space_time_frames"
 
     id = Column(String(36), primary_key=True)
-    # TODO: add dedicated FK constraints for claim_id/sentence_id/source_id and create the table via migration.
-    claim_id = Column(String(36), nullable=True, index=True)
-    sentence_id = Column(String(36), nullable=True, index=True)
-    source_id = Column(String(36), nullable=True, index=True)
+    claim_id = Column(String(36), ForeignKey("knowledge_claims.id", ondelete="CASCADE"), nullable=True, index=True)
+    sentence_id = Column(String(36), ForeignKey("knowledge_sentences.id", ondelete="CASCADE"), nullable=True, index=True)
+    source_id = Column(String(36), ForeignKey("knowledge_sources.id", ondelete="CASCADE"), nullable=True, index=True)
     language = Column(String(16), nullable=False, default="unknown", index=True)
     time_mode = Column(String(32), nullable=False, default="unknown", index=True)
     time_value = Column(String(255), nullable=True)

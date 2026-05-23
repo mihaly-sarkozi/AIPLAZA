@@ -7,7 +7,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Request, Response as MutableResponse
 
 from apps.chat.dependencies import get_chat_service
-from apps.chat.router.channel_support import (
+from apps.chat.application.channel_request_policy import (
     channel_access_service_or_503 as _channel_access_service_or_503,
     extract_channel_secret as _extract_channel_secret,
     tenant_required_id as _tenant_required_id,
@@ -74,7 +74,7 @@ async def channel_feedback_capture(
         secret=secret,
         origin=request.headers.get("Origin"),
     )
-    if not chat_permission_service.can_use_channel_credential(principal, "widget", tenant_id=tenant_id):
+    if not chat_permission_service.can_send_channel_message(principal, "widget", tenant):
         increment_metric("channel.feedback.rejected.auth", 1.0)
         raise security_http_exception(status_code=401, code="UNAUTHORIZED", message="Authentication failed.")
     result = channel_svc.record_feedback(

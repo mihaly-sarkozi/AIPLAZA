@@ -23,9 +23,9 @@ class ChannelChatUseCase:
         svc: Any,
     ):
         # Runtime import: a meglévő tesztek monkeypatch-elhetik a use-case függvényt.
-        from apps.chat.service import chat_http_use_cases
+        from apps.chat.application import http_use_cases
 
-        return await chat_http_use_cases.handle_channel_chat_request(
+        return await http_use_cases.handle_channel_chat_request(
             request=request,
             req=req,
             tenant=tenant,
