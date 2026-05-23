@@ -19,7 +19,8 @@ def quality_summary_placeholder() -> dict[str, Any]:
         "fragment_sentence_count": 0,
         "skipped_sentences": [],
         "rejected_claim_examples": [],
-        "todo": "TODO: persist rejected claim diagnostics per ingest run.",
+        # Diagnostics are bounded in the trace summary; detailed persistence needs a versioned schema.
+        "diagnostics_persistence_status": "summary_only",
     }
 
 

@@ -1,0 +1,367 @@
+@import "tailwindcss";
+
+@theme {
+  --color-background: #f6f7fb;
+  --color-foreground: #0f172a;
+  --color-muted: #64748b;
+  --color-muted-foreground: #475569;
+  --color-label: #334155;
+  --color-border: #989fab;
+  --color-button-hover: #eef2f7;
+  --color-readonly-bg: #9ca3af;
+  --color-input-bg: #ffffff;
+  --color-card: #ffffff;
+  --color-card-muted: #f8fafc;
+  --color-card-strong: #111827;
+  --color-primary: #111827;
+  --color-primary-hover: #1f2937;
+  --color-on-primary: #ffffff;
+  --color-table-head: #f8fafc;
+  --color-inactive: #4b5563;
+  --color-kb-selector-bg: #f8fafc;
+  --color-kb-selector-hover: #eef2f7;
+  --color-accent: #4f46e5;
+  --color-accent-soft: #eef2ff;
+  --color-accent-foreground: #4338ca;
+  --color-overlay: rgba(15, 23, 42, 0.55);
+  --color-success-bg: #ecfdf5;
+  --color-success-border: #a7f3d0;
+  --color-success-text: #166534;
+  --color-warning-bg: #fff7ed;
+  --color-warning-border: #fed7aa;
+  --color-warning-text: #c2410c;
+  --color-danger-bg: #fef2f2;
+  --color-danger-border: #fecaca;
+  --color-danger-text: #b91c1c;
+  --color-info-bg: #eff6ff;
+  --color-info-border: #bfdbfe;
+  --color-info-text: #1d4ed8;
+}
+
+/* Dark theme: fekete alapon fehér (html.dark a documentElement-en) */
+.dark {
+  --color-background: #050505;
+  --color-foreground: #f8fafc;
+  --color-muted: #94a3b8;
+  --color-muted-foreground: #cbd5e1;
+  --color-label: #e2e8f0;
+  --color-border: #707174;
+  --color-button-hover: #17181c;
+  --color-readonly-bg: #6b7280;
+  --color-input-bg: #0b0b0d;
+  --color-card: #0b0b0d;
+  --color-card-muted: #111214;
+  --color-card-strong: #f8fafc;
+  --color-primary: #f8fafc;
+  --color-primary-hover: #e2e8f0;
+  --color-on-primary: #09090b;
+  --color-table-head: #111214;
+  --color-inactive: #6b7280;
+  --color-kb-selector-bg: #111214;
+  --color-kb-selector-hover: #17181c;
+  --color-accent: #a5b4fc;
+  --color-accent-soft: rgba(99, 102, 241, 0.16);
+  --color-accent-foreground: #c7d2fe;
+  --color-overlay: rgba(0, 0, 0, 0.78);
+  --color-success-bg: rgba(22, 101, 52, 0.16);
+  --color-success-border: rgba(74, 222, 128, 0.24);
+  --color-success-text: #86efac;
+  --color-warning-bg: rgba(194, 65, 12, 0.16);
+  --color-warning-border: rgba(251, 146, 60, 0.24);
+  --color-warning-text: #fdba74;
+  --color-danger-bg: rgba(185, 28, 28, 0.18);
+  --color-danger-border: rgba(248, 113, 113, 0.24);
+  --color-danger-text: #fca5a5;
+  --color-info-bg: rgba(29, 78, 216, 0.18);
+  --color-info-border: rgba(96, 165, 250, 0.22);
+  --color-info-text: #93c5fd;
+}
+
+html {
+  background-color: var(--color-background);
+}
+
+body {
+  background-color: var(--color-background);
+  color: var(--color-foreground);
+  font-family: system-ui, sans-serif;
+}
+
+#root {
+  min-height: 100vh;
+  background-color: var(--color-background);
+}
+
+input, textarea, select {
+  background-color: var(--color-input-bg);
+  color: var(--color-foreground);
+  border: 1px solid var(--color-border);
+  @apply rounded-xl px-3 py-2.5 w-full focus:outline-none;
+  box-shadow: 0 0 0 0 transparent;
+}
+
+input:focus, textarea:focus, select:focus {
+  border-color: color-mix(in srgb, var(--color-accent) 35%, var(--color-border));
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--color-accent) 14%, transparent);
+}
+
+.chat-question-input {
+  appearance: none;
+  -webkit-appearance: none;
+  border-width: 1px !important;
+  box-shadow: none !important;
+  --tw-ring-shadow: 0 0 #0000 !important;
+  --tw-ring-offset-shadow: 0 0 #0000 !important;
+}
+
+.chat-question-input:focus,
+.chat-question-input:focus-visible {
+  outline: none !important;
+  border-width: 1px !important;
+  box-shadow: none !important;
+  --tw-ring-shadow: 0 0 #0000 !important;
+  --tw-ring-offset-shadow: 0 0 #0000 !important;
+  --tw-ring-color: transparent !important;
+}
+
+.chat-composer-input,
+.chat-composer-input:focus,
+.chat-composer-input:focus-visible {
+  border: 0 !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+  outline: none !important;
+  --tw-ring-shadow: 0 0 #0000 !important;
+  --tw-ring-offset-shadow: 0 0 #0000 !important;
+  --tw-ring-color: transparent !important;
+}
+
+input[type="checkbox"]:focus {
+  outline: none !important;
+  box-shadow: none !important;
+  --tw-ring-shadow: 0 0 #0000 !important;
+}
+
+/* Readonly checkbox: középső szürke (border és muted között), fehér pipa, fix négyzet, szögletes */
+input[type="checkbox"][readonly] {
+  appearance: none;
+  -webkit-appearance: none;
+  box-sizing: border-box;
+  width: 16px !important;
+  height: 16px !important;
+  min-width: 16px !important;
+  max-width: 16px !important;
+  min-height: 16px !important;
+  max-height: 16px !important;
+  padding: 0 !important;
+  border: none !important;
+  border-radius: 0 !important;
+  flex-shrink: 0;
+  background-color: var(--color-readonly-bg);
+}
+input[type="checkbox"][readonly]:checked {
+  background-color: var(--color-readonly-bg);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='white'%3E%3Cpath d='M12.207 4.793a1 1 0 0 1 0 1.414l-5 5a1 1 0 0 1-1.414 0l-2-2a1 1 0 0 1 1.414-1.414L6.5 9.086l4.293-4.293a1 1 0 0 1 1.414 0z'/%3E%3C/svg%3E");
+  background-size: 100% 100%;
+}
+
+.dark input[type="checkbox"][readonly],
+.dark input[type="checkbox"][readonly]:checked {
+  background-color: var(--color-background);
+}
+.dark input[type="checkbox"][readonly]:checked {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='white'%3E%3Cpath d='M12.207 4.793a1 1 0 0 1 0 1.414l-5 5a1 1 0 0 1-1.414 0l-2-2a1 1 0 0 1 1.414-1.414L6.5 9.086l4.293-4.293a1 1 0 0 1 1.414 0z'/%3E%3C/svg%3E");
+}
+
+/* Jelölhető (aktív) checkbox: nincs kijelölve = csak keret, kijelölve = kék, tiltott = kitöltött szürke */
+.kb-perm-checkbox {
+  appearance: none;
+  -webkit-appearance: none;
+  box-sizing: border-box;
+  width: 16px !important;
+  height: 16px !important;
+  min-width: 16px !important;
+  max-width: 16px !important;
+  min-height: 16px !important;
+  max-height: 16px !important;
+  padding: 0 !important;
+  border: 1px solid var(--color-border) !important;
+  border-radius: 0 !important;
+  flex-shrink: 0;
+  background-color: transparent;
+  cursor: pointer;
+}
+.kb-perm-checkbox:checked {
+  background-color: var(--color-primary);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='white'%3E%3Cpath d='M12.207 4.793a1 1 0 0 1 0 1.414l-5 5a1 1 0 0 1-1.414 0l-2-2a1 1 0 0 1 1.414-1.414L6.5 9.086l4.293-4.293a1 1 0 0 1 1.414 0z'/%3E%3C/svg%3E");
+  background-size: 100% 100%;
+  border-color: var(--color-primary) !important;
+}
+.kb-perm-checkbox:disabled {
+  background-color: var(--color-border);
+  opacity: 0.6;
+  cursor: default;
+}
+
+/* Fekete skin: tiltott = fekete háttér + szürke keret, állítható üres = fehér keret */
+.dark .kb-perm-checkbox {
+  border-color: var(--color-foreground) !important;
+}
+.dark .kb-perm-checkbox:checked {
+  border-color: var(--color-primary) !important;
+}
+.dark .kb-perm-checkbox:disabled {
+  background-color: var(--color-background) !important;
+  border-color: var(--color-border) !important;
+  opacity: 1;
+}
+
+label {
+  color: var(--color-label);
+  @apply block text-sm font-medium mb-1;
+}
+
+.btn {
+  @apply bg-black text-white px-4 py-2 rounded-md hover:bg-gray-800 transition;
+}
+
+.app-page {
+  background-color: var(--color-background);
+  color: var(--color-foreground);
+  @apply min-h-full px-4 py-8 md:px-6 lg:px-8;
+}
+
+.app-page-container {
+  @apply mx-auto w-full max-w-6xl space-y-6;
+}
+
+.app-page-container-narrow {
+  @apply mx-auto w-full max-w-5xl space-y-6;
+}
+
+.app-page-header {
+  @apply flex flex-col gap-4 md:flex-row md:items-end md:justify-between;
+}
+
+.app-page-eyebrow {
+  color: var(--color-accent-foreground);
+  @apply text-sm font-medium;
+}
+
+.app-page-title {
+  color: var(--color-foreground);
+  @apply mt-1 text-2xl font-semibold tracking-tight md:text-3xl;
+}
+
+.app-page-intro {
+  color: var(--color-muted);
+  @apply mt-2 max-w-2xl text-sm leading-6;
+}
+
+.app-surface {
+  background-color: var(--color-card);
+  border: 1px solid var(--color-border);
+  @apply rounded-3xl shadow-sm;
+}
+
+.app-surface-muted {
+  background-color: var(--color-card-muted);
+  border: 1px solid var(--color-border);
+  @apply rounded-2xl;
+}
+
+.app-table-wrap {
+  border: 1px solid var(--color-border);
+  @apply overflow-hidden rounded-2xl;
+}
+
+.app-table-head {
+  background-color: var(--color-table-head);
+  color: var(--color-muted);
+}
+
+.btn-base {
+  @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-50;
+}
+
+.btn-primary {
+  background-color: var(--color-primary);
+  color: var(--color-on-primary);
+}
+
+.btn-primary:hover {
+  background-color: var(--color-primary-hover);
+}
+
+.btn-secondary {
+  background-color: var(--color-card);
+  color: var(--color-foreground);
+  border: 1px solid var(--color-border);
+}
+
+.btn-secondary:hover,
+.btn-ghost:hover {
+  background-color: var(--color-button-hover);
+}
+
+.btn-ghost {
+  color: var(--color-muted-foreground);
+  @apply inline-flex items-center justify-center gap-2 rounded-xl px-3 py-2 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-50;
+}
+
+.btn-danger {
+  background-color: var(--color-danger-bg);
+  color: var(--color-danger-text);
+  border: 1px solid var(--color-danger-border);
+}
+
+.btn-danger:hover {
+  filter: brightness(0.97);
+}
+
+.badge-soft {
+  background-color: var(--color-card-muted);
+  color: var(--color-muted-foreground);
+  @apply inline-flex items-center rounded-full px-3 py-1 text-xs font-medium;
+}
+
+.alert-base {
+  border-width: 1px;
+  @apply rounded-2xl p-4 text-sm;
+}
+
+.alert-error {
+  background-color: var(--color-danger-bg);
+  border-color: var(--color-danger-border);
+  color: var(--color-danger-text);
+}
+
+.alert-warning {
+  background-color: var(--color-warning-bg);
+  border-color: var(--color-warning-border);
+  color: var(--color-warning-text);
+}
+
+.alert-success {
+  background-color: var(--color-success-bg);
+  border-color: var(--color-success-border);
+  color: var(--color-success-text);
+}
+
+.alert-info {
+  background-color: var(--color-info-bg);
+  border-color: var(--color-info-border);
+  color: var(--color-info-text);
+}
+
+.modal-overlay {
+  background-color: var(--color-overlay);
+  @apply fixed inset-0 z-50 flex items-center justify-center p-4;
+}
+
+.modal-card {
+  background-color: var(--color-card);
+  color: var(--color-foreground);
+  border: 1px solid var(--color-border);
+  @apply w-full rounded-3xl shadow-xl;
+}

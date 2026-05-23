@@ -51,7 +51,9 @@ __MACOSX/
 venv/
 env/
 ENV/
-.venv
+.venv/
+.venv312/
+.venv-ci/
 .env.example
 
 # Archive / project noise

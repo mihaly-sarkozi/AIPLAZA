@@ -1,0 +1,145 @@
+name: aiplaza-preprod
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: aiplaza-preprod-postgres
+    environment:
+      POSTGRES_DB: aiplaza
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
+    ports:
+      - "5432:5432"
+    volumes:
+      - preprod_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d aiplaza"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: aiplaza-preprod-qdrant
+    ports:
+      - "6333:6333"
+    volumes:
+      - preprod_qdrant_data:/qdrant/storage
+
+  minio:
+    image: minio/minio:latest
+    container_name: aiplaza-preprod-minio
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-change-me}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-change-me}
+    command: server /data --console-address ":9001"
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - preprod_minio_data:/data
+
+  redis:
+    image: redis:7-alpine
+    container_name: aiplaza-preprod-redis
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - preprod_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: .
+      dockerfile: docker/backend.prod.Dockerfile
+    container_name: aiplaza-preprod-backend
+    env_file:
+      - .env
+    environment:
+      APP_ENV: preprod
+      INSTANCE_ROLE: web
+      DATABASE_URL: postgresql+psycopg2://postgres:${POSTGRES_PASSWORD:-change-me}@postgres:5432/aiplaza
+      database_url: postgresql+psycopg2://postgres:${POSTGRES_PASSWORD:-change-me}@postgres:5432/aiplaza
+      QDRANT_URL: http://qdrant:6333
+      OBJECT_STORAGE_ENDPOINT: http://minio:9000
+      BILLING_PROVIDER: ${BILLING_PROVIDER:-simulated}
+      STRIPE_TEST_SECRET_KEY: ${STRIPE_TEST_SECRET_KEY:-}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:4173}
+      CORS_ORIGINS_REGEX: ${CORS_ORIGINS_REGEX:-https?://.*\.lvh\.me(:\d+)?}
+      TENANT_BASE_DOMAIN: ${TENANT_BASE_DOMAIN:-lvh.me}
+      INSTALL_HOST: ${INSTALL_HOST:-lvh.me}
+      TRUSTED_HOSTS: ${TRUSTED_HOSTS:-localhost,127.0.0.1,lvh.me,*.lvh.me}
+      REDIS_URL: redis://redis:6379/0
+      redis_url: redis://redis:6379/0
+    ports:
+      - "8001:8001"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8001/api/health/ready >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    depends_on:
+      postgres:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+      minio:
+        condition: service_started
+      redis:
+        condition: service_healthy
+
+  backend-worker:
+    build:
+      context: .
+      dockerfile: docker/backend.prod.Dockerfile
+    container_name: aiplaza-preprod-worker
+    env_file:
+      - .env
+    environment:
+      APP_ENV: preprod
+      INSTANCE_ROLE: worker
+      DATABASE_URL: postgresql+psycopg2://postgres:${POSTGRES_PASSWORD:-change-me}@postgres:5432/aiplaza
+      database_url: postgresql+psycopg2://postgres:${POSTGRES_PASSWORD:-change-me}@postgres:5432/aiplaza
+      QDRANT_URL: http://qdrant:6333
+      OBJECT_STORAGE_ENDPOINT: http://minio:9000
+      BILLING_PROVIDER: ${BILLING_PROVIDER:-simulated}
+      STRIPE_TEST_SECRET_KEY: ${STRIPE_TEST_SECRET_KEY:-}
+      REDIS_URL: redis://redis:6379/0
+      redis_url: redis://redis:6379/0
+    command: sh -c "python3 -m core.kernel.events"
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+      minio:
+        condition: service_started
+      redis:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: .
+      dockerfile: docker/frontend.prod.Dockerfile
+    container_name: aiplaza-preprod-frontend
+    environment:
+      VITE_TENANT_DOMAIN: ${TENANT_BASE_DOMAIN:-lvh.me}
+      VITE_API_URL: ${VITE_API_URL:-http://localhost:8001/api}
+    ports:
+      - "4173:4173"
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+
+volumes:
+  preprod_postgres_data:
+  preprod_qdrant_data:
+  preprod_minio_data:
+  preprod_redis_data:

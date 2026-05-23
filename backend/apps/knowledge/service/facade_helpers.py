@@ -78,6 +78,8 @@ def empty_claim_quality_summary() -> dict[str, Any]:
         "duplicate_weak_claim_rejected_count": 0,
         "skipped_sentences": [],
         "rejected_claim_examples": [],
+        # Diagnostics are bounded in the run summary; detailed rejected-claim persistence needs a versioned schema.
+        "diagnostics_persistence_status": "summary_only",
     }
 
 
@@ -184,7 +186,7 @@ def aggregate_ingest_item_quality(items: list[IngestItem]) -> dict[str, Any]:
             rejected_examples.append(row)
         summary["rejected_claim_examples"] = rejected_examples
     if not has_quality:
-        summary["todo"] = "TODO: persist rejected claim diagnostics per ingest run."
+        summary["diagnostics_persistence_status"] = "summary_only"
     return summary
 
 

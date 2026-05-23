@@ -1,0 +1,107 @@
+Refaktor
+- core
+- settings - alapbeállítások - OK
+- users - userkezelés - OK
+- auth - belépés, bejelentkezés, jogosultság - OK
+- multihost - dinamikus host beállításáért felelős modul - Részben
+    - Kell még valós külső aldomain bejegyzés, nyílvéntartés, dns info, ellenőrzés
+    - Egyedi üzleti beállítás, például meddig ingyesnes, számlázás, korlátok
+- auditlog - a user műveletek és funkciók logja - OK
+
+- chat
+- knowledge
+
+Elszámolás:
+--------
+Három csomag van:
+alapdij 29/59/99
+tudástár 1/3/10
+méret 1Gb/5/10
+kérdés 500/2000/5000
+addon +5 tudástáranként/GB/500,kérdés
+tanítás 49 500K karakter/+19 500K
+ujratanitás optimalizálás 19€/29€
+ingyenes: 
+  1 tudástár, 1 user, 1 hét, 100K betanitás, 100 kérdés
+  - addon esetében a tudástár arányos, a kérdésből van 100 kérdés 1.2€-ért
+
+
+
+Feladat:
+--------
+Domain és brand management alap
+    Mit kell programozni
+    Készíts külön tenant domain service-t.
+    Támogasd ezeket:
+    custom domain felvétele
+    domain ellenőrzés
+    primary domain kijelölése
+    domain aktiválás / letiltás
+    A domain rekordhoz vezess be plusz mezőket:
+    status
+    verification token vagy challenge
+    verification method
+    last checked at
+    ssl state
+    is_primary
+    A settings modulból csinálj valódi brand settings modult is.
+    Legyenek brand mezők:
+    tenant display name
+    logo URL vagy asset reference
+    primary color
+    secondary color
+    support email
+    legal links
+    email sender name
+    Mit vegyen figyelembe a rendszer
+    Egy domain csak egy tenanté lehessen.
+    A domain csak ellenőrzés után legyen aktív.
+    A primary domain mindig egyértelmű legyen.
+    A branding legyen tenantonként elkülönítve.
+    A brand adatok ne csak frontend célra legyenek, hanem email és későbbi public page célra is.
+    A domain kezelés legyen független a chat/knowledge modultól.
+    Késznek akkor tekintsd, ha
+    egy tenant tud saját domaint felvenni és hitelesíteni
+    van primary domain logika
+    van használható brand beállításkészlet
+    a rendszer tenantonként saját megjelenést tud adni
+Tenant lifecycle és provisioning stabilizálása
+    Vezess be egy világos tenant életciklus modellt.
+    Minimum állapotok:
+    draft
+    provisioning
+    active
+    suspended
+    deleting
+    deleted
+    Készíts külön lifecycle service-t, ami kezeli az állapotváltásokat.
+    A signup ne közvetlen ad hoc műveletsor legyen, hanem lifecycle alapú provisioning.
+    Minden állapotváltásnál legyen:
+    validáció
+    audit esemény
+    rollback vagy retry lehetőség
+    A törlés még lehet soft delete jellegű első körben.
+    Mit vegyen figyelembe a rendszer
+    Az állapotgép legyen szigorú.
+    Nem lehet bármelyik állapotból bármelyikbe ugrani.
+    Ha provisioning közben hiba van, a tenant ne legyen “ismeretlen köztes” állapotban.
+    A suspended tenant viselkedése legyen egyértelmű:
+    beléphet-e
+    API-t használhat-e
+    admin javíthatja-e
+    A lifecycle logika legyen modulfüggetlen alap, ne a chat/knowledge flow-ba legyen beégetve.
+    Késznek akkor tekintsd, ha
+    minden tenantnak van világos állapota
+    az állapotváltás szabályozott
+    a provisioning hiba után is kezelhető
+    nincs “félkész, de élőnek látszó” tenant
+
+.......... Majd ..........
+Kell egy installáló szett az adatbázisokhoz és a migrációs rutinokat is ki kell alakítani!
+Legyen log is a rendszerbe üzemeltetéshez
+Legyen valami monitoring is az üzemeltetéshez
+A configot is szedje szét core configra és másra
+a jelszó biztonsági szintet env-be tegye ki
+a lang részt bontsa szét fileokra, templatekre és nyelvekre külön külön
+Scripteket is szedje szét alapscriptre 
+
