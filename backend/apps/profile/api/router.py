@@ -8,7 +8,7 @@ from apps.profile.api.schemas import (
     ProfileResponse,
     ProfileUpdateRequest,
 )
-from apps.profile.dependencies import CurrentProfileUserDep, ProfileFacadeDep, ProfileTenantDep
+from apps.profile.bootstrap.dependencies import CurrentProfileUserDep, ProfileFacadeDep, ProfileTenantDep
 
 router = APIRouter()
 

@@ -7,7 +7,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from apps.profile.api.router import router
-from apps.profile.dependencies import get_profile_facade
+from apps.profile.bootstrap.dependencies import get_profile_facade
 from core.modules.users.domain.dto import User
 from core.modules.tenant.context.request_tenant_context import RequestTenantContext
 from core.modules.tenant.dto import TenantConfig, TenantStatus

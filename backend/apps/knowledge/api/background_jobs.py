@@ -9,10 +9,10 @@ import logging
 import threading
 from typing import Any
 
+from apps.knowledge.bootstrap.service_keys import KNOWLEDGE_EVENT_CHANNEL
 from apps.knowledge.ingest_jobs import process_ingest_run_and_start_index_async
 from core.kernel.config.config_loader import settings
 from core.kernel.http.app_dependencies import get_module_service
-from core.kernel.interface.app_keys import MODULE_KNOWLEDGE_EVENT_CHANNEL
 from core.modules.tenant.context.tenant_context import run_async_with_tenant_schema
 
 logger = logging.getLogger(__name__)
@@ -99,7 +99,7 @@ def enqueue_recovery_sweep_job(*, tenant_slug: str | None) -> None:
 def _publish_worker_event(event_type: str, payload: dict[str, Any], *, idempotency_key: str) -> None:
     channel = None
     try:
-        channel = get_module_service(MODULE_KNOWLEDGE_EVENT_CHANNEL)
+        channel = get_module_service(KNOWLEDGE_EVENT_CHANNEL)
     except (KeyError, LookupError, RuntimeError):
         channel = None
     if channel is not None and hasattr(channel, "publish"):

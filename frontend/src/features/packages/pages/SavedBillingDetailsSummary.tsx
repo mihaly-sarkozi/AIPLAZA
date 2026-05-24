@@ -33,7 +33,10 @@ export function SavedBillingDetailsSummary({ settings, onEdit }: { settings: Set
       </div>
       <div className="space-y-2 text-sm">
         <SummaryRow label={t("packages.checkoutCustomerType")} value={customerType === "company" ? t("packages.checkoutCustomerTypeCompany") : t("packages.checkoutCustomerTypePrivate")} />
-        <SummaryRow label={customerType === "company" ? t("packages.checkoutCompanyRequired") : t("packages.checkoutFullName")} value={settings.billing_company_name} />
+        <SummaryRow
+          label={customerType === "company" ? t("packages.checkoutCompanyRequired") : t("packages.checkoutFullName")}
+          value={customerType === "company" ? settings.billing_company_name : settings.billing_full_name}
+        />
         <SummaryRow label={t("packages.checkoutCountry")} value={settings.billing_country} />
         <SummaryRow label={t("packages.checkoutPostalCode")} value={settings.billing_postal_code} />
         <SummaryRow label={t("packages.checkoutCity")} value={settings.billing_city} />

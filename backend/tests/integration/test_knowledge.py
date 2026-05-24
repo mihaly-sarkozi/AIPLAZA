@@ -34,7 +34,7 @@ def mock_kb_service():
 @pytest.fixture
 def client_kb(app, client, sample_user, mock_kb_service):
     """Client + admin user (owner) + KB service mock."""
-    from apps.knowledge.dependencies import get_kb_service
+    from apps.knowledge.bootstrap.dependencies import get_kb_service
     from core.kernel.deps.facade import get_service, register_service
     from core.modules.auth.web.dependencies.auth_dependencies import get_current_user
     from core.kernel.interface.keys import PLATFORM_TENANT_USAGE_SERVICE

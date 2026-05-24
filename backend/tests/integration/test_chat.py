@@ -15,7 +15,7 @@ def test_chat_without_auth_returns_401(client: TestClient):
 
 def test_chat_success_returns_answer(client_authenticated: TestClient, mock_chat_service, app):
     """POST /chat bejelentkezett userrel → 200, answer a válaszban."""
-    from apps.chat.dependencies import get_chat_service
+    from apps.chat.bootstrap.dependencies import get_chat_service
     async def _chat(question: str):
         return f"Válasz: {question}"
     mock_chat_service.chat = AsyncMock(side_effect=_chat)
@@ -32,7 +32,7 @@ def test_chat_success_returns_answer(client_authenticated: TestClient, mock_chat
 
 def test_chat_returns_sources_when_available(client_authenticated: TestClient, mock_chat_service, app):
     """POST /chat visszaad forrásokat, ha a service támogatja."""
-    from apps.chat.dependencies import get_chat_service
+    from apps.chat.bootstrap.dependencies import get_chat_service
 
     mock_chat_service.chat_with_sources = AsyncMock(
         return_value={
@@ -82,7 +82,7 @@ def test_chat_returns_sources_when_available(client_authenticated: TestClient, m
 
 
 def test_chat_returns_pii_contract_fields(client_authenticated: TestClient, mock_chat_service, app, allow_chat_usage, monkeypatch):
-    from apps.chat.dependencies import get_chat_service
+    from apps.chat.bootstrap.dependencies import get_chat_service
     from core.kernel.interface.keys import PLATFORM_TENANT_USAGE_SERVICE
     import apps.chat.application.http_use_cases as chat_use_cases
 
@@ -122,7 +122,7 @@ def test_chat_returns_pii_contract_fields(client_authenticated: TestClient, mock
 
 def test_chat_debug_false_omits_debug_field(client_authenticated: TestClient, mock_chat_service, app):
     """POST /chat debug nélkül maradjon backward compatible."""
-    from apps.chat.dependencies import get_chat_service
+    from apps.chat.bootstrap.dependencies import get_chat_service
 
     mock_chat_service.chat_with_sources = AsyncMock(
         return_value={
@@ -147,7 +147,7 @@ def test_chat_debug_false_omits_debug_field(client_authenticated: TestClient, mo
 
 
 def test_chat_source_download_returns_query_context_attachment(client_authenticated: TestClient, mock_chat_service, app):
-    from apps.chat.dependencies import get_chat_service
+    from apps.chat.bootstrap.dependencies import get_chat_service
 
     mock_chat_service.download_answer_source.return_value = {
         "filename": "aiplaza-context-src-1.txt",
@@ -168,7 +168,7 @@ def test_chat_source_download_returns_query_context_attachment(client_authentica
 
 
 def test_chat_context_download_returns_llm_context_attachment(client_authenticated: TestClient, mock_chat_service, app):
-    from apps.chat.dependencies import get_chat_service
+    from apps.chat.bootstrap.dependencies import get_chat_service
 
     mock_chat_service.download_answer_context.return_value = {
         "filename": "aiplaza-llm-context-qr-1.txt",
@@ -190,7 +190,7 @@ def test_chat_context_download_returns_llm_context_attachment(client_authenticat
 
 def test_chat_debug_true_returns_debug_payload(client_authenticated: TestClient, mock_chat_service, app):
     """POST /chat debug=true esetén a debug payload visszajön a válaszban."""
-    from apps.chat.dependencies import get_chat_service
+    from apps.chat.bootstrap.dependencies import get_chat_service
 
     mock_chat_service.chat_with_sources = AsyncMock(
         return_value={
@@ -232,7 +232,7 @@ def test_chat_debug_true_returns_debug_payload(client_authenticated: TestClient,
 
 def test_chat_returns_insufficient_information_when_no_context(client_authenticated: TestClient, mock_chat_service, app):
     """Ha nincs használható context, a válasz ne menjen LLM-only irányba."""
-    from apps.chat.dependencies import get_chat_service
+    from apps.chat.bootstrap.dependencies import get_chat_service
 
     mock_chat_service.chat_with_sources = AsyncMock(
         return_value={

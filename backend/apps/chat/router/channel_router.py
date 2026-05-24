@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response as MutableResponse
 
-from apps.chat.dependencies import get_chat_service
+from apps.chat.bootstrap.dependencies import get_chat_service
 from apps.chat.application.channel_request_policy import (
     channel_access_service_or_503 as _channel_access_service_or_503,
     extract_channel_secret as _extract_channel_secret,

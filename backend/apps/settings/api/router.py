@@ -1,14 +1,20 @@
 from __future__ import annotations
 
+# backend/apps/settings/api/router.py
+# Feladat: A settings modul FastAPI routere. Beállítások olvasását, módosítását és settings szekciók listázását delegálja a SettingsFacade felé.
+# Sárközi Mihály - 2026.05.24
+
 from fastapi import APIRouter, Body
 
-from apps.settings.api.schemas import SettingsResponse, SettingsSectionResponse, SettingsUpdateRequest
-from apps.settings.dependencies import SettingsFacadeDep, SettingsReadUserDep, SettingsWriteUserDep
+from apps.settings.api.SettingsSectionResponse import SettingsSectionResponse
+from apps.settings.api.SettingsUpdateRequest import SettingsUpdateRequest
+from apps.settings.bootstrap.dependencies import SettingsFacadeDep, SettingsReadUserDep, SettingsWriteUserDep
+from apps.settings.domain.settings_state import SettingsState
 
 router = APIRouter()
 
 
-@router.get("/settings", response_model=SettingsResponse)
+@router.get("/settings", response_model=SettingsState)
 def get_settings(
     facade: SettingsFacadeDep,
     current_user: SettingsReadUserDep,
@@ -16,7 +22,7 @@ def get_settings(
     return facade.get_settings()
 
 
-@router.patch("/settings", response_model=SettingsResponse)
+@router.patch("/settings", response_model=SettingsState)
 def update_settings(
     facade: SettingsFacadeDep,
     current_user: SettingsWriteUserDep,

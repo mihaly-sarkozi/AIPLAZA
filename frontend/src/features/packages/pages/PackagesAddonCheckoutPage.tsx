@@ -133,7 +133,9 @@ export default function PackagesAddonCheckoutPage() {
     if (!isValidPostalCode(postalCode) || (customerType === "company" && !isValidEuVatId(country, taxId))) return;
     try {
       await api.patch("/settings", {
-        billing_company_name: customerType === "company" ? company : fullName,
+        billing_customer_type: customerType,
+        billing_full_name: fullName,
+        billing_company_name: customerType === "company" ? company : "",
         billing_tax_id: customerType === "company" ? normalizeEuVatId(taxId) : "",
         billing_address_line: addressLine,
         billing_postal_code: postalCode,
@@ -303,8 +305,8 @@ export default function PackagesAddonCheckoutPage() {
               >
                 <option value="">{t("packages.checkoutCountrySelectPlaceholder")}</option>
                 {EU_COUNTRIES.map((item) => (
-                  <option key={item} value={item}>
-                    {item}
+                  <option key={item.code} value={item.code} disabled={item.disabled}>
+                    {item.label}
                   </option>
                 ))}
               </select>

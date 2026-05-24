@@ -1,3 +1,7 @@
+// backend/apps/settings/web/module.tsx
+// Feladat: A settings frontend moduldefiníciója. Regisztrálja az admin settings route-ot és menüpontot settings.read jogosultsággal.
+// Sárközi Mihály - 2026.05.24
+
 import type { FrontendModuleDefinition } from "@frontend/platform/moduleTypes";
 
 export function getModule(): FrontendModuleDefinition {

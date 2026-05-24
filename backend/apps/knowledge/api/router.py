@@ -64,7 +64,7 @@ from apps.knowledge.api.upload_support import (
     validate_upload_magic_type as _validate_upload_magic_type,
     validate_upload_type as _validate_upload_type,
 )
-from apps.knowledge.dependencies import CurrentKnowledgeUserDep, KnowledgeFacadeDep, KnowledgeTenantDep
+from apps.knowledge.bootstrap.dependencies import CurrentKnowledgeUserDep, KnowledgeFacadeDep, KnowledgeTenantDep
 from apps.knowledge.domain.context_profile import ContextProfile
 from apps.knowledge.domain.retrieval_profile import RetrievalProfile
 from apps.knowledge.mappers.knowledge_mapper import (

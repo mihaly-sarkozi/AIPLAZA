@@ -9,7 +9,7 @@ pytestmark = [pytest.mark.integration, pytest.mark.usefixtures("allow_chat_usage
 
 
 def test_chat_accepts_optional_kb_uuid_and_debug(client_authenticated: TestClient, mock_chat_service, app):
-    from apps.chat.dependencies import get_chat_service
+    from apps.chat.bootstrap.dependencies import get_chat_service
 
     async def _chat(question: str, user_id=None, user_role=None, kb_uuid=None, debug=False):
         assert question == "Mikor volt tréning?"
@@ -31,7 +31,7 @@ def test_chat_accepts_optional_kb_uuid_and_debug(client_authenticated: TestClien
 
 
 def test_chat_returns_403_when_service_denies_kb_scope(client_authenticated: TestClient, mock_chat_service, app):
-    from apps.chat.dependencies import get_chat_service
+    from apps.chat.bootstrap.dependencies import get_chat_service
 
     async def _chat(question: str, user_id=None, user_role=None, kb_uuid=None, debug=False):
         raise PermissionError("denied")

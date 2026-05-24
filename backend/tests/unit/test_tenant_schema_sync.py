@@ -1,6 +1,6 @@
 from sqlalchemy import Column, Integer, MetaData, Table
 
-from apps.knowledge.tenant_hooks import register_knowledge_tenant_hooks
+from apps.knowledge.bootstrap.tenant_hooks import register_knowledge_tenant_hooks
 import core.modules.tenant.schema.hooks as tenant_schema_hooks
 from core.modules.tenant.service import tenant_schema_service
 

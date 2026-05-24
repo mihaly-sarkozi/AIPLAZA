@@ -9,7 +9,7 @@ from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 
 from apps.settings.api.router import router
-from apps.settings.dependencies import get_settings_facade
+from apps.settings.bootstrap.dependencies import get_settings_facade
 from core.modules.users.domain.dto import User
 from core.modules.auth.web.dependencies import auth_dependencies
 from core.modules.auth.web.dependencies.auth_dependencies import get_current_user
@@ -24,6 +24,8 @@ BILLING_DEFAULTS = {
     "billing_city": "",
     "billing_region": "",
     "billing_country": "",
+    "billing_customer_type": "company",
+    "billing_full_name": "",
 }
 
 
@@ -65,6 +67,8 @@ class _FakeSettingsFacade:
         billing_city: str | None = None,
         billing_region: str | None = None,
         billing_country: str | None = None,
+        billing_customer_type: str | None = None,
+        billing_full_name: str | None = None,
         updated_by: int | None = None,
     ) -> dict[str, object]:
         self.calls.append(
@@ -82,6 +86,8 @@ class _FakeSettingsFacade:
                     "billing_city": billing_city,
                     "billing_region": billing_region,
                     "billing_country": billing_country,
+                    "billing_customer_type": billing_customer_type,
+                    "billing_full_name": billing_full_name,
                     "updated_by": updated_by,
                 },
             )
@@ -91,6 +97,15 @@ class _FakeSettingsFacade:
             "timezone": timezone or "UTC",
             "date_format": date_format or "YYYY-MM-DD",
             "time_format": time_format or "HH:mm",
+                "billing_customer_type": billing_customer_type or "company",
+                "billing_full_name": billing_full_name or "",
+                "billing_company_name": billing_company_name or "",
+                "billing_tax_id": billing_tax_id or "",
+                "billing_address_line": billing_address_line or "",
+                "billing_postal_code": billing_postal_code or "",
+                "billing_city": billing_city or "",
+                "billing_region": billing_region or "",
+                "billing_country": billing_country or "",
         }
 
     def get_sections(self) -> list[dict[str, object]]:
@@ -183,6 +198,8 @@ def test_patch_settings_delegates_to_facade(monkeypatch: pytest.MonkeyPatch) -> 
             "billing_city": None,
             "billing_region": None,
             "billing_country": None,
+            "billing_customer_type": None,
+            "billing_full_name": None,
             "updated_by": 1,
         },
     )
@@ -209,6 +226,60 @@ def test_patch_settings_rejects_invalid_literal_values(
 
     assert response.status_code == 422
     assert all(call[0] != "update_settings" for call in facade.calls)
+
+
+@pytest.mark.parametrize(
+    ("payload", "expected_error_type"),
+    [
+        ({"unexpected_admin_override": True}, "extra_forbidden"),
+        ({"two_factor_enabled": "true"}, "bool_type"),
+        ({"billing_company_name": 123}, "string_type"),
+        (["not", "an", "object"], "model_attributes_type"),
+    ],
+)
+def test_patch_settings_rejects_malformed_or_manipulated_payloads(
+    payload,
+    expected_error_type: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    facade = _FakeSettingsFacade()
+    app = _app(facade=facade, current_user=_user(), monkeypatch=monkeypatch)
+
+    with TestClient(app, base_url="http://demo.lvh.me") as client:
+        response = client.patch("/api/settings", json=payload)
+
+    assert response.status_code == 422
+    assert expected_error_type in {error["type"] for error in response.json()["detail"]}
+    assert all(call[0] != "update_settings" for call in facade.calls)
+
+
+def test_patch_settings_accepts_empty_body_as_noop(monkeypatch: pytest.MonkeyPatch) -> None:
+    facade = _FakeSettingsFacade()
+    app = _app(facade=facade, current_user=_user(), monkeypatch=monkeypatch)
+
+    with TestClient(app, base_url="http://demo.lvh.me") as client:
+        response = client.patch("/api/settings", json={})
+
+    assert response.status_code == 200
+    assert facade.calls[-1] == (
+        "update_settings",
+        {
+            "two_factor_enabled": None,
+            "timezone": None,
+            "date_format": None,
+            "time_format": None,
+            "billing_company_name": None,
+            "billing_tax_id": None,
+            "billing_address_line": None,
+            "billing_postal_code": None,
+            "billing_city": None,
+            "billing_region": None,
+            "billing_country": None,
+            "billing_customer_type": None,
+            "billing_full_name": None,
+            "updated_by": 1,
+        },
+    )
 
 
 def test_get_settings_sections_returns_facade_sections(monkeypatch: pytest.MonkeyPatch) -> None:

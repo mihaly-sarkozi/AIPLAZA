@@ -6,10 +6,11 @@ import PageHeader from "../../../components/ui/PageHeader";
 import type { AuthenticatorSetupResponse } from "../../../api/services/authenticatorService";
 import type { DomainRecordResponse } from "../../../api/services/domainService";
 import type { SettingsDateFormat, SettingsTimeFormat, SettingsTimezone } from "../../../api/services/settingsService";
+import { normalizeEuVatId, normalizePostalCode, type BillingCustomerType } from "../../billing/billingCountries";
 import { useTranslation } from "../../../i18n";
 import { useAuthStore } from "../../../store/authStore";
 import { getApiErrorMessage } from "../../../utils/getApiErrorMessage";
-import AuthenticatorSetupModal from "../components/AuthenticatorSetupModal";
+import AuthenticatorSetupModal, { type AuthenticatorSetupModalLabels } from "../components/AuthenticatorSetupModal";
 import BillingSettingsSection from "../components/BillingSettingsSection";
 import DomainsSettingsSection from "../components/DomainsSettingsSection";
 import PreferencesSettingsSection from "../components/PreferencesSettingsSection";
@@ -36,7 +37,7 @@ interface SystemSecurityBodyProps {
 }
 
 export function SystemSecurityBody({ onSaved, onCancel }: SystemSecurityBodyProps) {
-  const { t } = useTranslation();
+  const { t, locale } = useTranslation();
   const { data: settings, isLoading: loading, error: settingsError } = useSettings();
   const domainQuery = useDomainOverview();
   const patchMutation = usePatchSettingsMutation();
@@ -52,6 +53,8 @@ export function SystemSecurityBody({ onSaved, onCancel }: SystemSecurityBodyProp
   const [timezone, setTimezone] = useState<SettingsTimezone>("UTC");
   const [dateFormat, setDateFormat] = useState<SettingsDateFormat>("YYYY-MM-DD");
   const [timeFormat, setTimeFormat] = useState<SettingsTimeFormat>("HH:mm");
+  const [billingCustomerType, setBillingCustomerType] = useState<BillingCustomerType>("company");
+  const [billingFullName, setBillingFullName] = useState("");
   const [billingCompanyName, setBillingCompanyName] = useState("");
   const [billingTaxId, setBillingTaxId] = useState("");
   const [billingAddressLine, setBillingAddressLine] = useState("");
@@ -99,6 +102,43 @@ export function SystemSecurityBody({ onSaved, onCancel }: SystemSecurityBodyProp
   const authenticatorSetupReady = !authenticatorEnabled && authenticatorWizardOpen && Boolean(authenticatorSetupData);
   const googleAuthenticatorAndroidUrl = "https://play.google.com/store/apps/details?id=com.google.android.apps.authenticator2";
   const googleAuthenticatorIosUrl = "https://apps.apple.com/app/google-authenticator/id388497605";
+  const authenticatorSecurityLabels = useMemo(
+    () => ({
+      authenticatorTitle: t("settings.authenticatorTitle"),
+      authenticatorDescription: t("settings.authenticatorDescription"),
+      statusEnabled: t("settings.authenticatorStatusEnabled"),
+      statusPending: t("settings.authenticatorStatusPending"),
+      statusDisabled: t("settings.authenticatorStatusDisabled"),
+      enableAction: t("settings.authenticatorEnableAction"),
+      enablePending: t("settings.authenticatorEnablePending"),
+      disableAction: t("settings.authenticatorDisableAction"),
+      disablePending: t("settings.authenticatorDisablePending"),
+      trialNotice: t("settings.authenticatorTrialNotice"),
+    }),
+    [t]
+  );
+  const authenticatorModalLabels = useMemo<AuthenticatorSetupModalLabels>(
+    () => ({
+      eyebrow: t("settings.authenticatorWizardEyebrow"),
+      title: t("settings.authenticatorWizardTitle"),
+      description: t("settings.authenticatorWizardDescription"),
+      back: t("settings.authenticatorWizardBack"),
+      next: t("settings.authenticatorWizardNext"),
+      close: t("settings.authenticatorWizardClose"),
+      confirmPending: t("settings.authenticatorWizardConfirmPending"),
+      confirmAction: t("settings.authenticatorWizardConfirmAction"),
+      downloadTitle: t("settings.authenticatorDownloadTitle"),
+      downloadDescription: t("settings.authenticatorDownloadDescription"),
+      qrTitle: t("settings.authenticatorQrTitle"),
+      qrManualHint: t("settings.authenticatorQrManualHint"),
+      copySecret: t("settings.authenticatorCopySecret"),
+      copyOtpUri: t("settings.authenticatorCopyOtpUri"),
+      validateTitle: t("settings.authenticatorValidateTitle"),
+      validateDescription: t("settings.authenticatorValidateDescription"),
+      codeLabel: t("settings.authenticatorCodeLabel"),
+    }),
+    [t]
+  );
 
   useEffect(() => {
     if (!settings) return;
@@ -106,6 +146,8 @@ export function SystemSecurityBody({ onSaved, onCancel }: SystemSecurityBodyProp
     setTimezone(settings.timezone);
     setDateFormat(settings.date_format);
     setTimeFormat(settings.time_format);
+    setBillingCustomerType(settings.billing_customer_type ?? "company");
+    setBillingFullName(settings.billing_full_name ?? "");
     setBillingCompanyName(settings.billing_company_name ?? "");
     setBillingTaxId(settings.billing_tax_id ?? "");
     setBillingAddressLine(settings.billing_address_line ?? "");
@@ -121,6 +163,8 @@ export function SystemSecurityBody({ onSaved, onCancel }: SystemSecurityBodyProp
     setTimezone(settings.timezone);
     setDateFormat(settings.date_format);
     setTimeFormat(settings.time_format);
+    setBillingCustomerType(settings.billing_customer_type ?? "company");
+    setBillingFullName(settings.billing_full_name ?? "");
     setBillingCompanyName(settings.billing_company_name ?? "");
     setBillingTaxId(settings.billing_tax_id ?? "");
     setBillingAddressLine(settings.billing_address_line ?? "");
@@ -138,10 +182,12 @@ export function SystemSecurityBody({ onSaved, onCancel }: SystemSecurityBodyProp
         timezone,
         date_format: dateFormat,
         time_format: timeFormat,
-        billing_company_name: billingCompanyName,
-        billing_tax_id: billingTaxId,
+        billing_customer_type: billingCustomerType,
+        billing_full_name: billingFullName.trim(),
+        billing_company_name: billingCustomerType === "company" ? billingCompanyName.trim() : "",
+        billing_tax_id: billingCustomerType === "company" ? normalizeEuVatId(billingTaxId) : "",
         billing_address_line: billingAddressLine,
-        billing_postal_code: billingPostalCode,
+        billing_postal_code: normalizePostalCode(billingPostalCode),
         billing_city: billingCity,
         billing_region: billingRegion,
         billing_country: billingCountry,
@@ -218,7 +264,7 @@ export function SystemSecurityBody({ onSaved, onCancel }: SystemSecurityBodyProp
         setAuthenticatorCode("");
         setAuthenticatorWizardStep(1);
         setAuthenticatorWizardOpen(true);
-        toast.success("Authenticator setup elindítva.");
+        toast.success(t("settings.authenticatorSetupStarted"));
       },
       onError: (error) => toast.error(getApiErrorMessage(error) ?? t("common.errorGeneric")),
     });
@@ -227,7 +273,7 @@ export function SystemSecurityBody({ onSaved, onCancel }: SystemSecurityBodyProp
   const handleConfirmAuthenticatorSetup = () => {
     const code = authenticatorCode.trim();
     if (code.length !== 6) {
-      toast.error("Adj meg egy 6 jegyű Google Authenticator kódot.");
+      toast.error(t("settings.authenticatorCodeRequired"));
       return;
     }
     confirmAuthenticatorSetupMutation.mutate(code, {
@@ -236,21 +282,21 @@ export function SystemSecurityBody({ onSaved, onCancel }: SystemSecurityBodyProp
         setAuthenticatorCode("");
         setAuthenticatorWizardStep(1);
         setAuthenticatorWizardOpen(false);
-        toast.success("Google Authenticator sikeresen bekapcsolva.");
+        toast.success(t("settings.authenticatorEnabledSuccess"));
       },
-      onError: (error) => toast.error(getApiErrorMessage(error) ?? "Érvénytelen authenticator kód."),
+      onError: (error) => toast.error(getApiErrorMessage(error) ?? t("settings.authenticatorInvalidCode")),
     });
   };
 
   const handleDisableAuthenticator = () => {
-    if (typeof window !== "undefined" && !window.confirm("Biztosan kikapcsolod a Google Authenticator védelmet?")) return;
+    if (typeof window !== "undefined" && !window.confirm(t("settings.authenticatorDisableConfirm"))) return;
     disableAuthenticatorMutation.mutate(undefined, {
       onSuccess: () => {
         setAuthenticatorSetupData(null);
         setAuthenticatorCode("");
         setAuthenticatorWizardStep(1);
         setAuthenticatorWizardOpen(false);
-        toast.success("Google Authenticator kikapcsolva.");
+        toast.success(t("settings.authenticatorDisabledSuccess"));
       },
       onError: (error) => toast.error(getApiErrorMessage(error) ?? t("common.errorGeneric")),
     });
@@ -275,6 +321,7 @@ export function SystemSecurityBody({ onSaved, onCancel }: SystemSecurityBodyProp
           <SecuritySettingsSection
             title={t("settings.securityTitle")}
             description={t("settings.twoFactorCardIntro")}
+            labels={authenticatorSecurityLabels}
             authenticatorEnabled={authenticatorEnabled}
             authenticatorPending={authenticatorPending}
             startPending={startAuthenticatorSetupMutation.isPending}
@@ -304,15 +351,26 @@ export function SystemSecurityBody({ onSaved, onCancel }: SystemSecurityBodyProp
           <BillingSettingsSection
             title={t("settings.billingCompanyTitle")}
             disabled={patchMutation.isPending}
-            fields={[
-              { label: t("settings.billingCompanyName"), value: billingCompanyName, setter: setBillingCompanyName },
-              { label: t("settings.billingTaxId"), value: billingTaxId, setter: setBillingTaxId },
-              { label: t("settings.billingAddressLine"), value: billingAddressLine, setter: setBillingAddressLine },
-              { label: t("settings.billingPostalCode"), value: billingPostalCode, setter: setBillingPostalCode },
-              { label: t("settings.billingCity"), value: billingCity, setter: setBillingCity },
-              { label: t("settings.billingRegion"), value: billingRegion, setter: setBillingRegion },
-              { label: t("settings.billingCountry"), value: billingCountry, setter: setBillingCountry },
-            ]}
+            customerType={billingCustomerType}
+            fullName={billingFullName}
+            companyName={billingCompanyName}
+            taxId={billingTaxId}
+            country={billingCountry}
+            postalCode={billingPostalCode}
+            region={billingRegion}
+            city={billingCity}
+            addressLine={billingAddressLine}
+            setCustomerType={setBillingCustomerType}
+            setFullName={setBillingFullName}
+            setCompanyName={setBillingCompanyName}
+            setTaxId={setBillingTaxId}
+            setCountry={setBillingCountry}
+            setPostalCode={setBillingPostalCode}
+            setRegion={setBillingRegion}
+            setCity={setBillingCity}
+            setAddressLine={setBillingAddressLine}
+            locale={locale}
+            t={t}
           />
         ) : null}
         {activeSection === "domains" ? (
@@ -352,6 +410,7 @@ export function SystemSecurityBody({ onSaved, onCancel }: SystemSecurityBodyProp
       <AuthenticatorSetupModal
         open={authenticatorSetupReady}
         setupData={authenticatorSetupData}
+        labels={authenticatorModalLabels}
         step={authenticatorWizardStep}
         code={authenticatorCode}
         confirmPending={confirmAuthenticatorSetupMutation.isPending}

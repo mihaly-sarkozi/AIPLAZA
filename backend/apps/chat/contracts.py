@@ -25,6 +25,7 @@ class ChatGateway(Protocol):
         tenant: str | None = None,
         debug: bool = False,
     ) -> dict: ...
+
     # Ez az aszinkron metódus a(z) chat_stream logikáját valósítja meg.
     async def chat_stream(
         self,
@@ -44,3 +45,6 @@ class ChatGateway(Protocol):
         wrong_time_slice: bool = False,
         note: str | None = None,
     ) -> dict: ...
+
+
+__all__ = ["ChatGateway"]

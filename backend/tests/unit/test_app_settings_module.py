@@ -4,8 +4,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from apps.settings.contracts import SETTINGS_SERVICE
-from apps.settings.module import SettingsAppModule
+from apps.settings.bootstrap.service_keys import SETTINGS_SERVICE
+from apps.settings.bootstrap.app_module import SettingsAppModule
 from core.kernel.interface import ModuleContext
 from core.kernel.interface.keys import PLATFORM_SETTINGS_SERVICE
 

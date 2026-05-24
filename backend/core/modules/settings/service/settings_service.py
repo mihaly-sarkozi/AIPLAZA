@@ -17,6 +17,8 @@ class SettingsService(TwoFactorSettingsReader):
     TIMEZONE_KEY = "timezone"
     DATE_FORMAT_KEY = "date_format"
     TIME_FORMAT_KEY = "time_format"
+    BILLING_CUSTOMER_TYPE_KEY = "billing_customer_type"
+    BILLING_FULL_NAME_KEY = "billing_full_name"
     BILLING_COMPANY_NAME_KEY = "billing_company_name"
     BILLING_TAX_ID_KEY = "billing_tax_id"
     BILLING_ADDRESS_LINE_KEY = "billing_address_line"
@@ -163,6 +165,8 @@ class SettingsService(TwoFactorSettingsReader):
 
     def get_billing_profile(self) -> dict[str, str]:
         return {
+            "billing_customer_type": self._get_text_setting(self.BILLING_CUSTOMER_TYPE_KEY) or "company",
+            "billing_full_name": self._get_text_setting(self.BILLING_FULL_NAME_KEY),
             "billing_company_name": self._get_text_setting(self.BILLING_COMPANY_NAME_KEY),
             "billing_tax_id": self._get_text_setting(self.BILLING_TAX_ID_KEY),
             "billing_address_line": self._get_text_setting(self.BILLING_ADDRESS_LINE_KEY),
@@ -188,6 +192,8 @@ class SettingsService(TwoFactorSettingsReader):
         timezone: str | None = None,
         date_format: str | None = None,
         time_format: str | None = None,
+        billing_customer_type: str | None = None,
+        billing_full_name: str | None = None,
         billing_company_name: str | None = None,
         billing_tax_id: str | None = None,
         billing_address_line: str | None = None,
@@ -206,6 +212,8 @@ class SettingsService(TwoFactorSettingsReader):
             self.set_date_format(date_format, updated_by=updated_by)
         if time_format is not None:
             self.set_time_format(time_format, updated_by=updated_by)
+        self._set_text_setting(self.BILLING_CUSTOMER_TYPE_KEY, billing_customer_type, updated_by=updated_by)
+        self._set_text_setting(self.BILLING_FULL_NAME_KEY, billing_full_name, updated_by=updated_by)
         self._set_text_setting(self.BILLING_COMPANY_NAME_KEY, billing_company_name, updated_by=updated_by)
         self._set_text_setting(self.BILLING_TAX_ID_KEY, billing_tax_id, updated_by=updated_by)
         self._set_text_setting(self.BILLING_ADDRESS_LINE_KEY, billing_address_line, updated_by=updated_by)

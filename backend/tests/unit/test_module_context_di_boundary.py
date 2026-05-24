@@ -2,12 +2,9 @@ from __future__ import annotations
 
 import pytest
 
+from apps.chat.bootstrap.service_keys import CHAT_LLM_CLIENT_FACTORY, CHAT_SERVICE
+from apps.knowledge.bootstrap.service_keys import KNOWLEDGE_REPOSITORY
 from core.kernel.http.app_dependencies import module_service_dependency
-from core.kernel.interface.app_keys import (
-    MODULE_CHAT_LLM_CLIENT_FACTORY,
-    MODULE_CHAT_SERVICE,
-    MODULE_KNOWLEDGE_REPOSITORY,
-)
 from core.kernel.interface.module_context import ModuleContext
 from core.kernel.interface.keys import PLATFORM_SETTINGS_REPOSITORY, PLATFORM_TENANT_SIGNUP_FACTORY, PLATFORM_USERS_SERVICE
 
@@ -26,13 +23,13 @@ def test_module_context_publishes_only_platform_namespaces():
     )
 
     context.register_service(PLATFORM_USERS_SERVICE, object())
-    context.register_service(MODULE_CHAT_SERVICE, object())
+    context.register_service(CHAT_SERVICE, object())
 
     context.register_repository(PLATFORM_SETTINGS_REPOSITORY, object())
-    context.register_repository(MODULE_KNOWLEDGE_REPOSITORY, object())
+    context.register_repository(KNOWLEDGE_REPOSITORY, object())
 
     context.register_factory(PLATFORM_TENANT_SIGNUP_FACTORY, lambda: None)
-    context.register_factory(MODULE_CHAT_LLM_CLIENT_FACTORY, lambda: None)
+    context.register_factory(CHAT_LLM_CLIENT_FACTORY, lambda: None)
 
     assert published_services == [PLATFORM_USERS_SERVICE]
 

@@ -1,4 +1,5 @@
 import api from "../axiosClient";
+import type { BillingCustomerType } from "../../features/billing/billingCountries";
 
 export type SettingsTimezone =
   | "UTC"
@@ -47,6 +48,8 @@ export type SettingsResponse = {
   timezone: SettingsTimezone;
   date_format: SettingsDateFormat;
   time_format: SettingsTimeFormat;
+  billing_customer_type: BillingCustomerType;
+  billing_full_name: string;
   billing_company_name: string;
   billing_tax_id: string;
   billing_address_line: string;
@@ -61,6 +64,8 @@ export type PatchSettingsPayload = {
   timezone?: SettingsTimezone;
   date_format?: SettingsDateFormat;
   time_format?: SettingsTimeFormat;
+  billing_customer_type?: BillingCustomerType;
+  billing_full_name?: string;
   billing_company_name?: string;
   billing_tax_id?: string;
   billing_address_line?: string;

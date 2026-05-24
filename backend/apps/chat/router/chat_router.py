@@ -8,7 +8,7 @@ from urllib.parse import quote
 from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import Response
 
-from apps.chat.dependencies import get_chat_service
+from apps.chat.bootstrap.dependencies import get_chat_service
 from apps.chat.application.chat_payload_policy import (
     tenant_chat_limits as _tenant_chat_limits,
 )

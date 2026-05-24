@@ -8,7 +8,7 @@ from apps.billing.catalog import default_catalog_rows
 from apps.billing.calculations import billing_period_multiplier, charge_date_before_expiry, money
 from apps.billing.debug_clock import BillingDebugClock
 from apps.billing.domain import BillingAddon, BillingPlan
-from apps.billing.module import BillingAppModule, get_module
+from apps.billing.bootstrap.app_module import BillingAppModule, get_module
 from apps.billing.repositories import BillingRepository
 from apps.billing.router import router
 from apps.billing.service import BillingService

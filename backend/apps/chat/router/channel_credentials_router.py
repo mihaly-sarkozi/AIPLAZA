@@ -7,7 +7,7 @@ import json
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 
-from apps.chat.dependencies import get_chat_service
+from apps.chat.bootstrap.dependencies import get_chat_service
 from apps.chat.application.channel_request_policy import (
     channel_access_service_or_503 as _channel_access_service_or_503,
     parse_iso_datetime as _parse_iso_datetime,

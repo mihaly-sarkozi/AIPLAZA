@@ -6,9 +6,9 @@ from apps.knowledge.api.background_jobs import (
     run_index_build_worker_task,
     run_recovery_sweep_for_tenant,
 )
+from apps.knowledge.bootstrap.service_keys import KNOWLEDGE_SERVICE
 from apps.knowledge.ingest_jobs import process_ingest_run_and_start_index_sync
 from core.kernel.http.app_dependencies import get_module_service
-from core.kernel.interface.app_keys import MODULE_KNOWLEDGE_SERVICE
 from core.modules.tenant.context.tenant_context import run_with_tenant_schema
 
 
@@ -34,7 +34,7 @@ def make_knowledge_index_build_handler():
         build_id = str(payload.get("build_id") or "").strip()
         if not build_id:
             raise ValueError("knowledge.index_build payload missing build_id")
-        facade = get_module_service(MODULE_KNOWLEDGE_SERVICE)
+        facade = get_module_service(KNOWLEDGE_SERVICE)
         run_index_build_worker_task(
             tenant_slug=tenant_slug if tenant_slug is None else str(tenant_slug),
             facade=facade,
@@ -50,7 +50,7 @@ def make_knowledge_ingest_item_reprocess_handler():
         item_id = str(payload.get("item_id") or "").strip()
         if not item_id:
             raise ValueError("knowledge.ingest_item_reprocess payload missing item_id")
-        facade = get_module_service(MODULE_KNOWLEDGE_SERVICE)
+        facade = get_module_service(KNOWLEDGE_SERVICE)
         run_with_tenant_schema(
             tenant_slug if tenant_slug is None else str(tenant_slug),
             facade.process_ingest_item,
@@ -63,7 +63,7 @@ def make_knowledge_ingest_item_reprocess_handler():
 def make_knowledge_recovery_sweep_handler():
     def _handle(payload: dict[str, Any]) -> None:
         tenant_slug = payload.get("tenant_slug")
-        facade = get_module_service(MODULE_KNOWLEDGE_SERVICE)
+        facade = get_module_service(KNOWLEDGE_SERVICE)
         run_with_tenant_schema(
             tenant_slug if tenant_slug is None else str(tenant_slug),
             run_recovery_sweep_for_tenant,

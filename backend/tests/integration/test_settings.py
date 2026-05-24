@@ -17,7 +17,7 @@ def test_get_settings_without_auth_returns_401(client: TestClient):
 
 def test_get_settings_non_owner_returns_403(client: TestClient, mock_settings_service, app):
     """GET /settings user/admin role-lal (nem owner) → 403."""
-    from apps.settings.dependencies import get_settings_service
+    from apps.settings.bootstrap.dependencies import get_settings_service
     from core.modules.auth.web.dependencies.auth_dependencies import get_current_user
     app.dependency_overrides[get_settings_service] = lambda: mock_settings_service
     non_owner = User(
@@ -39,7 +39,7 @@ def test_get_settings_non_owner_returns_403(client: TestClient, mock_settings_se
 
 def test_get_settings_success(client_authenticated: TestClient, mock_settings_service, app):
     """GET /settings ownerrel → 200, teljes settings payload."""
-    from apps.settings.dependencies import get_settings_service
+    from apps.settings.bootstrap.dependencies import get_settings_service
     from core.kernel.deps.facade import get_permission_service
 
     get_permission_service().register_permissions(("settings.read", "settings.write"))
@@ -65,7 +65,7 @@ def test_patch_settings_without_auth_returns_401(client: TestClient):
 
 def test_patch_settings_non_owner_returns_403(client: TestClient, mock_settings_service, app):
     """PATCH /settings nem ownerrel → 403."""
-    from apps.settings.dependencies import get_settings_service
+    from apps.settings.bootstrap.dependencies import get_settings_service
     from core.modules.auth.web.dependencies.auth_dependencies import get_current_user
     app.dependency_overrides[get_settings_service] = lambda: mock_settings_service
     non_owner = User(
@@ -87,7 +87,7 @@ def test_patch_settings_non_owner_returns_403(client: TestClient, mock_settings_
 
 def test_patch_settings_success(client_authenticated: TestClient, mock_settings_service, app):
     """PATCH /settings ownerrel → 200, részleges settings update."""
-    from apps.settings.dependencies import get_settings_service
+    from apps.settings.bootstrap.dependencies import get_settings_service
     from core.kernel.deps.facade import get_permission_service
 
     get_permission_service().register_permissions(("settings.read", "settings.write"))
@@ -113,6 +113,8 @@ def test_patch_settings_success(client_authenticated: TestClient, mock_settings_
             timezone="Europe/Budapest",
             date_format="DD.MM.YYYY",
             time_format="HH:mm:ss",
+            billing_customer_type=None,
+            billing_full_name=None,
             billing_company_name=None,
             billing_tax_id=None,
             billing_address_line=None,
@@ -122,5 +124,28 @@ def test_patch_settings_success(client_authenticated: TestClient, mock_settings_
             billing_country=None,
             updated_by=1,
         )
+    finally:
+        app.dependency_overrides.pop(get_settings_service, None)
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"unexpected_admin_override": True},
+        {"two_factor_enabled": "true"},
+        {"billing_company_name": 123},
+        {"billing_customer_type": "robot"},
+    ],
+)
+def test_patch_settings_rejects_malformed_payloads(client_authenticated: TestClient, mock_settings_service, app, payload):
+    from apps.settings.bootstrap.dependencies import get_settings_service
+    from core.kernel.deps.facade import get_permission_service
+
+    get_permission_service().register_permissions(("settings.read", "settings.write"))
+    app.dependency_overrides[get_settings_service] = lambda: mock_settings_service
+    try:
+        r = client_authenticated.patch("/api/settings", json=payload)
+        assert r.status_code == 422
+        mock_settings_service.update_settings.assert_not_called()
     finally:
         app.dependency_overrides.pop(get_settings_service, None)

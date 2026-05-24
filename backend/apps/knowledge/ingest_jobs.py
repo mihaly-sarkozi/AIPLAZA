@@ -4,9 +4,9 @@ import asyncio
 import logging
 from typing import Any
 
+from apps.knowledge.bootstrap.service_keys import KNOWLEDGE_SERVICE
 from core.kernel.config.config_loader import get_app_env
 from core.kernel.config.environment import is_deployed_env
-from core.kernel.interface.app_keys import MODULE_KNOWLEDGE_SERVICE
 from core.kernel.http.app_dependencies import get_module_service
 from core.modules.tenant.context.tenant_context import run_with_tenant_schema
 
@@ -20,7 +20,7 @@ def process_ingest_run_and_start_index_sync(
     created_by: int | None,
     facade: Any | None = None,
 ) -> None:
-    effective_facade = facade or get_module_service(MODULE_KNOWLEDGE_SERVICE)
+    effective_facade = facade or get_module_service(KNOWLEDGE_SERVICE)
     completed = run_with_tenant_schema(
         tenant_slug,
         effective_facade.process_ingest_run,

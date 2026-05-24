@@ -9,7 +9,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from apps.knowledge.api.router import router as knowledge_api_router
-from apps.knowledge.dependencies import get_knowledge_facade
+from apps.knowledge.bootstrap.dependencies import get_knowledge_facade
 from apps.knowledge.domain.ingest_run import IngestRun
 from core.kernel.http.correlation_id_middleware import CorrelationIdMiddleware
 from core.kernel.http.exception_handlers import register_exception_handlers

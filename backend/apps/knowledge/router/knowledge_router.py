@@ -1,7 +1,7 @@
 # Ez a fájl az adott modul HTTP útvonalait és kérés-válasz illesztését tartalmazza.
 from fastapi import APIRouter, Depends, HTTPException, Request
 
-from apps.knowledge.dependencies import CurrentKnowledgeUserDep, KnowledgeFacadeDep, KnowledgeTenantDep
+from apps.knowledge.bootstrap.dependencies import CurrentKnowledgeUserDep, KnowledgeFacadeDep, KnowledgeTenantDep
 from apps.knowledge.api.upload_support import (
     ensure_training_mfa as _ensure_training_mfa,
     ensure_training_quota as _ensure_training_quota,
