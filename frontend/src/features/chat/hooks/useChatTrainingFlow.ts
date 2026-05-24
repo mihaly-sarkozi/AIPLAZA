@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, type Dispatch, type RefObject, type SetStateAction, type MutableRefObject } from "react";
+import { useEffect, type Dispatch, type MutableRefObject, type RefObject, type SetStateAction } from "react";
 import { toast } from "sonner";
 
 import { useAuthStore } from "../../../store/authStore";
@@ -6,19 +6,11 @@ import { getApiErrorMessage } from "../../../utils/getApiErrorMessage";
 import { sanitizeMessage } from "../../../utils/sanitize";
 import { useCreateFileIngestMutation, useCreateTextIngestMutation, useIngestRun } from "../../knowledge-base/hooks/useKb";
 import { estimateFileIngestRun } from "../../knowledge-base/services";
-import { getTrainingFailureMessage, isTrainingActive } from "../../knowledge-base/utils/trainingProgress";
+import { isTrainingActive } from "../../knowledge-base/utils/trainingProgress";
 import type { ChatMessageType, FileCountingProgress, PendingFileTraining, PendingTextTraining } from "../types";
 import { formatInteger, numberValue } from "../utils/chatNumbers";
-import {
-  estimateCountingDurationMs,
-  estimatedTrainingProgress,
-  estimateFileCharactersForProgress,
-  estimateTrainingDurationMs,
-  exactTrainingCharCount,
-  isDuplicateOnlyTrainingRun,
-} from "../utils/chatTraining";
-
-const TRAINING_STALE_TIMEOUT_MS = 5 * 60 * 1000;
+import { useTrainingProgressTimers } from "./useTrainingProgressTimers";
+import { useTrainingRunEffects } from "./useTrainingRunEffects";
 
 type UseChatTrainingFlowOptions = {
   effectiveTrainKbUuid: string;
@@ -94,194 +86,38 @@ export function useChatTrainingFlow({
     createFileMutation.isPending ||
     isTrainingActive(activeTrainingRun?.status);
 
-  const fileCountingTimerRef = useRef<number | null>(null);
-  const trainingProgressTimerRef = useRef<number | null>(null);
-  const staleTrainingTimeoutRef = useRef<number | null>(null);
+  const { startFileCountingProgress, stopFileCountingProgress, startTrainingProgress, stopTrainingProgress, resumeTrainingProgress } =
+    useTrainingProgressTimers({
+      trainingStartedAtRef,
+      trainingEstimatedDurationMsRef,
+      setFileCountingProgress,
+      setTrainingVisualProgress,
+    });
 
-  const stopFileCountingProgress = useCallback(() => {
-    if (fileCountingTimerRef.current !== null) {
-      window.clearInterval(fileCountingTimerRef.current);
-      fileCountingTimerRef.current = null;
-    }
-  }, []);
-
-  const startFileCountingProgress = useCallback(
-    (file: File) => {
-      stopFileCountingProgress();
-      const estimatedCharacters = estimateFileCharactersForProgress(file);
-      const durationMs = estimateCountingDurationMs(file);
-      const startedAt = Date.now();
-      setFileCountingProgress({ filename: file.name, percent: 3, estimatedCharacters });
-      fileCountingTimerRef.current = window.setInterval(() => {
-        const elapsed = Date.now() - startedAt;
-        const ratio = Math.min(0.95, elapsed / durationMs);
-        const eased = 1 - Math.pow(1 - ratio, 2);
-        setFileCountingProgress((current) =>
-          current ? { ...current, percent: Math.max(current.percent, Math.min(95, Math.round(eased * 95))) } : current
-        );
-      }, 180);
-    },
-    [setFileCountingProgress, stopFileCountingProgress]
-  );
-
-  const stopTrainingProgress = useCallback(() => {
-    if (trainingProgressTimerRef.current !== null) {
-      window.clearInterval(trainingProgressTimerRef.current);
-      trainingProgressTimerRef.current = null;
-    }
-    trainingStartedAtRef.current = null;
-    trainingEstimatedDurationMsRef.current = null;
-  }, [trainingEstimatedDurationMsRef, trainingStartedAtRef]);
-
-  const clearStaleTrainingTimeout = useCallback(() => {
-    if (staleTrainingTimeoutRef.current !== null) {
-      window.clearTimeout(staleTrainingTimeoutRef.current);
-      staleTrainingTimeoutRef.current = null;
-    }
-  }, []);
-
-  const startTrainingProgress = useCallback(
-    (characterCount: number, startedAt = Date.now()) => {
-      stopTrainingProgress();
-      const durationMs = estimateTrainingDurationMs(characterCount);
-      trainingStartedAtRef.current = startedAt;
-      trainingEstimatedDurationMsRef.current = durationMs;
-      setTrainingVisualProgress((current) => Math.max(current, estimatedTrainingProgress(Date.now() - startedAt, durationMs), 6));
-      trainingProgressTimerRef.current = window.setInterval(() => {
-        const effectiveStartedAt = trainingStartedAtRef.current ?? startedAt;
-        const effectiveDurationMs = trainingEstimatedDurationMsRef.current ?? durationMs;
-        const elapsed = Date.now() - effectiveStartedAt;
-        const nextProgress = estimatedTrainingProgress(elapsed, effectiveDurationMs);
-        setTrainingVisualProgress((current) => Math.max(current, Math.min(99, nextProgress)));
-      }, 500);
-    },
-    [setTrainingVisualProgress, stopTrainingProgress, trainingEstimatedDurationMsRef, trainingStartedAtRef]
-  );
-
-  useEffect(
-    () => () => {
-      stopFileCountingProgress();
-      stopTrainingProgress();
-      clearStaleTrainingTimeout();
-    },
-    [clearStaleTrainingTimeout, stopFileCountingProgress, stopTrainingProgress]
-  );
-
-  useEffect(() => {
-    if (!activeTrainingRunId || !activeTrainingTitle || trainingProgressTimerRef.current !== null) return;
-    const startedAt = trainingStartedAtRef.current;
-    const durationMs = trainingEstimatedDurationMsRef.current;
-    if (!startedAt || !durationMs) return;
-    setTrainingVisualProgress((current) => Math.max(current, estimatedTrainingProgress(Date.now() - startedAt, durationMs), 6));
-    trainingProgressTimerRef.current = window.setInterval(() => {
-      const effectiveStartedAt = trainingStartedAtRef.current ?? startedAt;
-      const effectiveDurationMs = trainingEstimatedDurationMsRef.current ?? durationMs;
-      const nextProgress = estimatedTrainingProgress(Date.now() - effectiveStartedAt, effectiveDurationMs);
-      setTrainingVisualProgress((current) => Math.max(current, Math.min(99, nextProgress)));
-    }, 500);
-  }, [activeTrainingRunId, activeTrainingTitle, setTrainingVisualProgress, trainingEstimatedDurationMsRef, trainingStartedAtRef]);
-
-  useEffect(() => {
-    clearStaleTrainingTimeout();
-    if (!activeTrainingRunId || !activeTrainingRun || !isTrainingActive(activeTrainingRun.status)) return;
-    const lastUpdatedRaw = activeTrainingRun.updated_at || activeTrainingRun.started_at || activeTrainingRun.created_at;
-    const lastUpdatedAtMs = Date.parse(lastUpdatedRaw);
-    const ageMs = Number.isFinite(lastUpdatedAtMs) ? Math.max(0, Date.now() - lastUpdatedAtMs) : 0;
-    const waitMs = Math.max(10_000, TRAINING_STALE_TIMEOUT_MS - ageMs);
-    staleTrainingTimeoutRef.current = window.setTimeout(() => {
-      appendMessage({ role: "training-status", text: t("chat.trainingStaleWarning") });
-      setActiveTrainingRunId(undefined);
-      setActiveTrainingTitle(null);
-      stopTrainingProgress();
-      setTrainingVisualProgress(0);
-      refreshBillingCounters();
-      refreshKnowledgeBaseList();
-      requestAnimationFrame(() => flushPersistToDisk());
-    }, waitMs);
-    return () => clearStaleTrainingTimeout();
-  }, [
+  useTrainingRunEffects({
     activeTrainingRun,
+    activeTrainingRunQuery,
     activeTrainingRunId,
-    appendMessage,
-    clearStaleTrainingTimeout,
-    flushPersistToDisk,
-    refreshBillingCounters,
-    refreshKnowledgeBaseList,
-    setActiveTrainingRunId,
-    setActiveTrainingTitle,
-    setTrainingVisualProgress,
-    stopTrainingProgress,
-    t,
-  ]);
-
-  useEffect(() => {
-    if (!activeTrainingRunId || !activeTrainingRun || isTrainingActive(activeTrainingRun.status)) return;
-    if (activeTrainingRun.status === "completed" || activeTrainingRun.status === "partial_success") {
-      const u = useAuthStore.getState().user;
-      if (u && u.tenant_kb_has_training !== true) setUser({ ...u, tenant_kb_has_training: true });
-      if (isDuplicateOnlyTrainingRun(activeTrainingRun)) {
-        appendMessage({ role: "training-status", text: t("chat.trainingAlreadyLoaded") });
-      } else {
-        const exactCharText = exactTrainingCharCount(activeTrainingRun);
-        const exactCharMessage =
-          exactCharText > 0 ? ` ${t("chat.fileCharacterCount").replace("{{count}}", formatInteger(exactCharText, locale))}` : "";
-        appendMessage({
-          role: "training-status",
-          text: `Tanítás: ${
-            activeTrainingRun.status === "partial_success" ? t("chat.trainingStatusPartialSuccess") : t("chat.trainingStatusCompleted")
-          } 100%.${exactCharMessage}`,
-        });
-      }
-      refreshKnowledgeBaseList();
-    } else {
-      appendMessage({ role: "assistant", text: getTrainingFailureMessage(activeTrainingRun, t) ?? t("chat.trainingFailed") });
-    }
-    setActiveTrainingRunId(undefined);
-    setActiveTrainingTitle(null);
-    stopTrainingProgress();
-    setTrainingVisualProgress(0);
-    refreshBillingCounters();
-    setTimeout(() => inputRef.current?.focus(), 50);
-    requestAnimationFrame(() => flushPersistToDisk());
-  }, [
-    activeTrainingRun,
-    activeTrainingRunId,
-    appendMessage,
-    flushPersistToDisk,
-    inputRef,
+    activeTrainingTitle,
     locale,
+    inputRef,
+    trainingStartedAtRef,
+    trainingEstimatedDurationMsRef,
+    setUser,
+    appendMessage,
+    setActiveTrainingRunId,
+    setActiveTrainingTitle,
+    setTrainingVisualProgress,
+    flushPersistToDisk,
     refreshBillingCounters,
     refreshKnowledgeBaseList,
-    setActiveTrainingRunId,
-    setActiveTrainingTitle,
-    setTrainingVisualProgress,
-    setUser,
     stopTrainingProgress,
     t,
-  ]);
+  });
 
   useEffect(() => {
-    if (!activeTrainingRunId || !activeTrainingRunQuery.isError) return;
-    appendMessage({ role: "assistant", text: getApiErrorMessage(activeTrainingRunQuery.error) ?? t("chat.trainingFailed") });
-    setActiveTrainingRunId(undefined);
-    setActiveTrainingTitle(null);
-    stopTrainingProgress();
-    setTrainingVisualProgress(0);
-    refreshBillingCounters();
-    setTimeout(() => inputRef.current?.focus(), 50);
-  }, [
-    activeTrainingRunId,
-    activeTrainingRunQuery.error,
-    activeTrainingRunQuery.isError,
-    appendMessage,
-    inputRef,
-    refreshBillingCounters,
-    setActiveTrainingRunId,
-    setActiveTrainingTitle,
-    setTrainingVisualProgress,
-    stopTrainingProgress,
-    t,
-  ]);
+    resumeTrainingProgress(activeTrainingRunId, activeTrainingTitle);
+  }, [activeTrainingRunId, activeTrainingTitle, resumeTrainingProgress]);
 
   const onSelectTrainingFile = async (file: File | null) => {
     if (!file || trainingOperationRunning || pendingTrainingConfirmation || billingRestricted) return;
