@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { useTranslation } from "../../../i18n";
+import { t as translate, useTranslation } from "../../../i18n";
 import type { Locale } from "../../../i18n";
 import type { Theme } from "../../../i18n";
 import { useAuthStore, type User } from "../../../store/authStore";
@@ -72,10 +72,11 @@ export default function ProfileModal({ isOpen, onClose }: ProfileModalProps) {
         tenant_demo_mode: data.tenant_demo_mode,
         tenant_kb_has_training: data.tenant_kb_has_training,
       });
-      if (data.locale) setLocale(data.locale as Locale);
+      const savedLocale = (data.locale || preferredLocale) as Locale;
+      if (data.locale) setLocale(savedLocale);
       if (data.theme) setTheme(data.theme as Theme);
 
-      toast.success(t("profile.saved"));
+      toast.success(translate("profile.saved", savedLocale));
       onClose();
     } catch (err: unknown) {
       toast.error(getApiErrorMessage(err) ?? t("common.errorGeneric"));
@@ -125,7 +126,10 @@ export default function ProfileModal({ isOpen, onClose }: ProfileModalProps) {
               <button
                 key={opt.value}
                 type="button"
-                onClick={() => setPreferredLocale(opt.value)}
+                onClick={() => {
+                  setPreferredLocale(opt.value);
+                  setLocale(opt.value);
+                }}
                 className={`px-4 py-2 rounded text-sm border ${
                   preferredLocale === opt.value
                     ? "bg-[var(--color-primary)] text-[var(--color-on-primary)] border-[var(--color-primary)] hover:opacity-90"

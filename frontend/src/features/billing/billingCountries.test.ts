@@ -3,6 +3,7 @@ import {
   BILLING_COUNTRIES,
   BILLING_COUNTRY_OTHER,
   BILLING_REGIONS_BY_COUNTRY,
+  getEuVatPlaceholder,
   getBillingCountryOptions,
   isEuBillingCountry,
   isRegionRequired,
@@ -44,8 +45,16 @@ describe("billingCountries", () => {
 
   it("validates EU VAT IDs by country code", () => {
     expect(isValidEuVatId("HU", "HU12345678")).toBe(true);
+    expect(isValidEuVatId("ES", "ESB09835208")).toBe(true);
     expect(isValidEuVatId("HU", "HU123")).toBe(false);
     expect(isValidEuVatId("CH", "CHE123")).toBe(false);
+  });
+
+  it("returns country-specific EU VAT placeholder examples", () => {
+    expect(getEuVatPlaceholder("HU")).toBe("HU12345678");
+    expect(getEuVatPlaceholder("DE")).toBe("DE123456789");
+    expect(getEuVatPlaceholder("ES")).toBe("ESB12345678");
+    expect(getEuVatPlaceholder("CH")).toBe("EU VAT ID");
   });
 
   it("exposes region options only for selected countries", () => {

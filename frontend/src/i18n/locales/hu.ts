@@ -786,6 +786,8 @@ export const hu = {
       billingRegionSelectPlaceholder: "Válassz régiót",
       billingOtherCountryDisabled: "A szolgáltatás jelenleg csak Európában üzemel.",
       billingCompanyEuOnly: "Céges számlázás első körben csak EU országban érhető el.",
+      billingFieldRequired: "Kötelező kitölteni.",
+      billingInvalidTaxId: "Nem megfelelő adószám formátum.",
       preferencesIntro:
         "Állítsd be, milyen időzónában, dátum- és időformátumban jelenjenek meg a rendszer adatai a munkaterületen.",
       timezoneLabel: "Időzóna",

@@ -6,7 +6,7 @@ import PageHeader from "../../../components/ui/PageHeader";
 import type { AuthenticatorSetupResponse } from "../../../api/services/authenticatorService";
 import type { DomainRecordResponse } from "../../../api/services/domainService";
 import type { SettingsDateFormat, SettingsTimeFormat, SettingsTimezone } from "../../../api/services/settingsService";
-import { normalizeEuVatId, normalizePostalCode, type BillingCustomerType } from "../../billing/billingCountries";
+import { isRegionRequired, isValidEuVatId, normalizeEuVatId, normalizePostalCode, type BillingCustomerType } from "../../billing/billingCountries";
 import { useTranslation } from "../../../i18n";
 import { useAuthStore } from "../../../store/authStore";
 import { getApiErrorMessage } from "../../../utils/getApiErrorMessage";
@@ -36,6 +36,8 @@ interface SystemSecurityBodyProps {
   onCancel?: () => void;
 }
 
+type BillingFieldErrors = Partial<Record<"fullName" | "companyName" | "taxId" | "country" | "postalCode" | "region" | "city" | "addressLine", string>>;
+
 export function SystemSecurityBody({ onSaved, onCancel }: SystemSecurityBodyProps) {
   const { t, locale } = useTranslation();
   const { data: settings, isLoading: loading, error: settingsError } = useSettings();
@@ -62,6 +64,7 @@ export function SystemSecurityBody({ onSaved, onCancel }: SystemSecurityBodyProp
   const [billingCity, setBillingCity] = useState("");
   const [billingRegion, setBillingRegion] = useState("");
   const [billingCountry, setBillingCountry] = useState("");
+  const [billingErrors, setBillingErrors] = useState<BillingFieldErrors>({});
   const [customDomainInput, setCustomDomainInput] = useState("");
   const [activeSection, setActiveSection] = useState<SettingsSectionKey>("security");
   const [authenticatorSetupData, setAuthenticatorSetupData] = useState<AuthenticatorSetupResponse | null>(null);
@@ -176,22 +179,58 @@ export function SystemSecurityBody({ onSaved, onCancel }: SystemSecurityBodyProp
 
   const handleSave = () => {
     if (patchMutation.isPending) return;
+    const validateRequired = (value: string) => (value.trim() ? "" : t("settings.billingFieldRequired"));
+    const nextBillingErrors: BillingFieldErrors = {};
+    if (activeSection === "billing") {
+      if (billingCustomerType === "company") {
+        const companyNameError = validateRequired(billingCompanyName);
+        if (companyNameError) nextBillingErrors.companyName = companyNameError;
+        const taxIdError = validateRequired(billingTaxId);
+        if (taxIdError) {
+          nextBillingErrors.taxId = taxIdError;
+        } else if (!isValidEuVatId(billingCountry, billingTaxId)) {
+          nextBillingErrors.taxId = t("settings.billingInvalidTaxId");
+        }
+      } else {
+        const fullNameError = validateRequired(billingFullName);
+        if (fullNameError) nextBillingErrors.fullName = fullNameError;
+      }
+      const countryError = validateRequired(billingCountry);
+      if (countryError) nextBillingErrors.country = countryError;
+      const postalCodeError = validateRequired(billingPostalCode);
+      if (postalCodeError) nextBillingErrors.postalCode = postalCodeError;
+      if (isRegionRequired(billingCountry)) {
+        const regionError = validateRequired(billingRegion);
+        if (regionError) nextBillingErrors.region = regionError;
+      }
+      const cityError = validateRequired(billingCity);
+      if (cityError) nextBillingErrors.city = cityError;
+      const addressLineError = validateRequired(billingAddressLine);
+      if (addressLineError) nextBillingErrors.addressLine = addressLineError;
+    }
+    setBillingErrors(nextBillingErrors);
+    if (Object.keys(nextBillingErrors).length > 0) return;
+    const patchPayload =
+      activeSection === "billing"
+        ? {
+            billing_customer_type: billingCustomerType,
+            billing_full_name: billingFullName.trim(),
+            billing_company_name: billingCustomerType === "company" ? billingCompanyName.trim() : "",
+            billing_tax_id: billingCustomerType === "company" ? normalizeEuVatId(billingTaxId) : "",
+            billing_address_line: billingAddressLine,
+            billing_postal_code: normalizePostalCode(billingPostalCode),
+            billing_city: billingCity,
+            billing_region: billingRegion,
+            billing_country: billingCountry,
+          }
+        : {
+            two_factor_enabled: twoFactorEnabled,
+            timezone,
+            date_format: dateFormat,
+            time_format: timeFormat,
+          };
     patchMutation.mutate(
-      {
-        two_factor_enabled: twoFactorEnabled,
-        timezone,
-        date_format: dateFormat,
-        time_format: timeFormat,
-        billing_customer_type: billingCustomerType,
-        billing_full_name: billingFullName.trim(),
-        billing_company_name: billingCustomerType === "company" ? billingCompanyName.trim() : "",
-        billing_tax_id: billingCustomerType === "company" ? normalizeEuVatId(billingTaxId) : "",
-        billing_address_line: billingAddressLine,
-        billing_postal_code: normalizePostalCode(billingPostalCode),
-        billing_city: billingCity,
-        billing_region: billingRegion,
-        billing_country: billingCountry,
-      },
+      patchPayload,
       {
         onSuccess: () => {
           toast.success(t("profile.saved"));
@@ -360,6 +399,7 @@ export function SystemSecurityBody({ onSaved, onCancel }: SystemSecurityBodyProp
             region={billingRegion}
             city={billingCity}
             addressLine={billingAddressLine}
+            errors={billingErrors}
             setCustomerType={setBillingCustomerType}
             setFullName={setBillingFullName}
             setCompanyName={setBillingCompanyName}

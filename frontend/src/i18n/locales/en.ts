@@ -784,6 +784,8 @@ export const en = {
       billingRegionSelectPlaceholder: "Select a region",
       billingOtherCountryDisabled: "The service currently operates only in Europe.",
       billingCompanyEuOnly: "Company billing is currently available only for EU countries.",
+      billingFieldRequired: "This field is required.",
+      billingInvalidTaxId: "Invalid tax ID format.",
       preferencesIntro:
         "Choose the timezone and the date/time formats used when system data is displayed across the workspace.",
       timezoneLabel: "Timezone",

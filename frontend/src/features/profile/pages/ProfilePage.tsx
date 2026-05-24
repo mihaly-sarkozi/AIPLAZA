@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { toast } from "sonner";
 import { useNavigate } from "react-router-dom";
-import { useTranslation } from "../../../i18n";
+import { t as translate, useTranslation } from "../../../i18n";
 import type { Locale } from "../../../i18n";
 import type { Theme } from "../../../i18n";
 import { useAuthStore, type User } from "../../../store/authStore";
@@ -54,6 +54,7 @@ export default function ProfilePage() {
     };
     patchProfile.mutate(body, {
       onSuccess: (data) => {
+        const savedLocale = (data.locale || body.preferred_locale) as Locale;
         setUser({
           ...user,
           name: data.name ?? undefined,
@@ -68,8 +69,11 @@ export default function ProfilePage() {
           tenant_demo_mode: data.tenant_demo_mode,
           tenant_kb_has_training: data.tenant_kb_has_training,
         });
-        if (data.locale) setLocale(data.locale as Locale);
+        if (data.locale) setLocale(savedLocale);
         if (data.theme) setTheme(data.theme as Theme);
+        if (payload.preferred_locale) {
+          toast.success(translate("profile.saved", savedLocale));
+        }
         if (payload.name !== undefined && data.name !== undefined) {
           const newName = (data.name as string)?.trim() ?? "";
           setName(newName);
@@ -99,6 +103,7 @@ export default function ProfilePage() {
 
   const handleLocaleChange = (value: Locale) => {
     setPreferredLocale(value);
+    setLocale(value);
     save({ preferred_locale: value });
   };
 

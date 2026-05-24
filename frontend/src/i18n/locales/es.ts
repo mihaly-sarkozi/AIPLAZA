@@ -785,6 +785,8 @@ export const es = {
       billingRegionSelectPlaceholder: "Selecciona una región",
       billingOtherCountryDisabled: "El servicio actualmente opera solo en Europa.",
       billingCompanyEuOnly: "La facturación de empresas está disponible actualmente solo para países de la UE.",
+      billingFieldRequired: "Este campo es obligatorio.",
+      billingInvalidTaxId: "Formato de NIF/IVA no válido.",
       preferencesIntro:
         "Configura la zona horaria y los formatos de fecha y hora que se usarán para mostrar los datos en todo el espacio de trabajo.",
       timezoneLabel: "Zona horaria",
