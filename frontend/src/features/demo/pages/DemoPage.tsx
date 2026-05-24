@@ -180,7 +180,7 @@ export default function DemoPage() {
             <a
               href={`/api/installer/privacy-policy.pdf?lang=${encodeURIComponent(locale)}`}
               target="_blank"
-              rel="noreferrer"
+              rel="noopener noreferrer"
               className="underline"
             >
               adatkezelési tájékoztató

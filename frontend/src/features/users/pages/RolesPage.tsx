@@ -9,29 +9,20 @@ import {
   useUpdateUserMutation,
   useDeleteUserMutation,
   useResendInviteMutation,
-  type UserListItem,
 } from "../hooks/useUsers";
 import { useKbList } from "../../knowledge-base/hooks/useKb";
 import UserKbAccessModal from "../components/UserKbAccessModal";
 import { getApiErrorMessage } from "../../../utils/getApiErrorMessage";
 import Alert from "../../../components/ui/Alert";
-import Button from "../../../components/ui/Button";
-import Modal, { ModalFooter, ModalHeader } from "../../../components/ui/Modal";
-import PageHeader from "../../../components/ui/PageHeader";
+import RolesHeader from "../components/RolesHeader";
+import UserConfirmModal from "../components/UserConfirmModal";
+import UserCreateModal from "../components/UserCreateModal";
+import UserEditModal from "../components/UserEditModal";
+import UserRoleList from "../components/UserRoleList";
+import type { RoleFormData, RoleUser } from "../components/rolesTypes";
 
-type User = UserListItem & { pending_registration?: boolean };
+type User = RoleUser;
 const LIST_PAGE_SIZE = 10;
-
-function isDeletedUser(user: User): boolean {
-  return Boolean(user.deleted_at);
-}
-
-function getStatusClasses(user: User): string {
-  if (isDeletedUser(user)) return "bg-[var(--color-danger-text)] text-white";
-  if (user.is_active) return "bg-[var(--color-success-text)] text-white";
-  if (user.pending_registration) return "bg-amber-500 text-white";
-  return "bg-slate-500 text-white";
-}
 
 export default function RolesPage() {
   const { t } = useTranslation();
@@ -68,13 +59,12 @@ export default function RolesPage() {
   const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
   // Form state
-  const [formData, setFormData] = useState({
+  const [formData, setFormData] = useState<RoleFormData>({
     email: "",
     name: "",
     role: "user" as "user" | "admin",
     is_active: true,
   });
-  const isOwner = (u: User | null) => u?.role === "owner";
 
   /** Aktívak névsorban előre, inaktívak névsorban hátra */
   const sortedUsers = useMemo(() => {
@@ -253,21 +243,13 @@ export default function RolesPage() {
   return (
     <div className="app-page">
       <div className="app-page-container">
-        <PageHeader
-          eyebrow={t("roles.teamLabel")}
-          title={t("roles.title")}
-          description={t("roles.pageIntro")}
-          actions={
-            <Button
-              onClick={() => {
-                resetForm();
-                setShowCreateModal(true);
-              }}
-              disabled={actionLoading}
-            >
-              {t("roles.newUser")}
-            </Button>
-          }
+        <RolesHeader
+          t={t}
+          actionLoading={actionLoading}
+          onCreate={() => {
+            resetForm();
+            setShowCreateModal(true);
+          }}
         />
 
         {error && (
@@ -277,344 +259,69 @@ export default function RolesPage() {
         {loading ? (
           <div className="text-[var(--color-foreground)]">{t("common.loading")}</div>
         ) : (
-          <section>
-            <div className="app-table-wrap">
-              <div className="app-table-head hidden grid-cols-[1.3fr_0.9fr_1.6fr_1.5fr] gap-4 !bg-[#efefef] px-5 py-3 text-sm font-medium !text-[var(--color-foreground)] md:grid">
-                <div>{t("roles.tableName")}</div>
-                <div>{t("roles.tableRole")}</div>
-                <div>{t("roles.tableEmail")}</div>
-                <div>{t("roles.tableActions")}</div>
-              </div>
-
-              <div className="divide-y divide-[var(--color-border)]">
-                {displayedUsers.map((user) => {
-                const statusLabel = isDeletedUser(user)
-                  ? t("roles.statusDeleted")
-                  : user.is_active
-                    ? t("roles.statusActive")
-                    : user.pending_registration
-                      ? t("roles.statusPending")
-                      : t("roles.statusInactive");
-                const roleLabel =
-                  user.role === "owner" ? t("roles.roleOwner") : user.role === "admin" ? t("roles.roleAdmin") : t("roles.roleUser");
-                const displayName = user.name || "—";
-
-                return (
-                  <div
-                    key={user.id}
-                    className="grid gap-3 px-5 py-4 md:grid-cols-[1.3fr_0.9fr_1.6fr_1.5fr] md:items-center md:gap-4"
-                  >
-                    <div>
-                      <p className="text-sm font-medium text-[var(--color-foreground)]">{displayName}</p>
-                      <span className={`mt-1 inline-block rounded-lg px-2 py-0.5 text-xs font-medium ${getStatusClasses(user)}`}>
-                        {statusLabel}
-                      </span>
-                    </div>
-
-                    <div className="text-sm text-[var(--color-muted-foreground)]">{roleLabel}</div>
-
-                    <div className="break-all text-sm text-[var(--color-muted)]">{user.email}</div>
-
-                    <div className="grid grid-cols-3 gap-2">
-                      {user.id !== currentUser?.id && user.role !== "owner" && (
-                        <Button
-                          type="button"
-                          onClick={() => setDeleteConfirmUser(user)}
-                          disabled={actionLoading}
-                          variant="danger"
-                          title={t("common.delete")}
-                          aria-label={t("common.delete")}
-                          className="w-full"
-                        >
-                          {t("common.delete")}
-                        </Button>
-                      )}
-                      {user.role !== "owner" && user.id !== currentUser?.id && (
-                        <Button
-                          type="button"
-                          onClick={() => setUserForKbModal(user)}
-                          disabled={actionLoading}
-                          variant="secondary"
-                          title={t("kb.actionPermissions")}
-                          aria-label={t("kb.actionPermissions")}
-                          className="w-full"
-                        >
-                          {t("kb.actionPermissions")}
-                        </Button>
-                      )}
-                      {user.role === "owner" && currentUser?.role !== "owner" ? (
-                        <span className="col-span-3 text-xs text-slate-400" title={t("roles.ownerOnlyEdit")}>
-                          {t("roles.ownerOnlyEdit")}
-                        </span>
-                      ) : (
-                        <Button
-                          type="button"
-                          onClick={() => openEditModal(user)}
-                          disabled={actionLoading}
-                          variant="secondary"
-                          title={t("roles.actionSettings")}
-                          aria-label={t("roles.actionSettings")}
-                          className="w-full"
-                        >
-                          {t("roles.actionSettings")}
-                        </Button>
-                      )}
-                      {user.pending_registration && user.role !== "owner" && (
-                        <Button
-                          type="button"
-                          onClick={() => setResendConfirmUser(user)}
-                          disabled={actionLoading}
-                          variant="secondary"
-                          title={t("roles.resendInvite")}
-                          aria-label={t("roles.resendInvite")}
-                          className="col-span-3 w-full !bg-[#efefef] !text-[var(--color-foreground)] hover:!bg-[#e5e5e5]"
-                        >
-                          {t("roles.resendInvite")}
-                        </Button>
-                      )}
-                    </div>
-                  </div>
-                );
-                })}
-              </div>
-              <div ref={loadMoreRef} className="h-8" />
-            </div>
-          </section>
+          <UserRoleList
+            users={displayedUsers}
+            currentUser={currentUser}
+            actionLoading={actionLoading}
+            loadMoreRef={loadMoreRef}
+            t={t}
+            onDelete={setDeleteConfirmUser}
+            onKbPermissions={setUserForKbModal}
+            onEdit={openEditModal}
+            onResendInvite={setResendConfirmUser}
+          />
         )}
       </div>
 
-      {/* Create Modal */}
-      {showCreateModal && (
-        <Modal open={showCreateModal} onClose={() => setShowCreateModal(false)} panelClassName="max-w-md">
-            <ModalHeader title={t("roles.modalNewTitle")} description={t("roles.modalNewHint")} />
-            {createFormError && (
-              <Alert tone="error" className="mb-4">{createFormError}</Alert>
-            )}
-            <div className="space-y-4">
-              <div>
-                <label className="block mb-1 text-[var(--color-label)]">{t("roles.labelName")}{t("common.required")}</label>
-                <input
-                  type="text"
-                  value={formData.name}
-                  onChange={(e) => {
-                    setFormData({ ...formData, name: e.target.value });
-                    if (createFormError) setCreateFormError(null);
-                  }}
-                  className="w-full bg-[var(--color-input-bg)] border border-[var(--color-border)] text-[var(--color-foreground)] p-2 rounded"
-                  placeholder={t("roles.placeholderName")}
-                  maxLength={100}
-                  required
-                />
-              </div>
-              <div>
-                <label className="block mb-1 text-[var(--color-label)]">{t("roles.labelEmail")}{t("common.required")}</label>
-                <input
-                  type="email"
-                  value={formData.email}
-                  onChange={(e) => {
-                    setFormData({ ...formData, email: e.target.value });
-                    if (createFormError) setCreateFormError(null);
-                  }}
-                  className="w-full bg-[var(--color-input-bg)] border border-[var(--color-border)] text-[var(--color-foreground)] p-2 rounded"
-                  placeholder={t("roles.placeholderInviteEmail")}
-                  maxLength={100}
-                  required
-                />
-              </div>
-              <div>
-                <label className="block mb-1 text-[var(--color-label)]">{t("roles.labelRole")}</label>
-                <select
-                  value={formData.role}
-                  onChange={(e) =>
-                    setFormData({ ...formData, role: e.target.value as "user" | "admin" })
-                  }
-                  className="w-full bg-[var(--color-input-bg)] border border-[var(--color-border)] text-[var(--color-foreground)] p-2 rounded"
-                >
-                  <option value="user">{t("roles.roleUser")}</option>
-                  <option value="admin">{t("roles.roleAdmin")}</option>
-                </select>
-              </div>
-            </div>
-            <ModalFooter>
-              <Button
-                type="button"
-                onClick={() => {
-                  setShowCreateModal(false);
-                  resetForm();
-                  setCreateFormError(null);
-                }}
-                variant="secondary"
-                disabled={actionLoading}
-              >
-                {t("common.cancel")}
-              </Button>
-              <Button
-                type="button"
-                onClick={handleCreate}
-                disabled={actionLoading}
-              >
-                {actionLoading ? t("common.loading") : t("common.create")}
-              </Button>
-            </ModalFooter>
-        </Modal>
-      )}
+      <UserCreateModal
+        open={showCreateModal}
+        formData={formData}
+        formError={createFormError}
+        actionLoading={actionLoading}
+        t={t}
+        setFormData={setFormData}
+        clearFormError={() => createFormError && setCreateFormError(null)}
+        onClose={() => {
+          setShowCreateModal(false);
+          resetForm();
+          setCreateFormError(null);
+        }}
+        onCreate={handleCreate}
+      />
 
-      {/* Edit Modal */}
-      {editingUser && (
-        <Modal open={Boolean(editingUser)} onClose={() => setEditingUser(null)} panelClassName="max-w-md">
-            <ModalHeader title={t("roles.modalEditTitle")} />
-            {editFormError && (
-              <Alert tone="error" className="mb-4">{editFormError}</Alert>
-            )}
-            <div className="space-y-4">
-              <div className="flex items-center justify-between gap-3">
-                <label htmlFor="edit-active-toggle" className="text-[var(--color-label)] font-medium cursor-pointer">
-                  {t("roles.labelActive")}
-                </label>
-                <button
-                  id="edit-active-toggle"
-                  type="button"
-                  role="switch"
-                  aria-checked={formData.is_active}
-                  disabled={editingUser.role === "owner" || editingUser.pending_registration === true}
-                  onClick={() =>
-                    (editingUser.role === "owner" || editingUser.pending_registration)
-                      ? undefined
-                      : setFormData({ ...formData, is_active: !formData.is_active })
-                  }
-                  className={`
-                    relative inline-flex h-6 w-11 shrink-0 rounded-full p-0.5
-                    transition-colors duration-200 ease-in-out
-                    focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-neutral-600
-                    disabled:opacity-50 disabled:cursor-not-allowed disabled:pointer-events-none
-                    ${formData.is_active ? "bg-[var(--color-primary)]" : "bg-[var(--color-border)]"}
-                  `}
-                >
-                  <span
-                    className={`
-                      inline-block h-5 w-5 rounded-full bg-white shadow-sm
-                      ring-0 transform transition-transform duration-200 ease-in-out
-                      ${formData.is_active ? "translate-x-5" : "translate-x-0"}
-                    `}
-                    aria-hidden
-                  />
-                </button>
-              </div>
-              <div>
-                <label className="block mb-1 text-[var(--color-label)]">{t("roles.labelName")}{t("common.required")}</label>
-                <input
-                  type="text"
-                  value={formData.name}
-                  onChange={(e) => {
-                    setFormData({ ...formData, name: e.target.value });
-                    if (editFormError) setEditFormError(null);
-                  }}
-                  className="w-full bg-[var(--color-input-bg)] border border-[var(--color-border)] text-[var(--color-foreground)] p-2 rounded"
-                  placeholder={t("roles.placeholderName")}
-                  maxLength={100}
-                  required
-                />
-              </div>
-              <div>
-                <label className="block mb-1 text-[var(--color-label)]">{t("roles.labelEmail")}{!isOwner(editingUser) && editingUser.id !== currentUser?.id ? t("common.required") : ""}</label>
-                {isOwner(editingUser) ? (
-                  <p className="text-[var(--color-foreground)] bg-[var(--color-table-head)] border border-[var(--color-border)] p-2 rounded text-sm">
-                    {editingUser.email}
-                  </p>
-                ) : (
-                  <input
-                    type="email"
-                    value={formData.email}
-                    onChange={(e) => {
-                      setFormData({ ...formData, email: e.target.value });
-                      if (editFormError) setEditFormError(null);
-                    }}
-                    className="w-full bg-[var(--color-input-bg)] border border-[var(--color-border)] text-[var(--color-foreground)] p-2 rounded"
-                    placeholder={t("roles.placeholderEmail")}
-                    maxLength={100}
-                    required={editingUser.id !== currentUser?.id}
-                  />
-                )}
-              </div>
-              <div>
-                <label className="block mb-1 text-[var(--color-label)]">{t("roles.labelRole")}</label>
-                {isOwner(editingUser) ? (
-                  <p className="text-[var(--color-foreground)] bg-[var(--color-table-head)] border border-[var(--color-border)] p-2 rounded text-sm">
-                    {t("roles.roleOwner")}
-                    <span className="block text-xs text-[var(--color-muted)] mt-1">{t("roles.ownerOnlyName")}</span>
-                  </p>
-                ) : editingUser.id === currentUser?.id ? (
-                  <p className="text-[var(--color-foreground)] bg-[var(--color-table-head)] border border-[var(--color-border)] p-2 rounded text-sm">
-                    {editingUser.role === "owner" ? t("roles.roleOwner") : editingUser.role}
-                    <span className="block text-xs text-[var(--color-muted)] mt-1">{t("roles.ownRoleNoEdit")}</span>
-                  </p>
-                ) : (
-                  <select
-                    value={formData.role}
-                    onChange={(e) =>
-                      setFormData({ ...formData, role: e.target.value as "user" | "admin" })
-                    }
-                    className="w-full bg-[var(--color-input-bg)] border border-[var(--color-border)] text-[var(--color-foreground)] p-2 rounded"
-                  >
-                    <option value="user">{t("roles.roleUser")}</option>
-                    <option value="admin">{t("roles.roleAdmin")}</option>
-                  </select>
-                )}
-              </div>
-            </div>
-            <ModalFooter>
-              <Button
-                type="button"
-                onClick={() => {
-                  setEditingUser(null);
-                  resetForm();
-                  setEditFormError(null);
-                }}
-                variant="secondary"
-                disabled={actionLoading}
-              >
-                {t("common.cancel")}
-              </Button>
-              <Button
-                type="button"
-                onClick={handleUpdate}
-                disabled={actionLoading}
-              >
-                {actionLoading ? t("common.loading") : t("common.save")}
-              </Button>
-            </ModalFooter>
-        </Modal>
-      )}
+      <UserEditModal
+        user={editingUser}
+        currentUserId={currentUser?.id}
+        formData={formData}
+        formError={editFormError}
+        actionLoading={actionLoading}
+        t={t}
+        setFormData={setFormData}
+        clearFormError={() => editFormError && setEditFormError(null)}
+        onClose={() => {
+          setEditingUser(null);
+          resetForm();
+          setEditFormError(null);
+        }}
+        onSave={handleUpdate}
+      />
 
       <SavedModal
         open={savedModalOpen}
         onClose={() => setSavedModalOpen(false)}
       />
 
-      {/* Delete confirm */}
-      {deleteConfirmUser && (
-        <Modal open={Boolean(deleteConfirmUser)} onClose={() => setDeleteConfirmUser(null)} panelClassName="max-w-md">
-            <ModalHeader title={t("common.delete")} description={t("roles.confirmDelete")} />
-            <ModalFooter>
-              <Button
-                type="button"
-                onClick={() => setDeleteConfirmUser(null)}
-                variant="secondary"
-                disabled={actionLoading}
-              >
-                {t("common.cancel")}
-              </Button>
-              <Button
-                type="button"
-                onClick={() => deleteConfirmUser && handleDelete(deleteConfirmUser.id)}
-                variant="danger"
-                disabled={actionLoading}
-              >
-                {actionLoading ? t("common.loading") : t("common.delete")}
-              </Button>
-            </ModalFooter>
-        </Modal>
-      )}
+      <UserConfirmModal
+        open={Boolean(deleteConfirmUser)}
+        title={t("common.delete")}
+        description={t("roles.confirmDelete")}
+        confirmLabel={t("common.delete")}
+        actionLoading={actionLoading}
+        danger
+        t={t}
+        onClose={() => setDeleteConfirmUser(null)}
+        onConfirm={() => deleteConfirmUser && handleDelete(deleteConfirmUser.id)}
+      />
 
       {/* User KB access modal (tudástár elérhetőség) */}
       {userForKbModal && (
@@ -625,29 +332,16 @@ export default function RolesPage() {
         />
       )}
 
-      {/* Resend invite confirm */}
-      {resendConfirmUser && (
-        <Modal open={Boolean(resendConfirmUser)} onClose={() => setResendConfirmUser(null)} panelClassName="max-w-md">
-            <ModalHeader title={t("roles.resendInvite")} description={t("roles.confirmResend")} />
-            <ModalFooter>
-              <Button
-                type="button"
-                onClick={() => setResendConfirmUser(null)}
-                variant="secondary"
-                disabled={actionLoading}
-              >
-                {t("common.cancel")}
-              </Button>
-              <Button
-                type="button"
-                onClick={() => resendConfirmUser && handleResendInvite(resendConfirmUser.id)}
-                disabled={actionLoading}
-              >
-                {actionLoading ? t("common.loading") : t("common.send")}
-              </Button>
-            </ModalFooter>
-        </Modal>
-      )}
+      <UserConfirmModal
+        open={Boolean(resendConfirmUser)}
+        title={t("roles.resendInvite")}
+        description={t("roles.confirmResend")}
+        confirmLabel={t("common.send")}
+        actionLoading={actionLoading}
+        t={t}
+        onClose={() => setResendConfirmUser(null)}
+        onConfirm={() => resendConfirmUser && handleResendInvite(resendConfirmUser.id)}
+      />
     </div>
   );
 }
