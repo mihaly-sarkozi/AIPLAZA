@@ -12,11 +12,10 @@ from apps.settings.service.billing_validator import BillingSettingsUpdate, Billi
 from apps.settings.service.eu_vat_validation_service import EuVatValidationService
 from apps.settings.service.locale_settings_service import LocaleSettingsService, LocaleSettingsUpdate
 from apps.settings.service.settings_sections_service import SettingsSectionsService
+from apps.settings.service.settings_state_mapper import coerce_settings_state, coerce_two_factor_settings_state
 
 
 class SettingsFacade:
-    DEFAULT_STATE = SettingsState()
-
     def __init__(
         self,
         *,
@@ -38,55 +37,11 @@ class SettingsFacade:
         self._locale_service = LocaleSettingsService(core_settings_service=core_settings_service)
         self._sections_service = SettingsSectionsService(sections_lister=sections_lister)
 
-    @staticmethod
-    def _coerce_state(payload: dict[str, object]) -> SettingsState:
-        return SettingsState(
-            two_factor_enabled=bool(payload.get("two_factor_enabled", False)),
-            timezone=str(payload.get("timezone", SettingsFacade.DEFAULT_STATE.timezone) or SettingsFacade.DEFAULT_STATE.timezone),  # type: ignore[arg-type]
-            date_format=str(payload.get("date_format", SettingsFacade.DEFAULT_STATE.date_format) or SettingsFacade.DEFAULT_STATE.date_format),  # type: ignore[arg-type]
-            time_format=str(payload.get("time_format", SettingsFacade.DEFAULT_STATE.time_format) or SettingsFacade.DEFAULT_STATE.time_format),  # type: ignore[arg-type]
-            billing_customer_type=str(payload.get("billing_customer_type", "company") or "company"),  # type: ignore[arg-type]
-            billing_full_name=str(payload.get("billing_full_name", "") or ""),
-            billing_company_name=str(payload.get("billing_company_name", "") or ""),
-            billing_tax_id=str(payload.get("billing_tax_id", "") or ""),
-            billing_address_line=str(payload.get("billing_address_line", "") or ""),
-            billing_postal_code=str(payload.get("billing_postal_code", "") or ""),
-            billing_city=str(payload.get("billing_city", "") or ""),
-            billing_region=str(payload.get("billing_region", "") or ""),
-            billing_country=str(payload.get("billing_country", "") or ""),
-        )
-
-    @staticmethod
-    def _coerce_two_factor_settings(payload: dict[str, object]) -> TwoFactorSettingsState:
-        return TwoFactorSettingsState(two_factor_enabled=bool(payload.get("two_factor_enabled", False)))
-
-    @staticmethod
-    def _coerce_locale_settings(payload: dict[str, object]) -> LocaleSettingsState:
-        return LocaleSettingsState(
-            timezone=str(payload.get("timezone", SettingsFacade.DEFAULT_STATE.timezone) or SettingsFacade.DEFAULT_STATE.timezone),  # type: ignore[arg-type]
-            date_format=str(payload.get("date_format", SettingsFacade.DEFAULT_STATE.date_format) or SettingsFacade.DEFAULT_STATE.date_format),  # type: ignore[arg-type]
-            time_format=str(payload.get("time_format", SettingsFacade.DEFAULT_STATE.time_format) or SettingsFacade.DEFAULT_STATE.time_format),  # type: ignore[arg-type]
-        )
-
-    @staticmethod
-    def _coerce_billing_settings(payload: dict[str, object]) -> BillingSettingsState:
-        return BillingSettingsState(
-            billing_customer_type=str(payload.get("billing_customer_type", "company") or "company"),  # type: ignore[arg-type]
-            billing_full_name=str(payload.get("billing_full_name", "") or ""),
-            billing_company_name=str(payload.get("billing_company_name", "") or ""),
-            billing_tax_id=str(payload.get("billing_tax_id", "") or ""),
-            billing_address_line=str(payload.get("billing_address_line", "") or ""),
-            billing_postal_code=str(payload.get("billing_postal_code", "") or ""),
-            billing_city=str(payload.get("billing_city", "") or ""),
-            billing_region=str(payload.get("billing_region", "") or ""),
-            billing_country=str(payload.get("billing_country", "") or ""),
-        )
-
     def get_settings(self) -> SettingsState:
-        return self._coerce_state(self._core_settings_service.get_settings_snapshot())
+        return coerce_settings_state(self._core_settings_service.get_settings_snapshot())
 
     def get_two_factor_settings(self) -> TwoFactorSettingsState:
-        return self._coerce_two_factor_settings(self._core_settings_service.get_two_factor_settings())
+        return coerce_two_factor_settings_state(self._core_settings_service.get_two_factor_settings())
 
     def update_two_factor_settings(
         self,
@@ -98,7 +53,7 @@ class SettingsFacade:
             two_factor_enabled=two_factor_enabled,
             updated_by=updated_by,
         )
-        return self._coerce_two_factor_settings(state)
+        return coerce_two_factor_settings_state(state)
 
     def get_locale_settings(self) -> LocaleSettingsState:
         return self._locale_service.get_locale_settings()
@@ -195,7 +150,7 @@ class SettingsFacade:
             if value is not None:
                 payload[key] = value
         state = self._core_settings_service.update_settings(**payload)
-        return self._coerce_state(state)
+        return coerce_settings_state(state)
 
     def get_sections(self) -> list[object]:
         return self._sections_service.get_sections()

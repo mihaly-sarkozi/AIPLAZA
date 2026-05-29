@@ -117,7 +117,7 @@ export default function PackagesAddonCheckoutPage() {
     const savedCustomerType = checkoutCustomerTypeFromSettings(settings);
     setCustomerType(savedCustomerType);
     setCompany(savedCustomerType === "company" ? settings.billing_company_name ?? "" : "");
-    setFullName(savedCustomerType === "private" ? settings.billing_company_name ?? "" : user?.name ?? "");
+    setFullName(savedCustomerType === "private" ? settings.billing_full_name ?? "" : user?.name ?? "");
     setAddressLine(settings.billing_address_line ?? "");
     setPostalCode(normalizePostalCode(settings.billing_postal_code ?? ""));
     setCity(settings.billing_city ?? "");
