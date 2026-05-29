@@ -1,3 +1,7 @@
+// frontend/src/features/settings/components/SecuritySettingsSection.tsx
+// Feladat: Legacy security settings UI komponens authenticator státusz megjelenítéshez.
+// Sárközi Mihály - 2026.05.29
+
 import Button from "../../../components/ui/Button";
 import SettingsBlock from "./SettingsBlock";
 

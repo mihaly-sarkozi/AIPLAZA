@@ -1,3 +1,7 @@
+// frontend/src/features/settings/components/BillingSettingsSection.test.tsx
+// Feladat: Legacy BillingSettingsSection komponens viselkedésének unit tesztje.
+// Sárközi Mihály - 2026.05.29
+
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";

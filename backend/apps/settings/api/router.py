@@ -6,10 +6,10 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Body, HTTPException
 
-from apps.settings.api.SettingsSectionResponse import SettingsSectionResponse
-from apps.settings.api.SettingsUpdateRequest import (
+from apps.settings.api.schemas import (
     BillingSettingsUpdateRequest,
     LocaleSettingsUpdateRequest,
+    SettingsSectionResponse,
     SettingsUpdateRequest,
     TwoFactorSettingsUpdateRequest,
 )
@@ -89,6 +89,7 @@ def get_two_factor_settings(
     facade: SettingsFacadeDep,
     _current_user: SettingsReadUserDep,
 ):
+    # Legacy/global 2FA settings endpoint. Authenticator MFA flow remains in /auth/authenticator/*.
     return facade.get_two_factor_settings()
 
 
@@ -98,6 +99,7 @@ def update_two_factor_settings(
     current_user: SettingsWriteUserDep,
     body: TwoFactorSettingsUpdateRequest = Body(default=TwoFactorSettingsUpdateRequest()),
 ):
+    # Legacy/global 2FA settings endpoint. Authenticator MFA flow remains in /auth/authenticator/*.
     return facade.update_two_factor_settings(
         two_factor_enabled=body.two_factor_enabled,
         updated_by=current_user.id,

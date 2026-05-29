@@ -1,3 +1,7 @@
+// frontend/src/features/settings/hooks/useAuthenticator.ts
+// Feladat: Legacy authenticator React Query hookok a settings security nézethez.
+// Sárközi Mihály - 2026.05.29
+
 import { useMutation, useQuery, useQueryClient, type UseMutationOptions, type UseQueryOptions } from "@tanstack/react-query";
 
 import { useAuthStore } from "../../auth/state/authStore";

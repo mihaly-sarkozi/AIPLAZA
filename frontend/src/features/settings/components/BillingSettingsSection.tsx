@@ -1,3 +1,7 @@
+// frontend/src/features/settings/components/BillingSettingsSection.tsx
+// Feladat: Legacy billing settings UI komponens a korábbi SettingsPage felépítéshez.
+// Sárközi Mihály - 2026.05.29
+
 import SettingsBlock from "./SettingsBlock";
 import {
   BILLING_COUNTRY_OTHER,

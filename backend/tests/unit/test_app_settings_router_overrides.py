@@ -502,3 +502,33 @@ def test_patch_settings_uses_body_not_query_param() -> None:
 
     assert "body" not in query_param_names
     assert "body" in body_param_names
+
+
+def test_patch_split_billing_settings_rejects_non_admin_owner_role(monkeypatch: pytest.MonkeyPatch) -> None:
+    facade = _FakeSettingsFacade()
+    member = User(
+        id=3,
+        email="member@example.com",
+        password_hash="hash",
+        is_active=True,
+        role="user",
+        created_at=datetime.now(timezone.utc),
+    )
+    app = _app(facade=facade, current_user=member, monkeypatch=monkeypatch)
+
+    with TestClient(app, base_url="http://demo.lvh.me") as client:
+        response = client.patch(
+            "/api/settings/billing",
+            json={
+                "billing_customer_type": "company",
+                "billing_company_name": "Example Kft.",
+                "billing_tax_id": "HU12345678",
+                "billing_address_line": "Fo utca 1.",
+                "billing_postal_code": "1051",
+                "billing_city": "Budapest",
+                "billing_country": "HU",
+            },
+        )
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "Only owner or admin can update billing settings."

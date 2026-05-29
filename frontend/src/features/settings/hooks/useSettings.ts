@@ -1,3 +1,7 @@
+// frontend/src/features/settings/hooks/useSettings.ts
+// Feladat: Legacy settings React Query hookok a központi query key és API service réteggel.
+// Sárközi Mihály - 2026.05.29
+
 import { useQuery, useMutation, useQueryClient, type UseQueryOptions, type UseMutationOptions } from "@tanstack/react-query";
 import { useAuthStore } from "../../auth/state/authStore";
 import { queryKeys } from "../../../queryKeys";

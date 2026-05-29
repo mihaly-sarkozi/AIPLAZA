@@ -1,3 +1,7 @@
+// frontend/src/features/settings/hooks/useDomainSettings.ts
+// Feladat: Legacy domain React Query hookok a settings modulból használt domain műveletekhez.
+// Sárközi Mihály - 2026.05.29
+
 import { useMutation, useQuery, useQueryClient, type UseMutationOptions, type UseQueryOptions } from "@tanstack/react-query";
 
 import { useAuthStore } from "../../auth/state/authStore";

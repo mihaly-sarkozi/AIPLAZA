@@ -1,6 +1,12 @@
+// frontend/src/features/settings/components/SettingsModal.tsx
+// Feladat: Legacy settings modal wrapper, amely a shellt ágyazza modalba kompatibilitási okból.
+// Sárközi Mihály - 2026.05.29
+
 import { useTranslation } from "../../../i18n";
 import Modal, { ModalHeader } from "../../../components/ui/Modal";
-import { SystemSecurityBody } from "../pages/SettingsPage";
+import { useAuthStore } from "../../../store/authStore";
+import { canAccessSettings } from "../model/settingsPermissions";
+import SettingsShell from "../shell/SettingsShell";
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -9,6 +15,7 @@ interface SettingsModalProps {
 
 export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const { t } = useTranslation();
+  const user = useAuthStore((s) => s.user);
 
   return (
     <Modal open={isOpen} onClose={onClose} panelClassName="max-w-md bg-[var(--color-background)]">
@@ -17,7 +24,7 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
         title={t("settings.title")}
         description={t("settings.pageIntro")}
       />
-      <SystemSecurityBody onSaved={onClose} onCancel={onClose} />
+      {user && canAccessSettings(user) ? <SettingsShell user={user} /> : null}
     </Modal>
   );
 }

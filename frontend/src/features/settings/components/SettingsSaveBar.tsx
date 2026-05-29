@@ -1,3 +1,7 @@
+// frontend/src/features/settings/components/SettingsSaveBar.tsx
+// Feladat: Legacy settings mentés/mégse gombsor komponens.
+// Sárközi Mihály - 2026.05.29
+
 import Button from "../../../components/ui/Button";
 
 type SettingsSaveBarProps = {

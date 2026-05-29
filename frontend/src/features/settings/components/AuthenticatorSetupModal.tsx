@@ -1,3 +1,7 @@
+// frontend/src/features/settings/components/AuthenticatorSetupModal.tsx
+// Feladat: Legacy authenticator setup wizard modal komponens.
+// Sárközi Mihály - 2026.05.29
+
 import { QRCodeSVG } from "qrcode.react";
 import Button from "../../../components/ui/Button";
 import Modal, { ModalFooter, ModalHeader } from "../../../components/ui/Modal";

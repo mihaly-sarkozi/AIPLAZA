@@ -1,3 +1,7 @@
+// frontend/src/features/settings/components/SettingsBlock.tsx
+// Feladat: Közös settings kártya/szekció layout komponens.
+// Sárközi Mihály - 2026.05.29
+
 import type { ReactNode } from "react";
 
 export default function SettingsBlock({ title, description, children }: { title: string; description?: string; children: ReactNode }) {

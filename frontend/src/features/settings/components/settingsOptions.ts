@@ -1,3 +1,7 @@
+// frontend/src/features/settings/components/settingsOptions.ts
+// Feladat: Settings locale/date/time opciólisták központi konstansai.
+// Sárközi Mihály - 2026.05.29
+
 import type { SettingsDateFormat, SettingsTimeFormat, SettingsTimezone } from "../../../api/services/settingsService";
 
 export const TIMEZONE_OPTIONS: { value: SettingsTimezone; label: string }[] = [

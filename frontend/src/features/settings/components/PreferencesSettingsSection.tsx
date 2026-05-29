@@ -1,3 +1,7 @@
+// frontend/src/features/settings/components/PreferencesSettingsSection.tsx
+// Feladat: Legacy preferences settings UI komponens (section-only, API nélkül).
+// Sárközi Mihály - 2026.05.29
+
 import type { SettingsDateFormat, SettingsTimeFormat, SettingsTimezone } from "../../../api/services/settingsService";
 import SettingsBlock from "./SettingsBlock";
 import { DATE_FORMAT_OPTIONS, TIMEZONE_OPTIONS, TIME_FORMAT_OPTIONS } from "./settingsOptions";

@@ -1,3 +1,7 @@
+// frontend/src/features/settings/components/SettingsSectionTabs.tsx
+// Feladat: Legacy settings tab navigáció komponens (visszafelé kompatibilitáshoz megtartva).
+// Sárközi Mihály - 2026.05.29
+
 export type SettingsSectionKey = "security" | "preferences" | "billing" | "domains";
 
 type SettingsSectionTabsProps = {

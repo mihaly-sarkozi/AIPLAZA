@@ -1,3 +1,7 @@
+// frontend/src/features/settings/components/DomainsSettingsSection.tsx
+// Feladat: Legacy domain settings UI komponens custom domain kezeléshez.
+// Sárközi Mihály - 2026.05.29
+
 import Button from "../../../components/ui/Button";
 import type { DomainRecordResponse } from "../../../api/services/domainService";
 import SettingsBlock from "./SettingsBlock";
