@@ -32,10 +32,22 @@ import {
 import { queryKeys } from "../queryKeys";
 import { useAuthStore } from "../store/authStore";
 import {
+  getBillingSettings,
+  getLocaleSettings,
   getSettings,
+  getTwoFactorSettings,
+  patchBillingSettings,
+  patchLocaleSettings,
   patchSettings,
+  patchTwoFactorSettings,
+  type BillingSettingsResponse,
+  type LocaleSettingsResponse,
+  type PatchBillingSettingsPayload,
+  type PatchLocaleSettingsPayload,
   type PatchSettingsPayload,
+  type PatchTwoFactorSettingsPayload,
   type SettingsResponse,
+  type TwoFactorSettingsResponse,
 } from "../api/services/settingsService";
 
 // ----- Auth / settings (unauthenticated or public) -----
@@ -138,6 +150,96 @@ export function usePatchSettingsMutation(
   });
 }
 
+export function useBillingSettings(
+  options?: Omit<UseQueryOptions<BillingSettingsResponse>, "queryKey" | "queryFn">
+) {
+  const user = useAuthStore((s) => s.user);
+  return useQuery({
+    queryKey: queryKeys.settingsBilling,
+    queryFn: getBillingSettings,
+    enabled: user?.role === "owner" || user?.role === "admin",
+    ...options,
+  });
+}
+
+export function usePatchBillingSettingsMutation(
+  options?: UseMutationOptions<BillingSettingsResponse, Error, PatchBillingSettingsPayload>
+) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: patchBillingSettings,
+    onSuccess: (data) => {
+      queryClient.setQueryData(queryKeys.settingsBilling, (prev: unknown) =>
+        prev ? { ...(prev as object), ...data } : data
+      );
+      queryClient.setQueryData(["settings"], (prev: unknown) =>
+        prev ? { ...(prev as object), ...data } : prev
+      );
+    },
+    ...options,
+  });
+}
+
+export function useLocaleSettings(
+  options?: Omit<UseQueryOptions<LocaleSettingsResponse>, "queryKey" | "queryFn">
+) {
+  const user = useAuthStore((s) => s.user);
+  return useQuery({
+    queryKey: queryKeys.settingsLocale,
+    queryFn: getLocaleSettings,
+    enabled: Boolean(user),
+    ...options,
+  });
+}
+
+export function usePatchLocaleSettingsMutation(
+  options?: UseMutationOptions<LocaleSettingsResponse, Error, PatchLocaleSettingsPayload>
+) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: patchLocaleSettings,
+    onSuccess: (data) => {
+      queryClient.setQueryData(queryKeys.settingsLocale, (prev: unknown) =>
+        prev ? { ...(prev as object), ...data } : data
+      );
+      queryClient.setQueryData(["settings"], (prev: unknown) =>
+        prev ? { ...(prev as object), ...data } : prev
+      );
+    },
+    ...options,
+  });
+}
+
+export function useTwoFactorSettings(
+  options?: Omit<UseQueryOptions<TwoFactorSettingsResponse>, "queryKey" | "queryFn">
+) {
+  const user = useAuthStore((s) => s.user);
+  return useQuery({
+    queryKey: queryKeys.settingsTwoFactor,
+    queryFn: getTwoFactorSettings,
+    enabled: user?.role === "owner" || user?.role === "admin",
+    ...options,
+  });
+}
+
+export function usePatchTwoFactorSettingsMutation(
+  options?: UseMutationOptions<TwoFactorSettingsResponse, Error, PatchTwoFactorSettingsPayload>
+) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: patchTwoFactorSettings,
+    onSuccess: (data) => {
+      queryClient.setQueryData(queryKeys.settingsTwoFactor, (prev: unknown) =>
+        prev ? { ...(prev as object), ...data } : data
+      );
+      queryClient.setQueryData(["settings"], (prev: unknown) =>
+        prev ? { ...(prev as object), ...data } : prev
+      );
+    },
+    ...options,
+  });
+}
+
 // ----- Me (profile) -----
 
 export function useProfileQuery(
@@ -199,9 +301,9 @@ export function usePatchProfilePreferencesMutation(
 
 export function usePatchMeMutation(
   options?: UseMutationOptions<
-    { name?: string; preferred_locale?: string; preferred_theme?: string },
+    { name?: string; email?: string; pending_email?: string | null; preferred_locale?: string; preferred_theme?: string },
     Error,
-    { name?: string; preferred_locale?: string; preferred_theme?: string }
+    { name?: string; email?: string; preferred_locale?: string; preferred_theme?: string }
   >
 ) {
   const queryClient = useQueryClient();

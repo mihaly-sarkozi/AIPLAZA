@@ -94,6 +94,7 @@ def resend_invite(
             user_id,
             request_base_url=tenant_frontend_base_url_from_request(request),
             updated_by=current_user.id,
+            invite_lang=getattr(current_user, "preferred_locale", None),
         )
         user = svc.get_by_id(user_id)
         if not user:

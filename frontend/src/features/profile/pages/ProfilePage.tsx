@@ -21,6 +21,7 @@ export default function ProfilePage() {
   const { t, locale, setLocale, theme, setTheme } = useTranslation();
   const { user, setUser, logout } = useAuthStore();
   const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
   const originalNameRef = useRef("");
   const [preferredLocale, setPreferredLocale] = useState<Locale>(locale);
   const [preferredTheme, setPreferredTheme] = useState<Theme>(theme);
@@ -33,6 +34,7 @@ export default function ProfilePage() {
   const demoUnsubscribe = useDemoUnsubscribeMutation();
   const saving = patchProfile.isPending;
   const profile = profileQuery.data;
+  const isOwner = user?.role === "owner";
 
   useEffect(() => {
     const source = profile ?? user;
@@ -45,10 +47,11 @@ export default function ProfilePage() {
     }
   }, [profile, user, locale, theme]);
 
-  const save = (payload: { name?: string | null; preferred_locale?: Locale; preferred_theme?: Theme }) => {
+  const save = (payload: { name?: string | null; email?: string; preferred_locale?: Locale; preferred_theme?: Theme }) => {
     if (!user) return;
     const body = {
       name: payload.name !== undefined ? (payload.name ?? undefined) : (name.trim() || undefined),
+      ...(payload.email !== undefined ? { email: payload.email } : {}),
       preferred_locale: payload.preferred_locale ?? preferredLocale,
       preferred_theme: payload.preferred_theme ?? preferredTheme,
     };
@@ -59,6 +62,8 @@ export default function ProfilePage() {
           ...user,
           name: data.name ?? undefined,
           email: data.email,
+          pending_email: data.pending_email,
+          pending_email_expires_at: data.pending_email_expires_at,
           role: data.role as User["role"],
           is_active: data.is_active,
           preferred_locale: data.preferred_locale,
@@ -80,6 +85,14 @@ export default function ProfilePage() {
           originalNameRef.current = newName;
           setNameError(null);
         }
+        if (payload.email !== undefined) {
+          setEmail("");
+          toast.success(
+            isOwner && data.pending_email
+              ? translate("profile.savedWithEmailPending", savedLocale).replace("{{email}}", data.pending_email)
+              : translate("profile.saved", savedLocale)
+          );
+        }
       },
       onError: (err: unknown) => {
         toast.error(getApiErrorMessage(err) ?? t("common.errorGeneric"));
@@ -99,6 +112,14 @@ export default function ProfilePage() {
 
   const handleRevertName = () => {
     setName(originalNameRef.current);
+  };
+
+  const handleSaveEmail = () => {
+    if (!user) return;
+    const accountEmail = (((profile?.email as string) || (user?.email as string)) || "").trim();
+    const emailTrim = email.trim();
+    if (!emailTrim || emailTrim.toLowerCase() === accountEmail.toLowerCase()) return;
+    save({ email: emailTrim });
   };
 
   const handleLocaleChange = (value: Locale) => {
@@ -162,13 +183,51 @@ export default function ProfilePage() {
 
         <div className="w-full space-y-6 rounded-lg p-6 border border-[var(--color-border)]" style={{ backgroundColor: 'var(--color-card)' }}>
         <div>
-          <label className="block mb-1 text-[var(--color-label)]">{t("profile.emailLabel")}</label>
+          <label className="block mb-1 text-[var(--color-label)]">{t("profile.emailCurrentAccountLabel")}</label>
           <input
             type="email"
             readOnly
             value={(((profile?.email as string) || (user?.email as string)) || "").trim()}
             className="w-full bg-[var(--color-muted)]/30 border border-[var(--color-border)] text-[var(--color-foreground)] p-2 rounded cursor-not-allowed"
           />
+        </div>
+        {isOwner && (((profile?.pending_email as string) || (user?.pending_email as string)) || "").trim() ? (
+          <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-table-head)] p-3 text-sm">
+            <div className="text-xs font-medium uppercase tracking-wide text-[var(--color-muted)]">{t("profile.emailNewPendingLabel")}</div>
+            <div className="mt-1 font-medium text-[var(--color-foreground)]">
+              {(((profile?.pending_email as string) || (user?.pending_email as string)) || "").trim()}
+            </div>
+            <p className="mt-2 text-xs leading-relaxed text-[var(--color-muted)]">{t("profile.emailPendingExplain")}</p>
+          </div>
+        ) : null}
+
+        <div>
+          <label className="block mb-1 text-[var(--color-label)]">{t("profile.emailEditNewLabel")}</label>
+          <div className="flex gap-2 items-center">
+            <input
+              type="email"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              className="flex-1 min-w-0 p-2 rounded border border-[var(--color-border)] bg-[var(--color-input-bg)] text-[var(--color-foreground)]"
+              placeholder={(((profile?.email as string) || (user?.email as string)) || "").trim()}
+              maxLength={100}
+            />
+            <button
+              type="button"
+              onClick={handleSaveEmail}
+              disabled={saving || !email.trim()}
+              className="p-2 rounded border border-[var(--color-border)] bg-[var(--color-card)] hover:bg-[var(--color-button-hover)] disabled:opacity-60 shrink-0 text-[var(--color-foreground)]"
+              title={t("profile.emailChangeSendLink")}
+              aria-label={t("profile.emailChangeSendLink")}
+            >
+              <svg className="w-5 h-5 text-green-600 dark:text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+              </svg>
+            </button>
+          </div>
+          {isOwner ? (
+            <p className="mt-1 text-xs text-[var(--color-muted)]">{t("profile.emailChangeHint")}</p>
+          ) : null}
         </div>
 
         <div>

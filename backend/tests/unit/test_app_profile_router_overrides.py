@@ -26,6 +26,8 @@ class _FakeFacade:
         return {
             "id": user.id,
             "email": user.email,
+            "pending_email": getattr(user, "pending_email", None),
+            "pending_email_expires_at": getattr(user, "pending_email_expires_at", None),
             "role": user.role,
             "is_active": user.is_active,
             "name": user.name,
@@ -48,9 +50,11 @@ class _FakeFacade:
         user,
         tenant,
         name: str | None,
+        email: str | None,
         preferred_locale: str | None,
         preferred_theme: str | None,
         app_preferences: dict[str, object] | None,
+        request_base_url: str | None = None,
     ) -> dict[str, object]:
         self.calls.append(
             (
@@ -59,15 +63,19 @@ class _FakeFacade:
                     "user": user,
                     "tenant": tenant,
                     "name": name,
+                    "email": email,
                     "preferred_locale": preferred_locale,
                     "preferred_theme": preferred_theme,
                     "app_preferences": app_preferences,
+                    "request_base_url": request_base_url,
                 },
             )
         )
         return {
             "id": user.id,
             "email": user.email,
+            "pending_email": email,
+            "pending_email_expires_at": None,
             "role": user.role,
             "is_active": user.is_active,
             "name": name,

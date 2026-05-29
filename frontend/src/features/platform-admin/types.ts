@@ -7,12 +7,39 @@ export type PlatformAdminUser = {
   created_at?: string | null;
   deleted_at?: string | null;
   pending_registration?: boolean;
+  mfa_enabled?: boolean;
 };
 
 export type PlatformAdminLoginResponse = {
   access_token: string;
   token_type: "bearer";
   user: PlatformAdminUser;
+};
+
+export type PlatformAdminDebugDateResponse = {
+  enabled: boolean;
+  simulated_date?: string | null;
+  current_date: string;
+};
+
+export type PlatformAdminMfaStatusResponse = {
+  enabled: boolean;
+  pending: boolean;
+  recovery_codes_remaining: number;
+};
+
+export type PlatformAdminMfaSetupResponse = {
+  enabled: boolean;
+  pending: boolean;
+  secret: string;
+  otpauth_uri: string;
+  expires_at: string;
+};
+
+export type PlatformAdminMfaConfirmResponse = {
+  enabled: boolean;
+  pending: boolean;
+  recovery_codes: string[];
 };
 
 export type PlatformAdminTenant = {
@@ -28,7 +55,16 @@ export type PlatformAdminStatisticsTenant = {
   slug: string;
   name: string;
   is_active: boolean;
+  lifecycle_status?: "active" | "inactive" | "temporary_deleted" | string;
   created_at?: string | null;
+  cancellation_request?: {
+    id: number;
+    status: string;
+    reason_code?: string | null;
+    requested_at?: string | null;
+    effective_at?: string | null;
+    deactivated_at?: string | null;
+  } | null;
   package_code?: string | null;
   package_name?: string | null;
   billing_period?: string | null;
@@ -89,6 +125,45 @@ export type PlatformAdminStatisticsResponse = {
     expected_average_monthly_revenue_cents: number;
   };
   tenants: PlatformAdminStatisticsTenant[];
+};
+
+export type PlatformAdminAuditTrailItem = {
+  id: number;
+  created_at: string;
+  user_id?: number | null;
+  actor_user_id?: number | null;
+  actor_type: string;
+  action: string;
+  event_name?: string | null;
+  outcome?: string | null;
+  target_type?: string | null;
+  target_id?: string | null;
+  correlation_id?: string | null;
+  details: Record<string, unknown>;
+  ip?: string | null;
+  user_agent?: string | null;
+  actor_email?: string | null;
+  actor_email_masked?: string | null;
+  actor_email_hash?: string | null;
+  actor_name?: string | null;
+  target_user_email_masked?: string | null;
+  target_user_name?: string | null;
+  target_user_settings?: Record<string, unknown> | null;
+  title: string;
+  summary: string;
+};
+
+export type PlatformAdminAuditTrailResponse = {
+  items: PlatformAdminAuditTrailItem[];
+  limit: number;
+  next_cursor?: string | null;
+  tenant: {
+    id: number;
+    slug: string;
+    name: string;
+    is_active: boolean;
+    timezone?: string | null;
+  };
 };
 
 export type PlatformAdminTenantStatisticsDetail = {

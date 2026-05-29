@@ -19,6 +19,8 @@ let loadUserPromise: Promise<void> | null = null;
 export interface User {
   id: number;
   email: string;
+  pending_email?: string | null;
+  pending_email_expires_at?: string | null;
   role: "user" | "admin" | "owner";
   /** false: fiók zárolt / inaktív */
   is_active?: boolean;

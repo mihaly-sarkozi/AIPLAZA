@@ -141,7 +141,7 @@ export function useChatTrainingFlow({
           role: "training-status",
           text: `${t("chat.fileCharacterCount").replace("{{count}}", charCountText)} ${t("chat.trainingCannotStart")}: ${reason}`,
           actionLabel: t("chat.expandTrainingQuota"),
-          actionHref: "/admin/csomagok",
+          actionHref: "/admin/pricing",
         });
         toast.error(reason);
         appendMessage({ role: "training-status", text: t("chat.trainingAborted") });
@@ -252,7 +252,7 @@ export function useChatTrainingFlow({
         role: "training-status",
         text: `${t("chat.fileCharacterCount").replace("{{count}}", charCountText)} ${t("chat.trainingCannotStart")}: ${reason}`,
         actionLabel: t("chat.expandTrainingQuota"),
-        actionHref: "/admin/csomagok",
+        actionHref: "/admin/pricing",
       });
       toast.error(reason);
       appendMessage({ role: "training-status", text: t("chat.trainingAborted") });

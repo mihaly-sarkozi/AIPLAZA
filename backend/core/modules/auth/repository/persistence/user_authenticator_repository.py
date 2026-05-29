@@ -4,7 +4,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 from core.modules.auth.models.user_authenticator_orm import UserAuthenticatorORM
 from core.kernel.runtime.clock import utc_now
@@ -104,6 +104,15 @@ class UserAuthenticatorRepository:
                 return None
             if not row.pending_secret_base32:
                 return None
-            if row.pending_expires_at is None or row.pending_expires_at <= utc_now():
+            pending_expires_at = self._as_utc_aware(row.pending_expires_at)
+            if pending_expires_at is None or pending_expires_at <= utc_now():
                 return None
             return row.pending_secret_base32
+
+    @staticmethod
+    def _as_utc_aware(value: datetime | None) -> datetime | None:
+        if value is None:
+            return None
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc)

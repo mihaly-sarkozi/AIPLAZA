@@ -16,7 +16,7 @@ export function useDomainOverview(options?: Omit<UseQueryOptions<DomainOverviewR
   return useQuery({
     queryKey: queryKeys.domainOverview,
     queryFn: getDomainOverview,
-    enabled: user?.role === "owner",
+    enabled: user?.role === "owner" || user?.role === "admin",
     ...options,
   });
 }

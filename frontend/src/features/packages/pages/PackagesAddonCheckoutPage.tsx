@@ -4,11 +4,11 @@ import { useTranslation } from "../../../i18n";
 import { useAuthStore } from "../../../store/authStore";
 import { useBillingOverview, usePurchaseAddonMutation, type BillingCatalogEntry } from "../../billing/hooks/useBilling";
 import { isAddonCheckoutCode, type AddonCheckoutCode } from "../addonCheckoutAllowed";
-import api from "../../../api/axiosClient";
+import { patchBillingSettings } from "../../../api/services/settingsService";
 import { EU_COUNTRIES, isValidEuVatId, isValidPostalCode, normalizeEuVatId, normalizePostalCode } from "./checkoutOptions";
 import { checkoutCustomerTypeFromSettings, hasSavedCheckoutBillingDetails, type BillingCustomerType } from "./checkoutBillingDetails";
 import { SavedBillingDetailsSummary } from "./SavedBillingDetailsSummary";
-import { useSettings } from "../../settings/hooks/useSettings";
+import { useBillingSettings } from "../../settings/hooks/useSettings";
 
 function formatEuroLocaleFromCents(cents: number, locale: string): string {
   const value = Number(cents) / 100;
@@ -32,7 +32,7 @@ function addonCheckoutName(entry: BillingCatalogEntry, locale: string, t: (key: 
     case "training_extra_500k":
       return t("packages.expandTrainingTitle").replace(
         "{{chars}}",
-        formatNumber(includedNumber(entry, "training_chars", 500000), locale)
+        formatNumber(includedNumber(entry, "training_chars", 1000000), locale)
       );
     case "extra_storage_gb":
       return t("packages.expandStorageTitle").replace("{{gb}}", String(includedNumber(entry, "storage_gb", 5)));
@@ -56,7 +56,7 @@ export default function PackagesAddonCheckoutPage() {
   const [searchParams] = useSearchParams();
   const { user } = useAuthStore();
   const { data: billingOverview, isLoading } = useBillingOverview();
-  const { data: settings } = useSettings();
+  const { data: settings } = useBillingSettings();
   const purchaseAddonMutation = usePurchaseAddonMutation();
 
   const addonCode = (searchParams.get("addon") ?? "").trim().toLowerCase();
@@ -132,7 +132,7 @@ export default function PackagesAddonCheckoutPage() {
     if (!checkoutIsValid || isFreeAddonBlocked || !acceptTerms) return;
     if (!isValidPostalCode(postalCode) || (customerType === "company" && !isValidEuVatId(country, taxId))) return;
     try {
-      await api.patch("/settings", {
+      await patchBillingSettings({
         billing_customer_type: customerType,
         billing_full_name: fullName,
         billing_company_name: customerType === "company" ? company : "",
@@ -145,7 +145,7 @@ export default function PackagesAddonCheckoutPage() {
       for (const item of checkoutItems) {
         await purchaseAddonMutation.mutateAsync({ addon_code: item.addonCode, quantity: item.quantity });
       }
-      navigate("/admin/csomagok", {
+      navigate("/admin/pricing", {
         state: { addonCheckoutComplete: true, message: t("packages.addonCheckoutSuccessMessage"), status: "addon" },
       });
     } catch {
@@ -178,7 +178,7 @@ export default function PackagesAddonCheckoutPage() {
         <button
           type="button"
           className="rounded-lg px-4 py-2 bg-[var(--color-primary)] text-[var(--color-on-primary)] text-sm font-medium"
-          onClick={() => navigate("/admin/csomagok")}
+          onClick={() => navigate("/admin/pricing")}
         >
           {t("packages.checkoutBackToPackages")}
         </button>
@@ -193,7 +193,7 @@ export default function PackagesAddonCheckoutPage() {
         <button
           type="button"
           className="rounded-lg px-4 py-2 bg-[var(--color-primary)] text-[var(--color-on-primary)] text-sm font-medium"
-          onClick={() => navigate("/admin/csomagok")}
+          onClick={() => navigate("/admin/pricing")}
         >
           {t("packages.checkoutBackToPackages")}
         </button>
@@ -415,7 +415,7 @@ export default function PackagesAddonCheckoutPage() {
             <button
               type="button"
               className="rounded-lg px-4 py-2.5 border border-[var(--color-border)] text-sm"
-              onClick={() => navigate("/admin/csomagok")}
+              onClick={() => navigate("/admin/pricing")}
             >
               {t("common.cancel")}
             </button>

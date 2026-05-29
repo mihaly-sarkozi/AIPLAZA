@@ -9,7 +9,6 @@ export function getModule(): FrontendModuleDefinition {
         path: "/admin/roles",
         layout: "main",
         requiresAuth: true,
-        requiredPermission: "users.write",
         loader: () => import("@frontend/features/users/pages/RolesPage"),
       },
     ],

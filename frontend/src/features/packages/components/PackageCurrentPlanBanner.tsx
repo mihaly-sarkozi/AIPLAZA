@@ -58,7 +58,7 @@ export default function PackageCurrentPlanBanner({
         <div className="md:text-right">
           <p className="text-sm font-normal text-[var(--color-muted)]">{t("packages.billingLabel")}</p>
         </div>
-        <div role="group" aria-label={t("packages.billingLabel")} className="flex w-full flex-wrap rounded-2xl bg-[var(--color-card-muted)] p-1 md:w-auto">
+        <div role="group" aria-label={t("packages.billingLabel")} className="flex w-full flex-wrap gap-2 md:w-auto">
           <SegmentButton period="monthly" label={t("packages.segmentMonthly")} selected={selectedBillingPeriod} onSelect={onSelectBillingPeriod} />
           <SegmentButton period="quarterly" label={t("packages.segmentQuarterly")} badge={t("packages.segmentSaveQuarterly")} selected={selectedBillingPeriod} onSelect={onSelectBillingPeriod} />
           <SegmentButton period="yearly" label={t("packages.segmentYearly")} badge={t("packages.segmentSaveYearly")} selected={selectedBillingPeriod} onSelect={onSelectBillingPeriod} />
@@ -86,13 +86,15 @@ function SegmentButton({
     <button
       type="button"
       onClick={() => onSelect(period)}
-      className={`min-w-[96px] rounded-xl px-4 py-2 text-sm font-medium transition ${
-        active ? "bg-[var(--color-card)] text-[var(--color-foreground)] shadow-sm" : "text-[var(--color-muted)] hover:text-[var(--color-foreground)]"
+      className={`min-w-[96px] rounded-lg px-4 py-2.5 text-sm font-semibold transition ${
+        active
+          ? "bg-[var(--color-card-muted)] text-[var(--color-foreground)] border border-[var(--color-border)] shadow-sm"
+          : "bg-[var(--color-primary)] text-[var(--color-on-primary)] hover:opacity-90"
       }`}
     >
       <span className="flex items-center justify-center gap-1.5 leading-tight text-center">
         <span>{label}</span>
-        {badge ? <span className={`text-xs font-semibold tabular-nums ${active ? "text-[var(--color-muted)]" : "text-[var(--color-accent-foreground)]"}`}>{badge}</span> : null}
+        {badge ? <span className="text-xs font-semibold tabular-nums text-current">{badge}</span> : null}
       </span>
     </button>
   );

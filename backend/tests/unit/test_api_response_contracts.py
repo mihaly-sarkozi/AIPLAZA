@@ -65,3 +65,11 @@ def test_mutating_success_routes_use_operation_status_response_model() -> None:
 
     for router, method, path in route_expectations:
         assert _response_model_for(router, path, method) is OperationStatusResponse
+
+
+def test_platform_admin_simulated_date_routes_use_debug_date_response_model() -> None:
+    from admin.web.schemas.platform_admin_schemas import PlatformAdminDebugDateResponse
+
+    assert _response_model_for(platform_admin_router, "/platform-admin/debug/simulated-date", "GET") is PlatformAdminDebugDateResponse
+    assert _response_model_for(platform_admin_router, "/platform-admin/debug/simulated-date", "PUT") is PlatformAdminDebugDateResponse
+    assert _response_model_for(platform_admin_router, "/platform-admin/debug/simulated-date", "DELETE") is PlatformAdminDebugDateResponse

@@ -19,6 +19,7 @@ from apps.billing.models import (
     BillingQuestionUsageORM,
     BillingSubscriptionORM,
     BillingTrainingUsageORM,
+    TenantCancellationRequestORM,
     _utcnow,
 )
 from core.modules.tenant.models.tenant_orm import TenantORM
@@ -88,6 +89,191 @@ class BillingRepository:
         with self._sf() as db:
             db.execute(text("SET search_path TO public"))
             return db.query(BillingSubscriptionORM).filter(BillingSubscriptionORM.tenant_id == tenant_id).first()
+
+    def create_cancellation_request(
+        self,
+        *,
+        tenant_id: int,
+        tenant_slug: str,
+        requested_by_user_id: int | None,
+        reason_code: str,
+        reason_text: str,
+        active_kb_count: int,
+        status: str,
+        effective_at: datetime | None,
+        deactivated_at: datetime | None,
+    ) -> TenantCancellationRequestORM:
+        with self._sf() as db:
+            db.execute(text("SET search_path TO public"))
+            row = TenantCancellationRequestORM(
+                tenant_id=tenant_id,
+                tenant_slug=tenant_slug,
+                requested_by_user_id=requested_by_user_id,
+                reason_code=reason_code,
+                reason_text=reason_text,
+                active_kb_count=max(0, int(active_kb_count or 0)),
+                status=status,
+                effective_at=effective_at,
+                deactivated_at=deactivated_at,
+            )
+            db.add(row)
+            db.commit()
+            db.refresh(row)
+            return row
+
+    def get_latest_cancellation_request(self, tenant_id: int) -> TenantCancellationRequestORM | None:
+        with self._sf() as db:
+            db.execute(text("SET search_path TO public"))
+            return (
+                db.query(TenantCancellationRequestORM)
+                .filter(TenantCancellationRequestORM.tenant_id == tenant_id)
+                .order_by(TenantCancellationRequestORM.requested_at.desc(), TenantCancellationRequestORM.id.desc())
+                .first()
+            )
+
+    def list_cancellation_requests_for_lifecycle(self) -> list[TenantCancellationRequestORM]:
+        with self._sf() as db:
+            db.execute(text("SET search_path TO public"))
+            return (
+                db.query(TenantCancellationRequestORM)
+                .filter(
+                    TenantCancellationRequestORM.status == "deactivation_requested",
+                    TenantCancellationRequestORM.cleanup_completed_at.is_(None),
+                )
+                .order_by(TenantCancellationRequestORM.requested_at.asc(), TenantCancellationRequestORM.id.asc())
+                .all()
+            )
+
+    def mark_cancellation_notice_two_days_sent(self, request_id: int, sent_at: datetime) -> bool:
+        with self._sf() as db:
+            db.execute(text("SET search_path TO public"))
+            result = db.execute(
+                text(
+                    """
+                    UPDATE public.tenant_cancellation_requests
+                    SET notice_two_days_sent_at = :sent_at,
+                        updated_at = NOW()
+                    WHERE id = :request_id
+                      AND notice_two_days_sent_at IS NULL
+                    """
+                ),
+                {"request_id": int(request_id), "sent_at": sent_at},
+            )
+            db.commit()
+            return int(result.rowcount or 0) > 0
+
+    def mark_cancellation_notice_one_day_sent(self, request_id: int, sent_at: datetime) -> bool:
+        with self._sf() as db:
+            db.execute(text("SET search_path TO public"))
+            result = db.execute(
+                text(
+                    """
+                    UPDATE public.tenant_cancellation_requests
+                    SET notice_one_day_sent_at = :sent_at,
+                        updated_at = NOW()
+                    WHERE id = :request_id
+                      AND notice_one_day_sent_at IS NULL
+                    """
+                ),
+                {"request_id": int(request_id), "sent_at": sent_at},
+            )
+            db.commit()
+            return int(result.rowcount or 0) > 0
+
+    def mark_cancellation_notice_expired_sent(self, request_id: int, sent_at: datetime) -> bool:
+        with self._sf() as db:
+            db.execute(text("SET search_path TO public"))
+            result = db.execute(
+                text(
+                    """
+                    UPDATE public.tenant_cancellation_requests
+                    SET notice_expired_sent_at = :sent_at,
+                        updated_at = NOW()
+                    WHERE id = :request_id
+                      AND notice_expired_sent_at IS NULL
+                    """
+                ),
+                {"request_id": int(request_id), "sent_at": sent_at},
+            )
+            db.commit()
+            return int(result.rowcount or 0) > 0
+
+    def mark_cancellation_deactivated(self, request_id: int, deactivated_at: datetime) -> bool:
+        with self._sf() as db:
+            db.execute(text("SET search_path TO public"))
+            result = db.execute(
+                text(
+                    """
+                    UPDATE public.tenant_cancellation_requests
+                    SET deactivated_at = :deactivated_at,
+                        updated_at = NOW()
+                    WHERE id = :request_id
+                      AND deactivated_at IS NULL
+                    """
+                ),
+                {"request_id": int(request_id), "deactivated_at": deactivated_at},
+            )
+            db.commit()
+            return int(result.rowcount or 0) > 0
+
+    def mark_cancellation_cleanup_completed(self, request_id: int, completed_at: datetime) -> bool:
+        with self._sf() as db:
+            db.execute(text("SET search_path TO public"))
+            result = db.execute(
+                text(
+                    """
+                    UPDATE public.tenant_cancellation_requests
+                    SET cleanup_completed_at = :completed_at,
+                        updated_at = NOW()
+                    WHERE id = :request_id
+                      AND cleanup_completed_at IS NULL
+                    """
+                ),
+                {"request_id": int(request_id), "completed_at": completed_at},
+            )
+            db.commit()
+            return int(result.rowcount or 0) > 0
+
+    def restore_latest_cancellation_request(self, tenant_id: int, restored_at: datetime) -> bool:
+        with self._sf() as db:
+            db.execute(text("SET search_path TO public"))
+            latest_id = db.execute(
+                text(
+                    """
+                    SELECT id
+                    FROM public.tenant_cancellation_requests
+                    WHERE tenant_id = :tenant_id
+                      AND status = 'deactivation_requested'
+                    ORDER BY requested_at DESC, id DESC
+                    LIMIT 1
+                    """
+                ),
+                {"tenant_id": int(tenant_id)},
+            ).scalar_one_or_none()
+            if latest_id is None:
+                return False
+            result = db.execute(
+                text(
+                    """
+                    UPDATE public.tenant_cancellation_requests
+                    SET status = 'renewal_restored',
+                        cleanup_completed_at = :restored_at,
+                        updated_at = NOW()
+                    WHERE id = :request_id
+                      AND deactivated_at IS NULL
+                    """
+                ),
+                {"request_id": int(latest_id), "restored_at": restored_at},
+            )
+            db.commit()
+            return int(result.rowcount or 0) > 0
+
+    def hard_delete_tenant(self, tenant_id: int) -> bool:
+        with self._sf() as db:
+            db.execute(text("SET search_path TO public"))
+            result = db.execute(text("DELETE FROM public.tenants WHERE id = :tenant_id"), {"tenant_id": int(tenant_id)})
+            db.commit()
+            return int(result.rowcount or 0) > 0
 
     def upsert_subscription(
         self,

@@ -31,6 +31,8 @@ def user_to_cache_json(user: User) -> str:
         "preferred_locale": getattr(user, "preferred_locale", None),
         "preferred_theme": getattr(user, "preferred_theme", None),
         "credentials_password_set": getattr(user, "credentials_password_set", True),
+        "pending_email": getattr(user, "pending_email", None),
+        "pending_email_expires_at": getattr(user, "pending_email_expires_at", None).isoformat() if getattr(user, "pending_email_expires_at", None) else None,
     })
 
 
@@ -54,6 +56,7 @@ def user_from_cache_json(s: str) -> User | None:
         preferred_theme=d.get("preferred_theme"),
         security_version=d.get("security_version", 0),
         credentials_password_set=bool(d.get("credentials_password_set", True)),
+        pending_email=d.get("pending_email"),
     )
 
 

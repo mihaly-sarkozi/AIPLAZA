@@ -2,7 +2,15 @@ import { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useTranslation } from "../../../i18n";
 import { useAuthStore } from "../../../store/authStore";
-import { useBillingOverview, useUpdateSubscriptionMutation } from "../../billing/hooks/useBilling";
+import {
+  useBillingOverview,
+  useCancelSubscriptionMutation,
+  useDeleteServiceAccessMutation,
+  useRestoreSubscriptionRenewalMutation,
+  useUpdateSubscriptionMutation,
+} from "../../billing/hooks/useBilling";
+import { useLocaleSettings } from "../../settings/hooks/useSettings";
+import { formatDateOnly } from "../../../utils/dateTimeFormatting";
 import {
   formatPlanResourceBlockMessage,
   planResourceBlock,
@@ -12,6 +20,7 @@ import { useAuthenticatorStatus } from "../../settings/hooks/useAuthenticator";
 import Alert from "../../../components/ui/Alert";
 import PageHeader from "../../../components/ui/PageHeader";
 import PackageCurrentPlanBanner from "../components/PackageCurrentPlanBanner";
+import PackageCancellationSection from "../components/PackageCancellationSection";
 import PackageExpandBanner from "../components/PackageExpandBanner";
 import PackageExpansionModal from "../components/PackageExpansionModal";
 import PackagePlanCard from "../components/PackagePlanCard";
@@ -21,13 +30,13 @@ import {
   addonEntry,
   formatSubscriptionDateForBanner,
   getStoragePerGbCents,
-  getTrainingInitialAddonInfo,
   includedNumber,
   isFreePlan,
   isScheduledChange,
   localeTagForNumbers,
   sortPlans,
   tBannerBilledPeriod,
+  trainingInitialFeeEuroForPlan,
   type BillingPeriod,
 } from "../components/packageUtils";
 
@@ -35,9 +44,13 @@ export default function PackagesPage() {
   const { t, locale } = useTranslation();
   const navigate = useNavigate();
   const location = useLocation();
-  const { user } = useAuthStore();
+  const { user, logout } = useAuthStore();
+  const { data: settings } = useLocaleSettings({ enabled: user?.role === "owner" });
   const { data: billingOverview, isLoading: billingLoading, error: billingError } = useBillingOverview();
   const updateSubscriptionMutation = useUpdateSubscriptionMutation();
+  const cancelSubscriptionMutation = useCancelSubscriptionMutation();
+  const restoreSubscriptionRenewalMutation = useRestoreSubscriptionRenewalMutation();
+  const deleteServiceAccessMutation = useDeleteServiceAccessMutation();
   const [bannerExpandModalOpen, setBannerExpandModalOpen] = useState(false);
   const [trainingQuantity, setTrainingQuantity] = useState(0);
   const [storageQuantity, setStorageQuantity] = useState(0);
@@ -75,17 +88,22 @@ export default function PackagesPage() {
       ? rawBillingPeriod
       : "monthly";
 
-  const trainingInitialSubline = useMemo(() => {
-    const a = getTrainingInitialAddonInfo(catalog);
-    return t("packages.trainingInitialSubline").replace("{{euro}}", String(a.euro));
-  }, [catalog, t]);
-
   const expansionOptions = useMemo(() => {
     const tag = localeTagForNumbers(locale);
+    const formatTrainingCharsForExpansion = (value: number): string => {
+      if (value >= 1_000_000 && value % 1_000_000 === 0) {
+        const millions = value / 1_000_000;
+        if (locale === "en") return `${millions} Million`;
+        if (locale === "es") return `${millions} Millón`;
+        return `${millions} Millió`;
+      }
+      return value.toLocaleString(tag);
+    };
     const trainingAddon = addonEntry(catalog, "training_extra_500k");
     const question100Addon = addonEntry(catalog, "question_pack_100");
     const question500Addon = addonEntry(catalog, "question_pack_500");
-    const trainChars = includedNumber(trainingAddon, "training_chars", 500000);
+    const trainChars = includedNumber(trainingAddon, "training_chars", 1000000);
+    const trainCharsLabel = formatTrainingCharsForExpansion(trainChars);
     const perGbCents = getStoragePerGbCents(catalog);
     const storageBundleCents = FLEX_STORAGE_GB_BUNDLE * perGbCents;
     const question100Count = includedNumber(question100Addon, "questions", 100);
@@ -97,8 +115,8 @@ export default function PackagesPage() {
       {
         addonCode: "training_extra_500k",
         checkoutQuantity: trainingQuantity,
-        title: t("packages.expandTrainingTitle").replace("{{chars}}", trainChars.toLocaleString(tag)),
-        unitLabel: `${trainChars.toLocaleString(tag)} ${t("traffic.expandCharactersUnit")}`,
+        title: t("packages.expandTrainingTitle").replace("{{chars}}", trainCharsLabel),
+        unitLabel: `${trainCharsLabel} ${t("traffic.expandCharactersUnit")}`,
         unitPriceCents: trainingUnitPriceCents,
         quantity: trainingQuantity,
         setQuantity: setTrainingQuantity,
@@ -196,7 +214,7 @@ export default function PackagesPage() {
         setShowAuthenticatorRequiredModal(true);
         return;
       }
-      navigate(`/admin/csomagok/fizetes?plan=${encodeURIComponent(planCode)}&period=${selectedBillingPeriod}`);
+      navigate(`/admin/pricing/checkout?plan=${encodeURIComponent(planCode)}&period=${selectedBillingPeriod}`);
       return;
     }
     if (isScheduledChange(currentPlanCode, planCode, currentBillingPeriod, selectedBillingPeriod)) {
@@ -204,7 +222,7 @@ export default function PackagesPage() {
       return;
     }
     navigate(
-      `/admin/csomagok/felfele-fizetes?plan=${encodeURIComponent(planCode)}&period=${selectedBillingPeriod}`
+      `/admin/pricing/upgrade-checkout?plan=${encodeURIComponent(planCode)}&period=${selectedBillingPeriod}`
     );
   };
 
@@ -222,10 +240,14 @@ export default function PackagesPage() {
     }
   };
 
-  const dateLocaleTag = localeTagForNumbers(locale);
   const periodToLabel =
     billingOverview?.current_period_end_iso != null && billingOverview.current_period_end_iso !== ""
-      ? new Date(`${billingOverview.current_period_end_iso}T12:00:00`).toLocaleDateString(dateLocaleTag, { dateStyle: "long" })
+      ? formatDateOnly(billingOverview.current_period_end_iso, {
+          locale,
+          timezone: settings?.timezone,
+          dateFormat: settings?.date_format,
+          dateStyle: settings?.date_format ? undefined : "long",
+        })
       : "—";
   const currentPlanName =
     catalog.find((e) => e.entry_type === "plan" && e.code === currentPlanCode)?.name ?? currentPlanCode;
@@ -235,7 +257,7 @@ export default function PackagesPage() {
   const scheduledBillingPeriod: BillingPeriod =
     scheduledPeriodRaw === "yearly" ? "yearly" : scheduledPeriodRaw === "quarterly" ? "quarterly" : "monthly";
 
-  const trialEndLabel = formatSubscriptionDateForBanner(subscription.trial_ends_at, dateLocaleTag);
+  const trialEndLabel = formatSubscriptionDateForBanner(subscription.trial_ends_at, locale, settings?.timezone, settings?.date_format);
   const bannerValidityDate =
     currentPlanCode === "free"
       ? trialEndLabel ?? (periodToLabel !== "—" ? periodToLabel : null)
@@ -254,6 +276,48 @@ export default function PackagesPage() {
       : false;
 
   const showBannerExpandButton = currentPlanCode !== "free";
+  const cancellationRequest =
+    subscription.cancellation_request && typeof subscription.cancellation_request === "object"
+      ? (subscription.cancellation_request as Record<string, unknown>)
+      : null;
+  const autoRenewal = subscription.auto_renewal == null ? cancellationRequest == null : Boolean(subscription.auto_renewal);
+  const cancellationMutationError =
+    deleteServiceAccessMutation.error ??
+    restoreSubscriptionRenewalMutation.error ??
+    cancelSubscriptionMutation.error;
+  const cancellationError: string | null =
+    cancellationMutationError &&
+    typeof (cancellationMutationError as { response?: { data?: { detail?: string } } })?.response?.data?.detail === "string"
+      ? ((cancellationMutationError as { response?: { data?: { detail?: string } } }).response?.data?.detail ?? null)
+      : cancellationMutationError
+        ? t("common.errorGeneric")
+        : null;
+
+  const handleCancelSubscription = async (body: { reason_code: string; reason_text: string }) => {
+    try {
+      await cancelSubscriptionMutation.mutateAsync(body);
+    } catch {
+      /* axios error surfaced via mutation */
+    }
+  };
+
+  const handleDeleteServiceAccess = async () => {
+    try {
+      await deleteServiceAccessMutation.mutateAsync();
+      logout();
+      navigate("/service-deleted", { replace: true });
+    } catch {
+      /* axios error surfaced via mutation */
+    }
+  };
+
+  const handleRestoreSubscriptionRenewal = async () => {
+    try {
+      await restoreSubscriptionRenewalMutation.mutateAsync();
+    } catch {
+      /* axios error surfaced via mutation */
+    }
+  };
 
   if (!user || user.role !== "owner") {
     return (
@@ -295,6 +359,26 @@ export default function PackagesPage() {
         onSelectBillingPeriod={setSelectedBillingPeriod}
       />
 
+      {currentPlanCode !== "free" ? (
+        <PackageCancellationSection
+          activeKnowledgeBaseCount={usedKbCount}
+          autoRenewal={autoRenewal}
+          cancellationRequest={cancellationRequest}
+          validUntilLabel={bannerValidityDate ?? periodToLabel}
+          currentHost={typeof window !== "undefined" ? window.location.host : ""}
+          locale={locale}
+          t={t}
+          cancelPending={cancelSubscriptionMutation.isPending}
+          restorePending={restoreSubscriptionRenewalMutation.isPending}
+          deletePending={deleteServiceAccessMutation.isPending}
+          errorMessage={cancellationError}
+          onCancel={(body) => void handleCancelSubscription(body)}
+          onRestoreRenewal={() => void handleRestoreSubscriptionRenewal()}
+          onDeleteAccess={() => void handleDeleteServiceAccess()}
+          onOpenKnowledgeBases={() => navigate("/kb")}
+        />
+      ) : null}
+
       {displayError && (
         <Alert tone="error" className="mb-4">
           {displayError}
@@ -314,7 +398,10 @@ export default function PackagesPage() {
               currentBillingPeriod={currentBillingPeriod}
               pending={updateSubscriptionMutation.isPending}
               resourceBlocked={planResourceBlock(plan, usedStorageGb, usedKbCount, plan.code === currentPlanCode).blocked}
-              trainingInitialSubline={trainingInitialSubline}
+              trainingInitialSubline={t("packages.trainingInitialSubline").replace(
+                "{{euro}}",
+                String(trainingInitialFeeEuroForPlan(plan.code, catalog))
+              )}
               t={t}
               onSwitch={handleSwitchToPlan}
             />
@@ -357,7 +444,7 @@ export default function PackagesPage() {
           onClose={() => setBannerExpandModalOpen(false)}
           onCheckout={(itemsParam) => {
             setBannerExpandModalOpen(false);
-            navigate(`/admin/csomagok/bovites-fizetes?items=${encodeURIComponent(itemsParam)}`);
+            navigate(`/admin/pricing/addon-checkout?items=${encodeURIComponent(itemsParam)}`);
           }}
         />
 

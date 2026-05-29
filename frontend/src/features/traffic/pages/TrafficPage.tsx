@@ -95,6 +95,8 @@ export default function TrafficPage() {
   const { user } = useAuthStore();
   const navigate = useNavigate();
   const { data: billingOverview, isLoading, error: billingError } = useBillingOverview();
+  const isOwner = user?.role === "owner";
+  const canViewTraffic = user?.role === "owner" || user?.role === "admin";
   const [showQuestionsByUser, setShowQuestionsByUser] = useState(false);
   const [expandModalOpen, setExpandModalOpen] = useState(false);
   const [storageQuantity, setStorageQuantity] = useState(0);
@@ -109,7 +111,7 @@ export default function TrafficPage() {
         ? t("common.errorGeneric")
         : null;
 
-  if (!user || user.role !== "owner") {
+  if (!user || !canViewTraffic) {
     return (
       <div className="p-6 min-h-full bg-[var(--color-background)] flex justify-center">
         <div className="w-full max-w-2xl bg-[var(--color-card)] border border-[var(--color-border)] text-[var(--color-foreground)] p-4 rounded">
@@ -132,7 +134,7 @@ export default function TrafficPage() {
   const catalog = billingOverview?.catalog ?? [];
   const subscription = billingOverview?.subscription ?? {};
   const currentPlanCode = String(subscription.plan_code ?? "free");
-  const showExpandButton = currentPlanCode !== "free";
+  const showExpandButton = isOwner && currentPlanCode !== "free";
   const nextPeriodStartLabel = formatDate(billingOverview?.current_period_end_iso, locale);
   const questions = (usage.questions as Record<string, unknown>) ?? {};
   const training = (usage.training as Record<string, unknown>) ?? {};
@@ -259,9 +261,11 @@ export default function TrafficPage() {
           title={t("traffic.overviewLabel")}
           description={t("traffic.currentPeriodUsage")}
           actions={
-            <Button variant="secondary" onClick={() => navigate("/admin/csomagok")}>
-              {t("nav.packages")}
-            </Button>
+            isOwner ? (
+              <Button variant="secondary" onClick={() => navigate("/admin/pricing")}>
+                {t("nav.packages")}
+              </Button>
+            ) : undefined
           }
         />
 
@@ -455,7 +459,7 @@ export default function TrafficPage() {
                     disabled={selectedExpansionItems.length === 0}
                     onClick={() => {
                       setExpandModalOpen(false);
-                      navigate(`/admin/csomagok/bovites-fizetes?items=${encodeURIComponent(checkoutItemsParam)}`);
+                      navigate(`/admin/pricing/addon-checkout?items=${encodeURIComponent(checkoutItemsParam)}`);
                     }}
                   >
                     {t("traffic.expandPay")}

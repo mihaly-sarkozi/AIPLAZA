@@ -23,6 +23,7 @@ def _to_domain(row: KBORM) -> KnowledgeBase:
         personal_data_mode=row.personal_data_mode,
         personal_data_sensitivity=row.personal_data_sensitivity,
         pii_depersonalization_enabled=bool(getattr(row, "pii_depersonalization_enabled", True)),
+        public_enabled=bool(getattr(row, "public_enabled", False)),
         created_at=row.created_at,
         updated_at=row.updated_at,
         deleted_at=row.deleted_at,
@@ -149,6 +150,7 @@ class MySQLKnowledgeBaseRepository:
                 personal_data_mode=kb.personal_data_mode,
                 personal_data_sensitivity=kb.personal_data_sensitivity,
                 pii_depersonalization_enabled=bool(getattr(kb, "pii_depersonalization_enabled", True)),
+                public_enabled=bool(getattr(kb, "public_enabled", False)),
                 created_by=actor_user_id,
                 updated_by=actor_user_id,
             )
@@ -168,6 +170,7 @@ class MySQLKnowledgeBaseRepository:
             row.personal_data_mode = kb.personal_data_mode
             row.personal_data_sensitivity = kb.personal_data_sensitivity
             row.pii_depersonalization_enabled = bool(getattr(kb, "pii_depersonalization_enabled", True))
+            row.public_enabled = bool(getattr(kb, "public_enabled", False))
             row.updated_by = actor_user_id
             session.commit()
             session.refresh(row)

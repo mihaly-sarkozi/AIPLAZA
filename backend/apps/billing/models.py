@@ -139,6 +139,29 @@ class BillingPaymentEventORM(PublicBase):
     created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow, server_default=func.now(), index=True)
 
 
+class TenantCancellationRequestORM(PublicBase):
+    __tablename__ = "tenant_cancellation_requests"
+    __table_args__ = ({"schema": "public"},)
+
+    id = Column(Integer, primary_key=True)
+    tenant_id = Column(Integer, ForeignKey("public.tenants.id", ondelete="CASCADE"), nullable=False, index=True)
+    tenant_slug = Column(String(64), nullable=False, index=True)
+    requested_by_user_id = Column(Integer, nullable=True, index=True)
+    reason_code = Column(String(64), nullable=False)
+    reason_text = Column(String(2000), nullable=False, default="")
+    active_kb_count = Column(Integer, nullable=False, default=0)
+    status = Column(String(32), nullable=False, default="deactivation_requested", index=True)
+    requested_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow, server_default=func.now(), index=True)
+    effective_at = Column(DateTime(timezone=True), nullable=True)
+    notice_two_days_sent_at = Column(DateTime(timezone=True), nullable=True)
+    notice_one_day_sent_at = Column(DateTime(timezone=True), nullable=True)
+    notice_expired_sent_at = Column(DateTime(timezone=True), nullable=True)
+    deactivated_at = Column(DateTime(timezone=True), nullable=True)
+    cleanup_completed_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow, server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow, server_default=func.now())
+
+
 class BillingDebugStateORM(PublicBase):
     __tablename__ = "billing_debug_state"
     __table_args__ = ({"schema": "public"},)

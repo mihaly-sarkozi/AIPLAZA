@@ -22,6 +22,18 @@ export function getModule(): FrontendModuleDefinition {
         layout: "public",
         loader: () => import("@frontend/features/auth/pages/SetPasswordPage"),
       },
+      {
+        key: "auth.confirm-email",
+        path: "/confirm-email",
+        layout: "public",
+        loader: () => import("@frontend/features/auth/pages/ConfirmEmailPage"),
+      },
+      {
+        key: "auth.service-deleted",
+        path: "/service-deleted",
+        layout: "public",
+        loader: () => import("@frontend/features/auth/pages/ServiceDeletedPage"),
+      },
     ],
     menuItems: () => [],
   };

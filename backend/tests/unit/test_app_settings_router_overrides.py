@@ -53,6 +53,100 @@ class _FakeSettingsFacade:
             "time_format": "HH:mm",
         }
 
+    def get_two_factor_settings(self) -> dict[str, object]:
+        self.calls.append(("get_two_factor_settings", {}))
+        return {"two_factor_enabled": False}
+
+    def update_two_factor_settings(
+        self,
+        *,
+        two_factor_enabled: bool | None = None,
+        updated_by: int | None = None,
+    ) -> dict[str, object]:
+        self.calls.append(
+            (
+                "update_two_factor_settings",
+                {"two_factor_enabled": two_factor_enabled, "updated_by": updated_by},
+            )
+        )
+        return {"two_factor_enabled": bool(two_factor_enabled)}
+
+    def get_locale_settings(self) -> dict[str, object]:
+        self.calls.append(("get_locale_settings", {}))
+        return {"timezone": "UTC", "date_format": "YYYY-MM-DD", "time_format": "HH:mm"}
+
+    def update_locale_settings(
+        self,
+        *,
+        timezone: str | None = None,
+        date_format: str | None = None,
+        time_format: str | None = None,
+        updated_by: int | None = None,
+    ) -> dict[str, object]:
+        self.calls.append(
+            (
+                "update_locale_settings",
+                {
+                    "timezone": timezone,
+                    "date_format": date_format,
+                    "time_format": time_format,
+                    "updated_by": updated_by,
+                },
+            )
+        )
+        return {
+            "timezone": timezone or "UTC",
+            "date_format": date_format or "YYYY-MM-DD",
+            "time_format": time_format or "HH:mm",
+        }
+
+    def get_billing_settings(self) -> dict[str, object]:
+        self.calls.append(("get_billing_settings", {}))
+        return dict(BILLING_DEFAULTS)
+
+    def update_billing_settings(
+        self,
+        *,
+        billing_company_name: str | None = None,
+        billing_tax_id: str | None = None,
+        billing_address_line: str | None = None,
+        billing_postal_code: str | None = None,
+        billing_city: str | None = None,
+        billing_region: str | None = None,
+        billing_country: str | None = None,
+        billing_customer_type: str | None = None,
+        billing_full_name: str | None = None,
+        updated_by: int | None = None,
+    ) -> dict[str, object]:
+        self.calls.append(
+            (
+                "update_billing_settings",
+                {
+                    "billing_company_name": billing_company_name,
+                    "billing_tax_id": billing_tax_id,
+                    "billing_address_line": billing_address_line,
+                    "billing_postal_code": billing_postal_code,
+                    "billing_city": billing_city,
+                    "billing_region": billing_region,
+                    "billing_country": billing_country,
+                    "billing_customer_type": billing_customer_type,
+                    "billing_full_name": billing_full_name,
+                    "updated_by": updated_by,
+                },
+            )
+        )
+        return {
+            "billing_customer_type": billing_customer_type or "company",
+            "billing_full_name": billing_full_name or "",
+            "billing_company_name": billing_company_name or "",
+            "billing_tax_id": billing_tax_id or "",
+            "billing_address_line": billing_address_line or "",
+            "billing_postal_code": billing_postal_code or "",
+            "billing_city": billing_city or "",
+            "billing_region": billing_region or "",
+            "billing_country": billing_country or "",
+        }
+
     def update_settings(
         self,
         *,
@@ -199,6 +293,78 @@ def test_patch_settings_delegates_to_facade(monkeypatch: pytest.MonkeyPatch) -> 
             "billing_region": None,
             "billing_country": None,
             "billing_customer_type": None,
+            "billing_full_name": None,
+            "updated_by": 1,
+        },
+    )
+
+
+def test_split_locale_settings_delegates_to_facade(monkeypatch: pytest.MonkeyPatch) -> None:
+    facade = _FakeSettingsFacade()
+    app = _app(facade=facade, current_user=_user(), monkeypatch=monkeypatch)
+
+    with TestClient(app, base_url="http://demo.lvh.me") as client:
+        response = client.patch(
+            "/api/settings/locale",
+            json={"timezone": "Europe/Budapest", "date_format": "DD.MM.YYYY", "time_format": "HH:mm:ss"},
+        )
+
+    assert response.status_code == 200
+    assert facade.calls[-1] == (
+        "update_locale_settings",
+        {
+            "timezone": "Europe/Budapest",
+            "date_format": "DD.MM.YYYY",
+            "time_format": "HH:mm:ss",
+            "updated_by": 1,
+        },
+    )
+
+
+def test_split_two_factor_settings_delegates_to_facade(monkeypatch: pytest.MonkeyPatch) -> None:
+    facade = _FakeSettingsFacade()
+    app = _app(facade=facade, current_user=_user(), monkeypatch=monkeypatch)
+
+    with TestClient(app, base_url="http://demo.lvh.me") as client:
+        response = client.patch("/api/settings/security/2fa", json={"two_factor_enabled": True})
+
+    assert response.status_code == 200
+    assert facade.calls[-1] == (
+        "update_two_factor_settings",
+        {"two_factor_enabled": True, "updated_by": 1},
+    )
+
+
+def test_split_billing_settings_delegates_to_facade(monkeypatch: pytest.MonkeyPatch) -> None:
+    facade = _FakeSettingsFacade()
+    app = _app(facade=facade, current_user=_user(), monkeypatch=monkeypatch)
+
+    with TestClient(app, base_url="http://demo.lvh.me") as client:
+        response = client.patch(
+            "/api/settings/billing",
+            json={
+                "billing_customer_type": "company",
+                "billing_company_name": "Example Kft.",
+                "billing_tax_id": "HU12345678",
+                "billing_address_line": "Fo utca 1.",
+                "billing_postal_code": "1051",
+                "billing_city": "Budapest",
+                "billing_country": "HU",
+            },
+        )
+
+    assert response.status_code == 200
+    assert facade.calls[-1] == (
+        "update_billing_settings",
+        {
+            "billing_company_name": "Example Kft.",
+            "billing_tax_id": "HU12345678",
+            "billing_address_line": "Fo utca 1.",
+            "billing_postal_code": "1051",
+            "billing_city": "Budapest",
+            "billing_region": None,
+            "billing_country": "HU",
+            "billing_customer_type": "company",
             "billing_full_name": None,
             "updated_by": 1,
         },

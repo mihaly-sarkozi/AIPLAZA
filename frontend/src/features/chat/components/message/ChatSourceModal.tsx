@@ -1,6 +1,7 @@
 import { sanitizeMessage } from "../../../../utils/sanitize";
 import type { ChatSource } from "./chatMessageTypes";
 import { sourceDisplayLabel } from "../../utils/chatMessageFormatting";
+import type { SettingsDateFormat, SettingsTimeFormat, SettingsTimezone } from "../../../../api/services/settingsService";
 
 type SourceTab = "raw" | "parts" | "provenance";
 
@@ -10,6 +11,9 @@ type ChatSourceModalProps = {
   onClose: () => void;
   t: (key: string) => string;
   locale: string;
+  timezone?: SettingsTimezone | string;
+  dateFormat?: SettingsDateFormat;
+  timeFormat?: SettingsTimeFormat;
   answerMode?: string;
   evidence: Array<Record<string, unknown>>;
   citedSourceIds: string[];
@@ -58,6 +62,9 @@ export default function ChatSourceModal({
   onClose,
   t,
   locale,
+  timezone,
+  dateFormat,
+  timeFormat,
   answerMode,
   evidence,
   citedSourceIds,
@@ -146,7 +153,9 @@ export default function ChatSourceModal({
                 <div className="space-y-1">
                   {sources.map((source, idx) => (
                     <div key={`${source.kb_uuid}-${source.point_id}-${idx}`} className="leading-snug">
-                      <span className="text-[var(--color-muted)]">{sanitizeMessage(sourceDisplayLabel(source, t("chat.sourceFallback"), locale))}</span>
+                      <span className="text-[var(--color-muted)]">
+                        {sanitizeMessage(sourceDisplayLabel(source, t("chat.sourceFallback"), locale, timezone, dateFormat, timeFormat))}
+                      </span>
                       <span className="ml-2 text-[var(--color-muted)]">•</span>
                       <button
                         type="button"

@@ -475,6 +475,31 @@ def _apply_public_billing_schema(engine: Engine) -> None:
                 """
             )
         )
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS public.tenant_cancellation_requests (
+                    id SERIAL PRIMARY KEY,
+                    tenant_id INTEGER NOT NULL REFERENCES public.tenants(id) ON DELETE CASCADE,
+                    tenant_slug VARCHAR(64) NOT NULL,
+                    requested_by_user_id INTEGER,
+                    reason_code VARCHAR(64) NOT NULL,
+                    reason_text VARCHAR(2000) NOT NULL DEFAULT '',
+                    active_kb_count INTEGER NOT NULL DEFAULT 0,
+                    status VARCHAR(32) NOT NULL DEFAULT 'deactivation_requested',
+                    requested_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    effective_at TIMESTAMPTZ,
+                    notice_two_days_sent_at TIMESTAMPTZ,
+                    notice_one_day_sent_at TIMESTAMPTZ,
+                    notice_expired_sent_at TIMESTAMPTZ,
+                    deactivated_at TIMESTAMPTZ,
+                    cleanup_completed_at TIMESTAMPTZ,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+                """
+            )
+        )
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_billing_question_usage_tenant_id ON public.billing_question_usage (tenant_id)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_billing_question_usage_user_id ON public.billing_question_usage (user_id)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_billing_question_usage_period_key ON public.billing_question_usage (period_key)"))
@@ -510,6 +535,11 @@ def _apply_public_billing_schema(engine: Engine) -> None:
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_billing_payment_events_tenant_id ON public.billing_payment_events (tenant_id)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_billing_payment_events_status ON public.billing_payment_events (status)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_billing_payment_events_created_at ON public.billing_payment_events (created_at)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_tenant_cancellation_requests_tenant_id ON public.tenant_cancellation_requests (tenant_id)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_tenant_cancellation_requests_tenant_slug ON public.tenant_cancellation_requests (tenant_slug)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_tenant_cancellation_requests_requested_by_user_id ON public.tenant_cancellation_requests (requested_by_user_id)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_tenant_cancellation_requests_status ON public.tenant_cancellation_requests (status)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_tenant_cancellation_requests_requested_at ON public.tenant_cancellation_requests (requested_at)"))
         _commit_if_possible(conn)
 
 
@@ -581,6 +611,70 @@ def _apply_public_demo_signup_schema(engine: Engine) -> None:
         _commit_if_possible(conn)
 
 
+def _apply_public_tenant_cancellation_requests_schema(engine: Engine) -> None:
+    with engine.connect() as conn:
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS public.tenant_cancellation_requests (
+                    id SERIAL PRIMARY KEY,
+                    tenant_id INTEGER NOT NULL REFERENCES public.tenants(id) ON DELETE CASCADE,
+                    tenant_slug VARCHAR(64) NOT NULL,
+                    requested_by_user_id INTEGER,
+                    reason_code VARCHAR(64) NOT NULL,
+                    reason_text VARCHAR(2000) NOT NULL DEFAULT '',
+                    active_kb_count INTEGER NOT NULL DEFAULT 0,
+                    status VARCHAR(32) NOT NULL DEFAULT 'deactivation_requested',
+                    requested_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    effective_at TIMESTAMPTZ,
+                    notice_two_days_sent_at TIMESTAMPTZ,
+                    notice_one_day_sent_at TIMESTAMPTZ,
+                    notice_expired_sent_at TIMESTAMPTZ,
+                    deactivated_at TIMESTAMPTZ,
+                    cleanup_completed_at TIMESTAMPTZ,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+                """
+            )
+        )
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_tenant_cancellation_requests_tenant_id ON public.tenant_cancellation_requests (tenant_id)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_tenant_cancellation_requests_tenant_slug ON public.tenant_cancellation_requests (tenant_slug)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_tenant_cancellation_requests_requested_by_user_id ON public.tenant_cancellation_requests (requested_by_user_id)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_tenant_cancellation_requests_status ON public.tenant_cancellation_requests (status)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_tenant_cancellation_requests_requested_at ON public.tenant_cancellation_requests (requested_at)"))
+        _commit_if_possible(conn)
+
+
+def _apply_public_tenant_cancellation_notifications_schema(engine: Engine) -> None:
+    with engine.connect() as conn:
+        conn.execute(
+            text(
+                """
+                ALTER TABLE public.tenant_cancellation_requests
+                ADD COLUMN IF NOT EXISTS notice_two_days_sent_at TIMESTAMPTZ
+                """
+            )
+        )
+        conn.execute(
+            text(
+                """
+                ALTER TABLE public.tenant_cancellation_requests
+                ADD COLUMN IF NOT EXISTS notice_one_day_sent_at TIMESTAMPTZ
+                """
+            )
+        )
+        conn.execute(
+            text(
+                """
+                ALTER TABLE public.tenant_cancellation_requests
+                ADD COLUMN IF NOT EXISTS notice_expired_sent_at TIMESTAMPTZ
+                """
+            )
+        )
+        _commit_if_possible(conn)
+
+
 def _public_migrations() -> tuple[PublicSchemaMigration, ...]:
     from core.kernel.events.outbox import ensure_platform_event_outbox
     from admin.repository.schema_migrations import apply_platform_security_alerts_legacy_compat
@@ -640,6 +734,16 @@ def _public_migrations() -> tuple[PublicSchemaMigration, ...]:
             revision="platform.public.0011_demo_signup_state",
             description="Demo signup session and blocklist tables",
             apply=_apply_public_demo_signup_schema,
+        ),
+        PublicSchemaMigration(
+            revision="platform.public.0012_tenant_cancellation_requests",
+            description="Tenant cancellation request records for subscription cancellation flow",
+            apply=_apply_public_tenant_cancellation_requests_schema,
+        ),
+        PublicSchemaMigration(
+            revision="platform.public.0013_tenant_cancellation_notifications",
+            description="Tenant cancellation notification tracking columns",
+            apply=_apply_public_tenant_cancellation_notifications_schema,
         ),
     )
 

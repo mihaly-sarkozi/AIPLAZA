@@ -6,6 +6,8 @@ export type KbItem = {
   description?: string;
   personal_data_mode: PersonalDataMode;
   pii_depersonalization_enabled?: boolean;
+  is_public?: boolean;
+  public_enabled?: boolean;
   storage_metrics?: {
     file_bytes?: number;
     database_bytes?: number;
@@ -228,6 +230,7 @@ export type UpdateKbPayload = {
   description?: string;
   personal_data_mode?: PersonalDataMode;
   pii_depersonalization_enabled?: boolean;
+  public_enabled?: boolean;
 };
 
 export type DeleteKbPayload = { uuid: string; confirm_name: string };

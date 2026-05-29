@@ -17,6 +17,13 @@ from apps.billing.calculations import (
 from apps.billing.domain import BillingPlan
 from apps.billing.models import DEFAULT_CURRENCY, BillingSubscriptionORM
 
+TRAINING_INITIAL_FEE_CENTS_BY_PLAN: dict[str, int] = {
+    "free": 0,
+    "starter": 2900,
+    "growth": 8900,
+    "business": 48900,
+}
+
 
 def is_downgrade(
     *,
@@ -85,6 +92,21 @@ def paid_until_after_upgrade(upgrade_date: date, normalized_period: str) -> date
     return add_months_to_date(upgrade_date, months)
 
 
+def training_initial_fee_cents_for_plan(plan_code: str) -> int:
+    normalized = str(plan_code or "").strip().lower()
+    return int(TRAINING_INITIAL_FEE_CENTS_BY_PLAN.get(normalized, 0))
+
+
+def upgrade_training_initial_fee_cents(
+    *,
+    current_plan_code: str,
+    next_plan_code: str,
+) -> int:
+    already_paid = training_initial_fee_cents_for_plan(current_plan_code)
+    target_fee = training_initial_fee_cents_for_plan(next_plan_code)
+    return max(0, target_fee - already_paid)
+
+
 def compute_upgrade_proration(
     *,
     subscription: BillingSubscriptionORM,
@@ -113,7 +135,11 @@ def compute_upgrade_proration(
     old_remaining_credit = max(0, old_remaining_credit)
     next_period_charge = new_m * billing_period_multiplier(normalized_period)
     paid_until = paid_until_after_upgrade(today, normalized_period)
-    total_charge = max(0, next_period_charge - old_remaining_credit)
+    training_initial_fee_cents = upgrade_training_initial_fee_cents(
+        current_plan_code=subscription.plan_code,
+        next_plan_code=normalized_plan,
+    )
+    total_charge = max(0, next_period_charge - old_remaining_credit) + max(0, int(training_initial_fee_cents))
     return {
         "immediate_use": True,
         "total_period_days": total_d,
@@ -127,6 +153,7 @@ def compute_upgrade_proration(
         "prorated_charge_cents": 0,
         "old_remaining_credit_cents": old_remaining_credit,
         "next_period_charge_cents": next_period_charge,
+        "training_initial_fee_cents": int(training_initial_fee_cents),
         "total_charge_cents": total_charge,
         "paid_until_iso": paid_until.isoformat(),
         "currency": DEFAULT_CURRENCY,
@@ -140,6 +167,8 @@ __all__ = [
     "is_billing_period_downgrade",
     "is_downgrade",
     "is_scheduled_change",
+    "training_initial_fee_cents_for_plan",
+    "upgrade_training_initial_fee_cents",
     "paid_until_after_upgrade",
     "proration_calendar_fraction",
 ]

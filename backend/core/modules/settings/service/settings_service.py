@@ -107,6 +107,19 @@ class SettingsService(TwoFactorSettingsReader):
                 target_id=self.TWO_FACTOR_ENABLED_KEY,
             )
 
+    def get_two_factor_settings(self) -> dict[str, bool]:
+        return {"two_factor_enabled": self.is_two_factor_enabled()}
+
+    def update_two_factor_settings(
+        self,
+        *,
+        two_factor_enabled: bool | None = None,
+        updated_by: int | None = None,
+    ) -> dict[str, bool]:
+        if two_factor_enabled is not None:
+            self.set_two_factor_enabled(two_factor_enabled, updated_by=updated_by)
+        return self.get_two_factor_settings()
+
     def get_timezone(self) -> str:
         value = self._repo.get_by_key(self.TIMEZONE_KEY)
         if value in self.ALLOWED_TIMEZONES:
@@ -155,6 +168,32 @@ class SettingsService(TwoFactorSettingsReader):
             updated_by=updated_by,
         )
 
+    def get_locale_settings(self) -> dict[str, str]:
+        return {
+            "timezone": self.get_timezone(),
+            "date_format": self.get_date_format(),
+            "time_format": self.get_time_format(),
+        }
+
+    def update_locale_settings(
+        self,
+        *,
+        timezone: str | None = None,
+        date_format: str | None = None,
+        time_format: str | None = None,
+        updated_by: int | None = None,
+    ) -> dict[str, str]:
+        before = self.get_settings_snapshot()
+        if timezone is not None:
+            self.set_timezone(timezone, updated_by=updated_by)
+        if date_format is not None:
+            self.set_date_format(date_format, updated_by=updated_by)
+        if time_format is not None:
+            self.set_time_format(time_format, updated_by=updated_by)
+        after = self.get_settings_snapshot()
+        self._audit_settings_changed(before=before, after=after, updated_by=updated_by)
+        return self.get_locale_settings()
+
     def _get_text_setting(self, key: str) -> str:
         return str(self._repo.get_by_key(key) or "")
 
@@ -176,12 +215,38 @@ class SettingsService(TwoFactorSettingsReader):
             "billing_country": self._get_text_setting(self.BILLING_COUNTRY_KEY),
         }
 
+    def update_billing_profile(
+        self,
+        *,
+        billing_customer_type: str | None = None,
+        billing_full_name: str | None = None,
+        billing_company_name: str | None = None,
+        billing_tax_id: str | None = None,
+        billing_address_line: str | None = None,
+        billing_postal_code: str | None = None,
+        billing_city: str | None = None,
+        billing_region: str | None = None,
+        billing_country: str | None = None,
+        updated_by: int | None = None,
+    ) -> dict[str, str]:
+        before = self.get_settings_snapshot()
+        self._set_text_setting(self.BILLING_CUSTOMER_TYPE_KEY, billing_customer_type, updated_by=updated_by)
+        self._set_text_setting(self.BILLING_FULL_NAME_KEY, billing_full_name, updated_by=updated_by)
+        self._set_text_setting(self.BILLING_COMPANY_NAME_KEY, billing_company_name, updated_by=updated_by)
+        self._set_text_setting(self.BILLING_TAX_ID_KEY, billing_tax_id, updated_by=updated_by)
+        self._set_text_setting(self.BILLING_ADDRESS_LINE_KEY, billing_address_line, updated_by=updated_by)
+        self._set_text_setting(self.BILLING_POSTAL_CODE_KEY, billing_postal_code, updated_by=updated_by)
+        self._set_text_setting(self.BILLING_CITY_KEY, billing_city, updated_by=updated_by)
+        self._set_text_setting(self.BILLING_REGION_KEY, billing_region, updated_by=updated_by)
+        self._set_text_setting(self.BILLING_COUNTRY_KEY, billing_country, updated_by=updated_by)
+        after = self.get_settings_snapshot()
+        self._audit_settings_changed(before=before, after=after, updated_by=updated_by)
+        return self.get_billing_profile()
+
     def get_settings_snapshot(self) -> dict[str, object]:
         return {
-            "two_factor_enabled": self.is_two_factor_enabled(),
-            "timezone": self.get_timezone(),
-            "date_format": self.get_date_format(),
-            "time_format": self.get_time_format(),
+            **self.get_two_factor_settings(),
+            **self.get_locale_settings(),
             **self.get_billing_profile(),
         }
 
@@ -203,27 +268,42 @@ class SettingsService(TwoFactorSettingsReader):
         billing_country: str | None = None,
         updated_by: int | None = None,
     ) -> dict[str, object]:
-        before = self.get_settings_snapshot()
         if two_factor_enabled is not None:
-            self.set_two_factor_enabled(two_factor_enabled, updated_by=updated_by)
-        if timezone is not None:
-            self.set_timezone(timezone, updated_by=updated_by)
-        if date_format is not None:
-            self.set_date_format(date_format, updated_by=updated_by)
-        if time_format is not None:
-            self.set_time_format(time_format, updated_by=updated_by)
-        self._set_text_setting(self.BILLING_CUSTOMER_TYPE_KEY, billing_customer_type, updated_by=updated_by)
-        self._set_text_setting(self.BILLING_FULL_NAME_KEY, billing_full_name, updated_by=updated_by)
-        self._set_text_setting(self.BILLING_COMPANY_NAME_KEY, billing_company_name, updated_by=updated_by)
-        self._set_text_setting(self.BILLING_TAX_ID_KEY, billing_tax_id, updated_by=updated_by)
-        self._set_text_setting(self.BILLING_ADDRESS_LINE_KEY, billing_address_line, updated_by=updated_by)
-        self._set_text_setting(self.BILLING_POSTAL_CODE_KEY, billing_postal_code, updated_by=updated_by)
-        self._set_text_setting(self.BILLING_CITY_KEY, billing_city, updated_by=updated_by)
-        self._set_text_setting(self.BILLING_REGION_KEY, billing_region, updated_by=updated_by)
-        self._set_text_setting(self.BILLING_COUNTRY_KEY, billing_country, updated_by=updated_by)
-        after = self.get_settings_snapshot()
-        self._audit_settings_changed(before=before, after=after, updated_by=updated_by)
-        return after
+            self.update_two_factor_settings(two_factor_enabled=two_factor_enabled, updated_by=updated_by)
+        if timezone is not None or date_format is not None or time_format is not None:
+            self.update_locale_settings(
+                timezone=timezone,
+                date_format=date_format,
+                time_format=time_format,
+                updated_by=updated_by,
+            )
+        if any(
+            value is not None
+            for value in (
+                billing_customer_type,
+                billing_full_name,
+                billing_company_name,
+                billing_tax_id,
+                billing_address_line,
+                billing_postal_code,
+                billing_city,
+                billing_region,
+                billing_country,
+            )
+        ):
+            self.update_billing_profile(
+                billing_customer_type=billing_customer_type,
+                billing_full_name=billing_full_name,
+                billing_company_name=billing_company_name,
+                billing_tax_id=billing_tax_id,
+                billing_address_line=billing_address_line,
+                billing_postal_code=billing_postal_code,
+                billing_city=billing_city,
+                billing_region=billing_region,
+                billing_country=billing_country,
+                updated_by=updated_by,
+            )
+        return self.get_settings_snapshot()
 
     def _audit_settings_changed(
         self,

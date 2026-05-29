@@ -59,7 +59,70 @@ export type SettingsResponse = {
   billing_country: string;
 };
 
-export type PatchSettingsPayload = {
+export type TwoFactorSettingsResponse = Pick<SettingsResponse, "two_factor_enabled">;
+export type LocaleSettingsResponse = Pick<SettingsResponse, "timezone" | "date_format" | "time_format">;
+export type BillingSettingsResponse = Pick<
+  SettingsResponse,
+  | "billing_customer_type"
+  | "billing_full_name"
+  | "billing_company_name"
+  | "billing_tax_id"
+  | "billing_address_line"
+  | "billing_postal_code"
+  | "billing_city"
+  | "billing_region"
+  | "billing_country"
+>;
+
+export type PatchTwoFactorSettingsPayload = Partial<TwoFactorSettingsResponse>;
+export type PatchLocaleSettingsPayload = Partial<LocaleSettingsResponse>;
+export type PatchBillingSettingsPayload = Partial<BillingSettingsResponse>;
+
+export type PatchSettingsPayload = PatchTwoFactorSettingsPayload & PatchLocaleSettingsPayload & PatchBillingSettingsPayload;
+
+export async function getSettings(): Promise<SettingsResponse> {
+  const res = await api.get("/settings");
+  return res.data as SettingsResponse;
+}
+
+export async function patchSettings(body: PatchSettingsPayload): Promise<SettingsResponse> {
+  const res = await api.patch("/settings", body);
+  return res.data as SettingsResponse;
+}
+
+export async function getTwoFactorSettings(): Promise<TwoFactorSettingsResponse> {
+  const res = await api.get("/settings/security/2fa");
+  return res.data as TwoFactorSettingsResponse;
+}
+
+export async function patchTwoFactorSettings(
+  body: PatchTwoFactorSettingsPayload
+): Promise<TwoFactorSettingsResponse> {
+  const res = await api.patch("/settings/security/2fa", body);
+  return res.data as TwoFactorSettingsResponse;
+}
+
+export async function getLocaleSettings(): Promise<LocaleSettingsResponse> {
+  const res = await api.get("/settings/locale");
+  return res.data as LocaleSettingsResponse;
+}
+
+export async function patchLocaleSettings(body: PatchLocaleSettingsPayload): Promise<LocaleSettingsResponse> {
+  const res = await api.patch("/settings/locale", body);
+  return res.data as LocaleSettingsResponse;
+}
+
+export async function getBillingSettings(): Promise<BillingSettingsResponse> {
+  const res = await api.get("/settings/billing");
+  return res.data as BillingSettingsResponse;
+}
+
+export async function patchBillingSettings(body: PatchBillingSettingsPayload): Promise<BillingSettingsResponse> {
+  const res = await api.patch("/settings/billing", body);
+  return res.data as BillingSettingsResponse;
+}
+
+export type LegacyPatchSettingsPayload = {
   two_factor_enabled?: boolean;
   timezone?: SettingsTimezone;
   date_format?: SettingsDateFormat;
@@ -74,13 +137,3 @@ export type PatchSettingsPayload = {
   billing_region?: string;
   billing_country?: string;
 };
-
-export async function getSettings(): Promise<SettingsResponse> {
-  const res = await api.get("/settings");
-  return res.data as SettingsResponse;
-}
-
-export async function patchSettings(body: PatchSettingsPayload): Promise<SettingsResponse> {
-  const res = await api.patch("/settings", body);
-  return res.data as SettingsResponse;
-}

@@ -27,7 +27,7 @@ class KnowledgePermissionService(CorpusPermissionService):
             return False
         if not self._tenant_allows(user, kb):
             return False
-        if self._has_role(user, {"owner"}) or _safe_has_permission(user, "knowledge.read"):
+        if self._has_role(user, {"owner", "admin"}):
             return True
         return self.user_can_use(kb_uuid, user_id, user) or self.user_can_train(kb_uuid, user_id, user)
 
@@ -42,14 +42,14 @@ class KnowledgePermissionService(CorpusPermissionService):
             return False
         if not self._tenant_allows(user, kb):
             return False
-        if self._has_role(user, {"owner"}) or _safe_has_permission(user, "knowledge.write"):
+        if self._has_role(user, {"owner", "admin"}):
             return True
         return self.user_can_train(kb_uuid, user_id, user)
 
     def can_delete_knowledge_base(self, user: Any | None, kb: Any | None) -> bool:
         if not self._tenant_allows(user, kb):
             return False
-        if self._has_role(user, {"owner"}) or _safe_has_permission(user, "knowledge.delete"):
+        if self._has_role(user, {"owner", "admin"}) or _safe_has_permission(user, "knowledge.delete"):
             return True
         return self.can_train_knowledge_base(user, kb)
 
@@ -59,7 +59,7 @@ class KnowledgePermissionService(CorpusPermissionService):
             return False
         if not self._tenant_allows(user, run):
             return False
-        if self._has_role(user, {"owner"}):
+        if self._has_role(user, {"owner", "admin"}):
             return True
         return self._can_use_or_train_corpus(user, corpus_uuid)
 
@@ -77,7 +77,7 @@ class KnowledgePermissionService(CorpusPermissionService):
             return False
         if not self._tenant_allows(user, item):
             return False
-        if self._has_role(user, {"owner"}):
+        if self._has_role(user, {"owner", "admin"}):
             return True
         return self._can_train_corpus(user, corpus_uuid)
 

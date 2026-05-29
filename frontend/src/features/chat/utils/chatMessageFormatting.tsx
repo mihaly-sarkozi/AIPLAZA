@@ -1,5 +1,7 @@
 import { Fragment, type ReactNode } from "react";
 import { sanitizeMessage } from "../../../utils/sanitize";
+import type { SettingsDateFormat, SettingsTimeFormat, SettingsTimezone } from "../../../api/services/settingsService";
+import { formatDateTime } from "../../../utils/dateTimeFormatting";
 import type { ChatSource, RestoredPiiSpan } from "../components/message/chatMessageTypes";
 
 export function shortLabel(value: string, maxLength = 42): string {
@@ -12,28 +14,34 @@ export function sourceDisplayName(source: ChatSource, fallback: string): string 
   return source.file_ref || source.title || source.source_id || source.point_id || fallback;
 }
 
-function sourceDateTime(value: string | null | undefined, locale: string): string {
+function sourceDateTime(
+  value: string | null | undefined,
+  locale: string,
+  timezone?: SettingsTimezone | string,
+  dateFormat?: SettingsDateFormat,
+  timeFormat?: SettingsTimeFormat
+): string {
   if (!value) return "";
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return "";
-  const tag = locale === "en" ? "en-GB" : locale === "es" ? "es-ES" : "hu-HU";
-  return parsed.toLocaleString(tag, {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  return formatDateTime(value, { locale, timezone, dateFormat, timeFormat });
 }
 
 function sourceTeacher(source: ChatSource): string {
   return source.created_by_label?.trim() || (source.created_by != null ? `#${source.created_by}` : "");
 }
 
-export function sourceDisplayLabel(source: ChatSource, fallback: string, locale: string): string {
+export function sourceDisplayLabel(
+  source: ChatSource,
+  fallback: string,
+  locale: string,
+  timezone?: SettingsTimezone | string,
+  dateFormat?: SettingsDateFormat,
+  timeFormat?: SettingsTimeFormat
+): string {
   const sourceType = String(source.source_type || source.display_type || "").trim().toLowerCase();
   const isFile = sourceType === "file" || Boolean(source.file_ref?.trim());
-  const dateLabel = sourceDateTime(source.created_at, locale) || "ismeretlen dátum";
+  const dateLabel = sourceDateTime(source.created_at, locale, timezone, dateFormat, timeFormat) || "ismeretlen dátum";
   const teacherLabel = sourceTeacher(source) || "ismeretlen tanító";
   const kbLabel = String(source.kb_name || source.kb_uuid || "").trim() || "ismeretlen tudástár";
   const trainingLabel = isFile ? "fájlos tanítás" : "Chatből tanított szöveg";

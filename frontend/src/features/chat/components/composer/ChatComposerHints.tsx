@@ -32,6 +32,7 @@ export default function ChatComposerHints({
   t,
 }: ChatComposerHintsProps) {
   const kbOptions = chatMode === "train" ? trainableKbList : selectableChatKbList;
+  const canTrain = trainableKbList.length > 0;
 
   return (
     <div className="absolute bottom-3 left-3 right-14 flex items-center gap-2 overflow-visible">
@@ -43,7 +44,7 @@ export default function ChatComposerHints({
           aria-label={t("chat.chatModeLabel")}
         >
           <option value="query">{t("chat.modeQuery")}</option>
-          <option value="train">{t("chat.modeTrain")}</option>
+          {canTrain ? <option value="train">{t("chat.modeTrain")}</option> : null}
         </select>
         <span className="pointer-events-none absolute right-3 top-1/2 h-1.5 w-1.5 -translate-y-[65%] rotate-45 border-b border-r border-white/80" />
       </div>

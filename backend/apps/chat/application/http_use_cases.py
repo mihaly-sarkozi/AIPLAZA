@@ -357,6 +357,16 @@ async def handle_chat_request(*, req, tenant, current_user, svc) -> AskResponse:
             tenant_id=getattr(tenant, "tenant_id", None),
         )
         raise
+    except PermissionError as exc:
+        log_structured_event(
+            "apps.chat",
+            "chat.permission_denied",
+            level=logging.WARNING,
+            reason=str(exc),
+            user_id=getattr(current_user, "id", None),
+            tenant_id=getattr(tenant, "tenant_id", None),
+        )
+        raise HTTPException(status_code=403, detail="Chat permission denied.") from exc
     except ChatPolicyViolationError:
         raise
     except PiiDepersonalizationUnavailableError:

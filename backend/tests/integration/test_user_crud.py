@@ -77,10 +77,11 @@ def test_create_user_success(client_superuser: TestClient, mock_user_service):
         id=2,
         email="newuser@example.com",
         password_hash="",
-        is_active=False,
+        is_active=True,
         role="user",
         created_at=datetime.now(timezone.utc),
         name="New User",
+        credentials_password_set=False,
     )
     r = client_superuser.post(
         "/api/users",
@@ -152,10 +153,11 @@ def test_resend_invite_success(client_superuser: TestClient, mock_user_service, 
         id=2,
         email="pending@example.com",
         password_hash="",
-        is_active=False,
+        is_active=True,
         role="user",
         created_at=datetime.now(timezone.utc),
         name=None,
+        credentials_password_set=False,
     )
     mock_user_service.get_by_id.side_effect = lambda uid: pending_user if uid == 2 else (sample_user if uid == 1 else None)
     r = client_superuser.post("/api/users/2/resend-invite")

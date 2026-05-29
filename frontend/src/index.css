@@ -142,7 +142,7 @@ input[type="checkbox"]:focus {
   --tw-ring-shadow: 0 0 #0000 !important;
 }
 
-/* Readonly checkbox: középső szürke (border és muted között), fehér pipa, fix négyzet, szögletes */
+/* Readonly checkbox: középső szürke (border és muted között), fix négyzet, szögletes */
 input[type="checkbox"][readonly] {
   appearance: none;
   -webkit-appearance: none;
@@ -170,7 +170,7 @@ input[type="checkbox"][readonly]:checked {
   background-color: var(--color-background);
 }
 .dark input[type="checkbox"][readonly]:checked {
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='white'%3E%3Cpath d='M12.207 4.793a1 1 0 0 1 0 1.414l-5 5a1 1 0 0 1-1.414 0l-2-2a1 1 0 0 1 1.414-1.414L6.5 9.086l4.293-4.293a1 1 0 0 1 1.414 0z'/%3E%3C/svg%3E");
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='black'%3E%3Cpath d='M12.207 4.793a1 1 0 0 1 0 1.414l-5 5a1 1 0 0 1-1.414 0l-2-2a1 1 0 0 1 1.414-1.414L6.5 9.086l4.293-4.293a1 1 0 0 1 1.414 0z'/%3E%3C/svg%3E");
 }
 
 /* Jelölhető (aktív) checkbox: nincs kijelölve = csak keret, kijelölve = kék, tiltott = kitöltött szürke */
@@ -209,6 +209,7 @@ input[type="checkbox"][readonly]:checked {
 }
 .dark .kb-perm-checkbox:checked {
   border-color: var(--color-primary) !important;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='black'%3E%3Cpath d='M12.207 4.793a1 1 0 0 1 0 1.414l-5 5a1 1 0 0 1-1.414 0l-2-2a1 1 0 0 1 1.414-1.414L6.5 9.086l4.293-4.293a1 1 0 0 1 1.414 0z'/%3E%3C/svg%3E");
 }
 .dark .kb-perm-checkbox:disabled {
   background-color: var(--color-background) !important;
@@ -219,6 +220,17 @@ input[type="checkbox"][readonly]:checked {
 label {
   color: var(--color-label);
   @apply block text-sm font-medium mb-1;
+}
+
+.dark .package-plan-card-featured {
+  background-color: #064e3b !important;
+  border-color: #065f46 !important;
+  --tw-ring-color: #065f46 !important;
+}
+
+.dark .package-plan-card-featured-badge {
+  background-color: #064e3b !important;
+  color: #d1fae5 !important;
 }
 
 .btn {
@@ -323,6 +335,34 @@ label {
   background-color: var(--color-card-muted);
   color: var(--color-muted-foreground);
   @apply inline-flex items-center rounded-full px-3 py-1 text-xs font-medium;
+}
+
+.role-status-label {
+  color: #ffffff !important;
+}
+
+.dark .role-status-label {
+  color: #000000 !important;
+}
+
+.dark .role-active-switch {
+  background-color: #ffffff !important;
+}
+
+.dark .role-active-switch-off {
+  background-color: var(--color-border) !important;
+}
+
+.dark .role-active-switch-knob {
+  background-color: #000000 !important;
+}
+
+.role-inactive-dark-text {
+  color: #cbd5e1 !important;
+}
+
+.dark .role-inactive-dark-text {
+  color: #475569 !important;
 }
 
 .alert-base {

@@ -6,8 +6,7 @@ from apps.chat.infrastructure import build_chat_infrastructure
 from apps.chat.router.channel_credentials_router import router as channel_credentials_router
 from apps.chat.router.channel_router import router as channel_router
 from apps.chat.router.chat_router import router as chat_router
-from apps.knowledge.bootstrap.service_keys import KNOWLEDGE_SERVICE
-from apps.state_keys import CTX_STATE_CHAT_INFRASTRUCTURE
+from apps.state_keys import CTX_STATE_CHAT_INFRASTRUCTURE, KNOWLEDGE_SERVICE
 from core.kernel.interface import BaseAppModule, ModuleContext, RouteRegistration
 from core.kernel.interface.app_conventions import module_key
 

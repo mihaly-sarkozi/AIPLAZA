@@ -225,13 +225,14 @@ def mock_user_service(sample_user):
         id=2,
         email=kw.get("email", "new@example.com"),
         password_hash="",
-        is_active=False,
+        is_active=True,
         role=kw.get("role", "user"),
         created_at=datetime.now(timezone.utc),
         name=kw.get("name"),
+        credentials_password_set=False,
     )
 
-    def _update(user_id, current_user_id=0, name=None, is_active=None, email=None, role=None):
+    def _update(user_id, current_user_id=0, name=None, is_active=None, email=None, role=None, **_kwargs):
         return User(
             id=user_id,
             email=email or "updated@example.com",
@@ -280,12 +281,64 @@ def mock_settings_service():
         "timezone": "UTC",
         "date_format": "YYYY-MM-DD",
         "time_format": "HH:mm",
+        "billing_customer_type": "company",
+        "billing_full_name": "",
+        "billing_company_name": "",
+        "billing_tax_id": "",
+        "billing_address_line": "",
+        "billing_postal_code": "",
+        "billing_city": "",
+        "billing_region": "",
+        "billing_country": "",
+    }
+    svc.get_two_factor_settings.return_value = {"two_factor_enabled": False}
+    svc.get_locale_settings.return_value = {
+        "timezone": "UTC",
+        "date_format": "YYYY-MM-DD",
+        "time_format": "HH:mm",
+    }
+    svc.get_billing_settings.return_value = {
+        "billing_customer_type": "company",
+        "billing_full_name": "",
+        "billing_company_name": "",
+        "billing_tax_id": "",
+        "billing_address_line": "",
+        "billing_postal_code": "",
+        "billing_city": "",
+        "billing_region": "",
+        "billing_country": "",
     }
     svc.update_settings.return_value = {
         "two_factor_enabled": True,
         "timezone": "Europe/Budapest",
         "date_format": "DD.MM.YYYY",
         "time_format": "HH:mm:ss",
+        "billing_customer_type": "company",
+        "billing_full_name": "",
+        "billing_company_name": "",
+        "billing_tax_id": "",
+        "billing_address_line": "",
+        "billing_postal_code": "",
+        "billing_city": "",
+        "billing_region": "",
+        "billing_country": "",
+    }
+    svc.update_two_factor_settings.return_value = {"two_factor_enabled": True}
+    svc.update_locale_settings.return_value = {
+        "timezone": "Europe/Budapest",
+        "date_format": "DD.MM.YYYY",
+        "time_format": "HH:mm:ss",
+    }
+    svc.update_billing_settings.return_value = {
+        "billing_customer_type": "company",
+        "billing_full_name": "",
+        "billing_company_name": "Example Kft.",
+        "billing_tax_id": "HU12345678",
+        "billing_address_line": "Fo utca 1.",
+        "billing_postal_code": "1051",
+        "billing_city": "Budapest",
+        "billing_region": "",
+        "billing_country": "HU",
     }
     return svc
 

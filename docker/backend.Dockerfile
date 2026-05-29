@@ -11,7 +11,8 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 COPY backend/requirements.txt ./requirements.txt
-RUN pip install --upgrade pip && pip install -r requirements.txt
+COPY backend/requirements-dev.txt ./requirements-dev.txt
+RUN pip install --upgrade pip && pip install -r requirements-dev.txt
 
 COPY backend/pyproject.toml ./pyproject.toml
 COPY backend/pytest.ini ./pytest.ini
@@ -22,6 +23,7 @@ COPY backend/lang ./lang
 COPY backend/main.py ./main.py
 COPY backend/run_test.py ./run_test.py
 COPY backend/scripts ./scripts
+COPY backend/scaffolding ./scaffolding
 COPY backend/shared ./shared
 COPY backend/storage ./storage
 COPY backend/tests ./tests

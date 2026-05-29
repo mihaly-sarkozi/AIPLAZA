@@ -2,7 +2,10 @@
 # Feladat: A /api/platform-admin HTTP felület FastAPI adaptere. Login, refresh, logout, CSRF, profil, jelszó, MFA, admin user kezelés, tenant statisztika, security monitoring, alert acknowledgement és IP ban endpointokat köt a PlatformAdminService műveleteihez. Admin HTTP réteg, amely auditot, rate limitet és platform-admin cookie policyt is alkalmaz.
 # Sárközi Mihály - 2026.05.21
 
-from fastapi import APIRouter, Body, Depends, Header, HTTPException, Request, Response
+from datetime import date
+
+from fastapi import APIRouter, Body, Depends, Header, HTTPException, Query, Request, Response
+from fastapi.responses import Response as FastAPIResponse
 import logging
 
 from core.kernel.audit import AuditLogAction, AuditService
@@ -25,6 +28,7 @@ from core.kernel.http.responses import OperationStatusResponse
 from core.kernel.security.rate_limit import limiter
 from core.kernel.interface.observability import increment_metric, log_structured_event
 from core.kernel.interface.keys import PLATFORM_ADMIN_SERVICE
+from core.kernel.interface.keys import PLATFORM_TENANT_USAGE_SERVICE
 from core.modules.auth.repository.token_allowlist import add as allowlist_add
 from core.modules.auth.repository.token_allowlist import is_allowed as allowlist_is_allowed
 from core.modules.auth.repository.token_allowlist import remove_by_user as allowlist_remove_by_user
@@ -35,12 +39,16 @@ from admin.web.schemas.platform_admin_schemas import (
     PlatformAdminBanIpRequest,
     PlatformAdminBanIpResponse,
     PlatformAdminChangePasswordRequest,
+    PlatformAdminDebugDateRequest,
+    PlatformAdminDebugDateResponse,
     PlatformAdminDemoSignupGateResponse,
     PlatformAdminDemoSignupGateUpdateRequest,
     PlatformAdminLoginRequest,
     PlatformAdminLoginResponse,
+    PlatformAdminAuditTrailResponse,
     PlatformAdminStatisticsResponse,
     PlatformAdminSecurityMonitoringResponse,
+    PlatformAdminTenantActionRequest,
     PlatformAdminTenantResponse,
     PlatformAdminProfileUpdateRequest,
     PlatformAdminUserResponse,
@@ -59,6 +67,10 @@ logger = logging.getLogger(__name__)
 
 def get_platform_admin_service() -> PlatformAdminService:
     return get_service(PLATFORM_ADMIN_SERVICE)
+
+
+def get_billing_usage_service():
+    return get_service(PLATFORM_TENANT_USAGE_SERVICE)
 
 
 def _audit_log(audit: AuditService, action: AuditLogAction, **kwargs) -> None:  # type: ignore[no-untyped-def]
@@ -82,6 +94,7 @@ def get_platform_admin_csrf_token(request: Request, response: Response):
 
 
 def current_platform_admin(
+    request: Request,
     authorization: str | None = Header(default=None),
     service: PlatformAdminService = Depends(get_platform_admin_service),
 ) -> PlatformAdminUserORM:
@@ -100,6 +113,18 @@ def current_platform_admin(
     user = service.resolve_token(token)
     if not user:
         raise HTTPException(status_code=401, detail="Invalid platform admin token")
+    path = str(getattr(request.url, "path", "") or "")
+    mfa_setup_paths = (
+        "/api/platform-admin/auth/me",
+        "/api/platform-admin/auth/logout",
+        "/api/platform-admin/auth/mfa/status",
+        "/api/platform-admin/auth/mfa/setup",
+        "/api/platform-admin/auth/mfa/confirm",
+    )
+    mfa_required = bool(getattr(settings, "platform_admin_mfa_required", True))
+    mfa_enabled = bool(getattr(user, "mfa_enabled", False) and getattr(user, "mfa_secret_base32", None))
+    if mfa_required and not mfa_enabled and path not in mfa_setup_paths:
+        raise HTTPException(status_code=403, detail="Platform admin MFA setup required.")
     return user
 
 
@@ -161,20 +186,17 @@ def login(
         result = service.login(body.email, body.password, ip=client_host, ua=user_agent, mfa_code=body.mfa_code)
     except ValueError as exc:
         code = str(exc)
-        if code == "platform_admin_mfa_setup_required":
+        if code == "platform_admin_mfa_required":
             _audit_log(
                 audit,
                 AuditLogAction.PLATFORM_ADMIN_MFA_REQUIRED,
                 actor_type="platform_admin",
                 outcome="challenge_required",
-                details={"email": body.email, "reason": "mfa_setup_required"},
+                details={"email": body.email, "reason": "mfa_required"},
                 ip=client_host,
                 user_agent=user_agent,
             )
-            raise HTTPException(
-                status_code=403,
-                detail="Platform admin MFA setup required before login.",
-            )
+            raise HTTPException(status_code=401, detail={"code": "mfa_required", "message": "MFA kód szükséges."})
         if code == "platform_admin_mfa_invalid":
             _audit_log(
                 audit,
@@ -526,6 +548,67 @@ def platform_statistics_overview(
     return service.get_statistics()
 
 
+@router.get("/debug/simulated-date", response_model=PlatformAdminDebugDateResponse)
+@limiter.limit("60/minute")
+def get_platform_admin_simulated_date(
+    request: Request,
+    billing_service=Depends(get_billing_usage_service),
+    user: PlatformAdminUserORM = Depends(current_platform_admin),
+):
+    return billing_service.get_debug_simulated_date()
+
+
+@router.put("/debug/simulated-date", response_model=PlatformAdminDebugDateResponse)
+@limiter.limit("20/minute")
+def set_platform_admin_simulated_date(
+    request: Request,
+    body: PlatformAdminDebugDateRequest = Body(...),
+    billing_service=Depends(get_billing_usage_service),
+    user: PlatformAdminUserORM = Depends(current_platform_admin),
+    audit: AuditService = Depends(get_audit_service),
+):
+    raw = (body.simulated_date or "").strip()
+    if not raw:
+        result = billing_service.set_debug_simulated_date(None)
+    else:
+        try:
+            parsed = date.fromisoformat(raw)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="Invalid date") from exc
+        result = billing_service.set_debug_simulated_date(parsed)
+    _audit_log(
+        audit,
+        AuditLogAction.PLATFORM_ADMIN_STATS_VIEWED,
+        user_id=user.id,
+        actor_type="platform_admin",
+        target_type="platform_admin",
+        target_id=str(user.id),
+        details={"section": "simulated_date", "simulated_date": result.simulated_date},
+    )
+    return result
+
+
+@router.delete("/debug/simulated-date", response_model=PlatformAdminDebugDateResponse)
+@limiter.limit("20/minute")
+def clear_platform_admin_simulated_date(
+    request: Request,
+    billing_service=Depends(get_billing_usage_service),
+    user: PlatformAdminUserORM = Depends(current_platform_admin),
+    audit: AuditService = Depends(get_audit_service),
+):
+    result = billing_service.set_debug_simulated_date(None)
+    _audit_log(
+        audit,
+        AuditLogAction.PLATFORM_ADMIN_STATS_VIEWED,
+        user_id=user.id,
+        actor_type="platform_admin",
+        target_type="platform_admin",
+        target_id=str(user.id),
+        details={"section": "simulated_date", "simulated_date": None},
+    )
+    return result
+
+
 @router.get("/statistics/tenants/{tenant_id}")
 @limiter.limit("60/minute")
 def platform_tenant_statistics_detail(
@@ -547,6 +630,125 @@ def platform_tenant_statistics_detail(
         return service.get_tenant_statistics_detail(tenant_id)
     except ValueError:
         raise HTTPException(status_code=404, detail="Tenant not found")
+
+
+@router.post("/tenants/{tenant_id}/restore", response_model=OperationStatusResponse)
+@limiter.limit("10/minute")
+def restore_platform_tenant(
+    request: Request,
+    tenant_id: int,
+    body: PlatformAdminTenantActionRequest = Body(...),
+    service: PlatformAdminService = Depends(get_platform_admin_service),
+    user: PlatformAdminUserORM = Depends(current_platform_admin),
+    audit: AuditService = Depends(get_audit_service),
+):
+    try:
+        tenant = service.restore_cancelled_tenant(tenant_id, confirm_name=body.confirm_name, admin_user_id=user.id)
+    except ValueError as exc:
+        code = str(exc)
+        if code == "tenant_not_found":
+            raise HTTPException(status_code=404, detail="Tenant not found") from exc
+        if code == "tenant_confirmation_mismatch":
+            raise HTTPException(status_code=400, detail="AI oldal név megerősítés nem egyezik") from exc
+        raise HTTPException(status_code=409, detail=code) from exc
+    _audit_log(
+        audit,
+        AuditLogAction.PLATFORM_ADMIN_STATS_VIEWED,
+        user_id=user.id,
+        actor_type="platform_admin",
+        target_type="tenant",
+        target_id=str(tenant_id),
+        details={"action": "tenant_restore", "tenant_slug": tenant.get("slug")},
+    )
+    return OperationStatusResponse(message="Tenant restored")
+
+
+@router.post("/tenants/{tenant_id}/permanent-delete", response_model=OperationStatusResponse)
+@limiter.limit("5/minute")
+def permanently_delete_platform_tenant(
+    request: Request,
+    tenant_id: int,
+    body: PlatformAdminTenantActionRequest = Body(...),
+    service: PlatformAdminService = Depends(get_platform_admin_service),
+    user: PlatformAdminUserORM = Depends(current_platform_admin),
+    audit: AuditService = Depends(get_audit_service),
+):
+    try:
+        tenant = service.permanently_delete_cancelled_tenant(tenant_id, confirm_name=body.confirm_name, admin_user_id=user.id)
+    except ValueError as exc:
+        code = str(exc)
+        if code == "tenant_not_found":
+            raise HTTPException(status_code=404, detail="Tenant not found") from exc
+        if code == "tenant_confirmation_mismatch":
+            raise HTTPException(status_code=400, detail="AI oldal név megerősítés nem egyezik") from exc
+        raise HTTPException(status_code=409, detail=code) from exc
+    _audit_log(
+        audit,
+        AuditLogAction.PLATFORM_ADMIN_STATS_VIEWED,
+        user_id=user.id,
+        actor_type="platform_admin",
+        target_type="tenant",
+        target_id=str(tenant_id),
+        details={"action": "tenant_permanent_delete", "tenant_slug": tenant.get("slug")},
+    )
+    return OperationStatusResponse(message="Tenant permanently deleted")
+
+
+@router.get("/audit/tenants/{tenant_id}", response_model=PlatformAdminAuditTrailResponse)
+@limiter.limit("60/minute")
+def platform_tenant_audit_trail(
+    request: Request,
+    tenant_id: int,
+    from_date: str | None = None,
+    to_date: str | None = None,
+    email: str | None = None,
+    action: list[str] | None = Query(default=None),
+    limit: int = 50,
+    cursor: str | None = None,
+    service: PlatformAdminService = Depends(get_platform_admin_service),
+    _user: PlatformAdminUserORM = Depends(current_platform_admin),
+):
+    try:
+        return service.list_tenant_audit_trail(
+            tenant_id=tenant_id,
+            from_date=from_date,
+            to_date=to_date,
+            email=email,
+            actions=action,
+            limit=limit,
+            cursor=cursor,
+        )
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+
+
+@router.get("/audit/tenants/{tenant_id}/export")
+@limiter.limit("20/minute")
+def export_platform_tenant_audit_trail(
+    request: Request,
+    tenant_id: int,
+    from_date: str | None = None,
+    to_date: str | None = None,
+    email: str | None = None,
+    action: list[str] | None = Query(default=None),
+    service: PlatformAdminService = Depends(get_platform_admin_service),
+    _user: PlatformAdminUserORM = Depends(current_platform_admin),
+):
+    try:
+        filename, content = service.export_tenant_audit_trail_csv(
+            tenant_id=tenant_id,
+            from_date=from_date,
+            to_date=to_date,
+            email=email,
+            actions=action,
+        )
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+    return FastAPIResponse(
+        content=content,
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.get("/monitoring/security", response_model=PlatformAdminSecurityMonitoringResponse)

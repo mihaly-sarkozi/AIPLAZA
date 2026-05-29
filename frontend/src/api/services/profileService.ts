@@ -8,6 +8,8 @@ export type ProfilePreferences = {
 export type ProfileResponse = {
   id: number;
   email: string;
+  pending_email?: string | null;
+  pending_email_expires_at?: string | null;
   role: string;
   is_active: boolean;
   name?: string | null;
@@ -23,6 +25,7 @@ export type ProfileResponse = {
 
 export type PatchProfilePayload = {
   name?: string | null;
+  email?: string;
   preferred_locale?: string;
   preferred_theme?: string;
   app_preferences?: Partial<ProfilePreferences>;

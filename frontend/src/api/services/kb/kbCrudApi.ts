@@ -17,6 +17,7 @@ export async function updateKb({
   description,
   personal_data_mode,
   pii_depersonalization_enabled,
+  public_enabled,
 }: UpdateKbPayload): Promise<KbItem> {
   const body: Record<string, unknown> = {
     name,
@@ -27,6 +28,9 @@ export async function updateKb({
   }
   if (typeof pii_depersonalization_enabled === "boolean") {
     body.pii_depersonalization_enabled = pii_depersonalization_enabled;
+  }
+  if (typeof public_enabled === "boolean") {
+    body.public_enabled = public_enabled;
   }
   const res = await api.put(`/kb/${uuid}`, body);
   return res.data as KbItem;

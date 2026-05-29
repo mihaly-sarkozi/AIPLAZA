@@ -40,6 +40,29 @@ Ha nem kérted a regisztrációt, hagyd figyelmen kívül ezt az emailt.
 Üdvözlettel,
 {signature}""",
         },
+        "confirm_email_change": {
+            "subject": "AIPLAZA - Erősítsd meg az új email címed",
+            "body": """Kedves Felhasználó!
+
+Email cím módosítást kezdeményeztél az AIPLAZA fiókodhoz.
+
+Jelenlegi belépési email címed:
+{current_email}
+
+Megerősítésre váró új email címed:
+{new_email}
+
+Az új email cím aktiválásához kattints az alábbi linkre:
+
+{confirm_email_link}
+
+Amíg ezt nem erősíted meg, továbbra is a régi email címeddel tudsz belépni.
+
+Ha nem te kezdeményezted ezt a módosítást, hagyd figyelmen kívül ezt az emailt.
+
+Üdvözlettel,
+{signature}""",
+        },
         "demo_login": {
             "subject": "BrainBankCenter demo - A rendszered elkészült",
             "body": """Szia!
@@ -107,6 +130,29 @@ If you did not request this registration, please ignore this email.
 Best regards,
 {signature}""",
         },
+        "confirm_email_change": {
+            "subject": "AIPLAZA - Confirm your new email address",
+            "body": """Dear User,
+
+You requested an email address change for your AIPLAZA account.
+
+Current sign-in email:
+{current_email}
+
+New email waiting for confirmation:
+{new_email}
+
+To activate the new email address, open this link:
+
+{confirm_email_link}
+
+Until you confirm it, you can continue signing in with your old email address.
+
+If you did not request this change, please ignore this email.
+
+Best regards,
+{signature}""",
+        },
         "demo_login": {
             "subject": "BrainBankCenter demo - Your workspace is ready",
             "body": """Hello,
@@ -170,6 +216,29 @@ Tu cuenta de AIPLAZA ha sido creada. Para iniciar sesión, configura tu contrase
 La contraseña debe tener al menos 6 caracteres e incluir minúsculas, mayúsculas y un número.
 
 Si no solicitaste este registro, ignora este correo.
+
+Saludos,
+{signature}""",
+        },
+        "confirm_email_change": {
+            "subject": "AIPLAZA - Confirma tu nueva dirección de correo",
+            "body": """Estimado/a usuario/a:
+
+Has solicitado cambiar la dirección de correo de tu cuenta de AIPLAZA.
+
+Correo actual para iniciar sesión:
+{current_email}
+
+Nuevo correo pendiente de confirmación:
+{new_email}
+
+Para activar el nuevo correo, abre este enlace:
+
+{confirm_email_link}
+
+Hasta que lo confirmes, podrás seguir iniciando sesión con tu correo anterior.
+
+Si no solicitaste este cambio, ignora este correo.
 
 Saludos,
 {signature}""",

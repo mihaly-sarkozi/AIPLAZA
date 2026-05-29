@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+# backend/apps/profile/infra/preferences_repository.py
+# Feladat: Tenant sémás profile_preferences repository a profil felületi preferenciáinak perzisztálásához.
+# Sárközi Mihály - 2026.05.24
+
 import re
 
 from sqlalchemy import text

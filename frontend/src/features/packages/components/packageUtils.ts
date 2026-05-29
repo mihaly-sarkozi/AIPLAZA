@@ -1,4 +1,6 @@
 import type { BillingCatalogEntry } from "../../billing/hooks/useBilling";
+import type { SettingsDateFormat, SettingsTimezone } from "../../../api/services/settingsService";
+import { formatDateOnly } from "../../../utils/dateTimeFormatting";
 
 export const PLAN_ORDER = ["free", "starter", "growth", "business"] as const;
 export const FLEX_STORAGE_GB_BUNDLE = 5;
@@ -83,10 +85,17 @@ export function includedNumber(entry: BillingCatalogEntry | null, key: string, f
 
 export function getTrainingInitialAddonInfo(catalog: BillingCatalogEntry[]): { euro: number; chars: number } {
   const row = catalog.find((entry) => entry.entry_type === "addon" && entry.code === "training_initial_500k");
-  const euro = row ? Math.floor(Number(row.price_cents) / 100) : 49;
+  const euro = row ? Math.floor(Number(row.price_cents) / 100) : 29;
   const raw = row?.included && typeof row.included === "object" ? (row.included as Record<string, unknown>).training_chars : null;
-  const chars = raw != null && raw !== "" ? Number(raw) : 500000;
-  return { euro, chars: Number.isFinite(chars) ? chars : 500000 };
+  const chars = raw != null && raw !== "" ? Number(raw) : 1000000;
+  return { euro, chars: Number.isFinite(chars) ? chars : 1000000 };
+}
+
+export function trainingInitialFeeEuroForPlan(planCode: string, catalog: BillingCatalogEntry[]): number {
+  const normalized = String(planCode || "").toLowerCase();
+  if (normalized === "growth") return 89;
+  if (normalized === "business") return 489;
+  return getTrainingInitialAddonInfo(catalog).euro;
 }
 
 export function planCardFeatureSections(entry: BillingCatalogEntry, t: (key: string) => string) {
@@ -165,9 +174,15 @@ export function tPlanBillingParen(period: BillingPeriod, t: (key: string) => str
   return t("packages.planBillingParenQuarterly");
 }
 
-export function formatSubscriptionDateForBanner(iso: unknown, dateLocaleTag: string): string | null {
+export function formatSubscriptionDateForBanner(
+  iso: unknown,
+  localeOrDateLocaleTag: string,
+  timezone?: SettingsTimezone | string,
+  dateFormat?: SettingsDateFormat
+): string | null {
   if (iso == null || iso === "") return null;
   const date = new Date(String(iso));
   if (Number.isNaN(date.getTime())) return null;
-  return date.toLocaleDateString(dateLocaleTag, { dateStyle: "long" });
+  const locale = localeOrDateLocaleTag === "en-GB" ? "en" : localeOrDateLocaleTag === "es-ES" ? "es" : "hu";
+  return formatDateOnly(iso, { locale, timezone, dateFormat, dateStyle: dateFormat ? undefined : "long" });
 }

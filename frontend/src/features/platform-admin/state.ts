@@ -11,6 +11,7 @@ type PlatformAdminState = {
   loadingUser: boolean;
   setSession: (token: string, user: PlatformAdminUser) => void;
   setUser: (user: PlatformAdminUser | null) => void;
+  clearSession: () => void;
   loadUser: () => Promise<void>;
   logout: () => Promise<void>;
 };
@@ -22,6 +23,7 @@ export const usePlatformAdminStore = create<PlatformAdminState>((set, get) => ({
 
   setSession: (token, user) => set({ token, user, loadingUser: false }),
   setUser: (user) => set({ user }),
+  clearSession: () => set({ token: null, user: null, loadingUser: false }),
 
   loadUser: async () => {
     if (loadPlatformAdminUserPromise) return loadPlatformAdminUserPromise;
@@ -43,7 +45,7 @@ export const usePlatformAdminStore = create<PlatformAdminState>((set, get) => ({
         });
         set({ user: res.data });
       } catch {
-        set({ token: null, user: null });
+        get().clearSession();
       } finally {
         set({ loadingUser: false });
         loadPlatformAdminUserPromise = null;
@@ -60,7 +62,7 @@ export const usePlatformAdminStore = create<PlatformAdminState>((set, get) => ({
     } catch {
       // Kliens oldalon akkor is kiléptetünk, ha a szerver session már lejárt.
     } finally {
-      set({ token: null, user: null, loadingUser: false });
+      get().clearSession();
     }
   },
 }));

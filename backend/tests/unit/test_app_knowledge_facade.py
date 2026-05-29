@@ -28,6 +28,7 @@ from apps.knowledge.service.runtime_store import (
     SimpleContextBuilder,
     SimpleRetrievalEngine,
 )
+from core.infrastructure.audit.const.audit_log_action_const import AuditLogAction
 from shared.object_storage.models import StoredObjectData, StoredObjectRef
 
 pytestmark = [pytest.mark.unit, pytest.mark.must_pass]
@@ -394,7 +395,15 @@ class _VectorIndex:
         return rows[:limit]
 
 
-def _build_facade(vector_index: _VectorIndex | None = None) -> KnowledgeFacade:
+class _AuditRecorder:
+    def __init__(self) -> None:
+        self.entries: list[dict] = []
+
+    def log(self, action, **kwargs) -> None:
+        self.entries.append({"action": action, **kwargs})
+
+
+def _build_facade(vector_index: _VectorIndex | None = None, audit_service=None) -> KnowledgeFacade:
     vector = vector_index or _VectorIndex()
     noop_store = _NoopStore()
     return KnowledgeFacade(
@@ -418,6 +427,7 @@ def _build_facade(vector_index: _VectorIndex | None = None) -> KnowledgeFacade:
         vector_index_factory=lambda: vector,
         metrics_store=InMemoryMetricsStore(),
         object_storage=_NoopObjectStorage(),
+        audit_service=audit_service,
     )
 
 
@@ -430,6 +440,33 @@ def test_split_sentences_keeps_numbered_list_item_together() -> None:
         "1. Első pont részletes leírása.",
         "2. Második pont külön mondat.",
     ]
+
+
+def test_update_kb_audits_public_and_pii_toggle_changes() -> None:
+    audit = _AuditRecorder()
+    facade = _build_facade(audit_service=audit)
+
+    facade.update(
+        "kb-1",
+        "Pilot KB",
+        "Demo corpus",
+        pii_depersonalization_enabled=False,
+        public_enabled=True,
+        current_user_id=7,
+        ip="127.0.0.1",
+        user_agent="test-agent",
+    )
+
+    setting_events = [
+        entry for entry in audit.entries if entry["action"] == AuditLogAction.KNOWLEDGE_SETTING_CHANGED
+    ]
+    assert [entry["details"]["field"] for entry in setting_events] == [
+        "public_enabled",
+        "pii_depersonalization_enabled",
+    ]
+    assert all(entry["target_id"] == "kb-1" for entry in setting_events)
+    assert all(entry["details"]["kb_name"] == "Pilot KB" for entry in setting_events)
+    assert all(entry["ip"] == "127.0.0.1" for entry in setting_events)
 
 
 @pytest.mark.anyio

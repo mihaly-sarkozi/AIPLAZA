@@ -18,6 +18,7 @@ type ChatMessagesListProps = {
   onStartPendingFileTraining: () => void;
   onStartPendingTextTraining: () => void;
   messagesEndRef: RefObject<HTMLDivElement | null>;
+  emptyStateKey?: string;
   t: (key: string) => string;
 };
 
@@ -35,6 +36,7 @@ export default function ChatMessagesList({
   onStartPendingFileTraining,
   onStartPendingTextTraining,
   messagesEndRef,
+  emptyStateKey = "chat.emptyState",
   t,
 }: ChatMessagesListProps) {
   return (
@@ -122,7 +124,7 @@ export default function ChatMessagesList({
 
       {messages.length === 0 ? (
         <div className="absolute inset-0 flex flex-col items-center justify-center text-center text-[var(--color-muted)] text-sm leading-6 pointer-events-none">
-          <div className="max-w-lg whitespace-pre-line">{t("chat.emptyState")}</div>
+          <div className="max-w-lg whitespace-pre-line">{t(emptyStateKey)}</div>
         </div>
       ) : null}
 

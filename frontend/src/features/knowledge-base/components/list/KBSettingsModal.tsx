@@ -10,6 +10,8 @@ type KBSettingsModalProps = {
   formData: KbFormData;
   formError: string | null;
   piiDepersonalizationEnabled: boolean;
+  isPublic: boolean;
+  publicEnabled: boolean;
   settingsPermsLoading: boolean;
   settingsSaveLoading: boolean;
   actionLoading: boolean;
@@ -18,9 +20,9 @@ type KBSettingsModalProps = {
   t: (key: string) => string;
   setFormData: (data: KbFormData) => void;
   setPiiDepersonalizationEnabled: (enabled: boolean) => void;
+  setPublicEnabled: (enabled: boolean) => void;
   clearFormError: () => void;
   onPermissionChange: (userId: number, permission: string) => void;
-  onBulkPermissionChange: (enabled: boolean) => void;
   onClose: () => void;
   onSave: () => void;
 };
@@ -30,6 +32,8 @@ export default function KBSettingsModal({
   formData,
   formError,
   piiDepersonalizationEnabled,
+  isPublic,
+  publicEnabled,
   settingsPermsLoading,
   settingsSaveLoading,
   actionLoading,
@@ -38,9 +42,9 @@ export default function KBSettingsModal({
   t,
   setFormData,
   setPiiDepersonalizationEnabled,
+  setPublicEnabled,
   clearFormError,
   onPermissionChange,
-  onBulkPermissionChange,
   onClose,
   onSave,
 }: KBSettingsModalProps) {
@@ -65,43 +69,58 @@ export default function KBSettingsModal({
             required
           />
         </div>
-        <label
-          className="!mb-0 !inline-flex !items-center rounded-lg border border-[var(--color-border)] px-3 py-2 text-sm text-[var(--color-foreground)]"
-          style={{ gap: "8px" }}
-        >
+        <div className="flex items-center text-sm text-[var(--color-muted)]">
           <input
+            id="kb-settings-pii-depersonalization"
             type="checkbox"
             checked={piiDepersonalizationEnabled}
+            disabled={actionLoading || settingsSaveLoading}
             onChange={(event) => setPiiDepersonalizationEnabled(event.target.checked)}
-            className="kb-perm-checkbox !mt-0 self-center"
+            className="kb-perm-checkbox focus:ring-0 focus:outline-none focus:shadow-none [&:focus]:outline-none [&:focus]:ring-0 [&:focus]:shadow-none"
           />
-          <span className="leading-5 align-middle">PII deperszonalizáció az LLM felé (ajánlott)</span>
-        </label>
+          <label htmlFor="kb-settings-pii-depersonalization" className="!mb-0 ml-2 !block translate-y-px cursor-pointer !font-medium leading-4 !text-[var(--color-muted)]">
+            PII deperszonalizáció az LLM felé (ajánlott)
+          </label>
+        </div>
+        <div className="flex items-center text-sm text-[var(--color-muted)]">
+          <input
+            id="kb-settings-public-enabled"
+            type="checkbox"
+            checked={publicEnabled}
+            disabled={actionLoading || settingsSaveLoading}
+            onChange={(event) => setPublicEnabled(event.target.checked)}
+            className="kb-perm-checkbox focus:ring-0 focus:outline-none focus:shadow-none [&:focus]:outline-none [&:focus]:ring-0 [&:focus]:shadow-none"
+          />
+          <label htmlFor="kb-settings-public-enabled" className="!mb-0 ml-2 !block translate-y-px cursor-pointer !font-medium leading-4 !text-[var(--color-muted)]">
+            Publikus (Bejelentkezés nélkül elérhető, pl. weboldalon)
+          </label>
+        </div>
       </div>
 
-      <h3 className="text-sm font-semibold text-[var(--color-foreground)] mb-2">{t("kb.permissionsTitle")}</h3>
-      {settingsPermsLoading ? (
-        <p className="text-[var(--color-muted)]">{t("common.loading")}</p>
-      ) : (
+      {!isPublic ? (
         <>
-          <KBPermissionTable
-            users={usersWithPerms}
-            currentUserId={currentUserId}
-            t={t}
-            onChange={onPermissionChange}
-            onBulkChange={onBulkPermissionChange}
-            mode="settings"
-          />
-          <ModalFooter className="mt-4">
-            <Button type="button" onClick={onClose} variant="secondary" disabled={actionLoading}>
-              {t("common.cancel")}
-            </Button>
-            <Button type="button" onClick={onSave} disabled={settingsSaveLoading}>
-              {settingsSaveLoading ? t("common.loading") : t("common.save")}
-            </Button>
-          </ModalFooter>
+          <h3 className="text-sm font-semibold text-[var(--color-foreground)] mb-2">{t("kb.permissionsTitle")}</h3>
+          {settingsPermsLoading ? (
+            <p className="text-[var(--color-muted)]">{t("common.loading")}</p>
+          ) : (
+            <KBPermissionTable
+              users={usersWithPerms}
+              currentUserId={currentUserId}
+              t={t}
+              onChange={onPermissionChange}
+              mode="settings"
+            />
+          )}
         </>
-      )}
+      ) : null}
+      <ModalFooter className="mt-4">
+        <Button type="button" onClick={onClose} variant="secondary" disabled={actionLoading}>
+          {t("common.cancel")}
+        </Button>
+        <Button type="button" onClick={onSave} disabled={settingsSaveLoading || (!isPublic && settingsPermsLoading)}>
+          {settingsSaveLoading ? t("common.loading") : t("common.save")}
+        </Button>
+      </ModalFooter>
     </Modal>
   );
 }

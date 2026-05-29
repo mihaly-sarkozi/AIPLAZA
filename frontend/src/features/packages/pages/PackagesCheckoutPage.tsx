@@ -4,11 +4,13 @@ import { useTranslation } from "../../../i18n";
 import { useAuthStore } from "../../../store/authStore";
 import { useBillingOverview, useUpdateSubscriptionMutation, type BillingCatalogEntry } from "../../billing/hooks/useBilling";
 import { formatPlanResourceBlockMessage, planResourceBlock, readBillingResourceUsage } from "../planEligibility";
-import api from "../../../api/axiosClient";
+import { patchBillingSettings } from "../../../api/services/settingsService";
 import { EU_COUNTRIES, isValidEuVatId, isValidPostalCode, normalizeEuVatId, normalizePostalCode } from "./checkoutOptions";
 import { checkoutCustomerTypeFromSettings, hasSavedCheckoutBillingDetails, type BillingCustomerType } from "./checkoutBillingDetails";
 import { SavedBillingDetailsSummary } from "./SavedBillingDetailsSummary";
-import { useSettings } from "../../settings/hooks/useSettings";
+import { useBillingSettings, useLocaleSettings } from "../../settings/hooks/useSettings";
+import { formatDateOnly } from "../../../utils/dateTimeFormatting";
+import { trainingInitialFeeEuroForPlan } from "../components/packageUtils";
 
 const VALID_PERIODS = ["monthly", "quarterly", "yearly"] as const;
 type BillingPeriod = (typeof VALID_PERIODS)[number];
@@ -41,7 +43,8 @@ export default function PackagesCheckoutPage() {
   const [searchParams] = useSearchParams();
   const { user } = useAuthStore();
   const { data: billingOverview, isLoading } = useBillingOverview();
-  const { data: settings } = useSettings();
+  const { data: settings } = useBillingSettings();
+  const { data: localeSettings } = useLocaleSettings();
   const updateSubscriptionMutation = useUpdateSubscriptionMutation();
 
   const planCode = (searchParams.get("plan") ?? "").toLowerCase();
@@ -80,8 +83,10 @@ export default function PackagesCheckoutPage() {
     let periodTotalEuro: number | null = null;
     if (billingPeriod === "quarterly") periodTotalEuro = effM * 3;
     if (billingPeriod === "yearly") periodTotalEuro = effM * 12;
-    return { monthEuro, periodTotalEuro };
-  }, [plan, billingPeriod]);
+    const trainingInitialFeeEuro = trainingInitialFeeEuroForPlan(plan.code, catalog);
+    const dueNowEuro = (periodTotalEuro ?? monthEuro) + trainingInitialFeeEuro;
+    return { monthEuro, periodTotalEuro, trainingInitialFeeEuro, dueNowEuro };
+  }, [plan, billingPeriod, catalog]);
 
   const billedPhrase =
     billingPeriod === "monthly"
@@ -122,7 +127,7 @@ export default function PackagesCheckoutPage() {
     const block = planResourceBlock(plan, usedGb, usedKbCount, false);
     if (block.blocked) return;
     try {
-      await api.patch("/settings", {
+      await patchBillingSettings({
         billing_customer_type: customerType,
         billing_full_name: fullName,
         billing_company_name: customerType === "company" ? company : "",
@@ -133,7 +138,7 @@ export default function PackagesCheckoutPage() {
         billing_country: country,
       });
       const res = await updateSubscriptionMutation.mutateAsync({ plan_code: plan.code, billing_period: billingPeriod });
-      navigate("/admin/csomagok", { state: { checkoutComplete: true, message: res.message, status: res.status } });
+      navigate("/admin/pricing", { state: { checkoutComplete: true, message: res.message, status: res.status } });
     } catch {
       /* axios error surfaced via mutation */
     }
@@ -164,7 +169,7 @@ export default function PackagesCheckoutPage() {
         <button
           type="button"
           className="rounded-lg px-4 py-2 bg-[var(--color-primary)] text-[var(--color-on-primary)] text-sm font-medium"
-          onClick={() => navigate("/admin/csomagok")}
+          onClick={() => navigate("/admin/pricing")}
         >
           {t("packages.checkoutBackToPackages")}
         </button>
@@ -179,7 +184,7 @@ export default function PackagesCheckoutPage() {
         <button
           type="button"
           className="rounded-lg px-4 py-2 bg-[var(--color-primary)] text-[var(--color-on-primary)] text-sm font-medium"
-          onClick={() => navigate("/admin/csomagok")}
+          onClick={() => navigate("/admin/pricing")}
         >
           {t("packages.checkoutBackToPackages")}
         </button>
@@ -187,11 +192,24 @@ export default function PackagesCheckoutPage() {
     );
   }
 
-  const tag = locale === "es" ? "es-ES" : locale === "en" ? "en-GB" : "hu-HU";
   const startIso = billingOverview?.current_period_start_iso ?? "";
   const endIso = billingOverview?.current_period_end_iso ?? "";
-  const fromLabel = startIso ? new Date(startIso + "T12:00:00").toLocaleDateString(tag, { dateStyle: "long" }) : "—";
-  const toLabel = endIso ? new Date(endIso + "T12:00:00").toLocaleDateString(tag, { dateStyle: "long" }) : "—";
+  const fromLabel = startIso
+    ? formatDateOnly(startIso, {
+        locale,
+        timezone: localeSettings?.timezone,
+        dateFormat: localeSettings?.date_format,
+        dateStyle: localeSettings?.date_format ? undefined : "long",
+      })
+    : "—";
+  const toLabel = endIso
+    ? formatDateOnly(endIso, {
+        locale,
+        timezone: localeSettings?.timezone,
+        dateFormat: localeSettings?.date_format,
+        dateStyle: localeSettings?.date_format ? undefined : "long",
+      })
+    : "—";
 
   const { usedGb: checkoutUsedGb, usedKbCount: checkoutUsedKb } = readBillingResourceUsage(
     billingOverview?.usage as Record<string, unknown> | undefined
@@ -246,6 +264,14 @@ export default function PackagesCheckoutPage() {
                 ? ` · ${summary.periodTotalEuro} € / ${checkoutTotalPeriodAdverb}`
                 : ""}
             </span>
+          </p>
+          <p>
+            <span className="text-[var(--color-muted)]">{t("packages.checkoutTrainingInitialFee")}</span>{" "}
+            <span className="font-medium tabular-nums">{summary.trainingInitialFeeEuro} €</span>
+          </p>
+          <p>
+            <span className="text-[var(--color-muted)]">{t("packages.checkoutDueNowTotal")}</span>{" "}
+            <span className="font-semibold tabular-nums">{summary.dueNowEuro} €</span>
           </p>
           <p className="text-[var(--color-muted)] text-xs leading-relaxed pt-1">
             {t("packages.checkoutPeriodWindow")
@@ -425,7 +451,7 @@ export default function PackagesCheckoutPage() {
             <button
               type="button"
               className="rounded-lg px-4 py-2.5 border border-[var(--color-border)] text-sm"
-              onClick={() => navigate("/admin/csomagok")}
+              onClick={() => navigate("/admin/pricing")}
             >
               {t("common.cancel")}
             </button>

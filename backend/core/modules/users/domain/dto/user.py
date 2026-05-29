@@ -28,6 +28,9 @@ class User:
     preferred_theme: Optional[str] = None   # light | dark, alapértelmezés: owneré → light
     security_version: int = 0  # növeléskor minden régi token (user_ver) érvénytelen
     credentials_password_set: bool = True  # False: csak belső placeholder jelszó (meghívó / demo), még nincs saját jelszó
+    pending_email: Optional[str] = None # Saját email cserekor megerősítésre váró új email cím
+    pending_email_token_hash: Optional[str] = None # Saját email csere megerősítő token hash
+    pending_email_expires_at: Optional[datetime] = None # Saját email csere token lejárata
 
     # Új, még nem persistált user példány létrehozása
     @classmethod

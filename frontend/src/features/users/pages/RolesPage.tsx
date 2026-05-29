@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useTranslation } from "../../../i18n";
-import { SavedModal } from "../../../components/SavedModal";
 import { useAuthStore } from "../../../store/authStore";
 import {
   useUsers,
@@ -37,7 +36,6 @@ export default function RolesPage() {
   const [deleteConfirmUser, setDeleteConfirmUser] = useState<User | null>(null);
   const [resendConfirmUser, setResendConfirmUser] = useState<User | null>(null);
   const [userForKbModal, setUserForKbModal] = useState<User | null>(null);
-  const [savedModalOpen, setSavedModalOpen] = useState(false);
   const [visibleCount, setVisibleCount] = useState(LIST_PAGE_SIZE);
   const loadMoreRef = useRef<HTMLDivElement | null>(null);
 
@@ -66,14 +64,24 @@ export default function RolesPage() {
     is_active: true,
   });
 
-  /** Aktívak névsorban előre, inaktívak névsorban hátra */
+  /** Várakozó meghívók, aktív userek/adminok, saját user, owner, inaktívak, majd töröltek; csoporton belül névsor. */
   const sortedUsers = useMemo(() => {
     const nameKey = (u: User) => (u.name || u.email || "").trim().toLowerCase();
+    const groupKey = (u: User) => {
+      if (u.deleted_at) return 8;
+      if (!u.is_active) return 7;
+      if (u.pending_registration) return u.role === "admin" ? 2 : 1;
+      if (u.id === currentUser?.id) return 5;
+      if (u.role === "admin") return 4;
+      if (u.role === "owner") return 6;
+      return 3;
+    };
     return [...users].sort((a, b) => {
-      if (a.is_active !== b.is_active) return a.is_active ? -1 : 1;
+      const groupDiff = groupKey(a) - groupKey(b);
+      if (groupDiff !== 0) return groupDiff;
       return nameKey(a).localeCompare(nameKey(b));
     });
-  }, [users]);
+  }, [currentUser?.id, users]);
   const displayedUsers = useMemo(() => sortedUsers.slice(0, visibleCount), [sortedUsers, visibleCount]);
 
   useEffect(() => {
@@ -110,7 +118,7 @@ export default function RolesPage() {
       { email: emailTrim, name: nameTrim, role: formData.role },
       {
         onSuccess: () => {
-          setSavedModalOpen(true);
+          toast.success(t("profile.saved"));
           setShowCreateModal(false);
           resetForm();
           setCreateFormError(null);
@@ -134,7 +142,7 @@ export default function RolesPage() {
 
     const nameTrim = formData.name?.trim() ?? "";
     const emailTrim = formData.email?.trim() ?? "";
-    const canEditEmail = editingUser.role !== "owner" && editingUser.id !== currentUser?.id;
+    const canEditEmail = editingUser.role !== "owner";
 
     setEditFormError(null);
     if (!nameTrim) {
@@ -152,12 +160,11 @@ export default function RolesPage() {
       }
     }
 
-    const payload: { id: number; name: string; is_active?: boolean; email?: string; role?: string } = {
+    const payload: { id: number; name: string; email?: string; role?: string } = {
       id: editingUser.id,
       name: nameTrim,
     };
     if (editingUser.role !== "owner") {
-      if (!editingUser.pending_registration) payload.is_active = formData.is_active;
       if (canEditEmail) payload.email = emailTrim;
       if (editingUser.id !== currentUser?.id) payload.role = formData.role;
     }
@@ -171,7 +178,7 @@ export default function RolesPage() {
             role: (updatedUser.role as "user" | "admin" | "owner") ?? currentUser.role,
           });
         }
-        setSavedModalOpen(true);
+        toast.success(t("profile.saved"));
         setEditingUser(null);
         resetForm();
         setEditFormError(null);
@@ -187,6 +194,24 @@ export default function RolesPage() {
         }
       },
     });
+  };
+
+  const handleToggleActive = (user: User) => {
+    if (
+      user.id === currentUser?.id ||
+      user.role === "owner"
+    ) return;
+    updateUserMutation.mutate(
+      {
+        id: user.id,
+        name: user.name ?? "",
+        is_active: !user.is_active,
+      },
+      {
+        onSuccess: () => toast.success(t("profile.saved")),
+        onError: (err: unknown) => toast.error(getApiErrorMessage(err) ?? t("roles.errorUpdate")),
+      }
+    );
   };
 
   const handleDelete = (userId: number): void => {
@@ -232,9 +257,10 @@ export default function RolesPage() {
 
   if (!canManage) {
     return (
-      <div className="p-6 min-h-full bg-[var(--color-background)]">
-        <div className="bg-[var(--color-card)] border border-[var(--color-border)] text-[var(--color-foreground)] p-4 rounded">
-          {t("roles.noPermission")}
+      <div className="min-h-[70vh] flex items-center justify-center bg-[var(--color-background)] p-6 text-[var(--color-foreground)]">
+        <div className="text-center">
+          <p className="text-5xl font-semibold">404</p>
+          <p className="mt-3 text-sm text-[var(--color-muted)]">{t("roles.noPermission")}</p>
         </div>
       </div>
     );
@@ -269,6 +295,7 @@ export default function RolesPage() {
             onKbPermissions={setUserForKbModal}
             onEdit={openEditModal}
             onResendInvite={setResendConfirmUser}
+            onToggleActive={handleToggleActive}
           />
         )}
       </div>
@@ -304,11 +331,6 @@ export default function RolesPage() {
           setEditFormError(null);
         }}
         onSave={handleUpdate}
-      />
-
-      <SavedModal
-        open={savedModalOpen}
-        onClose={() => setSavedModalOpen(false)}
       />
 
       <UserConfirmModal

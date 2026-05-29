@@ -13,11 +13,12 @@ import { getApiErrorMessage } from "../../../utils/getApiErrorMessage";
 import Alert from "../../../components/ui/Alert";
 import Button from "../../../components/ui/Button";
 import PageHeader from "../../../components/ui/PageHeader";
-import api from "../../../api/axiosClient";
+import { patchBillingSettings } from "../../../api/services/settingsService";
 import { EU_COUNTRIES, isValidEuVatId, isValidPostalCode, normalizeEuVatId, normalizePostalCode } from "./checkoutOptions";
 import { checkoutCustomerTypeFromSettings, hasSavedCheckoutBillingDetails, type BillingCustomerType } from "./checkoutBillingDetails";
 import { SavedBillingDetailsSummary } from "./SavedBillingDetailsSummary";
-import { useSettings } from "../../settings/hooks/useSettings";
+import { useBillingSettings, useLocaleSettings } from "../../settings/hooks/useSettings";
+import { formatDateOnly } from "../../../utils/dateTimeFormatting";
 
 const VALID_PERIODS = ["monthly", "quarterly", "yearly"] as const;
 type BillingPeriod = (typeof VALID_PERIODS)[number];
@@ -50,7 +51,8 @@ export default function PackagesUpgradeCheckoutPage() {
   const [searchParams] = useSearchParams();
   const { user } = useAuthStore();
   const { data: billingOverview, isLoading: overviewLoading } = useBillingOverview();
-  const { data: settings } = useSettings();
+  const { data: settings } = useBillingSettings();
+  const { data: localeSettings } = useLocaleSettings();
   const completeUpgradeMutation = useCompleteUpgradeMutation();
 
   const planCode = (searchParams.get("plan") ?? "").toLowerCase();
@@ -123,7 +125,7 @@ export default function PackagesUpgradeCheckoutPage() {
     const block = planResourceBlock(plan, usedGb, usedKbCount, false);
     if (block.blocked) return;
     try {
-      await api.patch("/settings", {
+      await patchBillingSettings({
         billing_customer_type: customerType,
         billing_full_name: fullName,
         billing_company_name: customerType === "company" ? company : "",
@@ -139,9 +141,17 @@ export default function PackagesUpgradeCheckoutPage() {
         res.total_charge_cents > 0
           ? t("packages.upgradeCheckoutSuccessPaid")
               .replace("{{amount}}", amountLabel)
-              .replace("{{date}}", new Date(`${res.paid_until_iso}T12:00:00`).toLocaleDateString(localeTag(locale), { dateStyle: "long" }))
+              .replace(
+                "{{date}}",
+                formatDateOnly(res.paid_until_iso, {
+                  locale,
+                  timezone: localeSettings?.timezone,
+                  dateFormat: localeSettings?.date_format,
+                  dateStyle: localeSettings?.date_format ? undefined : "long",
+                })
+              )
           : t("packages.upgradeCheckoutSuccessZero");
-      navigate("/admin/csomagok", {
+      navigate("/admin/pricing", {
         state: { upgradeCheckoutComplete: true, message, status: res.status },
       });
     } catch {
@@ -174,7 +184,7 @@ export default function PackagesUpgradeCheckoutPage() {
         <button
           type="button"
           className="rounded-lg px-4 py-2 bg-[var(--color-primary)] text-[var(--color-on-primary)] text-sm font-medium"
-          onClick={() => navigate("/admin/csomagok")}
+          onClick={() => navigate("/admin/pricing")}
         >
           {t("packages.checkoutBackToPackages")}
         </button>
@@ -189,7 +199,7 @@ export default function PackagesUpgradeCheckoutPage() {
         <button
           type="button"
           className="rounded-lg px-4 py-2 bg-[var(--color-primary)] text-[var(--color-on-primary)] text-sm font-medium"
-          onClick={() => navigate("/admin/csomagok")}
+          onClick={() => navigate("/admin/pricing")}
         >
           {t("packages.checkoutBackToPackages")}
         </button>
@@ -197,11 +207,24 @@ export default function PackagesUpgradeCheckoutPage() {
     );
   }
 
-  const tag = localeTag(locale);
   const startIso = billingOverview?.current_period_start_iso ?? "";
   const endIso = billingOverview?.current_period_end_iso ?? "";
-  const fromLabel = startIso ? new Date(startIso + "T12:00:00").toLocaleDateString(tag, { dateStyle: "long" }) : "—";
-  const toLabel = endIso ? new Date(endIso + "T12:00:00").toLocaleDateString(tag, { dateStyle: "long" }) : "—";
+  const fromLabel = startIso
+    ? formatDateOnly(startIso, {
+        locale,
+        timezone: localeSettings?.timezone,
+        dateFormat: localeSettings?.date_format,
+        dateStyle: localeSettings?.date_format ? undefined : "long",
+      })
+    : "—";
+  const toLabel = endIso
+    ? formatDateOnly(endIso, {
+        locale,
+        timezone: localeSettings?.timezone,
+        dateFormat: localeSettings?.date_format,
+        dateStyle: localeSettings?.date_format ? undefined : "long",
+      })
+    : "—";
 
   const { usedGb: checkoutUsedGb, usedKbCount: checkoutUsedKb } = readBillingResourceUsage(
     billingOverview?.usage as Record<string, unknown> | undefined
@@ -235,7 +258,12 @@ export default function PackagesUpgradeCheckoutPage() {
       : null;
   const paidUntilLabel =
     preview?.paid_until_iso != null
-      ? new Date(`${preview.paid_until_iso}T12:00:00`).toLocaleDateString(tag, { dateStyle: "long" })
+      ? formatDateOnly(preview.paid_until_iso, {
+          locale,
+          timezone: localeSettings?.timezone,
+          dateFormat: localeSettings?.date_format,
+          dateStyle: localeSettings?.date_format ? undefined : "long",
+        })
       : "—";
   const progressPercent = preview != null ? percentValue(preview.remaining_period_days, preview.total_period_days) : 0;
   const payNowLabel = preview != null ? `${formatEuroFromCents(preview.total_charge_cents, locale)} €` : "—";
@@ -307,10 +335,16 @@ export default function PackagesUpgradeCheckoutPage() {
             {preview ? (
               <div className="mt-3 space-y-1 text-sm opacity-70">
                 <p>
-                  {t("packages.upgradeCheckoutNextPeriodShort")}: {formatEuroFromCents(preview.next_period_charge_cents, locale)} €
+                  {t("packages.upgradeCheckoutNextPeriodShort")}: + {formatEuroFromCents(preview.next_period_charge_cents, locale)} €
                 </p>
                 <p>
-                  {t("packages.upgradeCheckoutProrationShort")}: -{formatEuroFromCents(preview.old_remaining_credit_cents, locale)} €
+                  {t("packages.upgradeCheckoutTrainingInitialShort")}: + {formatEuroFromCents(preview.training_initial_fee_cents, locale)} €
+                </p>
+                <p>
+                  {t("packages.upgradeCheckoutProrationShort")}: - {formatEuroFromCents(preview.old_remaining_credit_cents, locale)} €
+                </p>
+                <p className="mt-2 border-t border-[var(--color-on-primary)]/20 pt-2 font-semibold opacity-100">
+                  {t("packages.upgradeCheckoutPayNowLabel")}: {payNowLabel}
                 </p>
               </div>
             ) : null}
@@ -495,7 +529,7 @@ export default function PackagesUpgradeCheckoutPage() {
               type="button"
               variant="secondary"
               size="lg"
-              onClick={() => navigate("/admin/csomagok")}
+              onClick={() => navigate("/admin/pricing")}
             >
               {t("common.cancel")}
             </Button>

@@ -10,6 +10,7 @@ from enum import StrEnum
 class AuditLogAction(StrEnum):
     BRAND_UPDATED = "brand_updated" # Platform brand beállítás változott
     FORGOT_PASSWORD_LINK_SENT = "forgot_password_link_sent" # Jelszó visszaállítási link küldése
+    EMAIL_CONFIRMED = "email_confirmed" # Email megerősítő link sikeres jóváhagyása
     INVITE_RESENT = "invite_resent" # Meghívó link küldése
     LOGIN_2FA_FAILED = "login_2fa_failed" # 2FA sikertelen
     LOGIN_2FA_RATE_LIMITED = "login_2fa_rate_limited" # 2FA ráta limitelt
@@ -20,6 +21,7 @@ class AuditLogAction(StrEnum):
     LOGOUT = "logout" # Kilépés
     LOGOUT_ERROR = "logout_error" # Kilépés hiba
     LOGOUT_FAILED = "logout_failed" # Kilépés sikertelen
+    PASSWORD_CHANGED = "password_changed" # Felhasználó jelszót módosított
     PASSWORD_SET_BY_INVITE = "password_set_by_invite" # Jelszó beállítása meghívóval
     REFRESH = "refresh" # Token frissítése  
     REFRESH_FAILED = "refresh_failed" # Token frissítés sikertelen
@@ -50,6 +52,10 @@ class AuditLogAction(StrEnum):
     ADMIN_ACTION = "admin_action"
     PERMISSION_DENIED = "permission_denied"
     KNOWLEDGE_PII_DEPERSONALIZED = "knowledge_pii_depersonalized"
+    KNOWLEDGE_CREATED = "knowledge_created"
+    KNOWLEDGE_DELETED = "knowledge_deleted"
+    KNOWLEDGE_PERMISSION_CHANGED = "knowledge_permission_changed"
+    KNOWLEDGE_SETTING_CHANGED = "knowledge_setting_changed"
     KNOWLEDGE_TRAINING_STARTED = "knowledge_training_started"
     KNOWLEDGE_SOURCE_DELETED = "knowledge_source_deleted"
     KNOWLEDGE_URL_INGEST_REJECTED = "knowledge_url_ingest_rejected"

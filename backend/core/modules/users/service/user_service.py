@@ -25,6 +25,11 @@ from shared.validation.password import validate_password_policy
 from core.modules.users.service._user_service_helpers import build_set_password_link, new_invite_token_payload
 
 
+def _normalize_invite_lang(value: str | None) -> str | None:
+    normalized = (value or "").strip().lower()[:2]
+    return normalized if normalized in {"hu", "en", "es"} else None
+
+
 class UserService(TransactionalService):
     # Ez a metódus a Python-specifikus speciális működést valósítja meg.
     def __init__(
@@ -53,7 +58,15 @@ class UserService(TransactionalService):
         return self.user_repository.get_by_id(user_id)
 
     # Jelszó módosítása aktuális jelszó ellenőrzésével
-    def change_password(self, *, user_id: int, current_password: str, new_password: str) -> None:
+    def change_password(
+        self,
+        *,
+        user_id: int,
+        current_password: str,
+        new_password: str,
+        ip: str | None = None,
+        user_agent: str | None = None,
+    ) -> None:
         with self._transaction():
             user = self.user_repository.get_by_id(user_id)
             if not user:
@@ -65,6 +78,16 @@ class UserService(TransactionalService):
             new_hash = pwd_hasher.hash(new_password)
             self.user_repository.update_password(user_id, new_hash, updated_by=user_id)
             self.user_repository.reset_failed_login(user_id, updated_by=user_id)
+            if self.audit:
+                self.audit.log(
+                    AuditLogAction.PASSWORD_CHANGED,
+                    user_id=user_id,
+                    target_type="user",
+                    target_id=str(user_id),
+                    details={"email": getattr(user, "email", None), "changed_by": user_id},
+                    ip=ip,
+                    user_agent=user_agent,
+                )
 
     def set_initial_password_demo(self, *, user_id: int, new_password: str, tenant_demo_mode: bool) -> None:
         if not tenant_demo_mode:
@@ -94,6 +117,9 @@ class UserService(TransactionalService):
         *,
         send_invite_email: bool = True,
         activate_immediately: bool = False,
+        invite_lang: str | None = None,
+        ip: str | None = None,
+        user_agent: str | None = None,
     ) -> User:
         if self.invite_token_repo is None:
             raise RuntimeError("InviteTokenRepository is not configured")
@@ -117,7 +143,7 @@ class UserService(TransactionalService):
                 email=email,
                 password_hash=password_hash,
                 role=role,
-                is_active=activate_immediately,
+                is_active=True,
                 name=name or None,
             ).with_updates(registration_completed_at=registration_completed_at)
             created = self.user_repository.create(user, created_by=created_by)
@@ -136,13 +162,19 @@ class UserService(TransactionalService):
 
                 set_password_link = build_set_password_link(request_base_url, invite_payload.raw_token)
                 if send_invite_email and set_password_link and self.email_service:
-                    self.email_service.send_set_password_invite(email, set_password_link)
+                    owner = self.user_repository.get_owner()
+                    lang = _normalize_invite_lang(invite_lang or getattr(owner, "preferred_locale", None))
+                    self.email_service.send_set_password_invite(email, set_password_link, lang=lang)
 
             if self.audit:
                 self.audit.log(
                     AuditLogAction.USER_CREATED,
-                    user_id=created.id,
-                    details={"email": email, "role": role},
+                    user_id=created_by,
+                    target_type="user",
+                    target_id=str(created.id),
+                    details={"email": email, "role": role, "created_by": created_by},
+                    ip=ip,
+                    user_agent=user_agent,
                 )
             return created
 
@@ -155,38 +187,50 @@ class UserService(TransactionalService):
         is_active: bool | None = None,
         email: str | None = None,
         role: str | None = None,
+        request_base_url: str | None = None,
+        ip: str | None = None,
+        user_agent: str | None = None,
     ) -> User:
         with self._transaction():
             user = self.user_repository.get_by_id(user_id)
             if not user:
                 raise ValueError("User not found")
-
             if user.is_owner:
                 if current_user_id != user_id:
                     raise ValueError("Az owner adatait csak az owner szerkesztheti.")
                 if is_active is not None or email is not None or role is not None:
                     raise ValueError("Owner esetén csak a név módosítható.")
-                updates = {"name": name} if name is not None else {}
+                updates = {}
+                if name is not None:
+                    normalized_name = str(name).strip()
+                    if normalized_name != str(user.name or "").strip():
+                        updates["name"] = normalized_name
             else:
                 updates = {}
                 if name is not None:
-                    updates["name"] = name
+                    normalized_name = str(name).strip()
+                    if normalized_name != str(user.name or "").strip():
+                        updates["name"] = normalized_name
                 if is_active is not None:
+                    if user_id == current_user_id:
+                        raise ValueError("A saját fiók aktiválási állapotát nem módosíthatod.")
                     updates["is_active"] = is_active
                 if email is not None:
                     existing = self.user_repository.get_by_email(email)
                     if existing and existing.id != user_id:
                         raise ValueError("Ez az email már használatban van.")
-                    updates["email"] = email
+                    if email != user.email:
+                        updates["email"] = email
                 if role is not None:
-                    if user_id == current_user_id:
-                        raise ValueError("A saját szerepköröd nem módosítható.")
+                    if user_id == current_user_id and user.role == "admin" and role != "admin":
+                        raise ValueError("A saját adminisztrátor szerepköröd nem módosítható.")
                     updates["role"] = role
 
             if not updates:
                 return user
 
             result = self.user_repository.update(user.with_updates(**updates), updated_by=current_user_id)
+            email_changed = email is not None and user.email != email
             auth_state_changed = (
                 (role is not None and user.role != role)
                 or (is_active is not None and user.is_active != is_active)
@@ -200,35 +244,53 @@ class UserService(TransactionalService):
                 if email is not None and user.email != email:
                     self.audit.log(
                         AuditLogAction.USER_EMAIL_CHANGED,
-                        user_id=result.id,
+                        user_id=current_user_id,
+                        target_type="user",
+                        target_id=str(result.id),
                         details={
                             "old_value": user.email,
                             "new_value": email,
                             "changed_by": current_user_id,
                         },
+                        ip=ip,
+                        user_agent=user_agent,
                     )
                 if role is not None and user.role != role:
                     self.audit.log(
                         AuditLogAction.USER_ROLE_CHANGED,
-                        user_id=result.id,
+                        user_id=current_user_id,
+                        target_type="user",
+                        target_id=str(result.id),
                         details={
                             "old_value": user.role,
                             "new_value": role,
                             "changed_by": current_user_id,
                         },
+                        ip=ip,
+                        user_agent=user_agent,
                     )
                 other = {k: v for k, v in updates.items() if k in ("name", "is_active")}
                 if other:
+                    previous = {key: getattr(user, key) for key in other}
                     self.audit.log(
                         AuditLogAction.USER_UPDATED,
-                        user_id=result.id,
-                        details={**other, "changed_by": current_user_id},
+                        user_id=current_user_id,
+                        target_type="user",
+                        target_id=str(result.id),
+                        details={
+                            **other,
+                            "old_values": previous,
+                            "new_values": other,
+                            "changed_by": current_user_id,
+                        },
+                        ip=ip,
+                        user_agent=user_agent,
                     )
             return result
 
 
     # Felhasználó törlése
-    def delete(self, user_id: int, current_user_id: int) -> None:
+    def delete(self, user_id: int, current_user_id: int, ip: str | None = None, user_agent: str | None = None) -> None:
         with self._transaction():
             if user_id == current_user_id:
                 raise ValueError("Saját magad nem törölheted.")
@@ -242,14 +304,18 @@ class UserService(TransactionalService):
             if self.audit:
                 self.audit.log(
                     AuditLogAction.USER_DELETED,
-                    user_id=user_id,
-                    details={"email": user.email},
+                    user_id=current_user_id,
+                    target_type="user",
+                    target_id=str(user_id),
+                    details={"email": user.email, "changed_by": current_user_id},
+                    ip=ip,
+                    user_agent=user_agent,
                 )
             self.user_repository.delete(user_id, updated_by=current_user_id)
 
 
     # Jelszó elfelejtése
-    def forgot_password(self, email: str, request_base_url: str | None = None) -> None:
+    def forgot_password(self, email: str, request_base_url: str | None = None, *, invite_lang: str | None = None) -> None:
         with self._transaction():
             user = self.user_repository.get_by_email(email.strip())
             if not user or not self.invite_token_repo:
@@ -267,7 +333,11 @@ class UserService(TransactionalService):
 
             set_password_link = build_set_password_link(request_base_url, invite_payload.raw_token)
             if set_password_link and self.email_service:
-                self.email_service.send_set_password_invite(user.email, set_password_link)
+                owner = self.user_repository.get_owner()
+                lang = _normalize_invite_lang(
+                    invite_lang or getattr(user, "preferred_locale", None) or getattr(owner, "preferred_locale", None)
+                )
+                self.email_service.send_set_password_invite(user.email, set_password_link, lang=lang)
 
             if self.audit:
                 self.audit.log(

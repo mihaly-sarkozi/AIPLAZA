@@ -73,7 +73,7 @@ class BillingAppModule(BaseAppModule):
         return (_shutdown,)
 
     def permissions(self) -> tuple[str, ...]:
-        return ("billing.read", "billing.write")
+        return ("billing.read", "billing.write", "billing.manage")
 
 
 def get_module() -> BaseAppModule:

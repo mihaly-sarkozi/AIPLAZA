@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+# backend/apps/profile/domain/preferences.py
+# Feladat: Frameworkfüggetlen profile preference domain modell és engedélyezett layout típusok.
+# Sárközi Mihály - 2026.05.24
+
 from dataclasses import dataclass
 from typing import Literal
 

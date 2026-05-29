@@ -5,6 +5,7 @@ import ProfileModal from "../features/profile/components/ProfileModal";
 import ChangePasswordModal from "../features/profile/components/ChangePasswordModal";
 import { useBillingAccessStatus } from "../features/billing/hooks/useBilling";
 import { formatInvoiceDate } from "../features/billing/billingInvoiceUtils";
+import { useLocaleSettings } from "../features/settings/hooks/useSettings";
 import { useTranslation } from "../i18n";
 
 const Footer = lazy(() => import("../components/Footer"));
@@ -26,7 +27,7 @@ export default function MainLayout() {
   const shouldCheckOnboardingTraining =
     user?.tenant_demo_mode === true &&
     user.tenant_kb_has_training !== true &&
-    hasUserPermission(user, "knowledge.write");
+    hasUserPermission(user, "knowledge.read");
   const {
     data: availableKbList = [],
     isLoading: loadingAvailableKbList,
@@ -37,10 +38,11 @@ export default function MainLayout() {
     refetchOnMount: "always",
     refetchOnWindowFocus: false,
   });
+  const { data: settings } = useLocaleSettings({ enabled: hasUserPermission(user, "settings.read") });
   const paymentWarning = billingAccessStatus?.payment_warning ?? null;
   const billingRestricted = billingAccessStatus?.restricted === true || paymentWarning?.is_expired === true;
   const graceUntilLabel = paymentWarning?.grace_until_iso
-    ? formatInvoiceDate(paymentWarning.grace_until_iso, locale)
+    ? formatInvoiceDate(paymentWarning.grace_until_iso, locale, settings?.timezone, settings?.date_format)
     : "—";
   const paymentWarningText =
     paymentWarning?.is_expired === true

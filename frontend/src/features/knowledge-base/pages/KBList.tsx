@@ -19,8 +19,6 @@ import KBSettingsModal from "../components/list/KBSettingsModal";
 import {
   KB_NAME_MAX_LENGTH,
   PERM_NONE,
-  PERM_TRAIN,
-  PERM_USE,
   isDeletedKb,
   metricValue,
   nameMaxLengthMessage,
@@ -57,6 +55,7 @@ export default function KBList() {
   const [editFormError, setEditFormError] = useState<string | null>(null);
   const [settingsKb, setSettingsKb] = useState<KbItem | null>(null);
   const [piiDepersonalizationEnabled, setPiiDepersonalizationEnabled] = useState(true);
+  const [publicEnabled, setPublicEnabled] = useState(false);
   const [deleteConfirmKb, setDeleteConfirmKb] = useState<KbItem | null>(null);
   const [deleteTypeName, setDeleteTypeName] = useState("");
   const [savedModalOpen, setSavedModalOpen] = useState(false);
@@ -106,28 +105,32 @@ export default function KBList() {
   }, [billingOverview, activeKnowledgeBaseCount]);
   const actionLoading =
     createKbMutation.isPending || updateKbMutation.isPending || deleteKbMutation.isPending || setPermissionsMutation.isPending;
-  const settingsSaveLoading = updateKbMutation.isPending || setPermissionsMutation.isPending;
+  const settingsKbIsPublic = publicEnabled;
+  const settingsSaveLoading = updateKbMutation.isPending || (!settingsKbIsPublic && setPermissionsMutation.isPending);
   const usersWithPermsCreate = useMemo(
     () =>
-      (users as Array<{ id: number; email: string; name?: string | null }>)
-        .filter((user) => user.id != null)
+      (users as Array<{ id: number; email: string; name?: string | null; role?: string }>)
+        .filter((user) => user.id != null && (user.role ?? "user") === "user")
         .map((user) => ({
           id: user.id,
           email: user.email,
           name: user.name ?? null,
           permission: createPermissions[user.id] ?? PERM_NONE,
+          role: user.role ?? "user",
         })),
     [users, createPermissions]
   );
   const usersWithPermsSettings = useMemo(
     () =>
-      settingsPermsList.map((permission) => ({
-        id: permission.user_id,
-        email: permission.email,
-        name: permission.name ?? null,
-        permission: settingsPermissions[permission.user_id] ?? permission.permission,
-        role: permission.role ?? "user",
-      })),
+      settingsPermsList
+        .filter((permission) => permission.role !== "admin")
+        .map((permission) => ({
+          id: permission.user_id,
+          email: permission.email,
+          name: permission.name ?? null,
+          permission: settingsPermissions[permission.user_id] ?? permission.permission,
+          role: permission.role ?? "user",
+        })),
     [settingsPermsList, settingsPermissions]
   );
   const error = listError ? (getApiErrorMessage(listError) ?? t("kb.errorLoad")) : null;
@@ -171,6 +174,7 @@ export default function KBList() {
     if (!openKbCreate) return;
     if (isOwner && billingOverviewPending) return;
     navigate(location.pathname, { replace: true, state: {} });
+    if (!isOwner) return;
     if (kbPackageLimitBlocked) {
       setShowKbLimitModal(true);
     } else {
@@ -199,6 +203,7 @@ export default function KBList() {
     setSettingsKb(kb);
     setSettingsPermissions({});
     setPiiDepersonalizationEnabled(kb.pii_depersonalization_enabled !== false);
+    setPublicEnabled(Boolean(kb.public_enabled ?? kb.is_public ?? false));
     settingsPermsSyncedUuid.current = null;
     setEditFormError(null);
     setFormData({ name: kb.name, description: kb.description ?? "" });
@@ -244,6 +249,11 @@ export default function KBList() {
       setEditFormError(nameMaxLengthMessage(t));
       return;
     }
+    const finishSettingsSave = () => {
+      setSavedModalOpen(true);
+      setSettingsKb(null);
+      resetForm();
+    };
     const permissions = usersWithPermsSettings.map((user) => ({ user_id: user.id, permission: user.permission }));
     updateKbMutation.mutate(
       {
@@ -251,17 +261,18 @@ export default function KBList() {
         name: nameTrim,
         description: settingsKb.description?.trim() || undefined,
         pii_depersonalization_enabled: piiDepersonalizationEnabled,
+        public_enabled: publicEnabled,
       },
       {
         onSuccess: () => {
+          if (settingsKbIsPublic) {
+            finishSettingsSave();
+            return;
+          }
           setPermissionsMutation.mutate(
             { uuid: settingsKb.uuid, permissions },
             {
-              onSuccess: () => {
-                setSavedModalOpen(true);
-                setSettingsKb(null);
-                resetForm();
-              },
+              onSuccess: finishSettingsSave,
               onError: (err: unknown) => toast.error(getApiErrorMessage(err) ?? t("kb.errorPermissions")),
             }
           );
@@ -359,6 +370,8 @@ export default function KBList() {
         formData={formData}
         formError={editFormError}
         piiDepersonalizationEnabled={piiDepersonalizationEnabled}
+        isPublic={settingsKbIsPublic}
+        publicEnabled={publicEnabled}
         settingsPermsLoading={settingsPermsLoading}
         settingsSaveLoading={settingsSaveLoading}
         actionLoading={actionLoading}
@@ -367,19 +380,9 @@ export default function KBList() {
         t={t}
         setFormData={setFormData}
         setPiiDepersonalizationEnabled={setPiiDepersonalizationEnabled}
+        setPublicEnabled={setPublicEnabled}
         clearFormError={() => editFormError && setEditFormError(null)}
         onPermissionChange={(userId, permission) => setSettingsPermissions((prev) => ({ ...prev, [userId]: permission }))}
-        onBulkPermissionChange={(enabled) =>
-          setSettingsPermissions((prev) => {
-            const next = { ...prev };
-            usersWithPermsSettings.forEach((user) => {
-              if (user.id !== currentUserId) {
-                next[user.id] = enabled ? (user.role === "user" ? PERM_USE : PERM_TRAIN) : PERM_NONE;
-              }
-            });
-            return next;
-          })
-        }
         onClose={() => {
           setSettingsKb(null);
           resetForm();
@@ -394,7 +397,7 @@ export default function KBList() {
         onClose={() => setShowKbLimitModal(false)}
         onViewPackages={() => {
           setShowKbLimitModal(false);
-          navigate("/admin/csomagok");
+          navigate("/admin/pricing");
         }}
       />
       <SavedModal open={savedModalOpen} onClose={() => setSavedModalOpen(false)} />

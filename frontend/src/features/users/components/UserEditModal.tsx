@@ -30,30 +30,13 @@ export default function UserEditModal({
 }: UserEditModalProps) {
   if (!user) return null;
   const isOwner = user.role === "owner";
+  const readOnlyFieldClass =
+    "text-[var(--color-foreground)] bg-[var(--color-table-head)] border border-slate-200 dark:border-slate-700 p-2 rounded text-sm";
   return (
     <Modal open={Boolean(user)} onClose={onClose} panelClassName="max-w-md">
       <ModalHeader title={t("roles.modalEditTitle")} />
       {formError ? <Alert tone="error" className="mb-4">{formError}</Alert> : null}
       <div className="space-y-4">
-        <div className="flex items-center justify-between gap-3">
-          <label htmlFor="edit-active-toggle" className="text-[var(--color-label)] font-medium cursor-pointer">
-            {t("roles.labelActive")}
-          </label>
-          <button
-            id="edit-active-toggle"
-            type="button"
-            role="switch"
-            aria-checked={formData.is_active}
-            disabled={isOwner || user.pending_registration === true}
-            onClick={() => (isOwner || user.pending_registration ? undefined : setFormData({ ...formData, is_active: !formData.is_active }))}
-            className={`relative inline-flex h-6 w-11 shrink-0 rounded-full p-0.5 transition-colors duration-200 ease-in-out focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-neutral-600 disabled:opacity-50 disabled:cursor-not-allowed disabled:pointer-events-none ${formData.is_active ? "bg-[var(--color-primary)]" : "bg-[var(--color-border)]"}`}
-          >
-            <span
-              className={`inline-block h-5 w-5 rounded-full bg-white shadow-sm ring-0 transform transition-transform duration-200 ease-in-out ${formData.is_active ? "translate-x-5" : "translate-x-0"}`}
-              aria-hidden
-            />
-          </button>
-        </div>
         <div>
           <label className="block mb-1 text-[var(--color-label)]">{t("roles.labelName")}{t("common.required")}</label>
           <input
@@ -74,7 +57,7 @@ export default function UserEditModal({
             {t("roles.labelEmail")}{!isOwner && user.id !== currentUserId ? t("common.required") : ""}
           </label>
           {isOwner ? (
-            <p className="text-[var(--color-foreground)] bg-[var(--color-table-head)] border border-[var(--color-border)] p-2 rounded text-sm">
+            <p className={readOnlyFieldClass}>
               {user.email}
             </p>
           ) : (
@@ -94,15 +77,10 @@ export default function UserEditModal({
         </div>
         <div>
           <label className="block mb-1 text-[var(--color-label)]">{t("roles.labelRole")}</label>
-          {isOwner ? (
-            <p className="text-[var(--color-foreground)] bg-[var(--color-table-head)] border border-[var(--color-border)] p-2 rounded text-sm">
-              {t("roles.roleOwner")}
-              <span className="block text-xs text-[var(--color-muted)] mt-1">{t("roles.ownerOnlyName")}</span>
-            </p>
-          ) : user.id === currentUserId ? (
-            <p className="text-[var(--color-foreground)] bg-[var(--color-table-head)] border border-[var(--color-border)] p-2 rounded text-sm">
-              {user.role === "owner" ? t("roles.roleOwner") : user.role}
-              <span className="block text-xs text-[var(--color-muted)] mt-1">{t("roles.ownRoleNoEdit")}</span>
+          {isOwner || (user.role === "admin" && user.id === currentUserId) ? (
+            <p className={readOnlyFieldClass}>
+              {isOwner ? t("roles.roleOwner") : t("roles.roleAdmin")}
+              {isOwner ? <span className="block text-xs text-[var(--color-muted)] mt-1">{t("roles.ownerOnlyName")}</span> : null}
             </p>
           ) : (
             <select

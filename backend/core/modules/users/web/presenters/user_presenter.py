@@ -7,8 +7,8 @@
 Felelősség: User domain objektum → UserResponse HTTP DTO konverzió.
 
 A ``pending_registration`` üzleti szabály itt él egy helyen:
-  - Ha a user inaktív ÉS nincs registration_completed_at → regisztráció folyamatban
-  - Ha a user aktív → pending_registration = False
+  - Ha a user még nem állított be saját jelszót → regisztráció folyamatban
+  - Ha a user admin által inaktív → pending_registration = False
   - Ha nincs id (nem persistált) → pending_registration = False
 
 Ezt a modult importálja az admin_users_router és az invite_router egyaránt,
@@ -29,12 +29,12 @@ def is_pending_registration(user: "User") -> bool:
 
     A user akkor számít „pending registration" állapotban lévőnek, ha:
     - van id-ja (persistált felhasználó)
-    - inaktív (is_active=False)
-    - a regisztráció nem lett befejezve (registration_completed_at is None)
+    - még nincs saját jelszava
+    - nincs admin által inaktiválva
     """
     if not user.id:
         return False
-    return not user.is_active and (getattr(user, "registration_completed_at", None) is None)
+    return bool(user.is_active) and not bool(getattr(user, "credentials_password_set", True))
 
 
 def user_to_response(

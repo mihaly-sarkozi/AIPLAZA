@@ -11,6 +11,10 @@ from core.modules.users.domain.dto import User
 from core.modules.auth.web.dependencies.auth_dependencies import has_permission
 
 
+def _is_kb_manager(user: User | None) -> bool:
+    return getattr(user, "role", None) in {"owner", "admin"}
+
+
 class KnowledgeBaseService:
     # Ez a metódus a Python-specifikus speciális működést valósítja meg.
     def __init__(self, repo: MySQLKnowledgeBaseRepository, user_repo: Any = None) -> None:
@@ -32,10 +36,9 @@ class KnowledgeBaseService:
         if current_user_id is None:
             return []
         all_kbs = self.repo.list_all()
-        if has_permission(current_user, "knowledge.write"):
+        if _is_kb_manager(current_user):
             return all_kbs
-        permission = "train" if has_permission(current_user, "knowledge.permissions.manage") else "use"
-        allowed_ids = set(self.repo.get_kb_ids_with_permission(current_user_id, permission))
+        allowed_ids = set(self.repo.get_kb_ids_with_permission(current_user_id, "use"))
         return [kb for kb in all_kbs if kb.id is not None and kb.id in allowed_ids]
 
     # Ez a metódus listázza a(z) all unfiltered logikáját.
@@ -61,7 +64,7 @@ class KnowledgeBaseService:
 
     # Ez a metódus visszaadja a(z) trainable KB ids logikáját.
     def get_trainable_kb_ids(self, user_id: int, user: User | None) -> set[int]:
-        if has_permission(user, "knowledge.write"):
+        if _is_kb_manager(user):
             return {kb.id for kb in self.repo.list_all() if kb.id is not None}
         return set(self.repo.get_kb_ids_with_permission(user_id, "train"))
 
@@ -102,6 +105,7 @@ class KnowledgeBaseService:
         description: str | None,
         personal_data_mode: Optional[str] = None,
         pii_depersonalization_enabled: Optional[bool] = None,
+        public_enabled: Optional[bool] = None,
         current_user_id: Optional[int] = None,
     ) -> KnowledgeBase:
         kb = self.repo.get_by_uuid(uuid)
@@ -115,6 +119,8 @@ class KnowledgeBaseService:
             kb.personal_data_mode = personal_data_mode
         if pii_depersonalization_enabled is not None:
             kb.pii_depersonalization_enabled = bool(pii_depersonalization_enabled)
+        if public_enabled is not None:
+            kb.public_enabled = bool(public_enabled)
         return self.repo.update(kb, actor_user_id=current_user_id)
 
     # Ez a metódus törli a(z) delete logikáját.
@@ -183,7 +189,7 @@ class KnowledgeBaseService:
 
     # Ez a metódus a(z) user_can_use logikáját valósítja meg.
     def user_can_use(self, kb_uuid: str, user_id: int, user: User | None) -> bool:
-        if has_permission(user, "knowledge.write"):
+        if _is_kb_manager(user):
             return True
         kb = self.repo.get_by_uuid(kb_uuid)
         if not kb or kb.id is None:
@@ -192,7 +198,7 @@ class KnowledgeBaseService:
 
     # Ez a metódus a(z) user_can_train logikáját valósítja meg.
     def user_can_train(self, kb_uuid: str, user_id: int, user: User | None) -> bool:
-        if has_permission(user, "knowledge.write"):
+        if _is_kb_manager(user):
             return True
         kb = self.repo.get_by_uuid(kb_uuid)
         if not kb or kb.id is None:

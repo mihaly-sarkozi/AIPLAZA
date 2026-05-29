@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+# backend/apps/profile/bootstrap/dependencies.py
+# Feladat: FastAPI dependency adapterek a profile facade, aktuális user és tenant kontextus eléréséhez.
+# Sárközi Mihály - 2026.05.24
+
 from typing import Annotated
 
 from fastapi import Depends, Request

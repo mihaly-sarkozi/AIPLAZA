@@ -1,4 +1,6 @@
 import type { IngestItem, IngestRun } from "../services";
+import type { SettingsDateFormat, SettingsTimeFormat, SettingsTimezone } from "../../../api/services/settingsService";
+import { formatDateTime } from "../../../utils/dateTimeFormatting";
 
 export const ACTIVE_RUN_STATUSES = new Set(["received", "queued", "processing"]);
 
@@ -93,11 +95,24 @@ function truncate(value: string, maxLength: number): string {
   return `${value.slice(0, Math.max(0, maxLength - 1)).trimEnd()}…`;
 }
 
-export function formatTimestamp(value: string | null | undefined): string {
+export function formatTimestamp(
+  value: string | null | undefined,
+  options?: {
+    locale?: string;
+    timezone?: SettingsTimezone | string;
+    dateFormat?: SettingsDateFormat;
+    timeFormat?: SettingsTimeFormat;
+  }
+): string {
   if (!value) return "n/a";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleString("hu-HU");
+  return formatDateTime(value, {
+    locale: options?.locale ?? "hu",
+    timezone: options?.timezone,
+    dateFormat: options?.dateFormat,
+    timeFormat: options?.timeFormat,
+  });
 }
 
 export function formatInteger(value: number | null | undefined): string {

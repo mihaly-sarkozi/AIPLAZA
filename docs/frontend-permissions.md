@@ -24,6 +24,6 @@ The frontend uses role-based route permissions in `frontend/src/platform/permiss
 - `/chat/channel-access`: `chat.channel.manage`
 - `/kb`, `/kb/create`, `/kb/edit/:uuid`, `/kb/ingest/:uuid`, `/kb/ingest/:uuid/runs/:runId`, `/onboarding/train`: `knowledge.write`
 - `/admin/roles`: `users.write`
-- `/admin/settings`, `/admin/forgalom`, `/admin/szamlak`, `/admin/csomagok` and checkout/package admin routes: `settings.read`
+- `/admin/settings`, `/admin/forgalom`, `/admin/szamlak`, `/admin/pricing` and checkout/package admin routes: `settings.read`
 
 `ProtectedRoute` redirects unauthenticated users to `/login` with a safe internal redirect. Authenticated users without the required permission see the shared access denied state instead of the protected page.

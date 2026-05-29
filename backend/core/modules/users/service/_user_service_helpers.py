@@ -26,6 +26,13 @@ def build_set_password_link(request_base_url: str | None, token: str) -> str:
         return ""
     return f"{base}{path}?token={token}"
 
+
+def build_confirm_email_link(request_base_url: str | None, token: str) -> str:
+    base = (request_base_url or "").strip().rstrip("/")
+    if not base:
+        return ""
+    return f"{base}/confirm-email?token={token}"
+
 # Meghívó token adatstruktúra
 @dataclass(frozen=True)
 class InviteTokenPayload:

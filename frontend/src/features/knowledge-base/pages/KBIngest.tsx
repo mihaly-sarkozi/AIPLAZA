@@ -10,6 +10,7 @@ import PageHeader from "../../../components/ui/PageHeader";
 import { useTranslation } from "../../../i18n";
 import { queryKeys } from "../../../queryKeys";
 import { getApiErrorMessage } from "../../../utils/getApiErrorMessage";
+import { useLocaleSettings } from "../../settings/hooks/useSettings";
 import {
   useInfiniteIngestRuns,
   useKbList,
@@ -46,9 +47,10 @@ function downloadBlob(filename: string, blob: Blob) {
 }
 
 export default function KBIngest() {
-  const { t } = useTranslation();
+  const { t, locale } = useTranslation();
   const { uuid } = useParams();
   const navigate = useNavigate();
+  const { data: settings } = useLocaleSettings();
   const queryClient = useQueryClient();
   const loadMoreRef = useRef<HTMLDivElement | null>(null);
   const [downloadSourceId, setDownloadSourceId] = useState<string | null>(null);
@@ -227,7 +229,14 @@ export default function KBIngest() {
                         }}
                         tabIndex={0}
                       >
-                        <div className="text-sm text-[var(--color-foreground)]">{formatTimestamp(row.timestamp)}</div>
+                        <div className="text-sm text-[var(--color-foreground)]">
+                          {formatTimestamp(row.timestamp, {
+                            locale,
+                            timezone: settings?.timezone,
+                            dateFormat: settings?.date_format,
+                            timeFormat: settings?.time_format,
+                          })}
+                        </div>
                         <div>
                             <span
                               className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${getStatusBadgeClass(row.status)}`}

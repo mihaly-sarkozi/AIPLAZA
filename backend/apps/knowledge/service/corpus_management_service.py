@@ -8,6 +8,8 @@ from typing import Any
 
 from apps.knowledge.domain.corpus import Corpus
 from apps.knowledge.errors import KnowledgeBaseNotFound, KnowledgeValidationError
+from core.infrastructure.audit.const.audit_log_action_const import AuditLogAction
+from core.infrastructure.audit.service.audit_service import AuditService
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +26,7 @@ class CorpusManagementService:
         ingest_run_list_summary: Callable[[str], dict[str, Any]],
         clear_contents: Callable[..., dict[str, int]],
         log_step: Callable[..., None],
+        audit_service: AuditService | None = None,
     ) -> None:
         self._corpus_store = corpus_store
         self._metrics_store = metrics_store
@@ -33,6 +36,7 @@ class CorpusManagementService:
         self._ingest_run_list_summary = ingest_run_list_summary
         self._clear_contents = clear_contents
         self._log_step = log_step
+        self._audit = audit_service
 
     @staticmethod
     def to_corpus(item: Any, *, tenant: str = "") -> Corpus:
@@ -48,6 +52,7 @@ class CorpusManagementService:
             personal_data_mode=str(getattr(item, "personal_data_mode", "no_personal_data")),
             personal_data_sensitivity=str(getattr(item, "personal_data_sensitivity", "medium")),
             pii_depersonalization_enabled=bool(getattr(item, "pii_depersonalization_enabled", True)),
+            public_enabled=bool(getattr(item, "public_enabled", False)),
             deleted_at=getattr(item, "deleted_at", None),
             deleted_display_name=getattr(item, "deleted_display_name", None),
             deleted_training_char_count=max(0, int(getattr(item, "deleted_training_char_count", 0) or 0)),
@@ -74,6 +79,8 @@ class CorpusManagementService:
         permissions: list[tuple[int, str]] | None,
         pii_depersonalization_enabled: bool,
         current_user_id: int | None,
+        ip: str | None = None,
+        user_agent: str | None = None,
     ) -> Corpus:
         if self._corpus_store.get_by_name(name):
             raise KnowledgeValidationError("Knowledge base name already exists.")
@@ -96,6 +103,8 @@ class CorpusManagementService:
         if not any(uid == current_user_id for uid, _ in perms):
             perms.append((current_user_id, "train"))
         self._corpus_store.set_permissions(created.uuid, perms, actor_user_id=current_user_id)
+        self._audit_created(created, current_user_id, ip=ip, user_agent=user_agent)
+        self._audit_initial_permissions(created, perms, current_user_id, ip=ip, user_agent=user_agent)
         self._metrics_store.increment("corpus_count", 1)
         self._log_step("corpus.create", status="ok", corpus_uuid=created.uuid, permissions=len(perms))
         return created
@@ -108,7 +117,10 @@ class CorpusManagementService:
         description: str | None,
         personal_data_mode: str | None,
         pii_depersonalization_enabled: bool | None,
+        public_enabled: bool | None,
         current_user_id: int | None,
+        ip: str | None = None,
+        user_agent: str | None = None,
     ) -> Corpus:
         raw = self._corpus_store.get_by_uuid(uuid)
         if not raw:
@@ -126,19 +138,149 @@ class CorpusManagementService:
                 if pii_depersonalization_enabled is not None
                 else corpus.pii_depersonalization_enabled
             ),
+            public_enabled=bool(public_enabled) if public_enabled is not None else corpus.public_enabled,
         )
-        return self.to_corpus(self._corpus_store.update(updated, actor_user_id=current_user_id))
+        saved = self.to_corpus(self._corpus_store.update(updated, actor_user_id=current_user_id))
+        self._audit_setting_changes(corpus, saved, current_user_id, ip=ip, user_agent=user_agent)
+        return saved
 
-    def delete(self, uuid: str, *, confirm_name: str | None = None) -> None:
+    def _audit_setting_changes(
+        self,
+        old: Corpus,
+        new: Corpus,
+        actor_user_id: int | None,
+        *,
+        ip: str | None = None,
+        user_agent: str | None = None,
+    ) -> None:
+        if self._audit is None:
+            return
+        fields = (
+            ("public_enabled", old.public_enabled, new.public_enabled),
+            ("pii_depersonalization_enabled", old.pii_depersonalization_enabled, new.pii_depersonalization_enabled),
+        )
+        for field, old_value, new_value in fields:
+            if bool(old_value) == bool(new_value):
+                continue
+            self._audit.log(
+                AuditLogAction.KNOWLEDGE_SETTING_CHANGED,
+                user_id=actor_user_id,
+                target_type="knowledge_base",
+                target_id=new.uuid,
+                details={
+                    "kb_uuid": new.uuid,
+                    "kb_name": new.name,
+                    "field": field,
+                    "old_value": bool(old_value),
+                    "new_value": bool(new_value),
+                    "changed_by": actor_user_id,
+                },
+                ip=ip,
+                user_agent=user_agent,
+            )
+
+    def delete(
+        self,
+        uuid: str,
+        *,
+        confirm_name: str | None = None,
+        current_user_id: int | None = None,
+        ip: str | None = None,
+        user_agent: str | None = None,
+    ) -> None:
         raw = self._corpus_store.get_by_uuid(uuid)
         if not raw:
             raise KnowledgeBaseNotFound()
+        corpus = self.to_corpus(raw)
         if confirm_name and confirm_name != str(getattr(raw, "name", "") or ""):
             raise KnowledgeValidationError("Confirmation name does not match.")
         training_char_count = int(self._ingest_run_list_summary(uuid).get("total_char_count") or 0)
         self._clear_contents(uuid, confirm_name=confirm_name)
         self._corpus_store.delete(uuid, training_char_count=training_char_count)
+        self._audit_deleted(corpus, current_user_id, training_char_count=training_char_count, ip=ip, user_agent=user_agent)
         self._log_step("corpus.delete", status="ok", corpus_uuid=uuid, training_char_count=training_char_count)
+
+    def _audit_created(
+        self,
+        corpus: Corpus,
+        actor_user_id: int | None,
+        *,
+        ip: str | None = None,
+        user_agent: str | None = None,
+    ) -> None:
+        if self._audit is None:
+            return
+        self._audit.log(
+            AuditLogAction.KNOWLEDGE_CREATED,
+            user_id=actor_user_id,
+            target_type="knowledge_base",
+            target_id=corpus.uuid,
+            details={
+                "kb_uuid": corpus.uuid,
+                "kb_name": corpus.name,
+                "changed_by": actor_user_id,
+                "pii_depersonalization_enabled": bool(corpus.pii_depersonalization_enabled),
+                "public_enabled": bool(corpus.public_enabled),
+            },
+            ip=ip,
+            user_agent=user_agent,
+        )
+
+    def _audit_deleted(
+        self,
+        corpus: Corpus,
+        actor_user_id: int | None,
+        *,
+        training_char_count: int,
+        ip: str | None = None,
+        user_agent: str | None = None,
+    ) -> None:
+        if self._audit is None:
+            return
+        self._audit.log(
+            AuditLogAction.KNOWLEDGE_DELETED,
+            user_id=actor_user_id,
+            target_type="knowledge_base",
+            target_id=corpus.uuid,
+            details={
+                "kb_uuid": corpus.uuid,
+                "kb_name": corpus.name,
+                "changed_by": actor_user_id,
+                "training_char_count": training_char_count,
+            },
+            ip=ip,
+            user_agent=user_agent,
+        )
+
+    def _audit_initial_permissions(
+        self,
+        corpus: Corpus,
+        permissions: list[tuple[int, str]],
+        actor_user_id: int | None,
+        *,
+        ip: str | None = None,
+        user_agent: str | None = None,
+    ) -> None:
+        if self._audit is None:
+            return
+        for user_id, permission in sorted(permissions):
+            if not permission or permission == "none":
+                continue
+            self._audit.log(
+                AuditLogAction.KNOWLEDGE_PERMISSION_CHANGED,
+                user_id=int(user_id),
+                target_type="knowledge_base",
+                target_id=corpus.uuid,
+                details={
+                    "kb_uuid": corpus.uuid,
+                    "kb_name": corpus.name,
+                    "old_permission": "none",
+                    "new_permission": permission,
+                    "changed_by": actor_user_id,
+                },
+                ip=ip,
+                user_agent=user_agent,
+            )
 
     def storage_metrics_for_corpus(self, corpus: Corpus) -> dict[str, Any]:
         if getattr(corpus, "deleted_at", None) is not None:

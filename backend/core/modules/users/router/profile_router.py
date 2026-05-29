@@ -42,6 +42,10 @@ router = APIRouter()
 _presenter = LocalizedPresenterBase()
 
 
+def _request_ip(request: Request) -> str | None:
+    return getattr(request.client, "host", None) if request.client else None
+
+
 @router.get("/auth/me")
 def me(
     tenant: RequiredTenantContextDep,
@@ -62,6 +66,25 @@ def default_settings(
     profile_service: UserProfileService = Depends(get_user_profile_service),
 ):
     return profile_service.get_default_settings()
+
+
+@router.post("/auth/confirm-email", response_model=OperationStatusResponse)
+@limiter.limit("10/minute")
+def confirm_email_change(
+    request: Request,
+    tenant: RequiredTenantContextDep,
+    token: str = "",
+    profile_service: UserProfileService = Depends(get_user_profile_service),
+):
+    try:
+        user = profile_service.confirm_email_change(token=token)
+    except ValueError as exc:
+        code = str(exc)
+        status_code = 410 if code == "expired_email_change_token" else 400
+        raise HTTPException(status_code=status_code, detail={"code": code, "message": code})
+    invalidate_user_cache(tenant.slug, user.id)
+    allowlist_remove_by_user(tenant.slug or "", user.id)
+    return OperationStatusResponse(message="Email cím megerősítve. Jelentkezz be az új email címmel.")
 
 
 @router.patch("/auth/me")
@@ -110,6 +133,8 @@ def change_password(
             user_id=user.id,
             current_password=body.current_password,
             new_password=body.new_password,
+            ip=_request_ip(request),
+            user_agent=request.headers.get("user-agent"),
         )
     except ValueError as exc:
         if str(exc) == "current_password_wrong":

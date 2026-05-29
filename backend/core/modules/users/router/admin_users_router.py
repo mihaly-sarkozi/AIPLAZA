@@ -35,6 +35,10 @@ router = APIRouter()
 _presenter = LocalizedPresenterBase()
 
 
+def _request_ip(request: Request) -> str | None:
+    return getattr(request.client, "host", None) if request.client else None
+
+
 
 @router.get("/users", response_model=list[UserResponse])
 @limiter.limit("30/minute")
@@ -96,15 +100,22 @@ def create_user(
             role=data.role,
             request_base_url=tenant_frontend_base_url_from_request(request),
             created_by=current_user.id,
+            invite_lang=getattr(current_user, "preferred_locale", None) or lang,
+            ip=_request_ip(request),
+            user_agent=request.headers.get("user-agent"),
         )
         if user.created_at is None:
             raise HTTPException(status_code=500, detail="Failed to create user with timestamp")
-        return user_to_response(user, pending_registration=True)
+        return user_to_response(user)
     except HTTPException:
         raise
     except ValueError as exc:
         message = str(exc)
-        if "Email already exists" in message or "email already exists" in message.lower():
+        if (
+            "Email already exists" in message
+            or "email already exists" in message.lower()
+            or "email már használatban" in message.lower()
+        ):
             raise HTTPException(status_code=400, detail=_presenter.detail_for_lang(ErrorCode.EMAIL_ALREADY_EXISTS, lang))
         raise HTTPException(status_code=400, detail={"code": "validation_error", "message": message})
 
@@ -120,25 +131,34 @@ def update_user(
     current_user: User = Depends(require_permission("users.write")),
 ):
     try:
-        user = svc.update(
-            user_id=user_id,
-            current_user_id=current_user.id or 0,
-            name=data.name,
-            is_active=data.is_active,
-            email=data.email,
-            role=data.role,
-        )
+        update_kwargs = {
+            "user_id": user_id,
+            "current_user_id": current_user.id or 0,
+            "name": data.name,
+            "is_active": data.is_active,
+            "email": data.email,
+            "role": data.role,
+            "ip": _request_ip(request),
+            "user_agent": request.headers.get("user-agent"),
+        }
+        if data.email is not None:
+            update_kwargs["request_base_url"] = tenant_frontend_base_url_from_request(request)
+        user = svc.update(**update_kwargs)
         invalidate_user_cache(tenant.slug, user_id)
         if user.created_at is None:
             raise HTTPException(status_code=500, detail="User data is incomplete")
-        if data.role is not None or data.is_active is not None:
+        if data.role is not None or data.is_active is not None or data.email is not None:
             allowlist_remove_by_user(tenant.slug, user_id)
             permissions_changed_set(tenant.slug, user_id)
         return user_to_response(user)
     except HTTPException:
         raise
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+        message = str(exc)
+        if "email már használatban" in message.lower():
+            lang = _presenter.lang(request)
+            raise HTTPException(status_code=400, detail=_presenter.detail_for_lang(ErrorCode.EMAIL_ALREADY_EXISTS, lang))
+        raise HTTPException(status_code=400, detail=message)
 
 
 @router.delete("/users/{user_id}", response_model=OperationStatusResponse)
@@ -152,7 +172,12 @@ def delete_user(
 ):
     try:
         allowlist_remove_by_user(tenant.slug, user_id)
-        svc.delete(user_id, current_user_id=current_user.id or 0)
+        svc.delete(
+            user_id,
+            current_user_id=current_user.id or 0,
+            ip=_request_ip(request),
+            user_agent=request.headers.get("user-agent"),
+        )
         return OperationStatusResponse(message="User deleted successfully")
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))

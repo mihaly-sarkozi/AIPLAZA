@@ -39,6 +39,9 @@ class _UserRepo:
     def exists_owner(self) -> bool:
         return self.owner_exists or any(user.role == "owner" for user in self.by_id.values())
 
+    def get_owner(self):
+        return next((user for user in self.by_id.values() if user.role == "owner"), None)
+
     def create(self, user: User, *, created_by=None) -> User:
         persisted = user.persisted(id=self.next_id, created_at=user.created_at)
         self.by_id[persisted.id] = persisted
@@ -92,6 +95,15 @@ class _SessionRepo:
 
     def invalidate_all_for_user(self, user_id: int, *, updated_by=None) -> None:
         self.invalidated_for_user.append((user_id, updated_by))
+
+
+class _EmailService:
+    def __init__(self) -> None:
+        self.set_password_invites: list[tuple[str, str, str | None]] = []
+
+    def send_set_password_invite(self, to_email: str, set_password_link: str, lang: str | None = None) -> bool:
+        self.set_password_invites.append((to_email, set_password_link, lang))
+        return True
 
 
 def test_change_password_updates_hash_and_resets_failed_login():
@@ -226,6 +238,56 @@ def test_set_password_used_token_raises_invalid_token():
         svc.set_password("used-token", "StrongPass1")
 
 
+def test_create_user_invite_uses_owner_locale_for_set_password_email():
+    owner = User(
+        id=1,
+        email="owner@example.com",
+        password_hash="hash",
+        is_active=True,
+        role="owner",
+        created_at=datetime.now(timezone.utc),
+        preferred_locale="es",
+    )
+    email_service = _EmailService()
+    svc = UserService(
+        user_repository=_UserRepo(existing=owner, owner_exists=True),
+        invite_token_repository=_InviteTokenRepo(),
+        email_service=email_service,
+    )
+
+    svc.create(
+        email="pending-es@example.com",
+        name="Pending ES",
+        role="user",
+        request_base_url="http://demo.local",
+        created_by=owner.id,
+    )
+
+    assert email_service.set_password_invites
+    assert email_service.set_password_invites[-1][0] == "pending-es@example.com"
+    assert email_service.set_password_invites[-1][2] == "es"
+
+
+def test_create_owner_invite_uses_explicit_request_locale_when_owner_is_missing():
+    email_service = _EmailService()
+    svc = UserService(
+        user_repository=_UserRepo(owner_exists=False),
+        invite_token_repository=_InviteTokenRepo(),
+        email_service=email_service,
+    )
+
+    svc.create(
+        email="first-owner@example.com",
+        name="First Owner",
+        role="owner",
+        request_base_url="http://demo.local",
+        invite_lang="en",
+    )
+
+    assert email_service.set_password_invites
+    assert email_service.set_password_invites[-1][2] == "en"
+
+
 def test_validate_invite_token_covers_invalid_expired_used_and_valid_states():
     now = datetime.now(timezone.utc)
     svc = InviteService(
@@ -254,9 +316,10 @@ def test_resend_invite_invalidates_previous_tokens_and_creates_new_one():
         id=3,
         email="pending@example.com",
         password_hash="hash",
-        is_active=False,
+        is_active=True,
         role="user",
         created_at=datetime.now(timezone.utc),
+        credentials_password_set=False,
     )
     invite_repo = _InviteTokenRepo()
     svc = InviteService(
@@ -275,6 +338,31 @@ def test_resend_invite_invalidates_previous_tokens_and_creates_new_one():
     assert updated_by == 99
 
 
+def test_resend_invite_uses_pending_user_locale_for_set_password_email():
+    user = User(
+        id=31,
+        email="pending-fr@example.com",
+        password_hash="hash",
+        is_active=True,
+        role="user",
+        created_at=datetime.now(timezone.utc),
+        preferred_locale="en",
+        credentials_password_set=False,
+    )
+    email_service = _EmailService()
+    svc = InviteService(
+        user_repository=_UserRepo(existing=user, owner_exists=True),
+        invite_token_repository=_InviteTokenRepo(),
+        email_service=email_service,
+    )
+
+    svc.resend_invite(user_id=31, request_base_url="http://demo.local", updated_by=99)
+
+    assert email_service.set_password_invites
+    assert email_service.set_password_invites[-1][0] == "pending-fr@example.com"
+    assert email_service.set_password_invites[-1][2] == "en"
+
+
 def test_resend_invite_active_user_raises():
     user = User(
         id=30,
@@ -283,6 +371,7 @@ def test_resend_invite_active_user_raises():
         is_active=True,
         role="user",
         created_at=datetime.now(timezone.utc),
+        credentials_password_set=True,
     )
     svc = InviteService(
         user_repository=_UserRepo(existing=user, owner_exists=True),
@@ -290,7 +379,7 @@ def test_resend_invite_active_user_raises():
         email_service=None,
     )
 
-    with pytest.raises(ValueError, match="már aktív"):
+    with pytest.raises(ValueError, match="már beállított jelszót"):
         svc.resend_invite(user_id=30, request_base_url="http://demo.local", updated_by=1)
 
 
@@ -401,7 +490,7 @@ def test_set_initial_password_demo_rejects_when_tenant_is_not_demo():
         svc.set_initial_password_demo(user_id=52, new_password="StrongPass1", tenant_demo_mode=False)
 
 
-def test_update_rejects_self_role_change():
+def test_update_rejects_self_admin_role_change():
     user = User(
         id=4,
         email="self@example.com",
@@ -417,8 +506,232 @@ def test_update_rejects_self_role_change():
         email_service=None,
     )
 
-    with pytest.raises(ValueError, match="saját szerepköröd"):
+    with pytest.raises(ValueError, match="saját adminisztrátor szerepköröd"):
         svc.update(user_id=4, current_user_id=4, role="user")
+
+
+def test_update_rejects_self_activation_change():
+    user = User(
+        id=41,
+        email="self-active@example.com",
+        password_hash="hash",
+        is_active=True,
+        role="admin",
+        created_at=datetime.now(timezone.utc),
+    )
+    svc = UserService(
+        user_repository=_UserRepo(existing=user, owner_exists=True),
+        invite_token_repository=_InviteTokenRepo(),
+        session_repository=_SessionRepo(),
+        email_service=None,
+    )
+
+    with pytest.raises(ValueError, match="saját fiók aktiválási állapotát"):
+        svc.update(user_id=41, current_user_id=41, is_active=False)
+
+
+def test_update_allows_admin_editing_another_admin():
+    current_admin = User(
+        id=60,
+        email="admin-a@example.com",
+        password_hash="hash",
+        is_active=True,
+        role="admin",
+        created_at=datetime.now(timezone.utc),
+    )
+    target_admin = User(
+        id=61,
+        email="admin-b@example.com",
+        password_hash="hash",
+        is_active=True,
+        role="admin",
+        created_at=datetime.now(timezone.utc),
+    )
+    user_repo = _UserRepo(existing=current_admin, owner_exists=True)
+    user_repo.by_id[target_admin.id] = target_admin
+    user_repo.by_email[target_admin.email] = target_admin
+    svc = UserService(
+        user_repository=user_repo,
+        invite_token_repository=_InviteTokenRepo(),
+        session_repository=_SessionRepo(),
+        email_service=None,
+    )
+
+    updated = svc.update(user_id=61, current_user_id=60, name="Admin B")
+
+    assert updated.name == "Admin B"
+
+
+def test_update_allows_downgrading_another_admin_role():
+    current_admin = User(
+        id=64,
+        email="admin-role-a@example.com",
+        password_hash="hash",
+        is_active=True,
+        role="admin",
+        created_at=datetime.now(timezone.utc),
+    )
+    target_admin = User(
+        id=65,
+        email="admin-role-b@example.com",
+        password_hash="hash",
+        is_active=True,
+        role="admin",
+        created_at=datetime.now(timezone.utc),
+    )
+    user_repo = _UserRepo(existing=current_admin, owner_exists=True)
+    user_repo.by_id[target_admin.id] = target_admin
+    user_repo.by_email[target_admin.email] = target_admin
+    svc = UserService(
+        user_repository=user_repo,
+        invite_token_repository=_InviteTokenRepo(),
+        session_repository=_SessionRepo(),
+        email_service=None,
+    )
+
+    updated = svc.update(user_id=65, current_user_id=64, role="user")
+
+    assert updated.role == "user"
+
+
+def test_update_email_changes_non_owner_immediately_without_invite():
+    current_admin = User(
+        id=70,
+        email="admin-email-change@example.com",
+        password_hash="hash",
+        is_active=True,
+        role="admin",
+        created_at=datetime.now(timezone.utc),
+    )
+    target_user = User(
+        id=71,
+        email="old-user@example.com",
+        password_hash="hash",
+        is_active=True,
+        role="user",
+        created_at=datetime.now(timezone.utc),
+        registration_completed_at=datetime.now(timezone.utc),
+        credentials_password_set=True,
+    )
+    user_repo = _UserRepo(existing=current_admin, owner_exists=True)
+    user_repo.by_id[target_user.id] = target_user
+    user_repo.by_email[target_user.email] = target_user
+    invite_repo = _InviteTokenRepo()
+    email_service = _EmailService()
+    svc = UserService(
+        user_repository=user_repo,
+        invite_token_repository=invite_repo,
+        session_repository=_SessionRepo(),
+        email_service=email_service,
+    )
+
+    updated = svc.update(
+        user_id=71,
+        current_user_id=70,
+        email="new-user@example.com",
+        request_base_url="http://tenant.local",
+    )
+
+    assert updated.email == "new-user@example.com"
+    assert updated.is_active is True
+    assert updated.registration_completed_at is not None
+    assert updated.credentials_password_set is True
+    assert invite_repo.invalidated_for_user == []
+    assert invite_repo.created == []
+    assert email_service.set_password_invites == []
+
+
+def test_update_allows_self_email_change_for_non_owner():
+    user = User(
+        id=72,
+        email="self-email@example.com",
+        password_hash="hash",
+        is_active=True,
+        role="admin",
+        created_at=datetime.now(timezone.utc),
+    )
+    svc = UserService(
+        user_repository=_UserRepo(existing=user, owner_exists=True),
+        invite_token_repository=_InviteTokenRepo(),
+        session_repository=_SessionRepo(),
+        email_service=None,
+    )
+
+    updated = svc.update(user_id=72, current_user_id=72, email="other@example.com")
+
+    assert updated.email == "other@example.com"
+
+
+def test_update_rejects_duplicate_email_change():
+    current_admin = User(
+        id=73,
+        email="admin-duplicate@example.com",
+        password_hash="hash",
+        is_active=True,
+        role="admin",
+        created_at=datetime.now(timezone.utc),
+    )
+    target_user = User(
+        id=74,
+        email="target-duplicate@example.com",
+        password_hash="hash",
+        is_active=True,
+        role="user",
+        created_at=datetime.now(timezone.utc),
+    )
+    existing_user = User(
+        id=75,
+        email="already-used@example.com",
+        password_hash="hash",
+        is_active=True,
+        role="user",
+        created_at=datetime.now(timezone.utc),
+    )
+    user_repo = _UserRepo(existing=current_admin, owner_exists=True)
+    for user in (target_user, existing_user):
+        user_repo.by_id[user.id] = user
+        user_repo.by_email[user.email] = user
+    svc = UserService(
+        user_repository=user_repo,
+        invite_token_repository=_InviteTokenRepo(),
+        session_repository=_SessionRepo(),
+        email_service=None,
+    )
+
+    with pytest.raises(ValueError, match="email már használatban"):
+        svc.update(user_id=74, current_user_id=73, email="already-used@example.com")
+
+
+def test_delete_allows_admin_deleting_another_admin():
+    current_admin = User(
+        id=62,
+        email="admin-delete-a@example.com",
+        password_hash="hash",
+        is_active=True,
+        role="admin",
+        created_at=datetime.now(timezone.utc),
+    )
+    target_admin = User(
+        id=63,
+        email="admin-delete-b@example.com",
+        password_hash="hash",
+        is_active=True,
+        role="admin",
+        created_at=datetime.now(timezone.utc),
+    )
+    user_repo = _UserRepo(existing=current_admin, owner_exists=True)
+    user_repo.by_id[target_admin.id] = target_admin
+    user_repo.by_email[target_admin.email] = target_admin
+    svc = UserService(
+        user_repository=user_repo,
+        invite_token_repository=_InviteTokenRepo(),
+        session_repository=_SessionRepo(),
+        email_service=None,
+    )
+
+    svc.delete(user_id=63, current_user_id=62)
+
+    assert user_repo.get_by_id(63) is None
 
 
 def test_delete_rejects_owner_target():

@@ -34,7 +34,8 @@ api.interceptors.request.use((config) => {
 
   const method = (config.method ?? "get").toLowerCase();
   if (["post", "patch", "put", "delete"].includes(method)) {
-    const csrf = getCsrfToken();
+    const url = (config.url ?? "").toString();
+    const csrf = getCsrfToken(/^\/platform-admin\//.test(url) ? "platform-admin" : "tenant");
     if (csrf) config.headers["X-CSRF-Token"] = csrf;
   }
 
@@ -47,6 +48,7 @@ api.interceptors.request.use((config) => {
     /^\/auth\/refresh(\/|$)/.test(url) ||
     /^\/auth\/logout(\/|$)/.test(url) ||
     /^\/auth\/forgot-password(\/|$)/.test(url) ||
+    /^\/auth\/confirm-email(\/|$)/.test(url) ||
     /^\/auth\/demo-login(\/|$)/.test(url) ||
     /^\/users\/set-password(\/|$)/.test(url) ||
     /^\/platform-admin\/auth\/login(\/|$)/.test(url) ||
@@ -97,7 +99,13 @@ function redirectToLogin(err?: unknown): void {
   if (typeof window === "undefined") return;
   const pathname = window.location.pathname || "";
   // Már login/forgot/set-password oldalon vagyunk → ne töltődjön újra (különben refresh 401 → logout → reload → végtelen ciklus)
-  if (pathname === "/login" || pathname.startsWith("/forgot") || pathname.startsWith("/set-password") || pathname.startsWith("/platform-admin")) {
+  if (
+    pathname === "/login" ||
+    pathname.startsWith("/forgot") ||
+    pathname.startsWith("/set-password") ||
+    pathname.startsWith("/confirm-email") ||
+    pathname.startsWith("/platform-admin")
+  ) {
     return;
   }
   const path = getSafeLoginRedirect(pathname && pathname !== "/login" ? pathname : null);
@@ -152,9 +160,9 @@ api.interceptors.response.use(
 export async function fetchCsrfToken(): Promise<void> {
   try {
     const res = await api.get<{ csrf_token: string }>("/auth/csrf-token", { withCredentials: true });
-    if (res.data?.csrf_token) setCsrfToken(res.data.csrf_token);
+    if (res.data?.csrf_token) setCsrfToken(res.data.csrf_token, "tenant");
   } catch {
-    setCsrfToken(null);
+    setCsrfToken(null, "tenant");
   }
 }
 
@@ -162,9 +170,9 @@ export async function fetchCsrfToken(): Promise<void> {
 export async function fetchPlatformAdminCsrfToken(): Promise<void> {
   try {
     const res = await api.get<{ csrf_token: string }>("/platform-admin/auth/csrf-token", { withCredentials: true });
-    if (res.data?.csrf_token) setCsrfToken(res.data.csrf_token);
+    if (res.data?.csrf_token) setCsrfToken(res.data.csrf_token, "platform-admin");
   } catch {
-    setCsrfToken(null);
+    setCsrfToken(null, "platform-admin");
   }
 }
 

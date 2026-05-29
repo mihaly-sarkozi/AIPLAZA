@@ -149,6 +149,38 @@ def test_set_permissions_preserves_current_user_permission() -> None:
     assert sorted(store.permissions["kb-1"]) == [(11, "train"), (12, "use")]
 
 
+def test_admin_list_all_can_access_all_active_knowledge_bases(monkeypatch: pytest.MonkeyPatch) -> None:
+    admin_user = SimpleNamespace(id=77, role="admin")
+    monkeypatch.setattr(
+        permission_module,
+        "has_permission",
+        lambda user, permission: bool(user is admin_user and permission == "knowledge.read"),
+    )
+    store = _CorpusStore()
+    store.permissions = {"kb-1": [], "kb-2": [(12, "train")]}
+    service = _service(store)
+
+    visible = service.list_all(current_user_id=77, current_user=admin_user)
+
+    assert [kb.uuid for kb in visible] == ["kb-1", "kb-2"]
+    assert service.user_can_train("kb-1", 77, admin_user) is True
+    assert service.user_can_train("kb-2", 77, admin_user) is True
+
+
+def test_kb_scoped_permission_updates_do_not_touch_other_knowledge_bases() -> None:
+    store = _CorpusStore()
+    store.permissions = {
+        "kb-1": [(11, "train"), (77, "train")],
+        "kb-2": [(12, "train"), (88, "train")],
+    }
+    service = _service(store)
+
+    service.set_permissions("kb-1", [(77, "train"), (88, "use")], current_user_id=11)
+
+    assert sorted(store.permissions["kb-1"]) == [(11, "train"), (77, "train"), (88, "use")]
+    assert sorted(store.permissions["kb-2"]) == [(12, "train"), (88, "train")]
+
+
 def test_tenant_a_user_cannot_see_tenant_b_knowledge_base_with_factories() -> None:
     tenant_a = tenant_factory("tenant-a")
     tenant_b = tenant_factory("tenant-b")
@@ -172,9 +204,10 @@ def test_admin_scope_can_access_train_and_use_permissions(monkeypatch: pytest.Mo
     monkeypatch.setattr(
         permission_module,
         "has_permission",
-        lambda user, permission: bool(user is admin_user and permission == "knowledge.write"),
+        lambda user, permission: bool(user is admin_user and permission == "knowledge.read"),
     )
     store = _CorpusStore()
+    store.permissions = {"kb-1": [(admin_user.id, "train")], "kb-2": [(12, "use")]}
     service = _service(store)
 
     assert service.user_can_use("kb-1", admin_user.id, admin_user) is True

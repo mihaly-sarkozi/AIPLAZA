@@ -49,6 +49,18 @@ function UnknownTenantHostPage() {
   );
 }
 
+function ServiceDeletedStandalonePage() {
+  const { t } = useTranslation();
+  return (
+    <div className="min-h-screen flex items-center justify-center px-4 bg-[var(--color-background)] text-[var(--color-foreground)]">
+      <div className="max-w-2xl text-center">
+        <h1 className="text-2xl md:text-3xl font-semibold mb-4">{t("serviceDeleted.title")}</h1>
+        <p className="text-[var(--color-muted-foreground)]">{t("serviceDeleted.description")}</p>
+      </div>
+    </div>
+  );
+}
+
 function ScrollToTopOnRouteChange() {
   const location = useLocation();
 
@@ -120,8 +132,13 @@ export default function AppShell() {
       if (path === "/demo" || path === "/demo-login" || path === "/demo-expired") return;
       if (path.startsWith("/platform-admin")) return;
       if (path === "/" && !isTenantSubdomain()) return;
+      if (path === "/service-deleted") {
+        useAuthStore.getState().setToken(null);
+        useAuthStore.setState({ user: null, loadingUser: false });
+        return;
+      }
       await fetchCsrfToken();
-      if (path === "/login" || path.startsWith("/forgot") || path.startsWith("/set-password")) {
+      if (path === "/login" || path.startsWith("/forgot") || path.startsWith("/set-password") || path.startsWith("/confirm-email")) {
         useAuthStore.getState().setToken(null);
         useAuthStore.setState({ user: null, loadingUser: false });
         return;
@@ -145,6 +162,9 @@ export default function AppShell() {
   const fallbackPath = getAuthenticatedFallbackPath();
 
   if (tenantHostStatus === "checking") return <GuardFallback />;
+  if (tenantHostStatus === "invalid" && (typeof window !== "undefined" ? window.location.pathname === "/service-deleted" : false)) {
+    return <ServiceDeletedStandalonePage />;
+  }
   if (tenantHostStatus === "invalid") return <UnknownTenantHostPage />;
 
   return (

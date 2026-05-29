@@ -1,5 +1,6 @@
 import type { ChatMessageType } from "../types";
-import { localeTag } from "./chatNumbers";
+import type { SettingsDateFormat, SettingsTimeFormat, SettingsTimezone } from "../../../api/services/settingsService";
+import { formatDateTime } from "../../../utils/dateTimeFormatting";
 
 export function serializeProcessToTxt({
   locale,
@@ -7,15 +8,21 @@ export function serializeProcessToTxt({
   selectedKbLabel,
   messages,
   contextNotice,
+  timezone,
+  dateFormat,
+  timeFormat,
 }: {
   locale: string;
   mode: "query" | "train";
   selectedKbLabel: string;
   messages: ChatMessageType[];
   contextNotice: string | null;
+  timezone?: SettingsTimezone | string;
+  dateFormat?: SettingsDateFormat;
+  timeFormat?: SettingsTimeFormat;
 }): string {
   const lines: string[] = [];
-  const now = new Date().toLocaleString(localeTag(locale));
+  const now = formatDateTime(new Date().toISOString(), { locale, timezone, dateFormat, timeFormat });
   lines.push("=== AIPLAZA Chat folyamat export ===");
   lines.push(`Export időpont: ${now}`);
   lines.push(`Mód: ${mode === "train" ? "Tanítás" : "Lekérdezés"}`);

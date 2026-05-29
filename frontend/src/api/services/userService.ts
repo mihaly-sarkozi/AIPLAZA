@@ -23,6 +23,7 @@ export type UpdateUserPayload = {
 
 export type PatchMePayload = {
   name?: string | null;
+  email?: string;
   preferred_locale?: string;
   preferred_theme?: string;
 };
@@ -76,9 +77,9 @@ export async function resendInvite(userId: number): Promise<unknown> {
 
 export async function patchMe(
   body: PatchMePayload
-): Promise<{ name?: string; preferred_locale?: string; preferred_theme?: string }> {
+): Promise<{ name?: string; email?: string; pending_email?: string | null; preferred_locale?: string; preferred_theme?: string }> {
   const res = await api.patch("/auth/me", body);
-  return res.data as { name?: string; preferred_locale?: string; preferred_theme?: string };
+  return res.data as { name?: string; email?: string; pending_email?: string | null; preferred_locale?: string; preferred_theme?: string };
 }
 
 export async function changePassword(body: ChangePasswordPayload): Promise<unknown> {

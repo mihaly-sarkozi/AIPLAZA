@@ -26,6 +26,7 @@ export default function KBCard({
   onDelete,
 }: KBCardProps) {
   const deleted = isDeletedKb(kb);
+  const canTrain = kb.can_train === true;
   return (
     <div className={`grid gap-4 px-5 py-4 md:grid-cols-[0.75fr_2fr_0.6fr] md:items-center ${deleted ? "text-[var(--color-muted)]" : ""}`}>
       <div className="min-w-0">
@@ -46,7 +47,7 @@ export default function KBCard({
           {t("kb.metricFile")}: {formatBytes(metricValue(kb, "file_bytes"))}
           <span className="mx-2">|</span>
           {t("kb.metricDatabase")}: {formatBytes(metricValue(kb, "database_bytes"))}
-          {canManage && !deleted ? (
+          {canManage && canTrain && !deleted ? (
             <div className="mt-1">
               <button
                 type="button"
@@ -68,7 +69,7 @@ export default function KBCard({
             {t("kb.deletedNoActions")}
           </div>
         ) : null}
-        {canManage && !billingRestricted && !deleted ? (
+        {canManage && canTrain && !billingRestricted && !deleted ? (
           <Button type="button" variant="secondary" onClick={() => onSettings(kb)} disabled={actionLoading} size="sm">
             {t("kb.actionSettings")}
           </Button>

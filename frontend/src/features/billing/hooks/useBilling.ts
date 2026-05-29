@@ -33,6 +33,7 @@ export type BillingUpgradePreview = {
   prorated_charge_cents: number;
   old_remaining_credit_cents: number;
   next_period_charge_cents: number;
+  training_initial_fee_cents: number;
   total_charge_cents: number;
   paid_until_iso: string;
   currency: string;
@@ -44,8 +45,17 @@ export type BillingUpgradeComplete = {
   prorated_charge: number;
   old_remaining_credit_cents: number;
   next_period_charge_cents: number;
+  training_initial_fee_cents: number;
   total_charge_cents: number;
   paid_until_iso: string;
+};
+
+export type BillingCancellationResponse = {
+  status: string;
+  message: string;
+  active_kb_count: number;
+  cancellation_request_id?: number | null;
+  current_period_end_iso?: string | null;
 };
 
 export type BillingOverview = {
@@ -88,7 +98,7 @@ export function useBillingOverview(options?: Omit<UseQueryOptions<BillingOvervie
       const res = await api.get("/billing/overview");
       return res.data as BillingOverview;
     },
-    enabled: user?.role === "owner",
+    enabled: user?.role === "owner" || user?.role === "admin",
     ...options,
   });
 }
@@ -150,6 +160,69 @@ export function useUpdateSubscriptionMutation(
     },
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: queryKeys.billingOverview });
+    },
+    ...options,
+  });
+}
+
+export function useCancelSubscriptionMutation(
+  options?: UseMutationOptions<
+    BillingCancellationResponse,
+    Error,
+    { reason_code: string; reason_text: string }
+  >
+) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (body: { reason_code: string; reason_text: string }) => {
+      const res = await api.post("/billing/subscription/cancel", body);
+      return res.data as BillingCancellationResponse;
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: queryKeys.billingOverview });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.billingAccessStatus });
+    },
+    ...options,
+  });
+}
+
+export function useDeleteServiceAccessMutation(
+  options?: UseMutationOptions<
+    BillingCancellationResponse,
+    Error,
+    void
+  >
+) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async () => {
+      const res = await api.post("/billing/subscription/delete-access");
+      return res.data as BillingCancellationResponse;
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: queryKeys.billingOverview });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.billingAccessStatus });
+    },
+    ...options,
+  });
+}
+
+export function useRestoreSubscriptionRenewalMutation(
+  options?: UseMutationOptions<
+    BillingCancellationResponse,
+    Error,
+    void
+  >
+) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async () => {
+      const res = await api.post("/billing/subscription/restore-renewal");
+      return res.data as BillingCancellationResponse;
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: queryKeys.billingOverview });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.billingAccessStatus });
     },
     ...options,
   });

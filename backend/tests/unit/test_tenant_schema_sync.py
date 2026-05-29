@@ -91,8 +91,8 @@ def test_knowledge_fk_constraints_revision_runs_after_base_schema(monkeypatch):
         for hook in tenant_schema_service.list_tenant_schema_hooks()
         if hook.name.startswith("knowledge")
     ]
-    assert "knowledge.schema.worker_first_ingest.v4" in revisions
+    assert "knowledge.schema.worker_first_ingest.v6.kb_visibility_flags" in revisions
     assert "knowledge.schema.worker_first_ingest.v5.referential_integrity" in revisions
-    assert revisions.index("knowledge.schema.worker_first_ingest.v4") < revisions.index(
-        "knowledge.schema.worker_first_ingest.v5.referential_integrity"
+    assert revisions.index("knowledge.schema.worker_first_ingest.v5.referential_integrity") < revisions.index(
+        "knowledge.schema.worker_first_ingest.v6.kb_visibility_flags"
     )

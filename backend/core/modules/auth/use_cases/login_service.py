@@ -307,6 +307,13 @@ class LoginService(TransactionalServiceMixin):
 
         self.logger.login_successful_login(user.id, ip, ua, **ctx)
         increment_metric("platform.auth.success.count", 1.0, tags={"flow": "login_2fa"})
+        self.audit.log(
+            AuditLogAction.LOGIN_2FA_SUCCESS,
+            user_id=user.id,
+            details={"email": user.email, "challenge_type": "authenticator" if authenticator_secret else "email"},
+            ip=ip,
+            user_agent=ua,
+        )
         self.audit.log(AuditLogAction.LOGIN_SUCCESS, user_id=user.id, details={"email": user.email}, ip=ip, user_agent=ua)
         access, refresh, access_jti = self._issue_tokens(user.id, ip, ua, auto_login, getattr(user, "security_version", 0), tenant.security_version, user.role)
         return LoginSuccess(access_token=access, refresh_token=refresh, user=user, access_jti=access_jti)
@@ -425,7 +432,9 @@ class LoginService(TransactionalServiceMixin):
 
     def authenticator_status(self, user_id: int) -> dict:
         row = self.user_authenticator_repository.get_by_user_id(user_id)
-        pending = bool(row and row.pending_secret_base32 and row.pending_expires_at and row.pending_expires_at > self.clock.now())
+        now_utc = self._as_utc_aware(self.clock.now())
+        pending_expires_at = self._as_utc_aware(getattr(row, "pending_expires_at", None)) if row else None
+        pending = bool(row and row.pending_secret_base32 and pending_expires_at and pending_expires_at > now_utc)
         enabled = bool(row and row.is_enabled and row.secret_base32)
         return {"enabled": enabled, "pending": pending}
 
@@ -433,6 +442,14 @@ class LoginService(TransactionalServiceMixin):
         self.user_authenticator_repository.disable(user_id, updated_by=user_id)
         self.user_repository.increment_security_version(user_id, updated_by=user_id)
         self.session_repository.invalidate_all_for_user(user_id, updated_by=user_id)
+
+    @staticmethod
+    def _as_utc_aware(value: datetime | None) -> datetime | None:
+        if value is None:
+            return None
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc)
 
 
     # Tokens előállítása

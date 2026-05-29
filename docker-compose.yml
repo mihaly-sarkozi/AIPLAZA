@@ -59,6 +59,8 @@ services:
       QDRANT_URL: http://qdrant:6333
       QDRANT_API_KEY: ""
       OBJECT_STORAGE_ENDPOINT: http://minio:9000
+      OBJECT_STORAGE_ACCESS_KEY: minioadmin
+      OBJECT_STORAGE_SECRET_KEY: minioadmin
       FRONTEND_BASE_URL: http://lvh.me:5173
       FRONTEND_SET_PASSWORD_PORT: 5173
       SMTP_FROM_EMAIL: sarkozi.mihaly@gmail.com

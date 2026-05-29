@@ -140,7 +140,8 @@ class RetrievalService:
         corpus = self._corpus_store.get_by_uuid(corpus_uuid)
         if corpus is None:
             raise KnowledgePermissionDenied()
-        if str(getattr(corpus, "tenant", "") or "").strip() != effective_tenant:
+        corpus_tenant = str(getattr(corpus, "tenant", "") or "").strip()
+        if corpus_tenant and corpus_tenant != effective_tenant:
             raise KnowledgePermissionDenied()
         return corpus
 

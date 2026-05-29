@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+# backend/apps/profile/bootstrap/app_module.py
+# Feladat: A profile app modul runtime beüzemelése, service-regisztrációja, routere és tenant hookja.
+# Sárközi Mihály - 2026.05.24
+
 from apps.profile.api.router import router
 from apps.profile.bootstrap.service_keys import PROFILE_SERVICE
 from apps.profile.infra.preferences_repository import ProfilePreferencesRepository

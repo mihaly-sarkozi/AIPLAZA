@@ -22,6 +22,8 @@ class _CoreProfileService:
         return {
             "id": user.id,
             "email": user.email,
+            "pending_email": getattr(user, "pending_email", None),
+            "pending_email_expires_at": getattr(user, "pending_email_expires_at", None),
             "role": user.role,
             "is_active": user.is_active,
             "name": user.name,
@@ -48,6 +50,11 @@ class _CoreProfileService:
             preferred_theme=preferred_theme,
         )
         return self.get_me(user=updated_user, tenant=None)
+
+    def request_email_change(self, *, user, new_email, request_base_url, updated_by=None) -> dict[str, object]:
+        if getattr(user, "role", None) == "owner":
+            return self.get_me(user=user.with_updates(pending_email=new_email), tenant=None)
+        return self.get_me(user=user.with_updates(email=new_email, pending_email=None), tenant=None)
 
     def invalidate_cache(self, tenant_slug: str | None, user_id: int) -> None:
         self.invalidations.append((tenant_slug, user_id))
@@ -139,6 +146,7 @@ def test_update_profile_updates_core_fields_and_preferences() -> None:
         user=_user(),
         tenant=_tenant_context(),
         name="  Uj Nev  ",
+        email=None,
         preferred_locale="en",
         preferred_theme="dark",
         app_preferences={"dashboard_layout": "compact", "show_tips": False},
@@ -172,6 +180,7 @@ def test_update_profile_with_only_app_preferences_skips_core_update() -> None:
         user=_user(),
         tenant=_tenant_context(),
         name=None,
+        email=None,
         preferred_locale=None,
         preferred_theme=None,
         app_preferences={"dashboard_layout": "compact"},
@@ -194,6 +203,7 @@ def test_update_profile_with_only_core_fields_skips_preference_write() -> None:
         user=_user(),
         tenant=_tenant_context(),
         name="Only Core",
+        email=None,
         preferred_locale="en",
         preferred_theme="dark",
         app_preferences=None,
@@ -203,3 +213,23 @@ def test_update_profile_with_only_core_fields_skips_preference_write() -> None:
     assert prefs_service.update_calls == 0
     assert payload["name"] == "Only Core"
     assert payload["locale"] == "en"
+
+
+def test_update_profile_email_change_returns_new_email_for_non_owner() -> None:
+    facade = ProfileFacade(
+        core_profile_service=_CoreProfileService(),
+        preferences_service=_PreferencesService(),
+    )
+
+    payload = facade.update_profile(
+        user=_user(),
+        tenant=_tenant_context(),
+        name=None,
+        email="new-profile@example.com",
+        preferred_locale=None,
+        preferred_theme=None,
+        app_preferences=None,
+    )
+
+    assert payload["email"] == "new-profile@example.com"
+    assert payload["pending_email"] is None

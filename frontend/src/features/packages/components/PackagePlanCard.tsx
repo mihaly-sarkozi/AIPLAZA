@@ -34,10 +34,10 @@ export default function PackagePlanCard({
   const samePlanAndCycle = isCurrent && selectedBillingPeriod === currentBillingPeriod;
   const { beforeUsers, usersLine, afterUsers, tagline } = planCardFeatureSections(plan, t);
   const switchDisabled = pending || isScheduledHere || samePlanAndCycle;
-  const borderClass = featured
-    ? "border border-emerald-200 bg-emerald-50 ring-1 ring-emerald-200"
-    : showPaidCurrentHighlight
-      ? "border-2 border-[var(--color-primary)] bg-[var(--color-background)] ring-1 ring-[var(--color-primary)]/20"
+  const borderClass = showPaidCurrentHighlight
+    ? "border-2 border-[var(--color-primary)] bg-[var(--color-background)] ring-1 ring-[var(--color-primary)]/20 dark:bg-neutral-700"
+    : featured
+      ? "package-plan-card-featured border border-emerald-200 bg-emerald-50 ring-1 ring-emerald-200"
       : "border border-[var(--color-border)] bg-[var(--color-background)]";
   const bulletRow = (line: string) => (
     <li key={`${plan.code}-${line}`} className="leading-snug pl-0 flex gap-2">
@@ -56,7 +56,8 @@ export default function PackagePlanCard({
             {tagline ? <p className="text-sm text-[var(--color-muted)] mt-1 leading-snug">{tagline}</p> : null}
           </div>
           <div className="flex flex-col items-end gap-1 shrink-0">
-            {featured ? <Badge className="bg-emerald-100 text-emerald-700">{t("packages.badgePopular")}</Badge> : null}
+            {featured ? <Badge className="package-plan-card-featured-badge bg-emerald-100 text-emerald-700">{t("packages.badgePopular")}</Badge> : null}
+            {samePlanAndCycle ? <Badge className="bg-orange-500 text-white">{t("packages.badgeCurrentPlan")}</Badge> : null}
             {isScheduledHere ? <Badge className="bg-amber-500/20 text-amber-900 dark:text-amber-200">{t("packages.badgeScheduled")}</Badge> : null}
             {resourceBlocked ? <Badge className="bg-neutral-500/25 text-neutral-900 dark:text-neutral-200">{t("packages.planNotSelectableBadge")}</Badge> : null}
           </div>
@@ -90,9 +91,7 @@ export default function PackagePlanCard({
         {afterUsers.length > 0 ? <ul className="text-sm text-[var(--color-foreground)] space-y-2 mb-4">{afterUsers.map(bulletRow)}</ul> : null}
 
         <div className="mt-[10px]">
-          {samePlanAndCycle ? (
-            <p className="mt-auto w-full py-2.5 text-sm font-semibold text-center text-[var(--color-foreground)]">{t("packages.badgeCurrentPlan")}</p>
-          ) : (
+          {!samePlanAndCycle ? (
             <>
               {resourceBlocked && !switchDisabled ? (
                 <p className="text-xs text-amber-900/90 dark:text-amber-200/95 leading-snug mb-2">{t("packages.planNotSelectableHint")}</p>
@@ -112,7 +111,7 @@ export default function PackagePlanCard({
                   : paidCtaLabel(plan.code, isScheduledHere, samePlanAndCycle, isCurrent, pending, t)}
               </button>
             </>
-          )}
+          ) : null}
         </div>
       </div>
     </div>

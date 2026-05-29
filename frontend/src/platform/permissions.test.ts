@@ -11,20 +11,24 @@ describe("frontend permissions", () => {
   });
 
   it("allows admin permissions intended for admins", () => {
-    expect(hasRolePermission("admin", "knowledge.write")).toBe(true);
+    expect(hasRolePermission("admin", "knowledge.read")).toBe(true);
     expect(hasRolePermission("admin", "users.write")).toBe(true);
-    expect(hasRolePermission("admin", "knowledge.permissions.manage")).toBe(true);
+    expect(hasRolePermission("admin", "settings.read")).toBe(true);
+    expect(hasRolePermission("admin", "settings.write")).toBe(true);
+    expect(hasRolePermission("admin", "billing.read")).toBe(true);
+    expect(hasRolePermission("admin", "billing.manage")).toBe(false);
+    expect(hasRolePermission("admin", "billing.write")).toBe(false);
   });
 
   it("denies admin/settings style permissions for regular users", () => {
     expect(hasRolePermission("user", "users.write")).toBe(false);
-    expect(hasRolePermission("user", "knowledge.permissions.manage")).toBe(false);
+    expect(hasRolePermission("user", "knowledge.read")).toBe(false);
     expect(hasRolePermission("user", "settings.read")).toBe(false);
   });
 
-  it("documents settings.read and chat.channel.manage as owner-only for now", () => {
+  it("keeps chat.channel.manage owner-only while allowing admin settings reads", () => {
     expect(hasRolePermission("owner", "settings.read")).toBe(true);
-    expect(hasRolePermission("admin", "settings.read")).toBe(false);
+    expect(hasRolePermission("admin", "settings.read")).toBe(true);
     expect(hasRolePermission("user", "settings.read")).toBe(false);
 
     expect(hasRolePermission("owner", "chat.channel.manage")).toBe(true);

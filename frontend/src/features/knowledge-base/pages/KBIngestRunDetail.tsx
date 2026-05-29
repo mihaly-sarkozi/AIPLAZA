@@ -5,6 +5,8 @@ import { toast } from "sonner";
 import api from "../../../api/axiosClient";
 import Alert from "../../../components/ui/Alert";
 import { getApiErrorMessage } from "../../../utils/getApiErrorMessage";
+import { useTranslation } from "../../../i18n";
+import { useLocaleSettings } from "../../settings/hooks/useSettings";
 import { useKbList } from "../hooks/useKb";
 import {
   getItemProcessingSummary,
@@ -32,8 +34,10 @@ import StructureDbDetailModal from "../components/StructureDbDetailModal";
 import { useIngestRunPolling } from "../hooks/useIngestRunPolling";
 
 export default function KBIngestRunDetail() {
+  const { locale } = useTranslation();
   const { uuid, runId } = useParams();
   const navigate = useNavigate();
+  const { data: settings } = useLocaleSettings();
   const [searchParams] = useSearchParams();
   const selectedItemId = searchParams.get("item");
   const { data: kbList = [], isLoading: kbLoading } = useKbList();
@@ -275,7 +279,16 @@ export default function KBIngestRunDetail() {
 
         {run ? (
           <section className="space-y-6">
-            <IngestRunProgress run={run} selectedItem={selectedItem} kb={kb} parserErrorMessage={parserErrorMessage} />
+            <IngestRunProgress
+              run={run}
+              selectedItem={selectedItem}
+              kb={kb}
+              parserErrorMessage={parserErrorMessage}
+              locale={locale}
+              timezone={settings?.timezone}
+              dateFormat={settings?.date_format}
+              timeFormat={settings?.time_format}
+            />
             <IngestRunItemList uuid={uuid} run={run} selectedItem={selectedItem} onNavigate={(url) => navigate(url)} />
           </section>
         ) : (

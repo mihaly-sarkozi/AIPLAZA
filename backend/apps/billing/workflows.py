@@ -76,6 +76,18 @@ class RestrictionUseCase:
 
     def sync_status(self, tenant: Any, subscription: Any) -> Any:
         current = self.clock.now()
+        cancellation = self.service._repo.get_latest_cancellation_request(tenant.tenant_id)
+        cancellation_effective_at = None
+        cancellation_requires_restriction = False
+        if cancellation is not None and str(getattr(cancellation, "status", "") or "").lower() == "deactivation_requested":
+            cancellation_effective_at = getattr(cancellation, "effective_at", None)
+            cancellation_deactivated_at = getattr(cancellation, "deactivated_at", None)
+            if cancellation_effective_at is not None and cancellation_deactivated_at is None and cancellation_effective_at <= current:
+                cancellation_requires_restriction = True
+                if current.date() >= (cancellation_effective_at.date() + timedelta(days=7)):
+                    self.service._tenant_repo.deactivate(int(tenant.tenant_id), updated_by=None)
+                    self.service._repo.mark_cancellation_deactivated(int(cancellation.id), current)
+
         failed_invoice = self.service._repo.get_latest_invoice_for_type(tenant.tenant_id, "monthly_subscription_failed")
         paid_invoice = self.service._repo.get_latest_invoice_for_type(tenant.tenant_id, "monthly_subscription")
         overdue_invoice = None
@@ -102,6 +114,12 @@ class RestrictionUseCase:
                 if invoice_is_older_than_subscription:
                     overdue_invoice = None
         next_status = self.state_machine.resolve(subscription, overdue_invoice=overdue_invoice, now=self.clock.now())
+        if cancellation_requires_restriction:
+            next_status = SubscriptionStatus.RESTRICTED.value
+        if overdue_invoice is not None:
+            failed_due_at = getattr(overdue_invoice, "due_at", None)
+            if failed_due_at is not None and current.date() >= (failed_due_at.date() + timedelta(days=7)):
+                self.service._tenant_repo.deactivate(int(tenant.tenant_id), updated_by=None)
         if next_status == subscription.status:
             return subscription
         return self.service._upsert_subscription_from_existing(

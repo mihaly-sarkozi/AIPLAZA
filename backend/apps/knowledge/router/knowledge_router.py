@@ -30,6 +30,10 @@ from core.modules.users.domain.dto import User
 router = APIRouter()
 
 
+def _request_ip(request: Request) -> str | None:
+    return getattr(request.client, "host", None) if request.client else None
+
+
 # Ez a függvény a(z) permissions_from_create logikáját valósítja meg.
 def _permissions_from_create(data: KBCreate) -> list[KbPermissionItem]:
     if not data.permissions:
@@ -85,6 +89,8 @@ def list_kb(
                 personal_data_mode=getattr(kb, "personal_data_mode", None) or "no_personal_data",
                 personal_data_sensitivity=getattr(kb, "personal_data_sensitivity", None) or "medium",
                 pii_depersonalization_enabled=bool(getattr(kb, "pii_depersonalization_enabled", True)),
+                public_enabled=bool(getattr(kb, "public_enabled", False)),
+                is_public=bool(getattr(kb, "public_enabled", False)),
                 created_at=kb.created_at,
                 updated_at=kb.updated_at,
                 deleted_at=deleted_at,
@@ -109,8 +115,10 @@ def create_kb(
     data: KBCreate,
     tenant: KnowledgeTenantDep,
     svc: KnowledgeFacadeDep,
-    user: User = Depends(require_permission("knowledge.write")),
+    user: CurrentKnowledgeUserDep,
 ):
+    if getattr(user, "role", None) != "owner":
+        raise security_http_exception()
     try:
         usage_service = get_service(PLATFORM_TENANT_USAGE_SERVICE)
         allowed, reason = usage_service.can_create_kb(tenant)
@@ -121,6 +129,8 @@ def create_kb(
             data.name, data.description,
             permissions=perms if perms else None,
             current_user_id=user.id,
+            ip=_request_ip(request),
+            user_agent=request.headers.get("user-agent"),
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -179,7 +189,7 @@ def get_kb_permissions_batch(
 
 
 @router.put("/kb/{uuid}/permissions", response_model=OperationStatusResponse)
-@limiter.limit("20/minute")
+@limiter.limit("60/minute")
 def set_kb_permissions(
     request: Request,
     uuid: str,
@@ -193,7 +203,13 @@ def set_kb_permissions(
         raise security_http_exception()
     perms: list[KbPermissionItem] = [(p.user_id, p.permission) for p in data.permissions]
     try:
-        svc.set_permissions(uuid, perms, current_user_id=user.id)
+        svc.set_permissions(
+            uuid,
+            perms,
+            current_user_id=user.id,
+            ip=_request_ip(request),
+            user_agent=request.headers.get("user-agent"),
+        )
         return OperationStatusResponse()
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -218,7 +234,10 @@ def update_kb(
             data.description,
             personal_data_mode=data.personal_data_mode,
             pii_depersonalization_enabled=data.pii_depersonalization_enabled,
+            public_enabled=data.public_enabled,
             current_user_id=user.id,
+            ip=_request_ip(request),
+            user_agent=request.headers.get("user-agent"),
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -231,7 +250,7 @@ def delete_kb(
     data: KBDelete,
     tenant: KnowledgeTenantDep,
     svc: KnowledgeFacadeDep,
-    user: User = Depends(require_permission("knowledge.write")),
+    user: CurrentKnowledgeUserDep,
 ):
     try:
         demo_mode = bool(
@@ -241,7 +260,14 @@ def delete_kb(
         )
         if get_app_env() != "dev" and not demo_mode:
             raise HTTPException(status_code=403, detail="Knowledge base deletion is available only in dev mode or free test mode")
-        svc.delete(uuid, data.confirm_name, demo_mode=demo_mode)
+        svc.delete(
+            uuid,
+            data.confirm_name,
+            demo_mode=demo_mode,
+            current_user_id=user.id,
+            ip=_request_ip(request),
+            user_agent=request.headers.get("user-agent"),
+        )
         return OperationStatusResponse()
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

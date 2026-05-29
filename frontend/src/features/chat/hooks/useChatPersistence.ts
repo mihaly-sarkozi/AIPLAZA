@@ -39,6 +39,7 @@ type ChatPersistenceRestorers = {
 export function useChatPersistence(state: ChatPersistenceState, restorers: ChatPersistenceRestorers) {
   const persistEnabledRef = useRef(false);
   const lastUserIdRef = useRef<number | string | null>(null);
+  const restorersRef = useRef(restorers);
   const messagesRef = useRef<ChatMessageType[]>(state.messages);
   const contextNoticeRef = useRef<string | null>(state.contextNotice);
   const inputDraftRef = useRef(state.inputDraft);
@@ -49,6 +50,7 @@ export function useChatPersistence(state: ChatPersistenceState, restorers: ChatP
   const activeTrainingTitleRef = useRef<string | null>(state.activeTrainingTitle);
   const trainingVisualProgressRef = useRef(state.trainingVisualProgress);
 
+  restorersRef.current = restorers;
   messagesRef.current = state.messages;
   contextNoticeRef.current = state.contextNotice;
   inputDraftRef.current = state.inputDraft;
@@ -97,37 +99,38 @@ export function useChatPersistence(state: ChatPersistenceState, restorers: ChatP
     try {
       const data = loadPersistedChatSession(state.userId);
       if (data) {
-        if (Array.isArray(data.messages)) restorers.setMessages(data.messages);
+        const restore = restorersRef.current;
+        if (Array.isArray(data.messages)) restore.setMessages(data.messages);
         if ("contextNotice" in data && (data.contextNotice === null || typeof data.contextNotice === "string")) {
-          restorers.setContextNotice(data.contextNotice);
+          restore.setContextNotice(data.contextNotice);
         } else {
           const saved = loadChatContextNoticeFallback();
-          if (saved) restorers.setContextNotice(saved);
+          if (saved) restore.setContextNotice(saved);
         }
-        if (typeof data.draft === "string") restorers.setInputDraft(data.draft);
-        if (data.chatMode === "query" || data.chatMode === "train") restorers.setChatMode(data.chatMode);
-        if (typeof data.selectedChatKbUuid === "string") restorers.setSelectedChatKbUuid(data.selectedChatKbUuid);
-        if (typeof data.selectedTrainKbUuid === "string") restorers.setSelectedTrainKbUuid(data.selectedTrainKbUuid);
+        if (typeof data.draft === "string") restore.setInputDraft(data.draft);
+        if (data.chatMode === "query" || data.chatMode === "train") restore.setChatMode(data.chatMode);
+        if (typeof data.selectedChatKbUuid === "string") restore.setSelectedChatKbUuid(data.selectedChatKbUuid);
+        if (typeof data.selectedTrainKbUuid === "string") restore.setSelectedTrainKbUuid(data.selectedTrainKbUuid);
         if (typeof data.activeTrainingRunId === "string" && data.activeTrainingRunId.trim()) {
-          restorers.setActiveTrainingRunId(data.activeTrainingRunId);
+          restore.setActiveTrainingRunId(data.activeTrainingRunId);
         }
-        if (typeof data.activeTrainingTitle === "string") restorers.setActiveTrainingTitle(data.activeTrainingTitle);
+        if (typeof data.activeTrainingTitle === "string") restore.setActiveTrainingTitle(data.activeTrainingTitle);
         if (typeof data.trainingVisualProgress === "number") {
-          restorers.setTrainingVisualProgress(Math.max(0, Math.min(99, Math.round(data.trainingVisualProgress))));
+          restore.setTrainingVisualProgress(Math.max(0, Math.min(99, Math.round(data.trainingVisualProgress))));
         }
         state.trainingStartedAtRef.current = typeof data.trainingStartedAt === "number" ? data.trainingStartedAt : null;
         state.trainingEstimatedDurationMsRef.current =
           typeof data.trainingEstimatedDurationMs === "number" ? data.trainingEstimatedDurationMs : null;
       } else {
         const saved = loadChatContextNoticeFallback();
-        if (saved) restorers.setContextNotice(saved);
+        if (saved) restorersRef.current.setContextNotice(saved);
       }
     } catch {
       // storage optional
     } finally {
       persistEnabledRef.current = true;
     }
-  }, [restorers, state.trainingEstimatedDurationMsRef, state.trainingStartedAtRef, state.userId]);
+  }, [state.trainingEstimatedDurationMsRef, state.trainingStartedAtRef, state.userId]);
 
   useEffect(() => {
     if (!state.userId || !persistEnabledRef.current) return;

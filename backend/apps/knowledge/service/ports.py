@@ -251,6 +251,8 @@ class KnowledgeFacadePort(Protocol):
         permissions: list[tuple[int, str]] | None = None,
         pii_depersonalization_enabled: bool = True,
         current_user_id: int | None = None,
+        ip: str | None = None,
+        user_agent: str | None = None,
     ) -> Corpus: ...
     def update(
         self,
@@ -259,9 +261,20 @@ class KnowledgeFacadePort(Protocol):
         description: str | None,
         personal_data_mode: str | None = None,
         pii_depersonalization_enabled: bool | None = None,
+        public_enabled: bool | None = None,
         current_user_id: int | None = None,
+        ip: str | None = None,
+        user_agent: str | None = None,
     ) -> Corpus: ...
-    def delete(self, uuid: str, confirm_name: str | None = None, demo_mode: bool = False) -> None: ...
+    def delete(
+        self,
+        uuid: str,
+        confirm_name: str | None = None,
+        demo_mode: bool = False,
+        current_user_id: int | None = None,
+        ip: str | None = None,
+        user_agent: str | None = None,
+    ) -> None: ...
     def clear_contents(
         self,
         uuid: str,

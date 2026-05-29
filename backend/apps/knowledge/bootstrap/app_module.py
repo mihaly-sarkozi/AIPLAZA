@@ -26,7 +26,7 @@ class KnowledgeModule(BaseAppModule):
             user_repository=container.infrastructure.repositories.user_repo,
         )
         repo = infra.build_repository()
-        service = infra.build_service(repo)
+        service = infra.build_service(repo, audit_service=container.audit_service)
         container.set_state(CTX_STATE_KNOWLEDGE_INFRASTRUCTURE, infra)
         container.register_repository(KNOWLEDGE_REPOSITORY, repo)
         container.register_factory(KNOWLEDGE_EMBEDDING_SERVICE_FACTORY, infra.build_embedding_service)

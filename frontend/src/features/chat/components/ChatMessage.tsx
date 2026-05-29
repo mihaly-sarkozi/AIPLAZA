@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import api from "../../../api/axiosClient";
 import { useTranslation } from "../../../i18n";
 import { sanitizeMessage } from "../../../utils/sanitize";
+import { useLocaleSettings } from "../../settings/hooks/useSettings";
 import ChatFeedbackControls from "./message/ChatFeedbackControls";
 import ChatMessageBubble from "./message/ChatMessageBubble";
 import ChatSourceModal from "./message/ChatSourceModal";
@@ -53,6 +54,7 @@ function ChatMessageInner({
   restoredPiiSpans = [],
 }: ChatMessageProps) {
   const { t, locale } = useTranslation();
+  const { data: settings } = useLocaleSettings();
   const isUser = role === "user";
   const isTrainingStatus = role === "training-status";
   const [sourceLoadingId, setSourceLoadingId] = useState<string | null>(null);
@@ -151,6 +153,9 @@ function ChatMessageInner({
           onClose={() => setSourceModalOpen(false)}
           t={t}
           locale={locale}
+          timezone={settings?.timezone}
+          dateFormat={settings?.date_format}
+          timeFormat={settings?.time_format}
           answerMode={answerMode}
           evidence={evidence}
           citedSourceIds={citedSourceIds}

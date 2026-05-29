@@ -9,13 +9,23 @@ from pydantic import BaseModel, ConfigDict, StrictBool, StrictStr
 from apps.settings.domain.settings_state import BillingCustomerType, DateFormat, TimeFormat, Timezone
 
 
-class SettingsUpdateRequest(BaseModel):
+class TwoFactorSettingsUpdateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     two_factor_enabled: StrictBool | None = None
+
+
+class LocaleSettingsUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     timezone: Timezone | None = None
     date_format: DateFormat | None = None
     time_format: TimeFormat | None = None
+
+
+class BillingSettingsUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     billing_customer_type: BillingCustomerType | None = None
     billing_full_name: StrictStr | None = None
     billing_company_name: StrictStr | None = None
@@ -27,4 +37,13 @@ class SettingsUpdateRequest(BaseModel):
     billing_country: StrictStr | None = None
 
 
-__all__ = ["SettingsUpdateRequest"]
+class SettingsUpdateRequest(TwoFactorSettingsUpdateRequest, LocaleSettingsUpdateRequest, BillingSettingsUpdateRequest):
+    """Backward-compatible aggregate settings PATCH body."""
+
+
+__all__ = [
+    "BillingSettingsUpdateRequest",
+    "LocaleSettingsUpdateRequest",
+    "SettingsUpdateRequest",
+    "TwoFactorSettingsUpdateRequest",
+]

@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+# backend/apps/profile/service/preferences_service.py
+# Feladat: Profile felületi preferenciák domain service-e layout validációval és repository delegálással.
+# Sárközi Mihály - 2026.05.24
+
 from apps.profile.domain.preferences import ProfilePreferences
 from apps.profile.service.ports import PreferencesRepositoryPort
 

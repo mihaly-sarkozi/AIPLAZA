@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+# backend/apps/profile/service/ports.py
+# Feladat: Profile facade és preference service protokolljai a tesztelhető függőségi határokhoz.
+# Sárközi Mihály - 2026.05.24
+
 from typing import Protocol, runtime_checkable
 
 from apps.profile.domain.preferences import ProfilePreferences
@@ -17,6 +21,16 @@ class CoreProfileServicePort(Protocol):
         name: str | None,
         preferred_locale: str | None,
         preferred_theme: str | None,
+        updated_by: int | None = None,
+    ) -> dict[str, object]:
+        ...
+
+    def request_email_change(
+        self,
+        *,
+        user,
+        new_email: str,
+        request_base_url: str | None,
         updated_by: int | None = None,
     ) -> dict[str, object]:
         ...
@@ -70,6 +84,7 @@ class ProfileFacadePort(Protocol):
         user,
         tenant,
         name: str | None,
+        email: str | None,
         preferred_locale: str | None,
         preferred_theme: str | None,
         app_preferences: dict[str, object] | None,

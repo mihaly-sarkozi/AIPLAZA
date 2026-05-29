@@ -15,6 +15,8 @@ class KBOut(BaseModel):
     personal_data_mode: str = "no_personal_data"
     personal_data_sensitivity: str = "medium"
     pii_depersonalization_enabled: bool = True
+    public_enabled: bool = False
+    is_public: bool = False
     created_at: datetime
     updated_at: datetime
     deleted_at: Optional[datetime] = None

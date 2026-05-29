@@ -64,6 +64,8 @@ def build_profile_payload(
     payload = {
         "id": user.id,
         "email": getattr(user, "email", "") or "",
+        "pending_email": getattr(user, "pending_email", None),
+        "pending_email_expires_at": getattr(user, "pending_email_expires_at", None),
         "role": user.role,
         "is_active": bool(getattr(user, "is_active", True)),
         "name": getattr(user, "name", None),

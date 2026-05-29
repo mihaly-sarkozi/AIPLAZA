@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+# backend/apps/profile/mappers/profile_mapper.py
+# Feladat: Core profile payload és app-specifikus preference adatok response payloadba rendezése.
+# Sárközi Mihály - 2026.05.24
+
 from apps.profile.domain.preferences import ProfilePreferences
 
 

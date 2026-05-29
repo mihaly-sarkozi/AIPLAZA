@@ -26,6 +26,7 @@ PUBLIC_CORE_API_PREFIXES: tuple[str, ...] = (
     "core.modules.tenant.repositories",
     "core.modules.tenant.service",
     "core.modules.tenant.slug.policy",
+    "core.modules.tenant.helpers",
     # Kernel-level shared integration helpers
     "core.kernel.app.app_container",
     "core.kernel.runtime.clock",
@@ -39,6 +40,8 @@ PUBLIC_CORE_API_PREFIXES: tuple[str, ...] = (
     "core.kernel.interface.app_conventions",
     "core.kernel.interface.observability",
     "core.kernel.audit",
+    "core.infrastructure.audit.const",
+    "core.infrastructure.audit.service",
     "core.kernel.process",
     "core.kernel.deps.facade",
     "core.kernel.http.tenant_dependencies",

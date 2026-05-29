@@ -66,8 +66,7 @@ export default function Navbar({
   const visibleMenuItems = getModuleMenuDefinitions()
     .filter((item) => (item.requiresAuth ? Boolean(user) : true))
     .filter((item) => (item.requiredPermission ? hasUserPermission(user, item.requiredPermission) : true))
-    .filter((item) => (item.key === "billing.menu" ? hasPaidInvoice : true))
-    .filter((item) => (item.key === "billing.dateSimulation" ? import.meta.env.DEV : true))
+    .filter((item) => (item.key === "billing.menu" ? user?.role === "owner" || hasPaidInvoice : true))
     .sort((a, b) => (a.order ?? 999) - (b.order ?? 999))
     .map((item) => ({
       key: item.key,
@@ -76,14 +75,7 @@ export default function Navbar({
       order: item.order ?? 999,
     }));
 
-  if (import.meta.env.DEV && hasUserPermission(user, "settings.read")) {
-    visibleMenuItems.push({
-      key: "billing.dateSimulation.dev",
-      label: t("nav.dateSimulation"),
-      path: "/admin/datum-szimulacio",
-      order: 46,
-    });
-  }
+  const profileMenuItems = visibleMenuItems.filter((item) => item.key === "users.roles.menu" || item.key === "settings.system");
 
   const leftMenuSections = [
     visibleMenuItems.filter((item) => item.order < 30),
@@ -91,7 +83,7 @@ export default function Navbar({
     visibleMenuItems.filter((item) => item.order >= 50),
   ].filter((section) => section.length > 0);
 
-  const showHamburger = !user || user.role === "owner";
+  const showHamburger = !user || visibleMenuItems.length > 0;
 
   useEffect(() => {
     if (!showHamburger) setMenuOpen(false);
@@ -197,6 +189,16 @@ export default function Navbar({
                   >
                     {t(user && isDemoInitialPasswordMode(user) ? "nav.setInitialPassword" : "nav.changePassword")}
                   </button>
+                  {profileMenuItems.length > 0 ? <div className="my-1 border-t border-[var(--color-border)]" /> : null}
+                  {profileMenuItems.map((item) => (
+                    <button
+                      key={`profile-${item.key}`}
+                      onClick={() => go(item.path)}
+                      className="w-full text-left px-4 py-2 text-sm hover:bg-[var(--color-border)]/20"
+                    >
+                      {item.label}
+                    </button>
+                  ))}
                 </div>
               )}
             </>

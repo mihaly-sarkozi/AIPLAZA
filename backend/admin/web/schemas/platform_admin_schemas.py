@@ -41,9 +41,46 @@ class PlatformAdminTenantResponse(BaseModel):
     created_at: datetime | None = None
 
 
+class PlatformAdminTenantActionRequest(BaseModel):
+    confirm_name: str = Field(min_length=1, max_length=255)
+
+
 class PlatformAdminStatisticsResponse(BaseModel):
     summary: dict
     tenants: list[dict]
+
+
+class PlatformAdminAuditTrailItem(BaseModel):
+    id: int
+    created_at: datetime
+    user_id: int | None = None
+    actor_user_id: int | None = None
+    actor_type: str
+    action: str
+    event_name: str | None = None
+    outcome: str | None = None
+    target_type: str | None = None
+    target_id: str | None = None
+    correlation_id: str | None = None
+    details: dict = Field(default_factory=dict)
+    ip: str | None = None
+    user_agent: str | None = None
+    actor_email: str | None = None
+    actor_email_masked: str | None = None
+    actor_email_hash: str | None = None
+    actor_name: str | None = None
+    target_user_email_masked: str | None = None
+    target_user_name: str | None = None
+    target_user_settings: dict | None = None
+    title: str
+    summary: str
+
+
+class PlatformAdminAuditTrailResponse(BaseModel):
+    items: list[PlatformAdminAuditTrailItem]
+    limit: int
+    next_cursor: str | None = None
+    tenant: dict
 
 
 class PlatformAdminSecurityMonitoringResponse(BaseModel):
@@ -64,6 +101,16 @@ class PlatformAdminSecurityMonitoringResponse(BaseModel):
     monitoring_metrics: list[dict]
     mvp_readiness: dict
     dashboards: list[dict]
+
+
+class PlatformAdminDebugDateRequest(BaseModel):
+    simulated_date: str | None = None
+
+
+class PlatformAdminDebugDateResponse(BaseModel):
+    enabled: bool
+    simulated_date: str | None = None
+    current_date: str
 
 
 class PlatformAdminBanIpRequest(BaseModel):

@@ -7,7 +7,7 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import Any, Generic, TypeVar
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, computed_field
 
 
 class OperationStatus(StrEnum):
@@ -45,6 +45,18 @@ class OperationStatusResponse(BaseResponse):
     message: str | None = None
     reason: str | None = None
     details: dict[str, Any] | None = None
+    legacy_ok: bool = Field(default=True, alias="ok", exclude=True)
+
+    @computed_field(alias="ok", repr=False)
+    @property
+    def ok(self) -> bool:
+        return self.legacy_ok
+
+    def model_dump(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        payload = super().model_dump(*args, **kwargs)
+        if not kwargs.get("by_alias", False):
+            payload.pop("ok", None)
+        return payload
 
 
 __all__ = [

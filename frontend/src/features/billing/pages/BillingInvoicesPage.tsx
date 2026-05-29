@@ -13,6 +13,7 @@ import {
 import Alert from "../../../components/ui/Alert";
 import Button from "../../../components/ui/Button";
 import PageHeader from "../../../components/ui/PageHeader";
+import { useLocaleSettings } from "../../settings/hooks/useSettings";
 
 function numberValue(value: unknown): number {
   const parsed = Number(value ?? 0);
@@ -59,6 +60,7 @@ export default function BillingInvoicesPage() {
   const { user } = useAuthStore();
   const navigate = useNavigate();
   const { data: billingOverview, isLoading, error: billingError } = useBillingOverview();
+  const { data: settings } = useLocaleSettings({ enabled: user?.role === "owner" });
   const [visibleCount, setVisibleCount] = useState(LIST_PAGE_SIZE);
   const loadMoreRef = useRef<HTMLDivElement | null>(null);
 
@@ -165,7 +167,9 @@ export default function BillingInvoicesPage() {
     discountPercent > 0
       ? `${t("billing.totalEstimated")} (${t("billing.discountPercent")} ${discountPercent}%)`
       : t("billing.totalEstimated");
-  const dueAtLabel = estimated.due_at_iso ? formatInvoiceDate(estimated.due_at_iso, locale) : "—";
+  const dueAtLabel = estimated.due_at_iso
+    ? formatInvoiceDate(estimated.due_at_iso, locale, settings?.timezone, settings?.date_format)
+    : "—";
   const dueAtTime = dateOnlyTime(estimated.due_at_iso);
   const currentDateTime = dateOnlyTime(new Date().toISOString());
   const invoiceDueOverdue = dueAtTime != null && currentDateTime != null && currentDateTime > dueAtTime;
@@ -207,7 +211,7 @@ export default function BillingInvoicesPage() {
           title={t("billing.pageTitle")}
           description={t("billing.pageIntro")}
           actions={isHealthyStatus ? (
-            <Button onClick={() => navigate("/admin/csomagok")}>{t("nav.packages")}</Button>
+            <Button onClick={() => navigate("/admin/pricing")}>{t("nav.packages")}</Button>
           ) : null}
         />
 
@@ -300,7 +304,7 @@ export default function BillingInvoicesPage() {
               {isHealthyStatus ? (
                 <Button
                   type="button"
-                  onClick={() => navigate("/admin/csomagok")}
+                  onClick={() => navigate("/admin/pricing")}
                   variant="primary"
                   fullWidth
                   size="lg"
@@ -339,7 +343,7 @@ export default function BillingInvoicesPage() {
                 <div className="divide-y divide-[var(--color-border)]">
                   {displayedInvoices.map((invoice, index) => {
                     const inv = invoice as Record<string, unknown>;
-                    const invoiceDateLabel = formatInvoiceDate(invoice.issued_at, locale);
+                    const invoiceDateLabel = formatInvoiceDate(invoice.issued_at, locale, settings?.timezone, settings?.date_format);
                     const canDownload = isDownloadablePaidInvoice(inv);
                     const statusValue = String(invoice.status ?? "").trim().toLowerCase();
                     const periodKey = String(invoice.period_key ?? "").trim();

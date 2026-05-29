@@ -17,6 +17,7 @@ class KBUpdate(BaseModel):
         description="no_personal_data | with_confirmation | allowed_not_to_ai | no_pii_filter",
     )
     pii_depersonalization_enabled: Optional[bool] = None
+    public_enabled: Optional[bool] = None
 
 class KBDelete(BaseModel):
     confirm_name: str

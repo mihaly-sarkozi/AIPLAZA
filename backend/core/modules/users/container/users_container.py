@@ -43,7 +43,12 @@ def build_users_feature(
         email_service=email_service,
         transaction_manager=transaction_manager,
     )
-    profile_service = UserProfileService(user_repository=user_repo)
+    profile_service = UserProfileService(
+        user_repository=user_repo,
+        email_service=email_service,
+        session_repository=session_repo,
+        audit_service=audit_service,
+    )
     invite_service = InviteService(
         user_repository=user_repo,
         invite_token_repository=invite_token_repo,

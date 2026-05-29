@@ -25,6 +25,7 @@ export default function ProfileModal({ isOpen, onClose }: ProfileModalProps) {
   const { t, setLocale, setTheme } = useTranslation();
   const { user, setUser } = useAuthStore();
   const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
   const [preferredLocale, setPreferredLocale] = useState<Locale>("hu");
   const [preferredTheme, setPreferredTheme] = useState<Theme>("light");
   const profileQuery = useProfileQuery({ enabled: isOpen && !!user });
@@ -37,6 +38,7 @@ export default function ProfileModal({ isOpen, onClose }: ProfileModalProps) {
       const source = profile ?? user;
       if (!source) return;
       setName((source.name as string)?.trim() ?? "");
+      setEmail("");
       setPreferredLocale(((source.preferred_locale || source.locale) as Locale) || "hu");
       setPreferredTheme(((source.preferred_theme || source.theme) as Theme) || "light");
     }
@@ -51,9 +53,14 @@ export default function ProfileModal({ isOpen, onClose }: ProfileModalProps) {
       return;
     }
 
+    const accountEmail = (((profile?.email as string) || (user?.email as string)) || "").trim();
+    const emailTrim = email.trim();
+    const emailChanged = emailTrim.length > 0 && emailTrim.toLowerCase() !== accountEmail.toLowerCase();
+
     try {
       const data = await patchProfile.mutateAsync({
         name: name.trim() || undefined,
+        ...(emailChanged ? { email: emailTrim } : {}),
         preferred_locale: preferredLocale,
         preferred_theme: preferredTheme,
       });
@@ -62,6 +69,8 @@ export default function ProfileModal({ isOpen, onClose }: ProfileModalProps) {
         ...user,
         name: data.name ?? undefined,
         email: data.email,
+        pending_email: data.pending_email,
+        pending_email_expires_at: data.pending_email_expires_at,
         role: data.role as User["role"],
         is_active: data.is_active,
         preferred_locale: data.preferred_locale,
@@ -76,7 +85,11 @@ export default function ProfileModal({ isOpen, onClose }: ProfileModalProps) {
       if (data.locale) setLocale(savedLocale);
       if (data.theme) setTheme(data.theme as Theme);
 
-      toast.success(translate("profile.saved", savedLocale));
+      toast.success(
+        data.pending_email
+          ? translate("profile.savedWithEmailPending", savedLocale).replace("{{email}}", data.pending_email)
+          : translate("profile.saved", savedLocale)
+      );
       onClose();
     } catch (err: unknown) {
       toast.error(getApiErrorMessage(err) ?? t("common.errorGeneric"));
@@ -88,6 +101,8 @@ export default function ProfileModal({ isOpen, onClose }: ProfileModalProps) {
   };
 
   const accountEmail = (((profile?.email as string) || (user?.email as string)) || "").trim();
+  const pendingEmail = (((profile?.pending_email as string) || (user?.pending_email as string)) || "").trim();
+  const isOwner = user?.role === "owner";
 
   return (
     <Modal open={isOpen} onClose={handleCancel} panelClassName="max-w-md">
@@ -110,13 +125,36 @@ export default function ProfileModal({ isOpen, onClose }: ProfileModalProps) {
         </div>
 
         <div>
-          <label className="block mb-1 text-[var(--color-label)]">{t("profile.emailLabel")}</label>
+          <label className="block mb-1 text-[var(--color-label)]">{t("profile.emailCurrentAccountLabel")}</label>
           <input
             type="email"
             readOnly
             value={accountEmail}
             className="w-full bg-[var(--color-muted)]/30 border border-[var(--color-border)] text-[var(--color-foreground)] p-2 rounded cursor-not-allowed"
           />
+        </div>
+
+        {isOwner && pendingEmail ? (
+          <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-table-head)] p-3 text-sm">
+            <div className="text-xs font-medium uppercase tracking-wide text-[var(--color-muted)]">{t("profile.emailNewPendingLabel")}</div>
+            <div className="mt-1 font-medium text-[var(--color-foreground)]">{pendingEmail}</div>
+            <p className="mt-2 text-xs leading-relaxed text-[var(--color-muted)]">{t("profile.emailPendingExplain")}</p>
+          </div>
+        ) : null}
+
+        <div>
+          <label className="block mb-1 text-[var(--color-label)]">{t("profile.emailEditNewLabel")}</label>
+          <input
+            type="email"
+            value={email}
+            onChange={(event) => setEmail(event.target.value)}
+            className="w-full bg-[var(--color-input-bg)] border border-[var(--color-border)] text-[var(--color-foreground)] p-2 rounded"
+            placeholder={accountEmail}
+            maxLength={100}
+          />
+          {isOwner ? (
+            <p className="mt-1 text-xs text-[var(--color-muted)]">{t("profile.emailChangeHint")}</p>
+          ) : null}
         </div>
 
         <div>

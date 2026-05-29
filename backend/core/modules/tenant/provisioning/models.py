@@ -24,6 +24,7 @@ class TenantProvisioningRequest:
     limits: dict | None = None
     owner_send_invite_email: bool = True
     owner_activate_immediately: bool = False
+    owner_invite_lang: str | None = None
 
 
 @dataclass(frozen=True)

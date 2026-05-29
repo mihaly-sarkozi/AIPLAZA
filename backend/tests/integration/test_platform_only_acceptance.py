@@ -233,7 +233,19 @@ def test_platform_health_returns_503_when_degraded():
     assert response.json()["status"] == "degraded"
 
 
-def test_platform_admin_routes_rejected_on_tenant_subdomain() -> None:
+def test_platform_admin_routes_work_without_tenant_context() -> None:
+    app = _build_platform_only_app()
+    stack, tenant_repo, _demo_snapshot_unused = _tenant_repo_patch_stack()
+    with stack:
+        stack.enter_context(patch.object(tenant_repo, "get_by_domain", return_value=None))
+        client = TestClient(app, base_url=f"http://{settings.tenant_base_domain}")
+        response = client.get("/api/platform-admin/auth/csrf-token")
+
+    assert response.status_code == 200
+    assert response.json()["csrf_token"]
+
+
+def test_platform_admin_routes_work_on_tenant_subdomain_too() -> None:
     app = _build_platform_only_app()
     stack, tenant_repo, _demo_snapshot_unused = _tenant_repo_patch_stack()
     with stack:
@@ -241,8 +253,8 @@ def test_platform_admin_routes_rejected_on_tenant_subdomain() -> None:
         client = TestClient(app, base_url=f"http://demo.{settings.tenant_base_domain}")
         response = client.get("/api/platform-admin/auth/csrf-token")
 
-    assert response.status_code == 400
-    assert "host install útvonal" in response.json()["detail"]
+    assert response.status_code == 200
+    assert response.json()["csrf_token"]
 
 
 def test_platform_only_tenant_middleware_rejects_unknown_platform_subdomain_for_api():

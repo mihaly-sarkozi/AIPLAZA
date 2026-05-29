@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+# backend/apps/profile/bootstrap/tenant_hooks.py
+# Feladat: Profile tenant schema hook, amely létrehozza a tenant szintű profile_preferences táblát.
+# Sárközi Mihály - 2026.05.24
+
 from core.modules.tenant.service import TenantSchemaHook, register_tenant_schema_hooks, run_schema_statements
 
 

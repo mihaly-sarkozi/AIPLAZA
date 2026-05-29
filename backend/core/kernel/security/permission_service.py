@@ -19,6 +19,12 @@ def build_default_role_permissions() -> dict[str, set[str]]:
             "users.read",
             "users.write",
             "users.invite",
+            "knowledge.read",
+            "settings.read",
+            "settings.write",
+            "domain.read",
+            "domain.write",
+            "billing.read",
         },
         "user": {
             "auth.login",

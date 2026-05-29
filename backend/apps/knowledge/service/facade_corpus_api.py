@@ -42,6 +42,8 @@ class CorpusFacadeMixin:
         permissions: list[tuple[int, str]] | None = None,
         pii_depersonalization_enabled: bool = True,
         current_user_id: int | None = None,
+        ip: str | None = None,
+        user_agent: str | None = None,
     ) -> Corpus:
         return self._corpus_management_service.create(
             name=name,
@@ -49,6 +51,8 @@ class CorpusFacadeMixin:
             permissions=permissions,
             pii_depersonalization_enabled=pii_depersonalization_enabled,
             current_user_id=current_user_id,
+            ip=ip,
+            user_agent=user_agent,
         )
 
     def update(
@@ -58,7 +62,10 @@ class CorpusFacadeMixin:
         description: str | None,
         personal_data_mode: str | None = None,
         pii_depersonalization_enabled: bool | None = None,
+        public_enabled: bool | None = None,
         current_user_id: int | None = None,
+        ip: str | None = None,
+        user_agent: str | None = None,
     ) -> Corpus:
         return self._corpus_management_service.update(
             uuid=uuid,
@@ -66,11 +73,28 @@ class CorpusFacadeMixin:
             description=description,
             personal_data_mode=personal_data_mode,
             pii_depersonalization_enabled=pii_depersonalization_enabled,
+            public_enabled=public_enabled,
             current_user_id=current_user_id,
+            ip=ip,
+            user_agent=user_agent,
         )
 
-    def delete(self, uuid: str, confirm_name: str | None = None, demo_mode: bool = False) -> None:
-        self._corpus_management_service.delete(uuid, confirm_name=confirm_name)
+    def delete(
+        self,
+        uuid: str,
+        confirm_name: str | None = None,
+        demo_mode: bool = False,
+        current_user_id: int | None = None,
+        ip: str | None = None,
+        user_agent: str | None = None,
+    ) -> None:
+        self._corpus_management_service.delete(
+            uuid,
+            confirm_name=confirm_name,
+            current_user_id=current_user_id,
+            ip=ip,
+            user_agent=user_agent,
+        )
 
     def clear_contents(
         self,
@@ -96,11 +120,15 @@ class CorpusFacadeMixin:
         kb_uuid: str,
         permissions: list[tuple[int, str]],
         current_user_id: int | None = None,
+        ip: str | None = None,
+        user_agent: str | None = None,
     ) -> None:
         self._knowledge_permission_service.set_permissions(
             kb_uuid,
             permissions,
             current_user_id=current_user_id,
+            ip=ip,
+            user_agent=user_agent,
         )
 
     def user_can_use(self, kb_uuid: str, user_id: int, user: User | None) -> bool:

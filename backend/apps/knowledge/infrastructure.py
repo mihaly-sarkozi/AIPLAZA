@@ -93,7 +93,7 @@ class KnowledgeModuleInfrastructure:
         )
 
     # Ez a metódus felépíti a(z) szolgáltatás logikáját.
-    def build_service(self, repo: MySQLKnowledgeBaseRepository) -> KnowledgeFacade:
+    def build_service(self, repo: MySQLKnowledgeBaseRepository, *, audit_service: object | None = None) -> KnowledgeFacade:
         return KnowledgeFacade(
             corpus_store=repo,
             user_repo=self.user_repository,
@@ -122,6 +122,7 @@ class KnowledgeModuleInfrastructure:
             metrics_store=self.metrics_store,
             object_storage=get_object_storage(),
             claim_fine_splitter=build_default_claim_fine_splitter(),
+            audit_service=audit_service,
         )
 
 

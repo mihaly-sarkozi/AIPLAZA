@@ -14,8 +14,9 @@ export function isDeletedUser(user: RoleUser): boolean {
 }
 
 export function getStatusClasses(user: RoleUser): string {
-  if (isDeletedUser(user)) return "bg-[var(--color-danger-text)] text-white";
-  if (user.is_active) return "bg-[var(--color-success-text)] text-white";
-  if (user.pending_registration) return "bg-amber-500 text-white";
-  return "bg-slate-500 text-white";
+  if (isDeletedUser(user)) return "bg-[var(--color-danger-text)]";
+  if (!user.is_active) return "bg-slate-500";
+  if (user.pending_registration) return "bg-amber-500";
+  if (user.is_active) return "bg-[var(--color-success-text)]";
+  return "bg-slate-500";
 }

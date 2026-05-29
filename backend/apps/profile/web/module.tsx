@@ -1,3 +1,7 @@
+// backend/apps/profile/web/module.tsx
+// Feladat: Frontend profile moduldefiníció a /profile és /change-password route-ok regisztrációjához.
+// Sárközi Mihály - 2026.05.24
+
 import type { FrontendModuleDefinition } from "@frontend/platform/moduleTypes";
 
 export function getModule(): FrontendModuleDefinition {
@@ -19,14 +23,6 @@ export function getModule(): FrontendModuleDefinition {
         loader: () => import("@frontend/features/profile/pages/ChangePasswordPage"),
       },
     ],
-    menuItems: () => [
-      {
-        key: "profile.changePassword.menu",
-        path: "/change-password",
-        labelKey: "nav.changePassword",
-        requiresAuth: true,
-        order: 60,
-      },
-    ],
+    menuItems: () => [],
   };
 }

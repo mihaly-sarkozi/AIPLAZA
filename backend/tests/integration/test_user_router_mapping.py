@@ -15,10 +15,11 @@ def test_list_users_skips_incomplete_and_sets_pending_registration(client_superu
         id=10,
         email="pending@example.com",
         password_hash="hash",
-        is_active=False,
+        is_active=True,
         role="user",
         created_at=datetime.now(timezone.utc),
         registration_completed_at=None,
+        credentials_password_set=False,
     )
     completed_inactive = User(
         id=11,

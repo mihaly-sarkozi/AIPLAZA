@@ -83,4 +83,11 @@ describe("ChatComposer", () => {
 
     expect(props.onSelectTrainingFile).toHaveBeenCalledWith(file);
   });
+
+  it("nem mutatja a tanítás módot, ha nincs tanítható tudástár", () => {
+    renderComposer({ trainableKbList: [] });
+
+    expect(screen.queryByRole("option", { name: "Tanítás" })).not.toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "Kérdés" })).toBeInTheDocument();
+  });
 });

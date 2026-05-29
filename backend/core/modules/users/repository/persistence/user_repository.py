@@ -7,7 +7,7 @@ from __future__ import annotations
 import secrets
 from datetime import datetime, timezone
 
-from sqlalchemy import text
+from sqlalchemy import func, text
 from sqlalchemy.exc import SQLAlchemyError
 
 from shared.utils import normalize_utc_datetime
@@ -37,6 +37,9 @@ class UserRepository:
             preferred_theme=getattr(row, "preferred_theme", None),
             security_version=getattr(row, "security_version", 0),
             credentials_password_set=bool(getattr(row, "credentials_password_set", True)),
+            pending_email=getattr(row, "pending_email", None),
+            pending_email_token_hash=getattr(row, "pending_email_token_hash", None),
+            pending_email_expires_at=normalize_utc_datetime(getattr(row, "pending_email_expires_at", None)) if getattr(row, "pending_email_expires_at", None) else None,
         )
 
     # User lekérése azonosító alapján
@@ -63,7 +66,15 @@ class UserRepository:
     # User lekérése email alapján
     def get_by_email(self, email: str) -> User | None:
         with self._sf() as db:
-            row = db.query(UserORM).filter(UserORM.email == email, UserORM.deleted_at.is_(None)).first()
+            normalized_email = email.strip().lower()
+            row = db.query(UserORM).filter(func.lower(UserORM.email) == normalized_email, UserORM.deleted_at.is_(None)).first()
+            if not row:
+                return None
+            return self._to_user(row)
+
+    def get_by_pending_email_token_hash(self, token_hash: str) -> User | None:
+        with self._sf() as db:
+            row = db.query(UserORM).filter(UserORM.pending_email_token_hash == token_hash, UserORM.deleted_at.is_(None)).first()
             if not row:
                 return None
             return self._to_user(row)
@@ -113,8 +124,8 @@ class UserRepository:
                 row.role = user.role
                 if hasattr(row, "name"):
                     row.name = user.name
-                if hasattr(row, "registration_completed_at") and getattr(user, "registration_completed_at", None) is not None:
-                    row.registration_completed_at = user.registration_completed_at
+                if hasattr(row, "registration_completed_at"):
+                    row.registration_completed_at = getattr(user, "registration_completed_at", None)
                 if hasattr(row, "failed_login_attempts"):
                     row.failed_login_attempts = getattr(user, "failed_login_attempts", 0)
                 if hasattr(row, "preferred_locale"):
@@ -123,6 +134,12 @@ class UserRepository:
                     row.preferred_theme = getattr(user, "preferred_theme", None)
                 if hasattr(row, "credentials_password_set"):
                     row.credentials_password_set = bool(getattr(user, "credentials_password_set", True))
+                if hasattr(row, "pending_email"):
+                    row.pending_email = getattr(user, "pending_email", None)
+                if hasattr(row, "pending_email_token_hash"):
+                    row.pending_email_token_hash = getattr(user, "pending_email_token_hash", None)
+                if hasattr(row, "pending_email_expires_at"):
+                    row.pending_email_expires_at = getattr(user, "pending_email_expires_at", None)
                 if hasattr(row, "updated_by"):
                     row.updated_by = updated_by if updated_by is not None else user.id
                 db.commit()
@@ -141,6 +158,9 @@ class UserRepository:
                     preferred_theme=getattr(row, "preferred_theme", None),
                     security_version=getattr(row, "security_version", 0),
                     credentials_password_set=bool(getattr(row, "credentials_password_set", True)),
+                    pending_email=getattr(row, "pending_email", None),
+                    pending_email_token_hash=getattr(row, "pending_email_token_hash", None),
+                    pending_email_expires_at=normalize_utc_datetime(getattr(row, "pending_email_expires_at", None)) if getattr(row, "pending_email_expires_at", None) else None,
                 )
             except SQLAlchemyError:
                 db.rollback()

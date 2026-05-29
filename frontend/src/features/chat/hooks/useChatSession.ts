@@ -17,6 +17,7 @@ type UseChatSessionOptions = {
   chatMode: "query" | "train";
   selectedChatKbUuid: string;
   selectedTrainKbUuid: string;
+  setChatMode: (mode: "query" | "train") => void;
   setSelectedChatKbUuid: (value: string) => void;
   setSelectedTrainKbUuid: (value: string) => void;
   locale: string;
@@ -30,6 +31,7 @@ export function useChatSession({
   chatMode,
   selectedChatKbUuid,
   selectedTrainKbUuid,
+  setChatMode,
   setSelectedChatKbUuid,
   setSelectedTrainKbUuid,
   locale,
@@ -42,11 +44,12 @@ export function useChatSession({
     if (!kbListFetched) return;
     if (!trainableKbList.length) {
       setSelectedTrainKbUuid("");
+      if (chatMode === "train") setChatMode("query");
       return;
     }
     if (trainableKbList.some((kb) => kb.uuid === selectedTrainKbUuid)) return;
     setSelectedTrainKbUuid(trainableKbList[0].uuid);
-  }, [kbListFetched, selectedTrainKbUuid, setSelectedTrainKbUuid, trainableKbList]);
+  }, [chatMode, kbListFetched, selectedTrainKbUuid, setChatMode, setSelectedTrainKbUuid, trainableKbList]);
 
   useEffect(() => {
     if (!kbListFetched) return;

@@ -29,7 +29,13 @@ import {
   useDomainOverview,
   useVerifyCustomDomainMutation,
 } from "../hooks/useDomainSettings";
-import { usePatchSettingsMutation, useSettings } from "../hooks/useSettings";
+import {
+  useBillingSettings,
+  useLocaleSettings,
+  usePatchBillingSettingsMutation,
+  usePatchLocaleSettingsMutation,
+  useTwoFactorSettings,
+} from "../hooks/useSettings";
 
 interface SystemSecurityBodyProps {
   onSaved?: () => void;
@@ -40,9 +46,25 @@ type BillingFieldErrors = Partial<Record<"fullName" | "companyName" | "taxId" | 
 
 export function SystemSecurityBody({ onSaved, onCancel }: SystemSecurityBodyProps) {
   const { t, locale } = useTranslation();
-  const { data: settings, isLoading: loading, error: settingsError } = useSettings();
+  const user = useAuthStore((state) => state.user);
+  const canManageBillingAndDomains = user?.role === "owner" || user?.role === "admin";
+  const {
+    data: billingSettings,
+    isLoading: billingLoading,
+    error: billingSettingsError,
+  } = useBillingSettings();
+  const {
+    data: localeSettings,
+    isLoading: localeLoading,
+    error: localeSettingsError,
+  } = useLocaleSettings();
+  const {
+    isLoading: twoFactorLoading,
+    error: twoFactorSettingsError,
+  } = useTwoFactorSettings();
   const domainQuery = useDomainOverview();
-  const patchMutation = usePatchSettingsMutation();
+  const billingPatchMutation = usePatchBillingSettingsMutation();
+  const localePatchMutation = usePatchLocaleSettingsMutation();
   const addDomainMutation = useAddCustomDomainMutation();
   const verifyDomainMutation = useVerifyCustomDomainMutation();
   const deleteDomainMutation = useDeleteCustomDomainMutation();
@@ -51,7 +73,6 @@ export function SystemSecurityBody({ onSaved, onCancel }: SystemSecurityBodyProp
   const confirmAuthenticatorSetupMutation = useConfirmAuthenticatorSetupMutation();
   const disableAuthenticatorMutation = useDisableAuthenticatorMutation();
 
-  const [twoFactorEnabled, setTwoFactorEnabled] = useState(false);
   const [timezone, setTimezone] = useState<SettingsTimezone>("UTC");
   const [dateFormat, setDateFormat] = useState<SettingsDateFormat>("YYYY-MM-DD");
   const [timeFormat, setTimeFormat] = useState<SettingsTimeFormat>("HH:mm");
@@ -73,17 +94,23 @@ export function SystemSecurityBody({ onSaved, onCancel }: SystemSecurityBodyProp
   const [authenticatorWizardStep, setAuthenticatorWizardStep] = useState<1 | 2 | 3>(1);
 
   const settingsErrMsg =
-    settingsError && typeof (settingsError as { response?: { data?: { detail?: string } } })?.response?.data?.detail === "string"
-      ? (settingsError as { response?: { data?: { detail?: string } } }).response!.data!.detail
-      : settingsError
+    billingSettingsError && typeof (billingSettingsError as { response?: { data?: { detail?: string } } })?.response?.data?.detail === "string"
+      ? (billingSettingsError as { response?: { data?: { detail?: string } } }).response!.data!.detail
+      : localeSettingsError && typeof (localeSettingsError as { response?: { data?: { detail?: string } } })?.response?.data?.detail === "string"
+        ? (localeSettingsError as { response?: { data?: { detail?: string } } }).response!.data!.detail
+        : twoFactorSettingsError && typeof (twoFactorSettingsError as { response?: { data?: { detail?: string } } })?.response?.data?.detail === "string"
+          ? (twoFactorSettingsError as { response?: { data?: { detail?: string } } }).response!.data!.detail
+          : billingSettingsError || localeSettingsError || twoFactorSettingsError
         ? t("settings.errorLoad")
         : null;
-  const patchErrMsg = patchMutation.error
-    ? typeof (patchMutation.error as { response?: { data?: { detail?: string } } })?.response?.data?.detail === "string"
-      ? (patchMutation.error as { response?: { data?: { detail?: string } } }).response?.data?.detail
+  const activePatchError = billingPatchMutation.error ?? localePatchMutation.error;
+  const patchErrMsg = activePatchError
+    ? typeof (activePatchError as { response?: { data?: { detail?: string } } })?.response?.data?.detail === "string"
+      ? (activePatchError as { response?: { data?: { detail?: string } } }).response?.data?.detail
       : t("common.errorGeneric")
     : null;
   const displayError = patchErrMsg ?? settingsErrMsg;
+  const patchPending = billingPatchMutation.isPending || localePatchMutation.isPending;
   const customDomains = domainQuery.data?.custom_domains ?? [];
   const primaryDomain = domainQuery.data?.primary_domain?.domain ?? "-";
   const showActiveCustomHost =
@@ -94,10 +121,14 @@ export function SystemSecurityBody({ onSaved, onCancel }: SystemSecurityBodyProp
     () => [
       { key: "security" as const, label: t("settings.sectionSecurity") },
       { key: "preferences" as const, label: t("settings.sectionPreferences") },
-      { key: "billing" as const, label: t("settings.sectionBilling") },
-      { key: "domains" as const, label: t("settings.sectionDomains") },
+      ...(canManageBillingAndDomains
+        ? [
+            { key: "billing" as const, label: t("settings.sectionBilling") },
+            { key: "domains" as const, label: t("settings.sectionDomains") },
+          ]
+        : []),
     ],
-    [t]
+    [canManageBillingAndDomains, t]
   );
   const authenticatorStatus = authenticatorStatusQuery.data;
   const authenticatorEnabled = Boolean(authenticatorStatus?.enabled);
@@ -144,41 +175,47 @@ export function SystemSecurityBody({ onSaved, onCancel }: SystemSecurityBodyProp
   );
 
   useEffect(() => {
-    if (!settings) return;
-    setTwoFactorEnabled(settings.two_factor_enabled);
-    setTimezone(settings.timezone);
-    setDateFormat(settings.date_format);
-    setTimeFormat(settings.time_format);
-    setBillingCustomerType(settings.billing_customer_type ?? "company");
-    setBillingFullName(settings.billing_full_name ?? "");
-    setBillingCompanyName(settings.billing_company_name ?? "");
-    setBillingTaxId(settings.billing_tax_id ?? "");
-    setBillingAddressLine(settings.billing_address_line ?? "");
-    setBillingPostalCode(settings.billing_postal_code ?? "");
-    setBillingCity(settings.billing_city ?? "");
-    setBillingRegion(settings.billing_region ?? "");
-    setBillingCountry(settings.billing_country ?? "");
-  }, [settings]);
+    if (!localeSettings) return;
+    setTimezone(localeSettings.timezone);
+    setDateFormat(localeSettings.date_format);
+    setTimeFormat(localeSettings.time_format);
+  }, [localeSettings]);
+
+  useEffect(() => {
+    if (!billingSettings) return;
+    setBillingCustomerType(billingSettings.billing_customer_type ?? "company");
+    setBillingFullName(billingSettings.billing_full_name ?? "");
+    setBillingCompanyName(billingSettings.billing_company_name ?? "");
+    setBillingTaxId(billingSettings.billing_tax_id ?? "");
+    setBillingAddressLine(billingSettings.billing_address_line ?? "");
+    setBillingPostalCode(billingSettings.billing_postal_code ?? "");
+    setBillingCity(billingSettings.billing_city ?? "");
+    setBillingRegion(billingSettings.billing_region ?? "");
+    setBillingCountry(billingSettings.billing_country ?? "");
+  }, [billingSettings]);
 
   const resetForm = () => {
-    if (!settings) return;
-    setTwoFactorEnabled(settings.two_factor_enabled);
-    setTimezone(settings.timezone);
-    setDateFormat(settings.date_format);
-    setTimeFormat(settings.time_format);
-    setBillingCustomerType(settings.billing_customer_type ?? "company");
-    setBillingFullName(settings.billing_full_name ?? "");
-    setBillingCompanyName(settings.billing_company_name ?? "");
-    setBillingTaxId(settings.billing_tax_id ?? "");
-    setBillingAddressLine(settings.billing_address_line ?? "");
-    setBillingPostalCode(settings.billing_postal_code ?? "");
-    setBillingCity(settings.billing_city ?? "");
-    setBillingRegion(settings.billing_region ?? "");
-    setBillingCountry(settings.billing_country ?? "");
+    if (localeSettings) {
+      setTimezone(localeSettings.timezone);
+      setDateFormat(localeSettings.date_format);
+      setTimeFormat(localeSettings.time_format);
+    }
+    if (billingSettings) {
+      setBillingCustomerType(billingSettings.billing_customer_type ?? "company");
+      setBillingFullName(billingSettings.billing_full_name ?? "");
+      setBillingCompanyName(billingSettings.billing_company_name ?? "");
+      setBillingTaxId(billingSettings.billing_tax_id ?? "");
+      setBillingAddressLine(billingSettings.billing_address_line ?? "");
+      setBillingPostalCode(billingSettings.billing_postal_code ?? "");
+      setBillingCity(billingSettings.billing_city ?? "");
+      setBillingRegion(billingSettings.billing_region ?? "");
+      setBillingCountry(billingSettings.billing_country ?? "");
+    }
   };
 
   const handleSave = () => {
-    if (patchMutation.isPending) return;
+    if (patchPending) return;
+    if (activeSection === "billing" && !canManageBillingAndDomains) return;
     const validateRequired = (value: string) => (value.trim() ? "" : t("settings.billingFieldRequired"));
     const nextBillingErrors: BillingFieldErrors = {};
     if (activeSection === "billing") {
@@ -210,38 +247,43 @@ export function SystemSecurityBody({ onSaved, onCancel }: SystemSecurityBodyProp
     }
     setBillingErrors(nextBillingErrors);
     if (Object.keys(nextBillingErrors).length > 0) return;
-    const patchPayload =
-      activeSection === "billing"
-        ? {
-            billing_customer_type: billingCustomerType,
-            billing_full_name: billingFullName.trim(),
-            billing_company_name: billingCustomerType === "company" ? billingCompanyName.trim() : "",
-            billing_tax_id: billingCustomerType === "company" ? normalizeEuVatId(billingTaxId) : "",
-            billing_address_line: billingAddressLine,
-            billing_postal_code: normalizePostalCode(billingPostalCode),
-            billing_city: billingCity,
-            billing_region: billingRegion,
-            billing_country: billingCountry,
-          }
-        : {
-            two_factor_enabled: twoFactorEnabled,
-            timezone,
-            date_format: dateFormat,
-            time_format: timeFormat,
-          };
-    patchMutation.mutate(
-      patchPayload,
-      {
+    const mutationOptions = {
         onSuccess: () => {
           toast.success(t("profile.saved"));
           onSaved?.();
         },
-      }
-    );
+      };
+    if (activeSection === "billing") {
+      billingPatchMutation.mutate(
+        {
+          billing_customer_type: billingCustomerType,
+          billing_full_name: billingFullName.trim(),
+          billing_company_name: billingCustomerType === "company" ? billingCompanyName.trim() : "",
+          billing_tax_id: billingCustomerType === "company" ? normalizeEuVatId(billingTaxId) : "",
+          billing_address_line: billingAddressLine,
+          billing_postal_code: normalizePostalCode(billingPostalCode),
+          billing_city: billingCity,
+          billing_region: billingRegion,
+          billing_country: billingCountry,
+        },
+        mutationOptions
+      );
+      return;
+    }
+    if (activeSection === "preferences") {
+      localePatchMutation.mutate(
+        {
+          timezone,
+          date_format: dateFormat,
+          time_format: timeFormat,
+        },
+        mutationOptions
+      );
+    }
   };
 
   const handleCancel = () => {
-    if (patchMutation.isPending) return;
+    if (patchPending) return;
     resetForm();
     onCancel?.();
   };
@@ -347,7 +389,7 @@ export function SystemSecurityBody({ onSaved, onCancel }: SystemSecurityBodyProp
     return t("settings.domainStateCustomPending");
   };
 
-  if (loading) {
+  if (billingLoading || localeLoading || twoFactorLoading) {
     return <div>{t("common.loading")}</div>;
   }
 
@@ -380,16 +422,16 @@ export function SystemSecurityBody({ onSaved, onCancel }: SystemSecurityBodyProp
             timezone={timezone}
             dateFormat={dateFormat}
             timeFormat={timeFormat}
-            disabled={patchMutation.isPending}
+            disabled={patchPending}
             setTimezone={setTimezone}
             setDateFormat={setDateFormat}
             setTimeFormat={setTimeFormat}
           />
         ) : null}
-        {activeSection === "billing" ? (
+        {activeSection === "billing" && canManageBillingAndDomains ? (
           <BillingSettingsSection
             title={t("settings.billingCompanyTitle")}
-            disabled={patchMutation.isPending}
+            disabled={patchPending}
             customerType={billingCustomerType}
             fullName={billingFullName}
             companyName={billingCompanyName}
@@ -413,7 +455,7 @@ export function SystemSecurityBody({ onSaved, onCancel }: SystemSecurityBodyProp
             t={t}
           />
         ) : null}
-        {activeSection === "domains" ? (
+        {activeSection === "domains" && canManageBillingAndDomains ? (
           <DomainsSettingsSection
             title={t("settings.domainTitle")}
             description={t("settings.domainIntro")}
@@ -426,7 +468,7 @@ export function SystemSecurityBody({ onSaved, onCancel }: SystemSecurityBodyProp
             addPending={addDomainMutation.isPending}
             verifyPending={verifyDomainMutation.isPending}
             deletePending={deleteDomainMutation.isPending}
-            patchPending={patchMutation.isPending}
+            patchPending={patchPending}
             t={t}
             getDomainStateLabel={getDomainStateLabel}
             setCustomDomainInput={setCustomDomainInput}
@@ -436,12 +478,12 @@ export function SystemSecurityBody({ onSaved, onCancel }: SystemSecurityBodyProp
             onCopy={(value) => void copyText(value)}
           />
         ) : null}
-        {activeSection === "preferences" || activeSection === "billing" ? (
+        {activeSection === "preferences" || (activeSection === "billing" && canManageBillingAndDomains) ? (
           <SettingsSaveBar
             cancelLabel={t("common.cancel")}
             saveLabel={t("common.save")}
             loadingLabel={t("common.loading")}
-            disabled={patchMutation.isPending}
+            disabled={patchPending}
             onCancel={handleCancel}
             onSave={handleSave}
           />
@@ -474,7 +516,7 @@ export default function SettingsPage() {
   const { t } = useTranslation();
   const { user } = useAuthStore();
 
-  if (!user || user.role !== "owner") {
+  if (!user || (user.role !== "owner" && user.role !== "admin")) {
     return (
       <div className="p-6 min-h-full bg-[var(--color-background)]">
         <div className="bg-[var(--color-card)] border border-[var(--color-border)] text-[var(--color-foreground)] p-4 rounded">

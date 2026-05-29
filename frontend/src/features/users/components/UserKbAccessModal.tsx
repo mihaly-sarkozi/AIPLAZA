@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { toast } from "sonner";
 import { useTranslation } from "../../../i18n";
 import { getKbPermissionsBatch } from "../../knowledge-base/services";
 import { useSetKbPermissionsMutation } from "../../knowledge-base/hooks/useKb";
@@ -111,10 +112,11 @@ export default function UserKbAccessModal({ user, onClose, kbList }: UserKbAcces
       setSaveError("A mentés közben hiba történt. Ellenőrizd a kapcsolatot, majd próbáld újra.");
       return;
     }
+    toast.success(t("profile.saved"));
     onClose();
   };
 
-  const isOwnerRow = user.role === "owner";
+  const isImplicitKnowledgeManager = user.role === "owner" || user.role === "admin";
 
   return (
     <Modal open={true} onClose={onClose} panelClassName="max-w-2xl">
@@ -125,28 +127,41 @@ export default function UserKbAccessModal({ user, onClose, kbList }: UserKbAcces
         />
         {isLoadingPermissions ? (
           <p className="text-[var(--color-muted)]">{t("common.loading")}</p>
+        ) : loadError ? (
+          <>
+            <Alert tone="error" className="mb-3">{loadError}</Alert>
+            <ModalFooter className="mt-4">
+              <Button
+                type="button"
+                onClick={onClose}
+                variant="secondary"
+              >
+                {t("common.cancel")}
+              </Button>
+            </ModalFooter>
+          </>
         ) : (
           <>
-            {loadError ? <Alert tone="error" className="mb-3">{loadError}</Alert> : null}
             {saveError ? <Alert tone="error" className="mb-3">{saveError}</Alert> : null}
             <div className="border border-[var(--color-border)] rounded overflow-hidden max-h-64 overflow-y-auto">
               <table className="w-full text-sm">
                 <tbody>
                   <tr className="border-b border-[var(--color-border)] bg-[var(--color-table-head)]">
-                    <td className="p-2 w-[20px] align-middle" />
-                    <td className="p-2 text-xs font-normal text-[var(--color-foreground)] w-[30%]">{t("kb.tableName")}</td>
+                    <td className="p-2 text-xs font-normal text-[var(--color-foreground)] w-[55%]">{t("kb.tableName")}</td>
+                    <td className="p-2 text-xs font-normal text-[var(--color-foreground)] text-center">{t("kb.hasAccess")}</td>
                     <td className="p-2 text-xs font-normal text-[var(--color-foreground)] text-center">{t("kb.columnTrainer")}</td>
                   </tr>
                   {kbList.map((kb) => {
                     const perm = getPermissionForUser(kb.uuid);
                     const hasPermission = perm === PERM_USE || perm === PERM_TRAIN;
                     const canTrain = perm === PERM_TRAIN;
-                    const isAdmin = user.role === "admin";
-
                     return (
                       <tr key={kb.uuid} className="border-t border-[var(--color-border)]">
-                        <td className="p-2 w-[20px] align-middle">
-                          {isOwnerRow ? (
+                        <td className="p-3 align-top w-[55%]">
+                          <div className={`font-medium ${hasPermission ? "text-[var(--color-foreground)]" : "text-[var(--color-muted)] opacity-70"}`}>{kb.name}</div>
+                        </td>
+                        <td className="p-3 align-middle text-center">
+                          {isImplicitKnowledgeManager ? (
                             <input type="checkbox" checked readOnly tabIndex={-1} className="w-4 h-4 border-[var(--color-border)] bg-[var(--color-border)] cursor-default" />
                           ) : (
                             <input
@@ -159,11 +174,8 @@ export default function UserKbAccessModal({ user, onClose, kbList }: UserKbAcces
                             />
                           )}
                         </td>
-                        <td className="p-3 align-top w-[30%]">
-                          <div className={`font-medium ${hasPermission ? "text-[var(--color-foreground)]" : "text-[var(--color-muted)] opacity-70"}`}>{kb.name}</div>
-                        </td>
                         <td className="p-3 align-middle text-center">
-                          {isOwnerRow || (isAdmin && canTrain) ? (
+                          {isImplicitKnowledgeManager ? (
                             <input type="checkbox" checked readOnly tabIndex={-1} className="w-4 h-4 border-[var(--color-border)] bg-[var(--color-border)] cursor-default" />
                           ) : (
                             <input

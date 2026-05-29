@@ -20,6 +20,11 @@ from core.modules.users.service.invite_errors import InviteTokenExpiredError, In
 from core.kernel.runtime.clock import utc_now
 
 
+def _normalize_invite_lang(value: str | None) -> str | None:
+    normalized = (value or "").strip().lower()[:2]
+    return normalized if normalized in {"hu", "en", "es"} else None
+
+
 class InviteService(TransactionalService):
     
     # Meghívásos regisztrációs flow (token validálás, set-password, meghívó újraküldés).    
@@ -86,13 +91,14 @@ class InviteService(TransactionalService):
         *,
         request_base_url: str | None = None,
         updated_by: int | None = None,
+        invite_lang: str | None = None,
     ) -> None:
         with self._transaction():
             user = self.user_repository.get_by_id(user_id)
             if not user:
                 raise ValueError("User not found")
-            if user.is_active:
-                raise ValueError("A felhasználó már aktív. Csak inaktív (zárolt vagy megerősítésre váró) usereknek küldhető link.")
+            if getattr(user, "credentials_password_set", True):
+                raise ValueError("A felhasználó már beállított jelszót. Csak megerősítésre váró usereknek küldhető link.")
             if user.is_owner:
                 raise ValueError("Az owner már aktív.")
 
@@ -108,7 +114,11 @@ class InviteService(TransactionalService):
 
             set_password_link = build_set_password_link(request_base_url, invite_payload.raw_token)
             if set_password_link and self.email_service:
-                self.email_service.send_set_password_invite(user.email, set_password_link)
+                owner = self.user_repository.get_owner()
+                lang = _normalize_invite_lang(
+                    invite_lang or getattr(user, "preferred_locale", None) or getattr(owner, "preferred_locale", None)
+                )
+                self.email_service.send_set_password_invite(user.email, set_password_link, lang=lang)
 
             if self.audit:
                 self.audit.log(

@@ -44,6 +44,32 @@ class BillingSubscriptionUpdateRequest(BaseModel):
         return normalized
 
 
+class BillingCancellationRequest(BaseModel):
+    reason_code: str = Field(..., min_length=1, max_length=64)
+    reason_text: str = Field(default="", max_length=2000)
+
+    @field_validator("reason_code")
+    @classmethod
+    def validate_reason_code(cls, value: str) -> str:
+        normalized = (value or "").strip().lower()
+        if normalized not in {"too_expensive", "not_using", "not_satisfied", "missing_features", "other"}:
+            raise ValueError("Invalid cancellation reason.")
+        return normalized
+
+    @field_validator("reason_text")
+    @classmethod
+    def normalize_reason_text(cls, value: str) -> str:
+        return (value or "").strip()
+
+
+class BillingCancellationResponse(BaseModel):
+    status: str
+    message: str
+    active_kb_count: int = 0
+    cancellation_request_id: int | None = None
+    current_period_end_iso: str | None = None
+
+
 class BillingAddonPurchaseRequest(BaseModel):
     addon_code: str = Field(..., min_length=1, max_length=64)
     quantity: int = Field(default=1, ge=1, le=100)
@@ -150,6 +176,7 @@ class BillingUpgradePreviewResponse(BaseModel):
     prorated_charge_cents: int
     old_remaining_credit_cents: int
     next_period_charge_cents: int
+    training_initial_fee_cents: int = 0
     total_charge_cents: int
     paid_until_iso: str
     currency: str = DEFAULT_BILLING_CURRENCY
@@ -161,6 +188,7 @@ class BillingUpgradeCompleteResponse(BaseModel):
     prorated_charge: float
     old_remaining_credit_cents: int
     next_period_charge_cents: int
+    training_initial_fee_cents: int = 0
     total_charge_cents: int
     paid_until_iso: str
 

@@ -8,18 +8,20 @@ const rolePermissions: Record<string, Set<string>> = {
     "auth.logout",
     "chat.use",
     "knowledge.read",
-    "knowledge.write",
-    "knowledge.permissions.manage",
     "users.read",
     "users.write",
     "users.invite",
+    "settings.read",
+    "settings.write",
+    "domain.read",
+    "domain.write",
+    "billing.read",
   ]),
   user: new Set([
     "auth.login",
     "auth.refresh",
     "auth.logout",
     "chat.use",
-    "knowledge.read",
   ]),
 };
 

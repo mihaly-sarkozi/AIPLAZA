@@ -20,6 +20,7 @@ class KBORM(TenantSchemaBase):
     personal_data_mode = Column(String(32), nullable=False, default=PERSONAL_DATA_MODE_NO)
     personal_data_sensitivity = Column(String(16), nullable=False, default=PERSONAL_DATA_SENSITIVITY_MEDIUM)
     pii_depersonalization_enabled = Column(Boolean, nullable=False, default=True)
+    public_enabled = Column(Boolean, nullable=False, default=False)
     created_at = Column(DateTime, default=_utcnow_naive)
     created_by = Column(Integer, nullable=False)
     updated_at = Column(DateTime, default=_utcnow_naive, onupdate=_utcnow_naive)

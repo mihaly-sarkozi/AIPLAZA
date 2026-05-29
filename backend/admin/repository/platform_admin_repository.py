@@ -4,15 +4,18 @@
 
 from __future__ import annotations
 
-import logging
+import base64
 import hashlib
+import logging
 import json
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 from sqlalchemy import func, text
 
 from core.modules.auth.domain.dto.session import Session
+from core.modules.tenant.cache import invalidate_tenant_cache
 from core.modules.tenant.models.tenant_orm import TenantORM
+from core.modules.tenant.schema.service import drop_tenant_schema
 from core.kernel.config.config_loader import settings
 from core.kernel.runtime.clock import utc_now
 from core.kernel.logging.observability import get_metrics_snapshot
@@ -551,6 +554,83 @@ class PlatformAdminRepository:
         with self._sf() as db:
             return db.query(TenantORM).order_by(TenantORM.name.asc(), TenantORM.slug.asc()).all()
 
+    def _latest_cancellation_by_tenant(self, db) -> dict[int, dict]:
+        if not self._table_exists(db, "public.tenant_cancellation_requests"):
+            return {}
+        rows = db.execute(
+            text(
+                """
+                SELECT DISTINCT ON (tenant_id)
+                       id, tenant_id, tenant_slug, requested_by_user_id, reason_code, reason_text,
+                       active_kb_count, status, requested_at, effective_at, deactivated_at,
+                       cleanup_completed_at
+                FROM public.tenant_cancellation_requests
+                ORDER BY tenant_id, requested_at DESC, id DESC
+                """
+            )
+        ).mappings().all()
+        return {int(row["tenant_id"]): dict(row) for row in rows}
+
+    def restore_cancelled_tenant(self, tenant_id: int, *, updated_by: int | None = None) -> dict | None:
+        with self._sf() as db:
+            tenant = db.query(TenantORM).filter(TenantORM.id == int(tenant_id)).first()
+            if tenant is None:
+                return None
+            if bool(tenant.is_active):
+                raise ValueError("tenant_already_active")
+            latest = self._latest_cancellation_by_tenant(db).get(int(tenant_id))
+            if latest is None or str(latest.get("status") or "").lower() != "deactivation_requested":
+                raise ValueError("tenant_not_cancelled")
+            tenant.is_active = True
+            tenant.updated_by = updated_by
+            if self._table_exists(db, "public.tenant_cancellation_requests"):
+                db.execute(
+                    text(
+                        """
+                        UPDATE public.tenant_cancellation_requests
+                        SET status = 'restored',
+                            updated_at = NOW()
+                        WHERE id = (
+                            SELECT id
+                            FROM public.tenant_cancellation_requests
+                            WHERE tenant_id = :tenant_id
+                            ORDER BY requested_at DESC, id DESC
+                            LIMIT 1
+                        )
+                        """
+                    ),
+                    {"tenant_id": int(tenant_id)},
+                )
+            db.commit()
+            invalidate_tenant_cache(tenant.slug)
+            return {"id": int(tenant.id), "slug": tenant.slug, "name": tenant.name, "is_active": True}
+
+    def permanently_delete_cancelled_tenant(self, tenant_id: int, *, deleted_by: int | None = None) -> dict | None:
+        engine = getattr(self._sf, "engine", None)
+        if engine is None:
+            raise RuntimeError("tenant_schema_engine_unavailable")
+        with self._sf() as db:
+            tenant = db.query(TenantORM).filter(TenantORM.id == int(tenant_id)).first()
+            if tenant is None:
+                return None
+            result = {"id": int(tenant.id), "slug": tenant.slug, "name": tenant.name, "is_active": bool(tenant.is_active)}
+            if bool(tenant.is_active):
+                raise ValueError("tenant_must_be_inactive")
+            latest = self._latest_cancellation_by_tenant(db).get(int(tenant_id))
+            if latest is None or str(latest.get("status") or "").lower() != "deactivation_requested":
+                raise ValueError("tenant_not_cancelled")
+        drop_tenant_schema(engine, result["slug"])
+        with self._sf() as db:
+            tenant = db.query(TenantORM).filter(TenantORM.id == int(tenant_id)).first()
+            if tenant is None:
+                return result
+            if bool(tenant.is_active):
+                raise ValueError("tenant_must_be_inactive")
+            db.execute(text("DELETE FROM public.tenants WHERE id = :tenant_id"), {"tenant_id": int(tenant_id)})
+            db.commit()
+        invalidate_tenant_cache(result["slug"])
+        return result
+
     @staticmethod
     def _quote_ident(value: str) -> str:
         return '"' + value.replace('"', '""') + '"'
@@ -788,6 +868,510 @@ class PlatformAdminRepository:
             "file_bytes": max(0, file_bytes),
             "database_bytes": max(0, database_bytes),
             "qdrant_collection_names": sorted(collection_names),
+        }
+
+    @staticmethod
+    def _parse_audit_details(value) -> dict:
+        if value is None:
+            return {}
+        if isinstance(value, dict):
+            return value
+        try:
+            parsed = json.loads(str(value))
+            return parsed if isinstance(parsed, dict) else {}
+        except Exception:
+            return {}
+
+    @staticmethod
+    def _audit_title(action: str) -> str:
+        labels = {
+            "login_success": "Sikeres belépés",
+            "login_failed": "Sikertelen belépés",
+            "login_2fa_required": "Kétlépcsős azonosítás szükséges",
+            "login_2fa_failed": "Sikertelen kétlépcsős azonosítás",
+            "login_2fa_rate_limited": "Kétlépcsős azonosítás korlátozva",
+            "login_2fa_success": "Sikeres kétlépcsős azonosítás",
+            "logout": "Kilépés",
+            "logout_failed": "Sikertelen kilépés",
+            "refresh": "Session frissítés",
+            "refresh_failed": "Sikertelen session frissítés",
+            "user_created": "Új felhasználó rögzítve",
+            "user_updated": "Felhasználó módosítva",
+            "user_email_changed": "Felhasználó email címe módosítva",
+            "user_role_changed": "Felhasználó szerepköre módosítva",
+            "user_deleted": "Felhasználó törölve",
+            "password_changed": "Jelszó módosítva",
+            "password_set_by_invite": "Jelszó beállítva meghívóval",
+            "invite_resent": "Meghívó újraküldve",
+            "forgot_password_link_sent": "Jelszóbeállító link kiküldve",
+            "email_confirmed": "Email link megerősítve",
+            "knowledge_created": "Tudástár létrehozva",
+            "knowledge_deleted": "Tudástár törölve",
+            "knowledge_permission_changed": "Tudástár jogosultság módosítva",
+            "knowledge_setting_changed": "Tudástár beállítás módosítva",
+        }
+        return labels.get(action, action.replace("_", " ").capitalize())
+
+    @classmethod
+    def _audit_summary(cls, action: str, details: dict, actor_email: str | None, target_id: str | None) -> str:
+        email = details.get("email") or actor_email or (f"User #{target_id}" if target_id else None)
+        if action == "user_role_changed":
+            return f"{email or 'Felhasználó'} szerepköre: {details.get('old_value')} -> {details.get('new_value')}"
+        if action == "user_email_changed":
+            return f"Email: {details.get('old_value')} -> {details.get('new_value')}"
+        if action == "user_updated":
+            changes = []
+            for key in ("name", "is_active"):
+                if key in details:
+                    changes.append(f"{key}: {details.get(key)}")
+            return f"{email or 'Felhasználó'} módosítva" + (f" ({', '.join(changes)})" if changes else "")
+        if action == "user_created":
+            return f"{email or 'Felhasználó'} létrehozva, szerepkör: {details.get('role') or '-'}"
+        if action == "user_deleted":
+            return f"{email or 'Felhasználó'} törölve"
+        if action == "knowledge_permission_changed":
+            return (
+                f"{details.get('email') or 'Felhasználó'} tudástár joga: "
+                f"{details.get('old_permission')} -> {details.get('new_permission')}"
+            )
+        if action == "knowledge_created":
+            return f"{details.get('kb_name') or 'Tudástár'} létrehozva"
+        if action == "knowledge_deleted":
+            return f"{details.get('kb_name') or 'Tudástár'} törölve"
+        if action == "knowledge_setting_changed":
+            return f"{details.get('kb_name') or 'Tudástár'} beállítása módosítva: {details.get('field') or '-'}"
+        if action in {"login_success", "login_failed", "login_2fa_success", "login_2fa_failed", "logout"}:
+            reason = details.get("reason")
+            return f"{email or 'Felhasználó'}" + (f" ({reason})" if reason else "")
+        if action == "password_set_by_invite":
+            return f"{email or 'Felhasználó'} jelszót állított be meghívóval"
+        if action == "password_changed":
+            return f"{email or 'Felhasználó'} jelszót módosított"
+        if action == "email_confirmed":
+            return f"{email or 'Felhasználó'} email linket megerősített"
+        if details:
+            return ", ".join(f"{key}: {value}" for key, value in list(details.items())[:4])
+        return cls._audit_title(action)
+
+    @staticmethod
+    def _email_from_audit_details(details: dict) -> str | None:
+        for key in ("email", "new_email", "old_email"):
+            value = details.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+        for key in ("new_value", "old_value"):
+            value = details.get(key)
+            if isinstance(value, str) and "@" in value and value.strip():
+                return value.strip()
+        return None
+
+    @staticmethod
+    def _int_from_details(details: dict, key: str) -> int | None:
+        try:
+            value = details.get(key)
+            if value is None or value == "":
+                return None
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _target_user_id_from_row(row, details: dict, action: str) -> int | None:
+        target_id = row["target_id"]
+        try:
+            if row["target_type"] == "user" and target_id is not None:
+                return int(target_id)
+        except (TypeError, ValueError):
+            pass
+        if action in {"user_created", "user_updated", "user_email_changed", "user_role_changed", "user_deleted", "knowledge_permission_changed"}:
+            return row["user_id"]
+        return row["user_id"]
+
+    @staticmethod
+    def _actor_user_id_from_row(row, details: dict, action: str) -> int | None:
+        changed_by = PlatformAdminRepository._int_from_details(details, "changed_by")
+        if changed_by is not None:
+            return changed_by
+        created_by = PlatformAdminRepository._int_from_details(details, "created_by")
+        if created_by is not None:
+            return created_by
+        return row["user_id"]
+
+    @staticmethod
+    def _normalize_email_for_hash(value: str | None) -> str | None:
+        normalized = str(value or "").strip().lower()
+        return normalized if "@" in normalized else None
+
+    @classmethod
+    def _email_hash(cls, value: str | None) -> str | None:
+        normalized = cls._normalize_email_for_hash(value)
+        if not normalized:
+            return None
+        return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def _mask_email_for_audit(value: str | None) -> str | None:
+        email = str(value or "").strip()
+        if "@" not in email:
+            return None
+        local, _, domain = email.partition("@")
+        if not local or not domain:
+            return None
+        visible_start = local[:2] if len(local) > 2 else local[:1]
+        visible_end = local[-1:] if len(local) > 3 else ""
+        masked_local = f"{visible_start}{'*' * max(2, len(local) - len(visible_start) - len(visible_end))}{visible_end}"
+        domain_name, dot, tld = domain.rpartition(".")
+        if not dot:
+            return f"{masked_local}@{domain[:1]}***"
+        masked_domain = f"{domain_name[:1]}***.{tld}"
+        return f"{masked_local}@{masked_domain}"
+
+    @staticmethod
+    def _legacy_mask_email_for_log(value: str | None) -> str | None:
+        email = str(value or "").strip()
+        if "@" not in email:
+            return None
+        local, _, domain = email.partition("@")
+        if not local or not domain or len(local) < 4:
+            return None
+        visible_domain = domain if len(domain) < 5 else domain[-5:]
+        hidden_domain_len = max(0, len(domain) - len(visible_domain))
+        hidden_local_len = max(0, len(local) - 2)
+        return f"{local[:2]}{'*' * hidden_local_len}@{'*' * hidden_domain_len}{visible_domain}"
+
+    @staticmethod
+    def _normalize_action_filter(actions: list[str] | tuple[str, ...] | None) -> list[str]:
+        normalized: list[str] = []
+        for action in actions or []:
+            for part in str(action or "").split(","):
+                value = part.strip().lower()
+                if value and all(ch.isalnum() or ch == "_" for ch in value):
+                    normalized.append(value)
+        return sorted(set(normalized))
+
+    @staticmethod
+    def _add_action_filter(clauses: list[str], params: dict[str, object], actions: list[str] | tuple[str, ...] | None) -> None:
+        normalized = PlatformAdminRepository._normalize_action_filter(actions)
+        if not normalized:
+            return
+        placeholders: list[str] = []
+        for index, action in enumerate(normalized):
+            key = f"action_{index}"
+            placeholders.append(f":{key}")
+            params[key] = action
+        clauses.append(f"a.action IN ({', '.join(placeholders)})")
+
+    @classmethod
+    def _add_email_filter(cls, clauses: list[str], params: dict[str, object], email: str | None) -> None:
+        query = str(email or "").strip().lower()
+        if not query:
+            return
+        email_clauses = [
+            "lower(coalesce(u.email, '')) ILIKE :email_query_like",
+            "lower(coalesce(tu.email, '')) ILIKE :email_query_like",
+            "a.details ILIKE :email_query_like",
+        ]
+        params["email_query_like"] = f"%{query}%"
+        email_hash = cls._email_hash(query)
+        if email_hash:
+            email_mask = cls._mask_email_for_audit(query)
+            legacy_email_mask = cls._legacy_mask_email_for_log(query)
+            email_clauses.extend([
+                "a.details ILIKE :email_hash_like",
+                "a.details ILIKE :email_mask_like",
+                "a.details ILIKE :legacy_email_mask_like",
+            ])
+            params["email_hash_like"] = f"%{email_hash}%"
+            params["email_mask_like"] = f"%{email_mask or ''}%"
+            params["legacy_email_mask_like"] = f"%{legacy_email_mask or ''}%"
+        clauses.append(f"({' OR '.join(email_clauses)})")
+
+    def _tenant_timezone(self, db, schema: str) -> str:
+        settings_table = f"{schema}.{self._quote_ident('settings')}"
+        if not self._table_exists(db, settings_table):
+            return "UTC"
+        try:
+            value = db.execute(
+                text(f"SELECT value FROM {settings_table} WHERE key = 'timezone' LIMIT 1")
+            ).scalar()
+        except Exception:
+            return "UTC"
+        return str(value or "UTC").strip() or "UTC"
+
+    @staticmethod
+    def _audit_actor_user_sql() -> str:
+        return (
+            "COALESCE("
+            "CASE WHEN a.details::jsonb ->> 'changed_by' ~ '^[0-9]+$' THEN (a.details::jsonb ->> 'changed_by')::integer END, "
+            "CASE WHEN a.details::jsonb ->> 'created_by' ~ '^[0-9]+$' THEN (a.details::jsonb ->> 'created_by')::integer END, "
+            "a.user_id"
+            ")"
+        )
+
+    @staticmethod
+    def _encode_audit_cursor(created_at: datetime, row_id: int) -> str:
+        if created_at.tzinfo is None:
+            created_at = created_at.replace(tzinfo=timezone.utc)
+        payload = json.dumps({"created_at": created_at.isoformat(), "id": int(row_id)}, separators=(",", ":"))
+        return base64.urlsafe_b64encode(payload.encode("utf-8")).decode("ascii")
+
+    @staticmethod
+    def _decode_audit_cursor(cursor: str | None) -> tuple[datetime, int] | None:
+        if not cursor:
+            return None
+        try:
+            payload = json.loads(base64.urlsafe_b64decode(cursor.encode("ascii")).decode("utf-8"))
+            created_at = datetime.fromisoformat(str(payload["created_at"]))
+            if created_at.tzinfo is not None:
+                created_at = created_at.astimezone(timezone.utc).replace(tzinfo=None)
+            return created_at, int(payload["id"])
+        except Exception:
+            return None
+
+    @staticmethod
+    def _normalize_date_bound(value: str | None, *, end: bool = False) -> datetime | None:
+        if not value:
+            return None
+        raw = str(value).strip()
+        try:
+            if len(raw) == 10:
+                base = datetime.fromisoformat(raw)
+                return base + timedelta(days=1) if end else base
+            parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+            if parsed.tzinfo is not None:
+                parsed = parsed.astimezone(timezone.utc).replace(tzinfo=None)
+            return parsed
+        except ValueError:
+            return None
+
+    def _audit_where(self, *, from_date: str | None, to_date: str | None, cursor: str | None = None):
+        clauses: list[str] = []
+        params: dict[str, object] = {}
+        date_from = self._normalize_date_bound(from_date)
+        date_to = self._normalize_date_bound(to_date, end=True)
+        if date_from is not None:
+            clauses.append("a.created_at >= :date_from")
+            params["date_from"] = date_from
+        if date_to is not None:
+            clauses.append("a.created_at < :date_to")
+            params["date_to"] = date_to
+        decoded_cursor = self._decode_audit_cursor(cursor)
+        if decoded_cursor is not None:
+            cursor_created_at, cursor_id = decoded_cursor
+            clauses.append("(a.created_at < :cursor_created_at OR (a.created_at = :cursor_created_at AND a.id < :cursor_id))")
+            params["cursor_created_at"] = cursor_created_at
+            params["cursor_id"] = cursor_id
+        return clauses, params
+
+    def list_tenant_audit_trail(
+        self,
+        *,
+        tenant_id: int,
+        from_date: str | None = None,
+        to_date: str | None = None,
+        limit: int = 50,
+        cursor: str | None = None,
+        email: str | None = None,
+        actions: list[str] | tuple[str, ...] | None = None,
+    ) -> dict | None:
+        safe_limit = min(max(int(limit or 50), 1), 200)
+        with self._sf() as db:
+            tenant = db.query(TenantORM).filter(TenantORM.id == int(tenant_id)).first()
+            if tenant is None:
+                return None
+            schema = self._quote_ident(str(tenant.slug))
+            audit_table = f"{schema}.{self._quote_ident('audit_log')}"
+            users_table = f"{schema}.{self._quote_ident('users')}"
+            knowledge_bases_table = f"{schema}.{self._quote_ident('knowledge_bases')}"
+            tenant_payload = {
+                "id": int(tenant.id),
+                "slug": tenant.slug,
+                "name": tenant.name,
+                "is_active": bool(tenant.is_active),
+                "timezone": self._tenant_timezone(db, schema),
+            }
+            if not self._table_exists(db, audit_table):
+                return {"tenant": tenant_payload, "items": [], "limit": safe_limit, "next_cursor": None}
+            join_users = self._table_exists(db, users_table)
+            join_knowledge_bases = self._table_exists(db, knowledge_bases_table)
+            clauses, params = self._audit_where(from_date=from_date, to_date=to_date, cursor=cursor)
+            self._add_action_filter(clauses, params, actions)
+            self._add_email_filter(clauses, params, email)
+            where_sql = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+            user_cols = (
+                "u.email AS actor_email, u.name AS actor_name, "
+                "tu.email AS target_user_email, tu.name AS target_user_name, tu.role AS target_user_role, "
+                "tu.is_active AS target_user_is_active, tu.preferred_locale AS target_user_locale, "
+                "tu.preferred_theme AS target_user_theme, tu.security_version AS target_user_security_version"
+                if join_users
+                else (
+                    "NULL AS actor_email, NULL AS actor_name, NULL AS target_user_email, NULL AS target_user_name, "
+                    "NULL AS target_user_role, NULL AS target_user_is_active, NULL AS target_user_locale, "
+                    "NULL AS target_user_theme, NULL AS target_user_security_version"
+                )
+            )
+            actor_user_sql = self._audit_actor_user_sql()
+            user_join = (
+                f"LEFT JOIN {users_table} u ON u.id = {actor_user_sql} "
+                f"LEFT JOIN {users_table} tu ON tu.id = CASE WHEN a.target_type = 'user' AND a.target_id ~ '^[0-9]+$' THEN a.target_id::integer ELSE a.user_id END"
+                if join_users
+                else ""
+            )
+            knowledge_base_cols = "kb.name AS audit_kb_name" if join_knowledge_bases else "NULL AS audit_kb_name"
+            knowledge_base_join = (
+                f"LEFT JOIN {knowledge_bases_table} kb ON kb.uuid = COALESCE(a.details::jsonb ->> 'kb_uuid', a.target_id)"
+                if join_knowledge_bases
+                else ""
+            )
+            params["limit"] = safe_limit + 1
+            rows = db.execute(
+                text(
+                    f"""
+                    SELECT a.id, a.created_at, a.user_id, a.actor_type, a.action, a.event_name,
+                           a.outcome, a.target_type, a.target_id, a.correlation_id,
+                           a.details, a.ip, a.user_agent, {user_cols}, {knowledge_base_cols}
+                    FROM {audit_table} a
+                    {user_join}
+                    {knowledge_base_join}
+                    {where_sql}
+                    ORDER BY a.created_at DESC, a.id DESC
+                    LIMIT :limit
+                    """
+                ),
+                params,
+            ).mappings().all()
+            page_rows = rows[:safe_limit]
+            next_cursor = None
+            if len(rows) > safe_limit and page_rows:
+                last = page_rows[-1]
+                next_cursor = self._encode_audit_cursor(last["created_at"], int(last["id"]))
+            items = [self._audit_row_to_payload(row) for row in page_rows]
+            return {"tenant": tenant_payload, "items": items, "limit": safe_limit, "next_cursor": next_cursor}
+
+    def export_tenant_audit_trail(
+        self,
+        *,
+        tenant_id: int,
+        from_date: str | None = None,
+        to_date: str | None = None,
+        max_rows: int = 50000,
+        email: str | None = None,
+        actions: list[str] | tuple[str, ...] | None = None,
+    ) -> dict | None:
+        safe_limit = min(max(int(max_rows or 50000), 1), 50000)
+        with self._sf() as db:
+            tenant = db.query(TenantORM).filter(TenantORM.id == int(tenant_id)).first()
+            if tenant is None:
+                return None
+            schema = self._quote_ident(str(tenant.slug))
+            audit_table = f"{schema}.{self._quote_ident('audit_log')}"
+            users_table = f"{schema}.{self._quote_ident('users')}"
+            knowledge_bases_table = f"{schema}.{self._quote_ident('knowledge_bases')}"
+            tenant_payload = {
+                "id": int(tenant.id),
+                "slug": tenant.slug,
+                "name": tenant.name,
+                "is_active": bool(tenant.is_active),
+                "timezone": self._tenant_timezone(db, schema),
+            }
+            if not self._table_exists(db, audit_table):
+                return {"tenant": tenant_payload, "items": []}
+            join_users = self._table_exists(db, users_table)
+            join_knowledge_bases = self._table_exists(db, knowledge_bases_table)
+            clauses, params = self._audit_where(from_date=from_date, to_date=to_date)
+            self._add_action_filter(clauses, params, actions)
+            self._add_email_filter(clauses, params, email)
+            where_sql = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+            user_cols = (
+                "u.email AS actor_email, u.name AS actor_name, "
+                "tu.email AS target_user_email, tu.name AS target_user_name, tu.role AS target_user_role, "
+                "tu.is_active AS target_user_is_active, tu.preferred_locale AS target_user_locale, "
+                "tu.preferred_theme AS target_user_theme, tu.security_version AS target_user_security_version"
+                if join_users
+                else (
+                    "NULL AS actor_email, NULL AS actor_name, NULL AS target_user_email, NULL AS target_user_name, "
+                    "NULL AS target_user_role, NULL AS target_user_is_active, NULL AS target_user_locale, "
+                    "NULL AS target_user_theme, NULL AS target_user_security_version"
+                )
+            )
+            actor_user_sql = self._audit_actor_user_sql()
+            user_join = (
+                f"LEFT JOIN {users_table} u ON u.id = {actor_user_sql} "
+                f"LEFT JOIN {users_table} tu ON tu.id = CASE WHEN a.target_type = 'user' AND a.target_id ~ '^[0-9]+$' THEN a.target_id::integer ELSE a.user_id END"
+                if join_users
+                else ""
+            )
+            knowledge_base_cols = "kb.name AS audit_kb_name" if join_knowledge_bases else "NULL AS audit_kb_name"
+            knowledge_base_join = (
+                f"LEFT JOIN {knowledge_bases_table} kb ON kb.uuid = COALESCE(a.details::jsonb ->> 'kb_uuid', a.target_id)"
+                if join_knowledge_bases
+                else ""
+            )
+            params["limit"] = safe_limit
+            rows = db.execute(
+                text(
+                    f"""
+                    SELECT a.id, a.created_at, a.user_id, a.actor_type, a.action, a.event_name,
+                           a.outcome, a.target_type, a.target_id, a.correlation_id,
+                           a.details, a.ip, a.user_agent, {user_cols}, {knowledge_base_cols}
+                    FROM {audit_table} a
+                    {user_join}
+                    {knowledge_base_join}
+                    {where_sql}
+                    ORDER BY a.created_at DESC, a.id DESC
+                    LIMIT :limit
+                    """
+                ),
+                params,
+            ).mappings().all()
+            return {"tenant": tenant_payload, "items": [self._audit_row_to_payload(row) for row in rows]}
+
+    def _audit_row_to_payload(self, row) -> dict:
+        details = self._parse_audit_details(row["details"])
+        if not details.get("kb_name") and row.get("audit_kb_name"):
+            details["kb_name"] = row["audit_kb_name"]
+        action = str(row["action"])
+        target_user_id = self._target_user_id_from_row(row, details, action)
+        actor_user_id = self._actor_user_id_from_row(row, details, action)
+        raw_actor_email = row["actor_email"]
+        raw_target_email = row["target_user_email"] or self._email_from_audit_details(details)
+        actor_email_masked = self._mask_email_for_audit(raw_actor_email)
+        actor_email_hash = self._email_hash(raw_actor_email)
+        target_email_masked = self._mask_email_for_audit(raw_target_email)
+        target_id = row["target_id"]
+        return {
+            "id": int(row["id"]),
+            "created_at": row["created_at"],
+            "user_id": target_user_id,
+            "actor_user_id": actor_user_id,
+            "actor_type": row["actor_type"],
+            "action": action,
+            "event_name": row["event_name"],
+            "outcome": row["outcome"],
+            "target_type": row["target_type"],
+            "target_id": target_id,
+            "correlation_id": row["correlation_id"],
+            "details": details,
+            "ip": row["ip"],
+            "user_agent": row["user_agent"],
+            "actor_email": actor_email_masked,
+            "actor_email_masked": actor_email_masked,
+            "actor_email_hash": actor_email_hash,
+            "actor_name": row["actor_name"],
+            "target_user_email_masked": target_email_masked,
+            "target_user_name": row["target_user_name"],
+            "target_user_settings": {
+                "id": target_user_id,
+                "email_masked": target_email_masked,
+                "name": row["target_user_name"],
+                "role": row["target_user_role"],
+                "is_active": row["target_user_is_active"],
+                "preferred_locale": row["target_user_locale"],
+                "preferred_theme": row["target_user_theme"],
+                "security_version": row["target_user_security_version"],
+            },
+            "title": self._audit_title(action),
+            "summary": self._audit_summary(action, details, target_email_masked or actor_email_masked, str(target_user_id or target_id or "")),
         }
 
     @staticmethod
@@ -1064,6 +1648,7 @@ class PlatformAdminRepository:
         rows = []
         with self._sf() as db:
             plan_names = self._plan_names(db)
+            cancellation_by_tenant = self._latest_cancellation_by_tenant(db)
             qdrant_client = self._build_qdrant_client()
             for tenant in tenants:
                 tenant_id = int(tenant.id)
@@ -1091,13 +1676,23 @@ class PlatformAdminRepository:
                 file_bytes = int(schema_metrics["file_bytes"] or billing["storage_bytes"] or 0)
                 database_bytes = int(schema_metrics["database_bytes"] or 0)
                 qdrant_bytes = int(qdrant_metrics["qdrant_bytes"] or 0)
+                cancellation = cancellation_by_tenant.get(tenant_id)
+                lifecycle_status = "active" if bool(tenant.is_active) else "inactive"
+                if (
+                    cancellation is not None
+                    and not bool(tenant.is_active)
+                    and str(cancellation.get("status") or "").lower() == "deactivation_requested"
+                ):
+                    lifecycle_status = "temporary_deleted"
                 rows.append(
                     {
                         "id": tenant_id,
                         "slug": tenant.slug,
                         "name": tenant.name,
                         "is_active": bool(tenant.is_active),
+                        "lifecycle_status": lifecycle_status,
                         "created_at": tenant.created_at,
+                        "cancellation_request": cancellation,
                         "package_code": package_code,
                         "package_name": package_name,
                         "billing_period": subscription.get("billing_period"),

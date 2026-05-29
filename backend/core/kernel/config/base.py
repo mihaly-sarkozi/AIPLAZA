@@ -215,10 +215,10 @@ class BaseConfig(BaseSettings):
     # Demo signup abuse guard
     demo_signups_enabled: bool = True
     demo_signup_max_per_day: int = 30
-    demo_signup_max_per_ip_per_day: int = 3
-    demo_signup_max_per_ip_email_per_day: int = 2
-    demo_signup_max_per_session_per_day: int = 2
-    demo_signup_max_per_email: int = 1
+    demo_signup_max_per_ip_per_day: int = 5
+    demo_signup_max_per_ip_email_per_day: int = 5
+    demo_signup_max_per_session_per_day: int = 5
+    demo_signup_max_per_email: int = 5
     demo_trial_days: int = 7
     demo_signup_captcha_provider: str = "none"  # none | turnstile | recaptcha
     demo_signup_captcha_secret: str = ""

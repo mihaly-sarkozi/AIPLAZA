@@ -7,6 +7,8 @@ from __future__ import annotations
 import hashlib
 import json
 import secrets
+import csv
+import io
 from email.utils import parseaddr
 from datetime import datetime, timedelta, timezone
 from urllib.parse import quote
@@ -341,10 +343,9 @@ class PlatformAdminService:
                 updated_by=user.id,
             )
             return None
-        mfa_required = bool(getattr(settings, "platform_admin_mfa_required", True))
-        if mfa_required and not self._is_platform_admin_mfa_enabled(user):
-            raise ValueError("platform_admin_mfa_setup_required")
         if self._is_platform_admin_mfa_enabled(user):
+            if not self._normalize_mfa_code(mfa_code):
+                raise ValueError("platform_admin_mfa_required")
             attempt_kind = self._mfa_attempt_kind_from_code(mfa_code)
             self._ensure_platform_admin_mfa_attempt_not_blocked(user_id=user.id, ip=ip, kind=attempt_kind)
             if not self._verify_platform_admin_mfa(user, mfa_code):
@@ -539,6 +540,33 @@ class PlatformAdminService:
     def get_statistics(self) -> dict:
         return self.repository.platform_statistics()
 
+    @staticmethod
+    def _ensure_ai_page_name_confirmation(tenant: dict, confirm_name: str) -> None:
+        if str(confirm_name or "").strip() != str(tenant.get("name") or "").strip():
+            raise ValueError("tenant_confirmation_mismatch")
+
+    def restore_cancelled_tenant(self, tenant_id: int, *, confirm_name: str, admin_user_id: int | None) -> dict:
+        statistics = self.repository.platform_tenant_statistics_detail(int(tenant_id))
+        if statistics is None:
+            raise ValueError("tenant_not_found")
+        tenant = dict(statistics.get("tenant") or {})
+        self._ensure_ai_page_name_confirmation(tenant, confirm_name)
+        restored = self.repository.restore_cancelled_tenant(int(tenant_id), updated_by=admin_user_id)
+        if restored is None:
+            raise ValueError("tenant_not_found")
+        return restored
+
+    def permanently_delete_cancelled_tenant(self, tenant_id: int, *, confirm_name: str, admin_user_id: int | None) -> dict:
+        statistics = self.repository.platform_tenant_statistics_detail(int(tenant_id))
+        if statistics is None:
+            raise ValueError("tenant_not_found")
+        tenant = dict(statistics.get("tenant") or {})
+        self._ensure_ai_page_name_confirmation(tenant, confirm_name)
+        deleted = self.repository.permanently_delete_cancelled_tenant(int(tenant_id), deleted_by=admin_user_id)
+        if deleted is None:
+            raise ValueError("tenant_not_found")
+        return deleted
+
     def get_security_monitoring(self) -> dict:
         return self.repository.platform_security_monitoring()
 
@@ -594,6 +622,84 @@ class PlatformAdminService:
         if detail is None:
             raise ValueError("tenant_not_found")
         return detail
+
+    def list_tenant_audit_trail(
+        self,
+        *,
+        tenant_id: int,
+        from_date: str | None = None,
+        to_date: str | None = None,
+        limit: int = 50,
+        cursor: str | None = None,
+        email: str | None = None,
+        actions: list[str] | tuple[str, ...] | None = None,
+    ) -> dict:
+        result = self.repository.list_tenant_audit_trail(
+            tenant_id=tenant_id,
+            from_date=from_date,
+            to_date=to_date,
+            limit=limit,
+            cursor=cursor,
+            email=email,
+            actions=actions,
+        )
+        if result is None:
+            raise ValueError("tenant_not_found")
+        return result
+
+    def export_tenant_audit_trail_csv(
+        self,
+        *,
+        tenant_id: int,
+        from_date: str | None = None,
+        to_date: str | None = None,
+        email: str | None = None,
+        actions: list[str] | tuple[str, ...] | None = None,
+    ) -> tuple[str, str]:
+        result = self.repository.export_tenant_audit_trail(
+            tenant_id=tenant_id,
+            from_date=from_date,
+            to_date=to_date,
+            email=email,
+            actions=actions,
+        )
+        if result is None:
+            raise ValueError("tenant_not_found")
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow([
+            "timestamp",
+            "title",
+            "summary",
+            "action",
+            "outcome",
+            "actor_email",
+            "actor_name",
+            "user_id",
+            "target_type",
+            "target_id",
+            "ip",
+            "user_agent",
+            "details",
+        ])
+        for item in result["items"]:
+            writer.writerow([
+                item.get("created_at"),
+                item.get("title"),
+                item.get("summary"),
+                item.get("action"),
+                item.get("outcome"),
+                item.get("actor_email_masked") or item.get("actor_email"),
+                item.get("actor_name"),
+                item.get("user_id"),
+                item.get("target_type"),
+                item.get("target_id"),
+                item.get("ip"),
+                item.get("user_agent"),
+                json.dumps(item.get("details") or {}, ensure_ascii=False),
+            ])
+        tenant_slug = str((result.get("tenant") or {}).get("slug") or tenant_id)
+        return f"audit-trail-{tenant_slug}.csv", "\ufeff" + output.getvalue()
 
     def validate_set_password_token(self, token: str) -> str:
         record = self.repository.get_invite_token(hashlib.sha256(token.encode()).hexdigest())

@@ -1,4 +1,5 @@
 import Alert from "../../../components/ui/Alert";
+import type { SettingsDateFormat, SettingsTimeFormat, SettingsTimezone } from "../../../api/services/settingsService";
 import type { IngestItem, IngestRun } from "../services";
 import {
   formatInteger,
@@ -22,9 +23,23 @@ type IngestRunProgressProps = {
   selectedItem: IngestItem | null;
   kb: KbLike;
   parserErrorMessage: string;
+  locale?: string;
+  timezone?: SettingsTimezone | string;
+  dateFormat?: SettingsDateFormat;
+  timeFormat?: SettingsTimeFormat;
 };
 
-export default function IngestRunProgress({ run, selectedItem, kb, parserErrorMessage }: IngestRunProgressProps) {
+export default function IngestRunProgress({
+  run,
+  selectedItem,
+  kb,
+  parserErrorMessage,
+  locale = "hu",
+  timezone,
+  dateFormat,
+  timeFormat,
+}: IngestRunProgressProps) {
+  const timestampOptions = { locale, timezone, dateFormat, timeFormat };
   const processingSummary = getItemProcessingSummary(selectedItem);
   const parserModule = processingSummary.modules.parser;
   const interpretationModule = processingSummary.modules.sentence_interpretation;
@@ -53,7 +68,7 @@ export default function IngestRunProgress({ run, selectedItem, kb, parserErrorMe
         </div>
         <div className="app-surface p-4">
           <div className="text-sm text-[var(--color-muted)]">Timestamp</div>
-          <div className="mt-2 text-lg font-semibold">{formatTimestamp(selectedItem?.created_at ?? run.created_at)}</div>
+          <div className="mt-2 text-lg font-semibold">{formatTimestamp(selectedItem?.created_at ?? run.created_at, timestampOptions)}</div>
         </div>
         <div className="app-surface p-4">
           <div className="text-sm text-[var(--color-muted)]">Tanítás típusa</div>
@@ -120,8 +135,8 @@ export default function IngestRunProgress({ run, selectedItem, kb, parserErrorMe
           <DetailField label="Megnevezés" value={selectedItem?.display_name || selectedItem?.title || run.id} />
           <DetailField label="Tartalom / forrás" value={selectedItem ? selectedItem.origin || selectedItem.title : "n/a"} />
           <DetailField label="Origin" value={selectedItem?.origin || "n/a"} />
-          <DetailField label="Létrehozva" value={formatTimestamp(run.created_at)} />
-          <DetailField label="Frissítve" value={formatTimestamp(selectedItem?.updated_at ?? run.updated_at)} />
+          <DetailField label="Létrehozva" value={formatTimestamp(run.created_at, timestampOptions)} />
+          <DetailField label="Frissítve" value={formatTimestamp(selectedItem?.updated_at ?? run.updated_at, timestampOptions)} />
           <DetailField label="Hiba" value={parserErrorMessage || "Nincs"} />
         </div>
       </div>

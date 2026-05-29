@@ -8,6 +8,7 @@ import { useKbList } from "../../knowledge-base/hooks/useKb";
 import { getTrainingProgress } from "../../knowledge-base/utils/trainingProgress";
 import { useTranslation } from "../../../i18n";
 import { useBillingAccessStatus, useBillingOverview } from "../../billing/hooks/useBilling";
+import { useLocaleSettings } from "../../settings/hooks/useSettings";
 import { useQueryClient } from "@tanstack/react-query";
 import { queryKeys } from "../../../queryKeys";
 import type {
@@ -33,6 +34,7 @@ export default function ChatPage() {
   const queryClient = useQueryClient();
   const setUser = useAuthStore((s) => s.setUser);
   const user = useAuthStore((s) => s.user);
+  const { data: settings } = useLocaleSettings();
   const kbListQuery = useKbList();
   const kbList = useMemo(() => kbListQuery.data ?? [], [kbListQuery.data]);
   const { data: billingOverview } = useBillingOverview();
@@ -46,6 +48,7 @@ export default function ChatPage() {
     String(subscription.plan_code ?? "").toLowerCase() === "free" &&
     (String(subscription.status ?? "").toLowerCase() === "restricted" ||
       (trialEndsAt != null && new Date(trialEndsAt).getTime() <= Date.now()));
+  const canManageBilling = user?.role === "owner";
   const [messages, setMessages] = useState<ChatMessageType[]>([]);
   const [loading, setLoading] = useState(false);
   const [chatMode, setChatMode] = useState<"query" | "train">("query");
@@ -114,11 +117,18 @@ export default function ChatPage() {
     chatMode,
     selectedChatKbUuid,
     selectedTrainKbUuid,
+    setChatMode,
     setSelectedChatKbUuid,
     setSelectedTrainKbUuid,
     locale,
     t,
   });
+  const noAccessibleKnowledgeBase = kbListQuery.isFetched && selectableChatKbList.length === 0;
+  const chatEmptyStateKey = noAccessibleKnowledgeBase
+    ? "chat.noAccessibleKnowledgeBase"
+    : trainableKbList.length === 0
+      ? "chat.emptyStateQueryOnly"
+      : "chat.emptyState";
 
   const appendMessage = useCallback((msg: ChatMessageType) => {
     setMessages((prev) => {
@@ -192,11 +202,14 @@ export default function ChatPage() {
       selectedKbLabel: selectedTopKbLabel,
       messages: messagesRef.current,
       contextNotice: contextNoticeRef.current,
+      timezone: settings?.timezone,
+      dateFormat: settings?.date_format,
+      timeFormat: settings?.time_format,
     });
     const stamp = new Date().toISOString().replace(/[:]/g, "-").replace(/\..+$/, "");
     downloadTxt(`aiplaza-chat-folyamat-${stamp}.txt`, `${content}\n`);
     toast.success("A folyamat exportálva lett .txt fájlba.");
-  }, [locale, chatMode, selectedTopKbLabel]);
+  }, [locale, chatMode, selectedTopKbLabel, settings?.timezone, settings?.date_format, settings?.time_format]);
 
   const send = useChatSendMessage({
     inputDraft,
@@ -216,7 +229,7 @@ export default function ChatPage() {
   });
 
   if (billingRestricted) {
-    return <ChatBillingRestrictionPanel freeTrialExpired={freeTrialExpired} t={t} />;
+    return <ChatBillingRestrictionPanel freeTrialExpired={freeTrialExpired} canManageBilling={canManageBilling} t={t} />;
   }
 
   return (
@@ -261,39 +274,44 @@ export default function ChatPage() {
                 onStartPendingFileTraining={startPendingFileTraining}
                 onStartPendingTextTraining={startPendingTextTraining}
                 messagesEndRef={messagesEndRef}
+                emptyStateKey={chatEmptyStateKey}
                 t={t}
               />
             </div>
           </div>
 
-          <ChatComposer
-            chatMode={chatMode}
-            setChatMode={setChatMode}
-            dragOverTrainFile={dragOverTrainFile}
-            setDragOverTrainFile={setDragOverTrainFile}
-            inputDraft={inputDraft}
-            setInputDraft={setInputDraft}
-            loading={loading}
-            messagesLength={messages.length}
-            contextNotice={contextNotice}
-            trainingOperationRunning={trainingOperationRunning}
-            pendingTrainingConfirmation={pendingTrainingConfirmation}
-            selectedTopKbUuid={selectedTopKbUuid}
-            selectedTopKbLabel={selectedTopKbLabel}
-            selectableChatKbList={selectableChatKbList}
-            trainableKbList={trainableKbList}
-            composerUsage={composerUsage}
-            inputRef={inputRef}
-            trainFileRef={trainFileRef}
-            onSelectTrainingFile={onSelectTrainingFile}
-            clearHistory={clearHistory}
-            exportChatProcess={exportChatProcess}
-            send={send}
-            onSubmitTextTraining={onSubmitTextTraining}
-            setSelectedTrainKbUuid={setSelectedTrainKbUuid}
-            setSelectedChatKbUuid={setSelectedChatKbUuid}
-            t={t}
-          />
+          {noAccessibleKnowledgeBase ? (
+            <div className="shrink-0 h-6" />
+          ) : (
+            <ChatComposer
+              chatMode={chatMode}
+              setChatMode={setChatMode}
+              dragOverTrainFile={dragOverTrainFile}
+              setDragOverTrainFile={setDragOverTrainFile}
+              inputDraft={inputDraft}
+              setInputDraft={setInputDraft}
+              loading={loading}
+              messagesLength={messages.length}
+              contextNotice={contextNotice}
+              trainingOperationRunning={trainingOperationRunning}
+              pendingTrainingConfirmation={pendingTrainingConfirmation}
+              selectedTopKbUuid={selectedTopKbUuid}
+              selectedTopKbLabel={selectedTopKbLabel}
+              selectableChatKbList={selectableChatKbList}
+              trainableKbList={trainableKbList}
+              composerUsage={composerUsage}
+              inputRef={inputRef}
+              trainFileRef={trainFileRef}
+              onSelectTrainingFile={onSelectTrainingFile}
+              clearHistory={clearHistory}
+              exportChatProcess={exportChatProcess}
+              send={send}
+              onSubmitTextTraining={onSubmitTextTraining}
+              setSelectedTrainKbUuid={setSelectedTrainKbUuid}
+              setSelectedChatKbUuid={setSelectedChatKbUuid}
+              t={t}
+            />
+          )}
         </div>
       </div>
 

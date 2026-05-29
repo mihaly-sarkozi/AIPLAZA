@@ -19,6 +19,9 @@ class UserRepositoryPort(Protocol):
     def get_by_email(self, email: str) -> User | None:
         ...
 
+    def get_by_pending_email_token_hash(self, token_hash: str) -> User | None:
+        ...
+
     def get_owner(self) -> User | None:
         ...
 
@@ -70,6 +73,17 @@ class SessionRepositoryPort(Protocol):
 
 class UserEmailPort(Protocol):
     def send_set_password_invite(self, to_email: str, set_password_link: str, lang: str | None = None) -> bool:
+        ...
+
+    def send_email_change_confirmation(
+        self,
+        to_email: str,
+        confirm_email_link: str,
+        *,
+        current_email: str,
+        new_email: str,
+        lang: str | None = None,
+    ) -> bool:
         ...
 
     def send_demo_login_link(self, to_email: str, login_link: str, *, demo_expires_at) -> bool:

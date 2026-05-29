@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+# backend/apps/profile/service/profile_facade.py
+# Feladat: App-szintű profile orchestrator a core profile service és profile preference service között.
+# Sárközi Mihály - 2026.05.24
+
 from apps.profile.mappers.profile_mapper import build_profile_preferences_response, build_profile_response
 from apps.profile.service.ports import (
     CoreProfileServicePort,
@@ -44,9 +48,11 @@ class ProfileFacade:
         user,
         tenant,
         name: str | None,
+        email: str | None,
         preferred_locale: str | None,
         preferred_theme: str | None,
         app_preferences: dict[str, object] | None,
+        request_base_url: str | None = None,
     ) -> dict[str, object]:
         core_fields_changed = any(v is not None for v in (name, preferred_locale, preferred_theme))
         effective_user = user
@@ -62,6 +68,18 @@ class ProfileFacade:
                 name=core_payload.get("name", getattr(user, "name", None)),
                 preferred_locale=core_payload.get("preferred_locale", getattr(user, "preferred_locale", None)),
                 preferred_theme=core_payload.get("preferred_theme", getattr(user, "preferred_theme", None)),
+            )
+        if email is not None:
+            core_payload = self._core_profile_service.request_email_change(
+                user=effective_user,
+                new_email=email,
+                request_base_url=request_base_url,
+                updated_by=user.id,
+            )
+            effective_user = effective_user.with_updates(
+                email=core_payload.get("email", getattr(effective_user, "email", None)),
+                pending_email=core_payload.get("pending_email"),
+                pending_email_expires_at=core_payload.get("pending_email_expires_at"),
             )
         if app_preferences is not None:
             self._preferences.update_for_user(

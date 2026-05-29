@@ -1,13 +1,13 @@
-import type { SettingsResponse } from "../../../api/services/settingsService";
+import type { BillingSettingsResponse } from "../../../api/services/settingsService";
 import { isEuBillingCountry, isValidEuVatId, isValidPostalCode } from "../../billing/billingCountries";
 
 export type BillingCustomerType = "company" | "private";
 
-export function checkoutCustomerTypeFromSettings(settings?: SettingsResponse | null): BillingCustomerType {
+export function checkoutCustomerTypeFromSettings(settings?: BillingSettingsResponse | null): BillingCustomerType {
   return settings?.billing_customer_type ?? (settings?.billing_tax_id?.trim() ? "company" : "private");
 }
 
-export function hasSavedCheckoutBillingDetails(settings?: SettingsResponse | null): boolean {
+export function hasSavedCheckoutBillingDetails(settings?: BillingSettingsResponse | null): boolean {
   if (!settings) return false;
   const commonFieldsFilled =
     Boolean(settings.billing_address_line?.trim()) &&

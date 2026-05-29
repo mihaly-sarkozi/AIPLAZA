@@ -12,9 +12,12 @@ _SERVICE_FILES = [
     Path("core/modules/auth/use_cases/logout_service.py"),
     Path("core/modules/users/service/user_service.py"),
     Path("core/modules/users/service/invite_service.py"),
+    Path("core/modules/users/service/profile_service.py"),
     Path("core/modules/settings/service/settings_service.py"),
     Path("core/modules/brand/service/brand_service.py"),
     Path("admin/router/admin_router.py"),
+    Path("apps/knowledge/service/corpus_management_service.py"),
+    Path("apps/knowledge/service/corpus_permission_service.py"),
     Path("core/modules/tenant/signup/new_demo_signup.py"),
 ]
 
@@ -79,7 +82,6 @@ def test_all_audit_action_enum_members_are_accounted_for_in_service_usage():
         "KNOWLEDGE_TRAINING_STARTED",
         "KNOWLEDGE_UPLOAD_REJECTED",
         "KNOWLEDGE_URL_INGEST_REJECTED",
-        "LOGIN_2FA_SUCCESS",
         "LOGOUT_ERROR",
         "PERMISSION_DENIED",
         "SIGNED_REQUEST_REJECTED",

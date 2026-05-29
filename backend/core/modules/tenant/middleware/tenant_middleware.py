@@ -125,7 +125,11 @@ class TenantMiddleware:
                 if value and value.strip()
             }
             if is_tenant_optional_path:
-                if is_csrf_token_path and host not in allowed_install_hosts:
+                if is_platform_admin_path:
+                    slug = None
+                    is_custom_domain = False
+                    snapshot = None
+                elif is_csrf_token_path and host not in allowed_install_hosts:
                     csrf_slug, _is_custom, _snapshot = await loop.run_in_executor(
                         None,
                         lambda: self._resolution_service.resolve_request(host),
@@ -139,24 +143,22 @@ class TenantMiddleware:
                         )
                         current_tenant_schema.reset(token)
                         return
-                if (
-                    allowed_install_hosts
-                    and (
-                        (is_platform_admin_path and host not in allowed_install_hosts)
-                        or (not is_platform_admin_path and not is_csrf_token_path and host not in allowed_install_hosts)
-                    )
-                ):
-                    state["tenant_resolution_outcome"] = "install_host_rejected"
-                    increment_metric("platform.tenant.resolution.failure.count", 1.0, tags={"reason": "install_host_rejected"})
-                    await _send_json_response(
-                        scope, send, 400,
-                        {"detail": "Tenant hiányzik, vagy a host install útvonal nincs engedélyezve."}
-                    )
-                    current_tenant_schema.reset(token)
-                    return
-                slug = None
-                is_custom_domain = False
-                snapshot = None
+                    slug = None
+                    is_custom_domain = False
+                    snapshot = None
+                else:
+                    if allowed_install_hosts and host not in allowed_install_hosts:
+                        state["tenant_resolution_outcome"] = "install_host_rejected"
+                        increment_metric("platform.tenant.resolution.failure.count", 1.0, tags={"reason": "install_host_rejected"})
+                        await _send_json_response(
+                            scope, send, 400,
+                            {"detail": "Tenant hiányzik, vagy a host install útvonal nincs engedélyezve."}
+                        )
+                        current_tenant_schema.reset(token)
+                        return
+                    slug = None
+                    is_custom_domain = False
+                    snapshot = None
             else:
                 slug, is_custom_domain, snapshot = await loop.run_in_executor(
                     None,
@@ -229,8 +231,8 @@ class TenantMiddleware:
                     host=host,
                 )
                 await _send_json_response(
-                    scope, send, 403,
-                    {"detail": "A tenant jelenleg nem aktív."}
+                    scope, send, 404,
+                    {"detail": "404"}
                 )
                 current_tenant_schema.reset(token)
                 return

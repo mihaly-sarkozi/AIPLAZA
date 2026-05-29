@@ -60,7 +60,7 @@ export default function DemoOnboardingTrainPage() {
   useEffect(() => {
     if (kbLoading) return;
     if (!kbUuid) {
-      setStatusKind("error");
+      setStatusKind("info");
       setStatusText(t("onboarding.noTrainableKb"));
       return;
     }
@@ -168,16 +168,18 @@ export default function DemoOnboardingTrainPage() {
       />
       <div className="flex-1 min-h-0 flex items-center justify-center px-4">
         <div className="w-full max-w-md flex flex-col items-center gap-3">
-          <div className={ONBOARDING_MUTED_TEXT}>{t("onboarding.trainPageIntro")}</div>
+          {kbUuid ? <div className={ONBOARDING_MUTED_TEXT}>{t("onboarding.trainPageIntro")}</div> : null}
 
-          <button
-            type="button"
-            onClick={onOpenTrainModal}
-            disabled={loading || !kbUuid}
-            className={ONBOARDING_GHOST_BTN}
-          >
-            {t("nav.train")}
-          </button>
+          {kbUuid ? (
+            <button
+              type="button"
+              onClick={onOpenTrainModal}
+              disabled={loading}
+              className={ONBOARDING_GHOST_BTN}
+            >
+              {t("nav.train")}
+            </button>
+          ) : null}
 
           {statusText ? (
             <p

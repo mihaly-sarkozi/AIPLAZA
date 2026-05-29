@@ -73,6 +73,7 @@ class KnowledgeFacade(
         metrics_store: MetricsStorePort,
         object_storage: ObjectStoragePort,
         source_storage_service: SourceStorageService | None = None,
+        audit_service: Any | None = None,
     ) -> None:
         self._runtime = build_knowledge_facade_from_init(self, locals())
 

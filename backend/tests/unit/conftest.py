@@ -5,3 +5,10 @@ azok csak ``tests/integration/`` alatt érhetők el (lásd ``integration/conftes
 
 Önállóan tesztelhető core területek: ``core.testability`` modul-dokumentáció.
 """
+
+import pytest
+
+
+@pytest.fixture
+def anyio_backend() -> str:
+    return "asyncio"

@@ -164,6 +164,7 @@ def _finish_runtime(owner: Any) -> KnowledgeFacadeRuntime:
         ingest_run_list_summary=owner.ingest_run_list_summary,
         clear_contents=owner.clear_contents,
         log_step=owner._log_step,
+        audit_service=getattr(owner, "_audit_service", None),
     )
     owner._knowledge_pii_service = KnowledgePiiService.from_corpus_store(owner._corpus_store)
     owner._url_fetch_service = UrlFetchService(text_normalizer=owner._normalize_parser_text)
@@ -178,6 +179,7 @@ def _wire_permissions_and_index(owner: Any) -> None:
         user_repo_list_all=owner._user_repo_list_all,
         corpus_mapper=owner._to_corpus,
         list_all_unfiltered=owner.list_all_unfiltered,
+        audit_service=getattr(owner, "_audit_service", None),
     )
     owner._index_build_service = IndexBuildService(
         corpus_store=owner._corpus_store,

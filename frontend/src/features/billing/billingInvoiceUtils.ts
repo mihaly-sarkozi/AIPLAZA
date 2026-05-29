@@ -1,38 +1,39 @@
+import type { SettingsDateFormat, SettingsTimezone } from "../../api/services/settingsService";
+import { formatDateOnly, localeTag } from "../../utils/dateTimeFormatting";
+
 export function moneyFromCents(cents: unknown): string {
   const n = Number(cents ?? 0);
   if (Number.isNaN(n)) return "0.00";
   return (n / 100).toFixed(2);
 }
 
-export function localeTag(locale: string): string {
-  if (locale === "es") return "es-ES";
-  if (locale === "en") return "en-GB";
-  return "hu-HU";
-}
+export { localeTag };
 
-export function formatInvoiceDate(iso: unknown, locale: string): string {
+export function formatInvoiceDate(
+  iso: unknown,
+  locale: string,
+  timezone?: SettingsTimezone | string,
+  dateFormat?: SettingsDateFormat
+): string {
   if (iso == null || iso === "") return "—";
-  const d = new Date(String(iso));
-  if (Number.isNaN(d.getTime())) return String(iso);
-  return d.toLocaleDateString(localeTag(locale), {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-  });
+  return formatDateOnly(iso, { locale, timezone, dateFormat });
 }
 
 /** Számlázási időszak: YYYY-MM → hónap első–utolsó napja; egyébként kiadás–esedék. */
-export function formatInvoicePeriodRange(invoice: Record<string, unknown>, locale: string): string {
+export function formatInvoicePeriodRange(
+  invoice: Record<string, unknown>,
+  locale: string,
+  timezone?: SettingsTimezone | string,
+  dateFormat?: SettingsDateFormat
+): string {
   const pk = String(invoice.period_key ?? "").trim();
   const ym = /^(\d{4})-(\d{2})$/.exec(pk);
-  const tag = localeTag(locale);
-  const df = new Intl.DateTimeFormat(tag, { year: "numeric", month: "short", day: "numeric" });
   if (ym) {
     const y = Number(ym[1]);
     const mo = Number(ym[2]);
-    const start = new Date(y, mo - 1, 1);
-    const end = new Date(y, mo, 0);
-    return `${df.format(start)} – ${df.format(end)}`;
+    const start = `${String(y).padStart(4, "0")}-${String(mo).padStart(2, "0")}-01`;
+    const end = new Date(Date.UTC(y, mo, 0)).toISOString().slice(0, 10);
+    return `${formatInvoiceDate(start, locale, timezone, dateFormat)} – ${formatInvoiceDate(end, locale, timezone, dateFormat)}`;
   }
   const issued = invoice.issued_at;
   const due = invoice.due_at;
@@ -40,10 +41,10 @@ export function formatInvoicePeriodRange(invoice: Record<string, unknown>, local
     const a = new Date(String(issued));
     const b = new Date(String(due));
     if (!Number.isNaN(a.getTime()) && !Number.isNaN(b.getTime())) {
-      return `${df.format(a)} – ${df.format(b)}`;
+      return `${formatInvoiceDate(a.toISOString(), locale, timezone, dateFormat)} – ${formatInvoiceDate(b.toISOString(), locale, timezone, dateFormat)}`;
     }
   }
-  if (issued) return formatInvoiceDate(issued, locale);
+  if (issued) return formatInvoiceDate(issued, locale, timezone, dateFormat);
   return pk || "—";
 }
 

@@ -11,6 +11,7 @@ type UserRoleListProps = {
   onKbPermissions: (user: RoleUser) => void;
   onEdit: (user: RoleUser) => void;
   onResendInvite: (user: RoleUser) => void;
+  onToggleActive: (user: RoleUser) => void;
 };
 
 export default function UserRoleList({
@@ -23,15 +24,17 @@ export default function UserRoleList({
   onKbPermissions,
   onEdit,
   onResendInvite,
+  onToggleActive,
 }: UserRoleListProps) {
   return (
     <section>
       <div className="app-table-wrap">
-        <div className="app-table-head hidden grid-cols-[1.3fr_0.9fr_1.6fr_1.5fr] gap-4 !bg-[#efefef] px-5 py-3 text-sm font-medium !text-[var(--color-foreground)] md:grid">
+        <div className="app-table-head hidden grid-cols-[5rem_minmax(12rem,1fr)_minmax(14rem,1.2fr)_minmax(8rem,0.7fr)_minmax(18rem,1.5fr)] gap-4 !bg-[#efefef] px-5 py-3 text-sm font-medium !text-black md:grid">
+          <div>{t("roles.labelActive")}</div>
           <div>{t("roles.tableName")}</div>
-          <div>{t("roles.tableRole")}</div>
           <div>{t("roles.tableEmail")}</div>
-          <div>{t("roles.tableActions")}</div>
+          <div>{t("roles.tableRole")}</div>
+          <div />
         </div>
         <div className="divide-y divide-[var(--color-border)]">
           {users.map((user) => (
@@ -45,6 +48,7 @@ export default function UserRoleList({
               onKbPermissions={onKbPermissions}
               onEdit={onEdit}
               onResendInvite={onResendInvite}
+              onToggleActive={onToggleActive}
             />
           ))}
         </div>

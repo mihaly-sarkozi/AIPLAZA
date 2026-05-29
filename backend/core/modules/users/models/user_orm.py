@@ -30,5 +30,8 @@ class UserORM(TenantSchemaBase):
     preferred_theme = Column(String(10), nullable=True)
     security_version = Column(Integer, default=0, nullable=False)
     credentials_password_set = Column(Boolean, default=True, nullable=False, server_default="true")
+    pending_email = Column(String(255), nullable=True)
+    pending_email_token_hash = Column(String(255), nullable=True, index=True)
+    pending_email_expires_at = Column(DateTime(timezone=True), nullable=True)
 
     __table_args__ = (Index("ix_users_created_at", "created_at"),)

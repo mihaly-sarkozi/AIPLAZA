@@ -205,10 +205,10 @@ class TenantSignupOrchestrator:
             raise DemoSignupDisabledError()
 
         max_global = max(1, int(getattr(settings, "demo_signup_max_per_day", 30) or 30))
-        max_ip = max(1, int(getattr(settings, "demo_signup_max_per_ip_per_day", 3) or 3))
-        max_ip_email = max(1, int(getattr(settings, "demo_signup_max_per_ip_email_per_day", 2) or 2))
-        max_session = max(1, int(getattr(settings, "demo_signup_max_per_session_per_day", 2) or 2))
-        max_per_email = max(1, int(getattr(settings, "demo_signup_max_per_email", 1) or 1))
+        max_ip = max(5, int(getattr(settings, "demo_signup_max_per_ip_per_day", 5) or 5))
+        max_ip_email = max(5, int(getattr(settings, "demo_signup_max_per_ip_email_per_day", 5) or 5))
+        max_session = max(5, int(getattr(settings, "demo_signup_max_per_session_per_day", 5) or 5))
+        max_per_email = max(5, int(getattr(settings, "demo_signup_max_per_email", 5) or 5))
 
         if self._demo_signup_repo.count_completed_signups_for_email(email) >= max_per_email:
             raise DemoSignupRateLimitedError()

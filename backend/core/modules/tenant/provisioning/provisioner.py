@@ -83,6 +83,7 @@ class TenantProvisioningService:
                 request_base_url=base_url,
                 send_invite_email=request.owner_send_invite_email,
                 activate_immediately=request.owner_activate_immediately,
+                invite_lang=request.owner_invite_lang,
             )
         finally:
             current_tenant_schema.reset(token)

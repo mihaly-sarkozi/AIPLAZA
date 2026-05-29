@@ -1,5 +1,5 @@
 import { useTranslation } from "../../../i18n";
-import type { SettingsResponse } from "../../../api/services/settingsService";
+import type { BillingSettingsResponse } from "../../../api/services/settingsService";
 import { checkoutCustomerTypeFromSettings } from "./checkoutBillingDetails";
 
 function SummaryRow({ label, value }: { label: string; value?: string | null }) {
@@ -12,7 +12,7 @@ function SummaryRow({ label, value }: { label: string; value?: string | null }) 
   );
 }
 
-export function SavedBillingDetailsSummary({ settings, onEdit }: { settings: SettingsResponse; onEdit: () => void }) {
+export function SavedBillingDetailsSummary({ settings, onEdit }: { settings: BillingSettingsResponse; onEdit: () => void }) {
   const { t } = useTranslation();
   const customerType = checkoutCustomerTypeFromSettings(settings);
 

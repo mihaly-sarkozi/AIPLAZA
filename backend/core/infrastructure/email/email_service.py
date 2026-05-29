@@ -184,6 +184,24 @@ class EmailService:
         )
         return self.send_email(to_email, subject, body)
 
+    def send_email_change_confirmation(
+        self,
+        to_email: str,
+        confirm_email_link: str,
+        *,
+        current_email: str,
+        new_email: str,
+        lang: str | None = None,
+    ) -> bool:
+        subject, body = get_email_template(
+            "confirm_email_change",
+            lang=lang or DEFAULT_LANG,
+            current_email=current_email,
+            new_email=new_email,
+            confirm_email_link=confirm_email_link,
+        )
+        return self.send_email(to_email, subject, body)
+
     def send_demo_login_link(
         self,
         to_email: str,
