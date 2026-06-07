@@ -139,8 +139,9 @@ export default function AppShell() {
       }
       await fetchCsrfToken();
       if (path === "/login" || path.startsWith("/forgot") || path.startsWith("/set-password") || path.startsWith("/confirm-email")) {
-        useAuthStore.getState().setToken(null);
-        useAuthStore.setState({ user: null, loadingUser: false });
+        // Ne töröljük a sessiont: a 2FA/login flow közben és után is kell a token.
+        // A nyilvános auth oldalak nem hívják a loadUser-t; a ProtectedRoute kezeli a redirectet.
+        useAuthStore.setState({ loadingUser: false });
         return;
       }
       await loadUser();

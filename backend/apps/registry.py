@@ -17,6 +17,7 @@ APP_MODULES: tuple[tuple[str, str], ...] = (
     ("settings", "apps.settings.bootstrap.app_module:get_module"),
     ("billing", "apps.billing.bootstrap.app_module:get_module"),
     ("knowledge", "apps.knowledge.bootstrap.app_module:get_module"),
+    ("kb", "apps.kb.bootstrap.app_module:get_module"),
     ("chat", "apps.chat.bootstrap.app_module:get_module"),
     ("demo", "apps.demo.bootstrap.app_module:get_module"),
     ("landing", "apps.landing.bootstrap.app_module:get_module"),

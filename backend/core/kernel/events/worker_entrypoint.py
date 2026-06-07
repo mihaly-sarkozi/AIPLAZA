@@ -108,6 +108,13 @@ def _build_dispatcher(*, security_logger, audit_service, email_service):
             register_knowledge_event_handlers(dispatcher)
     except Exception as exc:
         _log.warning("Knowledge outbox handler regisztráció kihagyva: %s", exc)
+    try:
+        kb_events_module = importlib.import_module("apps.kb.events")
+        register_kb_event_handlers = getattr(kb_events_module, "register_kb_event_handlers", None)
+        if callable(register_kb_event_handlers):
+            register_kb_event_handlers(dispatcher)
+    except Exception as exc:
+        _log.warning("KB outbox handler regisztráció kihagyva: %s", exc)
     return dispatcher
 
 

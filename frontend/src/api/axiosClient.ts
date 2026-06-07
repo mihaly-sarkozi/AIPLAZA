@@ -12,7 +12,7 @@ import { toast } from "sonner";
 type AuthStoreAdapter = {
   getToken: () => string | null;
   setToken: (token: string | null) => void;
-  logout: () => void;
+  logout: () => void | Promise<void>;
 };
 
 let authStoreAdapter: AuthStoreAdapter | null = null;
@@ -81,6 +81,16 @@ async function doRefresh(): Promise<string> {
   return newToken;
 }
 
+/** Közös refresh útvonal: loadUser és az axios 401 interceptor ugyanazt a promise-t használja. */
+export async function refreshAccessToken(): Promise<string> {
+  if (!refreshPromise) {
+    refreshPromise = doRefresh().finally(() => {
+      refreshPromise = null;
+    });
+  }
+  return refreshPromise;
+}
+
 const PERMISSIONS_CHANGED_CODE = "permissions_changed";
 
 function isPermissionsChanged(err: unknown): boolean {
@@ -140,12 +150,7 @@ api.interceptors.response.use(
     originalRequest._retry = true;
 
     try {
-      if (!refreshPromise) {
-        refreshPromise = doRefresh().finally(() => {
-          refreshPromise = null;
-        });
-      }
-      const newToken = await refreshPromise;
+      const newToken = await refreshAccessToken();
 
       originalRequest.headers.Authorization = `Bearer ${newToken}`;
       return api(originalRequest);

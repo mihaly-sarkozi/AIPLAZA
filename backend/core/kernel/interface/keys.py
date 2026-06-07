@@ -36,6 +36,12 @@ def platform_service_key(domain: str, *, role: str = "service") -> ServiceKey:
 PLATFORM_CLOCK_SERVICE = "platform.clock"
 
 # ---------------------------------------------------------------------------
+# Job queue (platform outbox)
+# ---------------------------------------------------------------------------
+
+PLATFORM_JOB_QUEUE = "platform.job_queue"
+
+# ---------------------------------------------------------------------------
 # Settings
 # ---------------------------------------------------------------------------
 
@@ -131,6 +137,7 @@ __all__ = [
     "PLATFORM_DOMAIN_ROUTING_POLICY",
     "PLATFORM_DOMAIN_SERVICE",
     "PLATFORM_DOMAIN_VERIFICATION_SERVICE",
+    "PLATFORM_JOB_QUEUE",
     "PLATFORM_LIFECYCLE",
     "PLATFORM_LIFECYCLE_SERVICE",
     "PLATFORM_LOGIN",

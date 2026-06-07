@@ -21,6 +21,7 @@ export default function Login() {
   const { setToken, logout, loadUser } = useAuthStore();
   const setLocaleAndTheme = useLocaleStore((s) => s.setLocaleAndTheme);
   const token = useAuthStore((s) => s.token);
+  const user = useAuthStore((s) => s.user);
   const { data: defaultSettings } = useDefaultSettings({ enabled: !token });
   const demoToken = searchParams.get("demo_token");
 
@@ -28,6 +29,12 @@ export default function Login() {
     if (!demoToken) return;
     navigate(`/demo-login?token=${encodeURIComponent(demoToken)}`, { replace: true });
   }, [demoToken, navigate]);
+
+  useEffect(() => {
+    if (token && user) {
+      navigate(returnTo, { replace: true });
+    }
+  }, [token, user, returnTo, navigate]);
 
   useEffect(() => {
     if (!defaultSettings) return;
@@ -111,7 +118,7 @@ export default function Login() {
     } catch (err: unknown) {
       const axErr = err as { response?: { status?: number } };
       if (axErr.response?.status === 409) {
-        logout();
+        await logout();
         try {
           await doLogin();
         } catch (retryErr: unknown) {

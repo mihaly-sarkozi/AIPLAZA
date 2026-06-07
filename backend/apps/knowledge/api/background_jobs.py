@@ -9,10 +9,9 @@ import logging
 import threading
 from typing import Any
 
-from apps.knowledge.bootstrap.service_keys import KNOWLEDGE_EVENT_CHANNEL
 from apps.knowledge.ingest_jobs import process_ingest_run_and_start_index_async
 from core.kernel.config.config_loader import settings
-from core.kernel.http.app_dependencies import get_module_service
+from core.kernel.jobs import enqueue_job
 from core.modules.tenant.context.tenant_context import run_async_with_tenant_schema
 
 logger = logging.getLogger(__name__)
@@ -43,7 +42,7 @@ def enqueue_ingest_pipeline_job(
     created_by: int | None,
     facade: Any,
 ) -> None:
-    _publish_worker_event(
+    enqueue_job(
         "knowledge.ingest_pipeline",
         {
             "tenant_slug": tenant_slug,
@@ -59,7 +58,7 @@ def enqueue_index_build_job(
     tenant_slug: str | None,
     build_id: str,
 ) -> None:
-    _publish_worker_event(
+    enqueue_job(
         "knowledge.index_build",
         {
             "tenant_slug": tenant_slug,
@@ -75,7 +74,7 @@ def enqueue_ingest_item_reprocess_job(
     item_id: str,
     current_user_id: int | None,
 ) -> None:
-    _publish_worker_event(
+    enqueue_job(
         "knowledge.ingest_item_reprocess",
         {
             "tenant_slug": tenant_slug,
@@ -87,36 +86,13 @@ def enqueue_ingest_item_reprocess_job(
 
 
 def enqueue_recovery_sweep_job(*, tenant_slug: str | None) -> None:
-    _publish_worker_event(
+    enqueue_job(
         "knowledge.recovery_sweep",
         {
             "tenant_slug": tenant_slug,
         },
         idempotency_key=f"knowledge.recovery_sweep:{tenant_slug or '_'}",
     )
-
-
-def _publish_worker_event(event_type: str, payload: dict[str, Any], *, idempotency_key: str) -> None:
-    channel = None
-    try:
-        channel = get_module_service(KNOWLEDGE_EVENT_CHANNEL)
-    except (KeyError, LookupError, RuntimeError):
-        channel = None
-    if channel is not None and hasattr(channel, "publish"):
-        try:
-            channel.publish(
-                event_type,
-                payload,
-                idempotency_key=idempotency_key,
-            )
-            return
-        except (RuntimeError, ValueError, OSError):
-            logger.exception(
-                "Knowledge worker outbox enqueue failed",
-                extra={"event_type": event_type, "idempotency_key": idempotency_key},
-            )
-            raise
-    raise RuntimeError("Knowledge worker queue is not available. Configure platform event outbox worker.")
 
 
 async def run_index_build_with_retry(

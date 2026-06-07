@@ -3,6 +3,40 @@
 # Itt találkozik a kötelező core manifest, az addon/app manifest és a FastAPI app factory.
 # Sárközi Mihály - 2026.05.17
 
+from __future__ import annotations
+
+import os
+
+
+def _enable_debugpy_if_requested() -> None:
+    """Docker/Cursor attach: DEBUGPY_ENABLE=1 → debugpy a uvicorn folyamatában indul."""
+    flag = os.getenv("DEBUGPY_ENABLE", "").strip().lower()
+    if flag not in {"1", "true", "yes", "on"}:
+        return
+
+    import sys
+
+    # Egyedi `python -c "from main import app"` / init script ne foglalja le a 5678-at.
+    if not any("uvicorn" in arg for arg in sys.argv):
+        return
+
+    import debugpy
+
+    host = os.getenv("DEBUGPY_HOST", "0.0.0.0")
+    port = int(os.getenv("DEBUGPY_PORT", "5678"))
+    if debugpy.is_client_connected():
+        return
+
+    debugpy.listen((host, port))
+    print(f"[debugpy] listening on {host}:{port}", flush=True)
+
+    if os.getenv("DEBUGPY_WAIT_FOR_CLIENT", "").strip().lower() in {"1", "true", "yes", "on"}:
+        print("[debugpy] waiting for client attach...", flush=True)
+        debugpy.wait_for_client()
+
+
+_enable_debugpy_if_requested()
+
 from apps.registry import load_app_modules
 from core.kernel.app.app_factory import create_app_from_manifest
 from core.kernel.app.app_manifest import AppManifest

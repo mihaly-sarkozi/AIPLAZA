@@ -16,6 +16,8 @@ export {
   createFileIngestRun,
   estimateFileIngestRun,
   createTextIngestRun,
+  submitTextTraining,
+  getTrainingBatch,
   createUrlIngestRun,
   getIngestRun,
   getIngestRunTrace,

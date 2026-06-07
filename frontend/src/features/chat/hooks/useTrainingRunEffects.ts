@@ -52,6 +52,8 @@ export function useTrainingRunEffects({
   t,
 }: UseTrainingRunEffectsOptions) {
   const staleTrainingTimeoutRef = useRef<number | null>(null);
+  const handledTrainingRunIdRef = useRef<string | null>(null);
+  const handledTrainingErrorRunIdRef = useRef<string | null>(null);
 
   const clearStaleTrainingTimeout = useCallback(() => {
     if (staleTrainingTimeoutRef.current !== null) {
@@ -61,6 +63,11 @@ export function useTrainingRunEffects({
   }, []);
 
   useEffect(() => () => clearStaleTrainingTimeout(), [clearStaleTrainingTimeout]);
+
+  useEffect(() => {
+    handledTrainingRunIdRef.current = null;
+    handledTrainingErrorRunIdRef.current = null;
+  }, [activeTrainingRunId]);
 
   useEffect(() => {
     clearStaleTrainingTimeout();
@@ -97,6 +104,8 @@ export function useTrainingRunEffects({
 
   useEffect(() => {
     if (!activeTrainingRunId || !activeTrainingRun || isTrainingActive(activeTrainingRun.status)) return;
+    if (handledTrainingRunIdRef.current === activeTrainingRunId) return;
+    handledTrainingRunIdRef.current = activeTrainingRunId;
     if (activeTrainingRun.status === "completed" || activeTrainingRun.status === "partial_success") {
       const user = useAuthStore.getState().user;
       if (user && user.tenant_kb_has_training !== true) setUser({ ...user, tenant_kb_has_training: true });
@@ -143,6 +152,8 @@ export function useTrainingRunEffects({
 
   useEffect(() => {
     if (!activeTrainingRunId || !activeTrainingRunQuery.isError) return;
+    if (handledTrainingErrorRunIdRef.current === activeTrainingRunId) return;
+    handledTrainingErrorRunIdRef.current = activeTrainingRunId;
     appendMessage({ role: "assistant", text: getApiErrorMessage(activeTrainingRunQuery.error) ?? t("chat.trainingFailed") });
     setActiveTrainingRunId(undefined);
     setActiveTrainingTitle(null);

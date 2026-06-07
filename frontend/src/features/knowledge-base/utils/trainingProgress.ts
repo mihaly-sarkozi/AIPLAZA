@@ -1,6 +1,13 @@
 import type { IngestRun } from "../services";
 
-const ACTIVE_TRAINING_STATUSES = new Set(["received", "queued", "processing"]);
+const ACTIVE_TRAINING_STATUSES = new Set([
+  "received",
+  "queued",
+  "processing",
+  "pending",
+  "running",
+  "accepted",
+]);
 type Translate = (key: string) => string;
 
 export type RunProgressSummary = {
@@ -19,6 +26,17 @@ export type RunProgressSummary = {
 
 export function isTrainingActive(status: string | undefined): boolean {
   return ACTIVE_TRAINING_STATUSES.has((status ?? "").trim());
+}
+
+const TERMINAL_TRAINING_STATUSES = new Set(["completed", "partial_success", "failed", "cancelled"]);
+
+export function isTerminalTrainingStatus(status: string | undefined): boolean {
+  return TERMINAL_TRAINING_STATUSES.has((status ?? "").trim());
+}
+
+/** Aktív futásnál pollolunk; lezárt vagy ismeretlen állapotnál nem. */
+export function getTrainingRunRefetchInterval(status: string | undefined): number | false {
+  return isTrainingActive(status) ? 1500 : false;
 }
 
 export function getRunProgressSummary(run: IngestRun | undefined): RunProgressSummary {
@@ -44,9 +62,10 @@ export function getTrainingProgress(run: IngestRun | undefined): number {
 export function getTrainingStatusLabel(run: IngestRun | undefined, t?: Translate): string {
   const status = run?.status ?? "";
   if (!status) return "";
-  if (status === "received") return t ? t("chat.trainingStatusReceived") : "received";
+  if (status === "received" || status === "pending") return t ? t("chat.trainingStatusReceived") : status;
   if (status === "queued") return t ? t("chat.trainingStatusQueued") : "queued";
-  if (status === "processing") return t ? t("chat.trainingStatusProcessing") : "processing";
+  if (status === "processing" || status === "running") return t ? t("chat.trainingStatusProcessing") : status;
+  if (status === "accepted") return t ? t("chat.trainingStatusProcessing") : "accepted";
   if (status === "completed") return t ? t("chat.trainingStatusCompleted") : "completed";
   if (status === "failed") return t ? t("chat.trainingStatusFailed") : "failed";
   if (status === "partial_success") return t ? t("chat.trainingStatusPartialSuccess") : "partial_success";
@@ -76,8 +95,6 @@ export function getTrainingFailureMessage(run: IngestRun | undefined, t?: Transl
   }
   const failedItem = run.items.find((item) => item.error_message?.trim());
   if (failedItem?.error_message) return failedItem.error_message;
-  const failedEvent = [...run.events].reverse().find((event) => event.status === "failed" && event.message?.trim());
-  if (failedEvent?.message) return failedEvent.message;
   const metadataError = run.metadata?.error_message;
   return typeof metadataError === "string" && metadataError.trim() ? metadataError : null;
 }

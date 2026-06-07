@@ -234,7 +234,7 @@ export default function KBIngestRunDetail() {
 
     setIsOpeningSource(true);
     try {
-      const response = await api.get<ArrayBuffer>(`/knowledge/ingest/items/${selectedItem.id}/raw`, {
+      const response = await api.get<ArrayBuffer>(`/kb/ingest/items/${selectedItem.id}/raw`, {
         responseType: "arraybuffer",
       });
       const contentType =

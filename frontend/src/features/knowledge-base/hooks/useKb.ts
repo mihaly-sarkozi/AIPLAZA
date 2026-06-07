@@ -205,12 +205,13 @@ export function useIngestRun(
 }
 
 export function useCreateTextIngestMutation(
-  options?: UseMutationOptions<IngestRun, Error, { kbUuid: string; title: string; text: string }>
+  options?: UseMutationOptions<IngestRun, Error, { kbUuid: string; text: string; title?: string | null }>
 ) {
   const storeCreatedRun = useStoreCreatedIngestRun();
   const { onSuccess, ...mutationOptions } = options ?? {};
   return useMutation({
-    mutationFn: ({ kbUuid, title, text }) => createTextIngestRun(kbUuid, { title, text }),
+    mutationFn: ({ kbUuid, text, title }) =>
+      createTextIngestRun(kbUuid, { content: text, ...(title != null ? { title } : {}) }),
     onSuccess: (run, variables, onMutateResult, context) => {
       storeCreatedRun(run);
       onSuccess?.(run, variables, onMutateResult, context);

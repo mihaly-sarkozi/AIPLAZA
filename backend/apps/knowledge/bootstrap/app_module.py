@@ -4,7 +4,6 @@ from __future__ import annotations
 from apps.knowledge.api.router import router as knowledge_router
 from apps.knowledge.bootstrap.service_keys import (
     KNOWLEDGE_EMBEDDING_SERVICE_FACTORY,
-    KNOWLEDGE_EVENT_CHANNEL,
     KNOWLEDGE_QDRANT_FACTORY,
     KNOWLEDGE_REPOSITORY,
     KNOWLEDGE_SERVICE,
@@ -32,8 +31,6 @@ class KnowledgeModule(BaseAppModule):
         container.register_factory(KNOWLEDGE_EMBEDDING_SERVICE_FACTORY, infra.build_embedding_service)
         container.register_factory(KNOWLEDGE_QDRANT_FACTORY, infra.build_qdrant_client)
         container.register_service(KNOWLEDGE_SERVICE, service)
-        if getattr(container.security, "event_channel", None) is not None:
-            container.register_service(KNOWLEDGE_EVENT_CHANNEL, container.security.event_channel)
         from apps.knowledge.events import register_knowledge_event_handlers
         register_knowledge_event_handlers(container.security.dispatcher)
         register_knowledge_tenant_signup_hook(service)

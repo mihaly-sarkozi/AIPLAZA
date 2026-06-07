@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "../../../i18n";
 import { useAuthStore } from "../../../store/authStore";
-import { getApiErrorMessage } from "../../../utils/getApiErrorMessage";
+import { getApiErrorMessage, isDuplicateContentError } from "../../../utils/getApiErrorMessage";
 import {
   useCreateFileIngestMutation,
   useCreateTextIngestMutation,
@@ -12,6 +12,7 @@ import {
 import {
   getTrainingFailureMessage,
   getTrainingProgress,
+  getTrainingRunRefetchInterval,
   getTrainingStatusDetail,
   isTrainingActive,
 } from "../utils/trainingProgress";
@@ -43,7 +44,7 @@ export default function DemoOnboardingTrainPage() {
   const createTextMutation = useCreateTextIngestMutation();
   const createFileMutation = useCreateFileIngestMutation();
   const activeTrainingRunQuery = useIngestRun(activeTrainingRunId, {
-    refetchInterval: ({ state }) => (isTrainingActive(state.data?.status) ? 1500 : 4000),
+    refetchInterval: ({ state }) => getTrainingRunRefetchInterval(state.data?.status),
   });
   const activeTrainingRun = activeTrainingRunQuery.data;
   const trainingProgress = useMemo(() => getTrainingProgress(activeTrainingRun), [activeTrainingRun]);
@@ -138,7 +139,6 @@ export default function DemoOnboardingTrainPage() {
     createTextMutation.mutate(
       {
         kbUuid,
-        title: "Első tanítási szöveg",
         text: textTrainValue,
       },
       {
@@ -150,6 +150,12 @@ export default function DemoOnboardingTrainPage() {
           setStatusText("");
         },
         onError: (error) => {
+          if (isDuplicateContentError(error)) {
+            const detail = getApiErrorMessage(error) ?? t("kb.errorDuplicateContent");
+            setStatusKind("info");
+            setStatusText(`${t("chat.trainingAborted")} ${detail}`);
+            return;
+          }
           setStatusKind("error");
           setStatusText(getApiErrorMessage(error) ?? "A szöveges tanítás indítása sikertelen.");
         },

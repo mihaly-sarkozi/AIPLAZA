@@ -4,8 +4,9 @@
 
 from __future__ import annotations
 
-from core.kernel.deps.facade import configure_kernel_dependencies
+from core.kernel.deps.facade import configure_kernel_dependencies, register_service
 from core.kernel.bootstrap.infrastructure_registry import InfrastructureRegistry
+from core.kernel.interface.keys import PLATFORM_JOB_QUEUE
 from core.kernel.security.permission_service import PermissionService
 
 
@@ -17,6 +18,7 @@ def wire_kernel_dependencies(
     refresh_service: object,
     logout_service: object,
     permission_service: PermissionService,
+    event_channel: object,
     infrastructure: InfrastructureRegistry,
 ) -> None:
     """Regisztrálja a gyakori platform service-eket a kernel DI konténerben."""
@@ -31,4 +33,5 @@ def wire_kernel_dependencies(
         tenant_repository=repos.tenant_repo,
         user_repository=repos.user_repo,
     )
+    register_service(PLATFORM_JOB_QUEUE, event_channel)
 

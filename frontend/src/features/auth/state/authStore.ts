@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import api, { bindAuthStoreAdapter, fetchCsrfToken } from "../../../api/axiosClient";
+import api, { bindAuthStoreAdapter, fetchCsrfToken, refreshAccessToken } from "../../../api/axiosClient";
 
 /**
  * Authentication state – access token in memory only.
@@ -48,7 +48,7 @@ interface AuthState {
   setToken: (t: string | null) => void;
   setUser: (u: User | null) => void;
   loadUser: () => Promise<void>;
-  logout: () => void;
+  logout: () => Promise<void>;
 }
 
 export const useAuthStore = create<AuthState>((set, get) => ({
@@ -69,9 +69,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         let token = get().token;
         if (!token) {
           try {
-            await fetchCsrfToken();
-            const refreshRes = await api.post<{ access_token: string }>("/auth/refresh", {}, { withCredentials: true });
-            token = refreshRes.data.access_token;
+            token = await refreshAccessToken();
             set({ token });
           } catch {
             set({ user: null, token: null, loadingUser: false });
@@ -91,10 +89,14 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     return loadUserPromise;
   },
 
-  logout: () => {
+  logout: async () => {
     loadUserPromise = null;
-    api.post("/auth/logout").catch(() => {});
     set({ user: null, token: null });
+    try {
+      await api.post("/auth/logout");
+    } catch {
+      void 0;
+    }
   },
 }));
 

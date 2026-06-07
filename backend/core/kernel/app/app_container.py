@@ -117,6 +117,7 @@ class AppContainer:
             refresh_service=self._refresh_service,
             logout_service=self._logout_service,
             permission_service=self._permission_service,
+            event_channel=self._event_channel,
             infrastructure=infrastructure,
         )
 

@@ -6,11 +6,8 @@ from core.kernel.interface.app_keys import module_service_key
 KNOWLEDGE_REPOSITORY = module_service_key("knowledge", "repository")
 KNOWLEDGE_EMBEDDING_SERVICE_FACTORY = module_service_key("knowledge", "embedding_service.factory")
 KNOWLEDGE_QDRANT_FACTORY = module_service_key("knowledge", "qdrant.factory")
-KNOWLEDGE_EVENT_CHANNEL = module_service_key("knowledge", "event_channel")
-
 __all__ = [
     "KNOWLEDGE_EMBEDDING_SERVICE_FACTORY",
-    "KNOWLEDGE_EVENT_CHANNEL",
     "KNOWLEDGE_QDRANT_FACTORY",
     "KNOWLEDGE_REPOSITORY",
     "KNOWLEDGE_SERVICE",

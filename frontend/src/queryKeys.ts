@@ -11,6 +11,7 @@ export const queryKeys = {
   kbItem: (uuid: string) => ["kb", uuid] as const,
   kbIngestRuns: (uuid: string) => ["kb", uuid, "ingest", "runs"] as readonly unknown[],
   kbIngestRun: (runId: string) => ["kb", "ingest", "run", runId] as const,
+  kbTrainingBatch: (batchId: string) => ["kb", "training", "batch", batchId] as const,
   settings: ["settings"] as const,
   settingsBilling: ["settings", "billing"] as const,
   settingsLocale: ["settings", "locale"] as const,

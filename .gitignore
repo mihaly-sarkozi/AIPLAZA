@@ -40,7 +40,9 @@ __MACOSX/
 **/__MACOSX/
 
 # IDE / eszközök
-.vscode/
+.vscode/*
+!.vscode/launch.json
+!.vscode/extensions.json
 .idea/
 .cursor/
 *.swp

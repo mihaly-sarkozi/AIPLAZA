@@ -20,6 +20,8 @@ def build_default_role_permissions() -> dict[str, set[str]]:
             "users.write",
             "users.invite",
             "knowledge.read",
+            "kb.read",
+            "kb.train",
             "settings.read",
             "settings.write",
             "domain.read",

@@ -1,6 +1,7 @@
 export * from "./types";
 export * from "./kbCrudApi";
 export * from "./kbIngestApi";
+export * from "./kbTrainingApi";
 export * from "./kbSourceApi";
 export * from "./kbTraceApi";
 export * from "./kbPermissionsApi";

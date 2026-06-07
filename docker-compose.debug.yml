@@ -1,0 +1,20 @@
+# Lokális debug: Cursor/VS Code attach a futó backend konténerhez (port 5678).
+# Használat: docker compose -f docker-compose.yml -f docker-compose.debug.yml up --build
+# Vagy: ./scripts/docker-debug-up.sh
+
+name: aiplaza
+
+services:
+  backend:
+    environment:
+      DEBUGPY_ENABLE: "1"
+      DEBUGPY_HOST: "0.0.0.0"
+      DEBUGPY_PORT: "5678"
+      PYDEVD_DISABLE_FILE_VALIDATION: "1"
+    command: >
+      sh -c "python3 scripts/init_db.py &&
+      python3 -Xfrozen_modules=off -m uvicorn main:app --host 0.0.0.0 --port 8001"
+    ports:
+      - "5678:5678"
+    volumes:
+      - ./backend:/app/backend

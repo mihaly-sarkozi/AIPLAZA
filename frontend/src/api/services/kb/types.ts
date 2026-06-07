@@ -32,6 +32,47 @@ export type KbPermissionItem = {
   role: "user" | "admin" | "owner";
 };
 
+export type TrainingItemSummaryApi = {
+  id: string;
+  input_type: string;
+  title: string;
+  status: string;
+  error_code?: string | null;
+  error_message?: string | null;
+  char_count?: number | null;
+};
+
+export type TrainingBatchSummaryApi = {
+  id: string;
+  knowledge_base_id: string;
+  input_channel: string;
+  status: string;
+  batch_size: number;
+  accepted_count: number;
+  failed_count: number;
+  rejected_count: number;
+  duplicate_count: number;
+  created_at: string;
+  completed_at?: string | null;
+  progress?: Record<string, unknown> | null;
+};
+
+export type TrainingSubmitResponse = {
+  batch_id: string;
+  status: string;
+  batch_size?: number;
+  accepted_count?: number;
+  failed_count?: number;
+  duplicate_count?: number;
+  rejected_count?: number;
+  items?: TrainingItemSummaryApi[];
+};
+
+export type TrainingBatchStatusResponse = {
+  batch: TrainingBatchSummaryApi;
+  items: TrainingItemSummaryApi[];
+};
+
 export type IngestEventItem = {
   id: string;
   ingest_run_id: string;

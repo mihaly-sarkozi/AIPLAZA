@@ -2,11 +2,11 @@ import { useEffect, type Dispatch, type MutableRefObject, type RefObject, type S
 import { toast } from "sonner";
 
 import { useAuthStore } from "../../../store/authStore";
-import { getApiErrorMessage } from "../../../utils/getApiErrorMessage";
+import { getApiErrorMessage, isDuplicateContentError } from "../../../utils/getApiErrorMessage";
 import { sanitizeMessage } from "../../../utils/sanitize";
 import { useCreateFileIngestMutation, useCreateTextIngestMutation, useIngestRun } from "../../knowledge-base/hooks/useKb";
 import { estimateFileIngestRun } from "../../knowledge-base/services";
-import { isTrainingActive } from "../../knowledge-base/utils/trainingProgress";
+import { getTrainingRunRefetchInterval, isTrainingActive } from "../../knowledge-base/utils/trainingProgress";
 import type { ChatMessageType, FileCountingProgress, PendingFileTraining, PendingTextTraining } from "../types";
 import { formatInteger, numberValue } from "../utils/chatNumbers";
 import { useTrainingProgressTimers } from "./useTrainingProgressTimers";
@@ -76,7 +76,7 @@ export function useChatTrainingFlow({
   const createTextMutation = useCreateTextIngestMutation();
   const createFileMutation = useCreateFileIngestMutation();
   const activeTrainingRunQuery = useIngestRun(activeTrainingRunId, {
-    refetchInterval: ({ state }) => (isTrainingActive(state.data?.status) ? 1500 : 4000),
+    refetchInterval: ({ state }) => getTrainingRunRefetchInterval(state.data?.status),
   });
   const activeTrainingRun = activeTrainingRunQuery.data;
   const pendingTrainingConfirmation = pendingFileTraining !== null || pendingTextTraining !== null;
@@ -206,7 +206,7 @@ export function useChatTrainingFlow({
     setActiveTrainingTitle(t("chat.textTrainingLabel"));
     startTrainingProgress(pending.text.length);
     createTextMutation.mutate(
-      { kbUuid: pending.kbUuid, title: pending.title, text: pending.text },
+      { kbUuid: pending.kbUuid, text: pending.text, title: pending.title },
       {
         onSuccess: (run) => {
           setActiveTrainingRunId(run.id);
@@ -217,8 +217,16 @@ export function useChatTrainingFlow({
           setActiveTrainingTitle(null);
           stopTrainingProgress();
           setTrainingVisualProgress(0);
-          toast.error(getApiErrorMessage(error) ?? t("chat.textTrainingStartError"));
-          appendMessage({ role: "training-status", text: t("chat.trainingAborted") });
+          if (isDuplicateContentError(error)) {
+            const detail = getApiErrorMessage(error) ?? t("kb.errorDuplicateContent");
+            appendMessage({
+              role: "training-status",
+              text: `${t("chat.trainingAborted")} ${detail}`,
+            });
+          } else {
+            toast.error(getApiErrorMessage(error) ?? t("chat.textTrainingStartError"));
+            appendMessage({ role: "training-status", text: t("chat.trainingAborted") });
+          }
         },
       }
     );

@@ -53,6 +53,14 @@ export function getModule(): FrontendModuleDefinition {
         requiredPermission: "knowledge.read",
         loader: () => import("@frontend/features/knowledge-base/pages/DemoOnboardingTrainPage"),
       },
+      {
+        key: "knowledge.trainingTest",
+        path: "/kb/training-test",
+        layout: "main",
+        requiresAuth: true,
+        requiredPermission: "kb.train",
+        loader: () => import("@frontend/features/knowledge-base/pages/KbTrainingTestPage"),
+      },
     ],
     menuItems: () => [
       {

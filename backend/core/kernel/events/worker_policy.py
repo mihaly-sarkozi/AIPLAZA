@@ -34,6 +34,7 @@ _EVENT_POLICIES: dict[str, EventWorkerPolicy] = {
     "knowledge.index_build": EventWorkerPolicy(60 * 60, 65 * 60, 60, "thread"),
     "knowledge.ingest_item_reprocess": EventWorkerPolicy(30 * 60, 35 * 60, 30, "thread"),
     "knowledge.recovery_sweep": EventWorkerPolicy(10 * 60, 12 * 60, 30, "thread"),
+    "kb.understanding_requested": EventWorkerPolicy(30 * 60, 35 * 60, 30, "thread"),
     "url.fetch": EventWorkerPolicy(120, 180, 15, "thread"),
     "file.parse": EventWorkerPolicy(10 * 60, 12 * 60, 30, "thread"),
 }
