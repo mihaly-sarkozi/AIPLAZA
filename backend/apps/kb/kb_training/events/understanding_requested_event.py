@@ -21,6 +21,7 @@ def add_understanding_requested_event(
     training_item_id: str,
     knowledge_base_id: str,
     created_by: int | None,
+    input_type: str = "text",
 ) -> None:
     """Understanding feldolgozás ütemezése platform outbox-on keresztül."""
     batch_id = str(training_batch_id or "").strip()
@@ -39,7 +40,7 @@ def add_understanding_requested_event(
         },
         idempotency_key=f"{UNDERSTANDING_REQUESTED}:{tenant_slug or '_'}:{item_id}",
     )
-    MetricsConf.increment(TrainingMetric.UNDERSTANDING_REQUESTED, input_type="text")
+    MetricsConf.increment(TrainingMetric.UNDERSTANDING_REQUESTED, input_type=input_type)
 
 
 __all__ = ["add_understanding_requested_event"]

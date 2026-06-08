@@ -3,6 +3,7 @@ import { toast } from "sonner";
 import ChatBillingRestrictionPanel from "../components/ChatBillingRestrictionPanel";
 import ChatComposer from "../components/ChatComposer";
 import ChatMessagesList from "../components/ChatMessagesList";
+import TrainingConfirmationModal from "../components/TrainingConfirmationModal";
 import { useAuthStore } from "../../../store/authStore";
 import { useKbList } from "../../knowledge-base/hooks/useKb";
 import { getTrainingProgress } from "../../knowledge-base/utils/trainingProgress";
@@ -15,11 +16,16 @@ import type {
   ChatMessageType,
   FileCountingProgress,
   PendingFileTraining,
-  PendingTextTraining,
 } from "../types";
 import { MAX_CHAT_MESSAGES, trimToLastN } from "../utils/chatHistory";
 import { downloadTxt, serializeProcessToTxt } from "../utils/chatExport";
-import { combineTrainingProgress } from "../utils/chatTraining";
+import { buildTrainingSuccessDetail, combineTrainingProgress, resolveTrainingCharCount } from "../utils/chatTraining";
+import {
+  findLastPendingTextTrainingMessage,
+  patchLastPendingTextTrainingCharacterCount,
+  patchLastPendingTextTrainingMessage,
+} from "../utils/textTrainingMessage";
+import type { IngestRun } from "../../knowledge-base/services";
 import { clearLocalChatHistory } from "../services/chatPersistenceService";
 import { useChatPersistence } from "../hooks/useChatPersistence";
 import { useChatScroll } from "../hooks/useChatScroll";
@@ -60,7 +66,6 @@ export default function ChatPage() {
   const [fileEstimateLoading, setFileEstimateLoading] = useState(false);
   const [fileCountingProgress, setFileCountingProgress] = useState<FileCountingProgress | null>(null);
   const [pendingFileTraining, setPendingFileTraining] = useState<PendingFileTraining | null>(null);
-  const [pendingTextTraining, setPendingTextTraining] = useState<PendingTextTraining | null>(null);
   const [activeTrainingRunId, setActiveTrainingRunId] = useState<string | undefined>(undefined);
   const [activeTrainingTitle, setActiveTrainingTitle] = useState<string | null>(null);
   const [trainingVisualProgress, setTrainingVisualProgress] = useState(0);
@@ -136,6 +141,38 @@ export default function ChatPage() {
       return next;
     });
   }, []);
+  const patchTextTrainingCharacterCount = useCallback((characterCount: number) => {
+    setMessages((prev) =>
+      trimToLastN(patchLastPendingTextTrainingCharacterCount(prev, characterCount), MAX_CHAT_MESSAGES)
+    );
+  }, []);
+  const patchTextTrainingUserMessage = useCallback(
+    (patch: {
+      textTrainingOutcome: "success" | "error" | "cancelled";
+      textTrainingOutcomeDetail?: string;
+      trainingRun?: IngestRun | null;
+    }) => {
+      setMessages((prev) => {
+        const pending = findLastPendingTextTrainingMessage(prev);
+        const detail =
+          patch.textTrainingOutcome === "success"
+            ? buildTrainingSuccessDetail(
+                resolveTrainingCharCount(patch.trainingRun, pending?.textTrainingCharacterCount),
+                locale,
+                t
+              )
+            : (patch.textTrainingOutcomeDetail ?? t("chat.trainingFailed"));
+        return trimToLastN(
+          patchLastPendingTextTrainingMessage(prev, {
+            textTrainingOutcome: patch.textTrainingOutcome,
+            textTrainingOutcomeDetail: detail,
+          }),
+          MAX_CHAT_MESSAGES
+        );
+      });
+    },
+    [locale, t]
+  );
   const refreshBillingCounters = useCallback(() => {
     void queryClient.invalidateQueries({ queryKey: queryKeys.billingOverview });
   }, [queryClient]);
@@ -149,7 +186,6 @@ export default function ChatPage() {
     billingOverview,
     inputDraft,
     pendingFileTraining,
-    pendingTextTraining,
     fileEstimateLoading,
     activeTrainingRunId,
     activeTrainingTitle,
@@ -160,11 +196,12 @@ export default function ChatPage() {
     trainingEstimatedDurationMsRef,
     setUser,
     appendMessage,
+    patchTextTrainingUserMessage,
+    patchTextTrainingCharacterCount,
     setInputDraft,
     setFileEstimateLoading,
     setFileCountingProgress,
     setPendingFileTraining,
-    setPendingTextTraining,
     setActiveTrainingRunId,
     setActiveTrainingTitle,
     setTrainingVisualProgress,
@@ -181,8 +218,6 @@ export default function ChatPage() {
     onSelectTrainingFile,
     startPendingFileTraining,
     cancelPendingFileTraining,
-    startPendingTextTraining,
-    cancelPendingTextTraining,
     onSubmitTextTraining,
   } = trainingFlow;
 
@@ -191,7 +226,6 @@ export default function ChatPage() {
     setContextNotice(null);
     setInputDraft("");
     setPendingFileTraining(null);
-    setPendingTextTraining(null);
     clearLocalChatHistory(useAuthStore.getState().user?.id);
   }, []);
 
@@ -267,12 +301,6 @@ export default function ChatPage() {
                 fileCountingProgress={fileCountingProgress}
                 activeTrainingTitle={activeTrainingTitle}
                 displayedTrainingProgress={displayedTrainingProgress}
-                pendingTrainingConfirmation={pendingTrainingConfirmation}
-                pendingFileTraining={pendingFileTraining !== null}
-                onCancelPendingFileTraining={cancelPendingFileTraining}
-                onCancelPendingTextTraining={cancelPendingTextTraining}
-                onStartPendingFileTraining={startPendingFileTraining}
-                onStartPendingTextTraining={startPendingTextTraining}
                 messagesEndRef={messagesEndRef}
                 emptyStateKey={chatEmptyStateKey}
                 t={t}
@@ -315,6 +343,15 @@ export default function ChatPage() {
         </div>
       </div>
 
+      <TrainingConfirmationModal
+        open={pendingFileTraining !== null}
+        filename={pendingFileTraining?.title ?? ""}
+        characterCount={pendingFileTraining?.characterCount ?? 0}
+        locale={locale}
+        onCancel={cancelPendingFileTraining}
+        onConfirm={startPendingFileTraining}
+        t={t}
+      />
     </div>
   );
 }

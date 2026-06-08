@@ -8,19 +8,6 @@ vi.mock("./ChatMessage", () => ({
   default: ({ role, text }: { role: string; text: string }) => <div data-testid={`message-${role}`}>{text}</div>,
 }));
 
-vi.mock("./TrainingConfirmationPanel", () => ({
-  default: ({ onCancel, onConfirm }: { onCancel: () => void; onConfirm: () => void }) => (
-    <div>
-      <button type="button" onClick={onConfirm}>
-        Confirm training
-      </button>
-      <button type="button" onClick={onCancel}>
-        Cancel training
-      </button>
-    </div>
-  ),
-}));
-
 const t = (key: string) => ({ "chat.emptyState": "Nincs még üzenet" })[key] ?? key;
 
 function baseProps(overrides: Partial<React.ComponentProps<typeof ChatMessagesList>> = {}) {
@@ -31,12 +18,6 @@ function baseProps(overrides: Partial<React.ComponentProps<typeof ChatMessagesLi
     fileCountingProgress: null,
     activeTrainingTitle: null,
     displayedTrainingProgress: 0,
-    pendingTrainingConfirmation: false,
-    pendingFileTraining: false,
-    onCancelPendingFileTraining: vi.fn(),
-    onCancelPendingTextTraining: vi.fn(),
-    onStartPendingFileTraining: vi.fn(),
-    onStartPendingTextTraining: vi.fn(),
     messagesEndRef: createRef<HTMLDivElement>(),
     t,
     ...overrides,
@@ -68,17 +49,4 @@ describe("ChatMessagesList", () => {
     expect(screen.getByText("Válasz")).toBeInTheDocument();
   });
 
-  it("pending training esetén megjeleníti a confirmation panelt", () => {
-    render(
-      <ChatMessagesList
-        {...baseProps({
-          messages: [{ role: "user", text: "training.txt" }],
-          pendingTrainingConfirmation: true,
-          pendingFileTraining: true,
-        })}
-      />
-    );
-
-    expect(screen.getByRole("button", { name: "Confirm training" })).toBeInTheDocument();
-  });
 });

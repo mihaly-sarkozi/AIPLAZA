@@ -86,6 +86,11 @@ export type ChatMessageType = {
   actionLabel?: string;
   actionHref?: string;
   progressPercent?: number | null;
+  /** Szöveges tanítás folyamatban — a user buborék mellett jelenik meg az állapotjelző. */
+  textTrainingPending?: boolean;
+  textTrainingCharacterCount?: number;
+  textTrainingOutcome?: "success" | "error" | "cancelled";
+  textTrainingOutcomeDetail?: string;
 };
 
 export type PersistedChatSession = {
@@ -107,12 +112,6 @@ export type PendingFileTraining = {
   kbUuid: string;
   title: string;
   characterCount: number;
-};
-
-export type PendingTextTraining = {
-  kbUuid: string;
-  title: string;
-  text: string;
 };
 
 export type FileCountingProgress = {

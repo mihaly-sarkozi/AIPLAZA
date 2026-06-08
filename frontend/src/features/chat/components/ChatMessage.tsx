@@ -7,6 +7,9 @@ import { sanitizeMessage } from "../../../utils/sanitize";
 import { useLocaleSettings } from "../../settings/hooks/useSettings";
 import ChatFeedbackControls from "./message/ChatFeedbackControls";
 import ChatMessageBubble from "./message/ChatMessageBubble";
+import TextTrainingOutcomeIndicator from "./message/TextTrainingOutcomeIndicator";
+import TextTrainingPendingIndicator from "./message/TextTrainingPendingIndicator";
+import type { TextTrainingOutcome } from "../utils/textTrainingMessage";
 import ChatSourceModal from "./message/ChatSourceModal";
 import type { ChatSource, RestoredPiiSpan } from "./message/chatMessageTypes";
 import { downloadBlob, filenameFromContentDisposition, sourceDisplayName } from "../utils/chatMessageFormatting";
@@ -34,6 +37,12 @@ export type ChatMessageProps = {
   actionLabel?: string;
   actionHref?: string;
   progressPercent?: number | null;
+  textTrainingPending?: boolean;
+  textTrainingInProgress?: boolean;
+  textTrainingProgressPercent?: number;
+  textTrainingOutcome?: TextTrainingOutcome;
+  textTrainingOutcomeDetail?: string;
+  excludeFromAiContext?: boolean;
   sources?: ChatSource[];
 };
 
@@ -47,6 +56,12 @@ function ChatMessageInner({
   actionLabel,
   actionHref,
   progressPercent,
+  textTrainingPending,
+  textTrainingInProgress,
+  textTrainingProgressPercent,
+  textTrainingOutcome,
+  textTrainingOutcomeDetail,
+  excludeFromAiContext,
   queryRunId,
   sources = [],
   promptContext,
@@ -56,6 +71,7 @@ function ChatMessageInner({
   const { t, locale } = useTranslation();
   const { data: settings } = useLocaleSettings();
   const isUser = role === "user";
+  const isTrainingUserBubble = isUser && Boolean(excludeFromAiContext);
   const isTrainingStatus = role === "training-status";
   const [sourceLoadingId, setSourceLoadingId] = useState<string | null>(null);
   const [sourceModalOpen, setSourceModalOpen] = useState(false);
@@ -115,15 +131,39 @@ function ChatMessageInner({
     }
   };
 
+  const showTextTrainingOutcome = isUser && textTrainingOutcome && textTrainingOutcomeDetail;
+  const showTextTrainingPending =
+    isUser && Boolean(textTrainingPending) && !textTrainingOutcome && Boolean(textTrainingInProgress);
+  const pendingDetail =
+    typeof textTrainingProgressPercent === "number" && textTrainingProgressPercent > 0
+      ? t("chat.trainingProgressPercent").replace("{{percent}}", String(Math.round(textTrainingProgressPercent)))
+      : t("chat.trainingInProgress");
+
   return (
-    <div className="inline-flex max-w-[min(42rem,85%)] flex-col items-start">
-      <ChatMessageBubble
-        isUser={isUser}
-        isTrainingStatus={isTrainingStatus}
-        text={text}
-        progressPercent={progressPercent}
-        restoredPiiSpans={restoredPiiSpans}
-      />
+    <div className={`inline-flex max-w-[min(42rem,85%)] flex-col ${isUser ? "items-end" : "items-start"}`}>
+      <div className={`flex items-center gap-1.5 ${isUser ? "mr-4" : ""}`}>
+        <ChatMessageBubble
+          isUser={isUser}
+          isTrainingUserBubble={isTrainingUserBubble}
+          isTrainingStatus={isTrainingStatus}
+          text={text}
+          progressPercent={progressPercent}
+          restoredPiiSpans={restoredPiiSpans}
+          trainingContentLabel={isTrainingUserBubble ? t("chat.trainingContentPrefix") : undefined}
+        />
+        {showTextTrainingPending ? (
+          <TextTrainingPendingIndicator detail={pendingDetail} ariaLabel={pendingDetail} />
+        ) : null}
+        {showTextTrainingOutcome ? (
+          <TextTrainingOutcomeIndicator
+            outcome={textTrainingOutcome}
+            detail={textTrainingOutcomeDetail}
+            successLabel={t("chat.trainingLearned")}
+            errorLabel={t("chat.trainingErrorLabel")}
+            cancelledLabel={t("chat.trainingAborted")}
+          />
+        ) : null}
+      </div>
       {isTrainingStatus && actionLabel && actionHref ? (
         <a
           href={actionHref}

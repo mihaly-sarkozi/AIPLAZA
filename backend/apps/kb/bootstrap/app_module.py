@@ -33,6 +33,11 @@ class KbAppModule(BaseAppModule):
     key = module_key("kb")
 
     def register(self, container: ModuleContext) -> None:
+        from apps.kb.bootstrap.service_keys import KB_FILE_STORAGE
+        from infra.kb import MinioFileStorage
+
+        container.register_repository(KB_FILE_STORAGE, MinioFileStorage())
+
         for module in KB_MODULES:
             module.register_services(container)
 

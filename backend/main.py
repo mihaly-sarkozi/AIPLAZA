@@ -15,9 +15,15 @@ def _enable_debugpy_if_requested() -> None:
         return
 
     import sys
+    from multiprocessing import current_process
 
-    # Egyedi `python -c "from main import app"` / init script ne foglalja le a 5678-at.
-    if not any("uvicorn" in arg for arg in sys.argv):
+    proc_name = current_process().name
+    argv = " ".join(sys.argv)
+    # uvicorn --reload: a szülő csak figyel, a SpawnProcess-* worker szolgál ki.
+    if proc_name == "MainProcess" and "--reload" in argv:
+        return
+    # Egyszerű (nem reload) indítás vagy reload worker; egyéb script import ne listeneljen.
+    if proc_name == "MainProcess" and "uvicorn" not in argv:
         return
 
     import debugpy

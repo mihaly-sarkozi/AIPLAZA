@@ -4,9 +4,12 @@ from __future__ import annotations
 # Feladat: ORM rekordok → vékony training API válasz DTO-k.
 # Sárközi Mihály - 2026.06.07
 
+from datetime import datetime
+
+from apps.kb.kb_training.dto.TrainingBatchStatusResponse import TrainingBatchStatusResponse
 from apps.kb.kb_training.dto.TrainingBatchSummaryResponse import TrainingBatchSummaryResponse
 from apps.kb.kb_training.dto.TrainingItemSummaryResponse import TrainingItemSummaryResponse
-from apps.kb.kb_training.dto.TrainingSubmitResponse import TrainingSubmitResponse
+from apps.kb.kb_training.dto.TrainingTextResponse import TrainingTextResponse
 from apps.kb.kb_training.enums.TrainingBatchStatus import TrainingBatchStatus
 from apps.kb.kb_training.enums.TrainingErrorCode import TrainingErrorCode
 from apps.kb.kb_training.enums.TrainingItemStatus import TrainingItemStatus
@@ -62,10 +65,21 @@ def to_batch_summary_response(row: TrainingBatch, *, items: list[TrainingItem]) 
     )
 
 
+def _parse_char_count(value: object) -> int | None:
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    if isinstance(value, str) and value.strip().isdigit():
+        return int(value.strip())
+    return None
+
+
 def to_item_summary_response(row: TrainingItem) -> TrainingItemSummaryResponse:
     metadata = dict(row.metadata_json or {})
-    char_count = metadata.get("char_count")
-    parsed_char_count = int(char_count) if isinstance(char_count, int) else None
+    parsed_char_count = _parse_char_count(metadata.get("char_count"))
     return TrainingItemSummaryResponse(
         id=row.id,
         input_type=row.input_type,
@@ -77,12 +91,14 @@ def to_item_summary_response(row: TrainingItem) -> TrainingItemSummaryResponse:
     )
 
 
-def to_submit_response(
+def to_text_response(
     *,
     batch_id: str,
     status: TrainingBatchStatus,
+    created_at: datetime,
+    completed_at: datetime | None = None,
     items: list[TrainingItem] | None = None,
-) -> TrainingSubmitResponse:
+) -> TrainingTextResponse:
     item_rows = list(items or [])
     summaries = [to_item_summary_response(item) for item in item_rows]
     batch_size = len(summaries) if summaries else 1
@@ -90,21 +106,42 @@ def to_submit_response(
     failed_count = sum(1 for item in summaries if item.status == TrainingItemStatus.FAILED.value)
     duplicate_count = sum(1 for item in summaries if str(item.status) == "duplicate")
     rejected_count = sum(1 for item in summaries if item.status == TrainingItemStatus.REJECTED.value)
-    include_items = batch_size > 1 or failed_count > 0 or duplicate_count > 0 or rejected_count > 0
-    return TrainingSubmitResponse(
+    return TrainingTextResponse(
         batch_id=batch_id,
         status=status,
+        created_at=created_at,
+        completed_at=completed_at,
         batch_size=batch_size,
-        accepted_count=accepted_count or (1 if status == TrainingBatchStatus.COMPLETED and not include_items else 0),
+        accepted_count=accepted_count or (1 if status == TrainingBatchStatus.COMPLETED and batch_size == 1 else 0),
         failed_count=failed_count,
         duplicate_count=duplicate_count,
         rejected_count=rejected_count,
-        items=summaries if include_items else [],
+        items=summaries,
+    )
+
+
+def to_text_response_from_batch_status(status: TrainingBatchStatusResponse) -> TrainingTextResponse:
+    batch = status.batch
+    summaries = list(status.items)
+    batch_size = len(summaries) if summaries else max(int(batch.batch_size or 0), 1)
+    accepted_count = int(batch.accepted_count or 0)
+    return TrainingTextResponse(
+        batch_id=batch.id,
+        status=batch.status,
+        created_at=batch.created_at,
+        completed_at=batch.completed_at,
+        batch_size=batch_size,
+        accepted_count=accepted_count or (1 if batch.status == TrainingBatchStatus.COMPLETED else 0),
+        failed_count=int(batch.failed_count or 0),
+        duplicate_count=int(batch.duplicate_count or 0),
+        rejected_count=int(batch.rejected_count or 0),
+        items=summaries,
     )
 
 
 __all__ = [
     "to_batch_summary_response",
     "to_item_summary_response",
-    "to_submit_response",
+    "to_text_response",
+    "to_text_response_from_batch_status",
 ]

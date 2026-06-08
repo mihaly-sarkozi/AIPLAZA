@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 
 
 class TrainingTextRequest(BaseModel):
-    """Szöveges tanítás — opcionális cím és tartalom."""
+    """HTTP kérés a szöveges tanítás beküldésére (`TrainingTextResponse` párja)."""
     title: str | None = None
     content: str = Field(..., min_length=1)
 

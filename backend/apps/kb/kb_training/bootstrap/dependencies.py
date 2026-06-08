@@ -6,13 +6,12 @@ from __future__ import annotations
 
 from fastapi import Request
 
-from apps.kb.kb_training.bootstrap.service_keys import (
-    KB_TRAINING_REPOSITORY,
-    KB_TRAINING_STORAGE,
-)
+from apps.kb.bootstrap.service_keys import KB_FILE_STORAGE
+from apps.kb.kb_training.bootstrap.service_keys import KB_TRAINING_REPOSITORY
+from apps.kb.kb_reading.bootstrap.dependencies import get_estimate_files_service
 from apps.kb.kb_training.service.TrainingBatchService import TrainingBatchService
+from apps.kb.kb_training.service.TrainingFileService import TrainingFileService
 from apps.kb.kb_training.service.TrainingTextService import TrainingTextService
-from apps.kb.kb_training.storage.TrainingRawWriter import TrainingRawWriter
 from core.kernel.http.app_dependencies import get_module_repository
 from core.modules.auth.web.dependencies.auth_dependencies import require_permission
 
@@ -20,10 +19,16 @@ require_kb_train = require_permission("kb.train")
 
 
 def get_training_text_service(request: Request) -> TrainingTextService:
-    storage = get_module_repository(KB_TRAINING_STORAGE, request)
     return TrainingTextService(
         repository=get_module_repository(KB_TRAINING_REPOSITORY, request),
-        raw_writer=TrainingRawWriter(storage=storage),
+        file_storage=get_module_repository(KB_FILE_STORAGE, request),
+    )
+
+
+def get_training_file_service(request: Request) -> TrainingFileService:
+    return TrainingFileService(
+        repository=get_module_repository(KB_TRAINING_REPOSITORY, request),
+        file_storage=get_module_repository(KB_FILE_STORAGE, request),
     )
 
 
@@ -34,7 +39,9 @@ def get_training_batch_service(request: Request) -> TrainingBatchService:
 
 
 __all__ = [
+    "get_estimate_files_service",
     "get_training_batch_service",
+    "get_training_file_service",
     "get_training_text_service",
     "require_kb_train",
 ]

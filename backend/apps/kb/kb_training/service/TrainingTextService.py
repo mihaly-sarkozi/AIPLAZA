@@ -7,16 +7,18 @@ from __future__ import annotations
 # Technikai adósság: a nyers anyag storage írás a DB commit előtt történik.
 # DB hiba esetén árva raw file maradhat — később: pending DB → storage → accepted.
 
+from apps.kb.ports.FileStorageInterface import FileStorageInterface
+from apps.kb.kb_training.config import MetricsConf
 from apps.kb.kb_training.config.TrainingConf import DEFAULT_TRAINING_CONFIG, TrainingConfig
-from apps.kb.kb_training.dto.TextTrainingBatchSave import TextTrainingBatchSave
+from apps.kb.kb_training.dto.TrainingTextBatchSave import TrainingTextBatchSave
 from apps.kb.kb_training.dto.TrainingTextRequest import TrainingTextRequest
 from apps.kb.kb_training.dto.TrainingTextResult import TrainingTextResult
 from apps.kb.kb_training.enums.TrainingBatchStatus import TrainingBatchStatus
+from apps.kb.kb_training.enums.TrainingMetric import TrainingMetric
 from apps.kb.kb_training.errors.TrainingDuplicateError import TrainingDuplicateError
 from apps.kb.kb_training.errors.TrainingQueueUnavailableError import TrainingQueueUnavailableError
 from apps.kb.kb_training.events.understanding_requested_event import add_understanding_requested_event
 from apps.kb.kb_training.repository.TrainingRepository import TrainingRepository
-from apps.kb.kb_training.storage.TrainingRawWriter import TrainingRawWriter
 from apps.kb.kb_training.validation.ValidateText import validate_text
 from apps.kb.kb_training.validation.ValidateTitle import normalize_title
 from apps.kb.shared.ids import new_id
@@ -29,11 +31,11 @@ class TrainingTextService:
         self,
         *,
         repository: TrainingRepository,
-        raw_writer: TrainingRawWriter,
+        file_storage: FileStorageInterface,
         config: TrainingConfig | None = None,
     ) -> None:
         self._repository = repository
-        self._raw_writer = raw_writer
+        self._file_storage = file_storage
         self._config = config or DEFAULT_TRAINING_CONFIG
 
     async def submit_text_training(
@@ -57,16 +59,17 @@ class TrainingTextService:
 
         batch_id = new_id("training_batch")
         item_id = new_id("training_item")
-        raw_ref = self._raw_writer.write_text(
+        raw_ref = self._file_storage.store_text(
             tenant=tenant,
             knowledge_base_id=knowledge_base_id,
             training_batch_id=batch_id,
             training_item_id=item_id,
             content=text,
         )
+        MetricsConf.increment(TrainingMetric.STORAGE_WRITE, input_type="text")
 
         ingest = self._repository.save_training_text_batch(
-            TextTrainingBatchSave(
+            TrainingTextBatchSave(
                 batch_id=batch_id,
                 item_id=item_id,
                 tenant=tenant,
@@ -98,6 +101,8 @@ class TrainingTextService:
         return TrainingTextResult(
             training_batch_id=ingest.batch_id,
             status=TrainingBatchStatus.COMPLETED,
+            created_at=ingest.created_at,
+            completed_at=ingest.completed_at,
         )
 
 

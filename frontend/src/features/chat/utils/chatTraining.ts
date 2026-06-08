@@ -1,11 +1,30 @@
-import { numberValue } from "./chatNumbers";
+import { formatInteger, numberValue } from "./chatNumbers";
 
 export function exactTrainingCharCount(
-  run: { metadata?: Record<string, unknown>; items?: Array<{ metadata?: Record<string, unknown> }> } | null | undefined
+  run:
+    | {
+        metadata?: Record<string, unknown>;
+        items?: Array<{ metadata?: Record<string, unknown>; char_count?: unknown }>;
+      }
+    | null
+    | undefined
 ): number {
   const total = numberValue(run?.metadata?.total_char_count);
   if (total > 0) return total;
-  return (run?.items ?? []).reduce((sum, item) => sum + numberValue(item.metadata?.char_count), 0);
+  return (run?.items ?? []).reduce((sum, item) => {
+    const fromMetadata = numberValue(item.metadata?.char_count);
+    if (fromMetadata > 0) return sum + fromMetadata;
+    return sum + numberValue(item.char_count);
+  }, 0);
+}
+
+export function resolveTrainingCharCount(
+  run: Parameters<typeof exactTrainingCharCount>[0],
+  fallbackCount?: number
+): number {
+  const fromRun = exactTrainingCharCount(run);
+  if (fromRun > 0) return fromRun;
+  return Math.max(0, numberValue(fallbackCount));
 }
 
 export function isDuplicateOnlyTrainingRun(
@@ -54,6 +73,16 @@ export function estimatedTrainingProgress(elapsedMs: number, durationMs: number)
   }
   const overtimeRatio = Math.min(1, ratio - 1);
   return Math.round(94 + overtimeRatio * 5);
+}
+
+export function buildTrainingSuccessDetail(
+  charCount: number,
+  locale: string,
+  t: (key: string) => string
+): string {
+  const base = t("chat.trainingCompletedPercent");
+  if (charCount <= 0) return base;
+  return `${base} ${t("chat.fileCharacterCount").replace("{{count}}", formatInteger(charCount, locale))}`;
 }
 
 export function combineTrainingProgress(actualProgress: number, visualProgress: number): number {

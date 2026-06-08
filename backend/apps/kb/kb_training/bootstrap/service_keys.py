@@ -7,9 +7,7 @@ from __future__ import annotations
 from core.kernel.interface.app_keys import module_service_key
 
 KB_TRAINING_REPOSITORY = module_service_key("kb", "training.repository")
-KB_TRAINING_STORAGE = module_service_key("kb", "training.storage")
 
 __all__ = [
     "KB_TRAINING_REPOSITORY",
-    "KB_TRAINING_STORAGE",
 ]

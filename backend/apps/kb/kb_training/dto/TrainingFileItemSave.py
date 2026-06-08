@@ -5,12 +5,8 @@ from typing import Any
 
 
 @dataclass(frozen=True)
-class TextTrainingBatchSave:
-    batch_id: str
+class TrainingFileItemSave:
     item_id: str
-    tenant: str
-    knowledge_base_id: str
-    created_by: int
     content_hash: str
     title: str
     raw_ref: str
@@ -19,4 +15,4 @@ class TextTrainingBatchSave:
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
-__all__ = ["TextTrainingBatchSave"]
+__all__ = ["TrainingFileItemSave"]

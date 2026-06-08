@@ -17,6 +17,7 @@ COPY backend/pyproject.toml ./pyproject.toml
 COPY backend/apps ./apps
 COPY backend/config ./config
 COPY backend/core ./core
+COPY backend/infra ./infra
 COPY backend/lang ./lang
 COPY backend/main.py ./main.py
 COPY backend/scripts ./scripts

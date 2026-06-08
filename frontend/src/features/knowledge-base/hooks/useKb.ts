@@ -189,6 +189,7 @@ function useStoreCreatedIngestRun() {
       (previous) => insertIngestRunIntoInfiniteCache(previous, run)
     );
     queryClient.invalidateQueries({ queryKey: queryKeys.kbIngestRuns(run.corpus_uuid) });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.kbIngestRun(run.id) });
   };
 }
 

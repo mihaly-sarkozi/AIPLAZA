@@ -57,9 +57,11 @@ export type TrainingBatchSummaryApi = {
   progress?: Record<string, unknown> | null;
 };
 
-export type TrainingSubmitResponse = {
+export type TrainingTextResponse = {
   batch_id: string;
   status: string;
+  created_at: string;
+  completed_at?: string | null;
   batch_size?: number;
   accepted_count?: number;
   failed_count?: number;

@@ -7,7 +7,8 @@ import { sanitizeMessage } from "../../../utils/sanitize";
 import { useCreateFileIngestMutation, useCreateTextIngestMutation, useIngestRun } from "../../knowledge-base/hooks/useKb";
 import { estimateFileIngestRun } from "../../knowledge-base/services";
 import { getTrainingRunRefetchInterval, isTrainingActive } from "../../knowledge-base/utils/trainingProgress";
-import type { ChatMessageType, FileCountingProgress, PendingFileTraining, PendingTextTraining } from "../types";
+import type { IngestRun } from "../../knowledge-base/services";
+import type { ChatMessageType, FileCountingProgress, PendingFileTraining } from "../types";
 import { formatInteger, numberValue } from "../utils/chatNumbers";
 import { useTrainingProgressTimers } from "./useTrainingProgressTimers";
 import { useTrainingRunEffects } from "./useTrainingRunEffects";
@@ -18,7 +19,6 @@ type UseChatTrainingFlowOptions = {
   billingOverview: { usage?: Record<string, unknown>; limits?: Record<string, unknown> } | null | undefined;
   inputDraft: string;
   pendingFileTraining: PendingFileTraining | null;
-  pendingTextTraining: PendingTextTraining | null;
   fileEstimateLoading: boolean;
   activeTrainingRunId: string | undefined;
   activeTrainingTitle: string | null;
@@ -29,11 +29,16 @@ type UseChatTrainingFlowOptions = {
   trainingEstimatedDurationMsRef: MutableRefObject<number | null>;
   setUser: (user: ReturnType<typeof useAuthStore.getState>["user"]) => void;
   appendMessage: (message: ChatMessageType) => void;
+  patchTextTrainingUserMessage: (patch: {
+    textTrainingOutcome: "success" | "error" | "cancelled";
+    textTrainingOutcomeDetail?: string;
+    trainingRun?: IngestRun | null;
+  }) => void;
+  patchTextTrainingCharacterCount: (characterCount: number) => void;
   setInputDraft: (value: string) => void;
   setFileEstimateLoading: (value: boolean) => void;
   setFileCountingProgress: Dispatch<SetStateAction<FileCountingProgress | null>>;
   setPendingFileTraining: (value: PendingFileTraining | null) => void;
-  setPendingTextTraining: (value: PendingTextTraining | null) => void;
   setActiveTrainingRunId: (value: string | undefined) => void;
   setActiveTrainingTitle: (value: string | null) => void;
   setTrainingVisualProgress: Dispatch<SetStateAction<number>>;
@@ -49,7 +54,6 @@ export function useChatTrainingFlow({
   billingOverview,
   inputDraft,
   pendingFileTraining,
-  pendingTextTraining,
   fileEstimateLoading,
   activeTrainingRunId,
   activeTrainingTitle,
@@ -60,11 +64,12 @@ export function useChatTrainingFlow({
   trainingEstimatedDurationMsRef,
   setUser,
   appendMessage,
+  patchTextTrainingUserMessage,
+  patchTextTrainingCharacterCount,
   setInputDraft,
   setFileEstimateLoading,
   setFileCountingProgress,
   setPendingFileTraining,
-  setPendingTextTraining,
   setActiveTrainingRunId,
   setActiveTrainingTitle,
   setTrainingVisualProgress,
@@ -79,7 +84,7 @@ export function useChatTrainingFlow({
     refetchInterval: ({ state }) => getTrainingRunRefetchInterval(state.data?.status),
   });
   const activeTrainingRun = activeTrainingRunQuery.data;
-  const pendingTrainingConfirmation = pendingFileTraining !== null || pendingTextTraining !== null;
+  const pendingTrainingConfirmation = pendingFileTraining !== null;
   const trainingOperationRunning =
     fileEstimateLoading ||
     createTextMutation.isPending ||
@@ -99,12 +104,12 @@ export function useChatTrainingFlow({
     activeTrainingRunQuery,
     activeTrainingRunId,
     activeTrainingTitle,
-    locale,
     inputRef,
     trainingStartedAtRef,
     trainingEstimatedDurationMsRef,
     setUser,
     appendMessage,
+    patchTextTrainingUserMessage,
     setActiveTrainingRunId,
     setActiveTrainingTitle,
     setTrainingVisualProgress,
@@ -126,7 +131,7 @@ export function useChatTrainingFlow({
       return;
     }
     const title = file.name;
-    appendMessage({ role: "user", text: title, excludeFromAiContext: true });
+    appendMessage({ role: "user", text: title, excludeFromAiContext: true, textTrainingPending: true });
     setFileEstimateLoading(true);
     startFileCountingProgress(file);
     try {
@@ -137,6 +142,10 @@ export function useChatTrainingFlow({
       const charCountText = formatInteger(exactCharCount, locale);
       if (!estimate.can_start) {
         const reason = t("chat.fileTrainingQuotaBlocked");
+        patchTextTrainingUserMessage({
+          textTrainingOutcome: "error",
+          textTrainingOutcomeDetail: `${t("chat.trainingCannotStart")}: ${reason}`,
+        });
         appendMessage({
           role: "training-status",
           text: `${t("chat.fileCharacterCount").replace("{{count}}", charCountText)} ${t("chat.trainingCannotStart")}: ${reason}`,
@@ -144,20 +153,16 @@ export function useChatTrainingFlow({
           actionHref: "/admin/pricing",
         });
         toast.error(reason);
-        appendMessage({ role: "training-status", text: t("chat.trainingAborted") });
         if (trainFileRef.current) trainFileRef.current.value = "";
         return;
       }
-      appendMessage({
-        role: "training-status",
-        text: `${t("chat.fileCharacterCount").replace("{{count}}", charCountText)} ${t("chat.trainingStartQuestion")}`,
-      });
+      patchTextTrainingCharacterCount(exactCharCount);
       setPendingFileTraining({ file, kbUuid: effectiveTrainKbUuid, title, characterCount: exactCharCount });
     } catch (error) {
       stopFileCountingProgress();
       const message = getApiErrorMessage(error) ?? t("chat.fileEstimateError");
       toast.error(message);
-      appendMessage({ role: "training-status", text: t("chat.trainingAborted") });
+      patchTextTrainingUserMessage({ textTrainingOutcome: "error", textTrainingOutcomeDetail: message });
       if (trainFileRef.current) trainFileRef.current.value = "";
       return;
     } finally {
@@ -185,8 +190,17 @@ export function useChatTrainingFlow({
           setActiveTrainingTitle(null);
           stopTrainingProgress();
           setTrainingVisualProgress(0);
-          toast.error(getApiErrorMessage(error) ?? t("chat.fileTrainingStartError"));
-          appendMessage({ role: "training-status", text: t("chat.trainingAborted") });
+          if (isDuplicateContentError(error)) {
+            const detail = getApiErrorMessage(error) ?? t("kb.errorDuplicateContent");
+            patchTextTrainingUserMessage({
+              textTrainingOutcome: "error",
+              textTrainingOutcomeDetail: `${t("chat.trainingAborted")} ${detail}`,
+            });
+          } else {
+            const detail = getApiErrorMessage(error) ?? t("chat.fileTrainingStartError");
+            toast.error(detail);
+            patchTextTrainingUserMessage({ textTrainingOutcome: "error", textTrainingOutcomeDetail: detail });
+          }
         },
       }
     );
@@ -195,18 +209,18 @@ export function useChatTrainingFlow({
 
   const cancelPendingFileTraining = () => {
     setPendingFileTraining(null);
-    appendMessage({ role: "training-status", text: t("chat.trainingAborted") });
+    patchTextTrainingUserMessage({
+      textTrainingOutcome: "cancelled",
+      textTrainingOutcomeDetail: t("chat.trainingAborted"),
+    });
     if (trainFileRef.current) trainFileRef.current.value = "";
   };
 
-  const startPendingTextTraining = () => {
-    if (!pendingTextTraining) return;
-    const pending = pendingTextTraining;
-    setPendingTextTraining(null);
+  const startTextTraining = (kbUuid: string, text: string) => {
     setActiveTrainingTitle(t("chat.textTrainingLabel"));
-    startTrainingProgress(pending.text.length);
+    startTrainingProgress(text.length);
     createTextMutation.mutate(
-      { kbUuid: pending.kbUuid, text: pending.text, title: pending.title },
+      { kbUuid, text },
       {
         onSuccess: (run) => {
           setActiveTrainingRunId(run.id);
@@ -217,25 +231,16 @@ export function useChatTrainingFlow({
           setActiveTrainingTitle(null);
           stopTrainingProgress();
           setTrainingVisualProgress(0);
-          if (isDuplicateContentError(error)) {
-            const detail = getApiErrorMessage(error) ?? t("kb.errorDuplicateContent");
-            appendMessage({
-              role: "training-status",
-              text: `${t("chat.trainingAborted")} ${detail}`,
-            });
-          } else {
-            toast.error(getApiErrorMessage(error) ?? t("chat.textTrainingStartError"));
-            appendMessage({ role: "training-status", text: t("chat.trainingAborted") });
+          const detail = isDuplicateContentError(error)
+            ? `${t("chat.trainingAborted")} ${getApiErrorMessage(error) ?? t("kb.errorDuplicateContent")}`
+            : getApiErrorMessage(error) ?? t("chat.textTrainingStartError");
+          patchTextTrainingUserMessage({ textTrainingOutcome: "error", textTrainingOutcomeDetail: detail });
+          if (!isDuplicateContentError(error)) {
+            toast.error(detail);
           }
         },
       }
     );
-  };
-
-  const cancelPendingTextTraining = () => {
-    setPendingTextTraining(null);
-    appendMessage({ role: "training-status", text: t("chat.trainingAborted") });
-    setTimeout(() => inputRef.current?.focus(), 50);
   };
 
   const onSubmitTextTraining = () => {
@@ -247,31 +252,35 @@ export function useChatTrainingFlow({
     }
     const title = sanitizeMessage(value);
     const charCount = value.length;
-    const charCountText = formatInteger(charCount, locale);
     setInputDraft("");
-    appendMessage({ role: "user", text: title, excludeFromAiContext: true });
+    appendMessage({
+      role: "user",
+      text: title,
+      excludeFromAiContext: true,
+      textTrainingPending: true,
+      textTrainingCharacterCount: charCount,
+    });
     const training = ((billingOverview?.usage ?? {}).training as Record<string, unknown> | undefined) ?? {};
     const limits = billingOverview?.limits ?? {};
     const used = numberValue(training.trained_chars);
     const total = numberValue(training.available_training_chars ?? limits.training_chars_available);
     if (total > 0 && Math.max(0, total - used) < charCount) {
       const reason = t("chat.fileTrainingQuotaBlocked");
+      patchTextTrainingUserMessage({
+        textTrainingOutcome: "error",
+        textTrainingOutcomeDetail: `${t("chat.trainingCannotStart")}: ${reason}`,
+      });
       appendMessage({
         role: "training-status",
-        text: `${t("chat.fileCharacterCount").replace("{{count}}", charCountText)} ${t("chat.trainingCannotStart")}: ${reason}`,
+        text: `${t("chat.trainingCannotStart")}: ${reason}`,
         actionLabel: t("chat.expandTrainingQuota"),
         actionHref: "/admin/pricing",
       });
       toast.error(reason);
-      appendMessage({ role: "training-status", text: t("chat.trainingAborted") });
       setTimeout(() => inputRef.current?.focus(), 50);
       return;
     }
-    appendMessage({
-      role: "training-status",
-      text: `${t("chat.fileCharacterCount").replace("{{count}}", charCountText)} ${t("chat.trainingStartQuestion")}`,
-    });
-    setPendingTextTraining({ kbUuid: effectiveTrainKbUuid, title: t("chat.textTrainingTitle"), text: value });
+    startTextTraining(effectiveTrainKbUuid, value);
   };
 
   return {
@@ -281,8 +290,6 @@ export function useChatTrainingFlow({
     onSelectTrainingFile,
     startPendingFileTraining,
     cancelPendingFileTraining,
-    startPendingTextTraining,
-    cancelPendingTextTraining,
     onSubmitTextTraining,
   };
 }

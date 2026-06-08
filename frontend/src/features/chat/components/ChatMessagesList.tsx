@@ -2,7 +2,6 @@ import type { RefObject } from "react";
 
 import type { ChatMessageType, FileCountingProgress } from "../types";
 import ChatMessage from "./ChatMessage";
-import TrainingConfirmationPanel from "./TrainingConfirmationPanel";
 
 type ChatMessagesListProps = {
   contextNotice: string | null;
@@ -11,12 +10,6 @@ type ChatMessagesListProps = {
   fileCountingProgress: FileCountingProgress | null;
   activeTrainingTitle: string | null;
   displayedTrainingProgress: number;
-  pendingTrainingConfirmation: boolean;
-  pendingFileTraining: boolean;
-  onCancelPendingFileTraining: () => void;
-  onCancelPendingTextTraining: () => void;
-  onStartPendingFileTraining: () => void;
-  onStartPendingTextTraining: () => void;
   messagesEndRef: RefObject<HTMLDivElement | null>;
   emptyStateKey?: string;
   t: (key: string) => string;
@@ -29,16 +22,14 @@ export default function ChatMessagesList({
   fileCountingProgress,
   activeTrainingTitle,
   displayedTrainingProgress,
-  pendingTrainingConfirmation,
-  pendingFileTraining,
-  onCancelPendingFileTraining,
-  onCancelPendingTextTraining,
-  onStartPendingFileTraining,
-  onStartPendingTextTraining,
   messagesEndRef,
   emptyStateKey = "chat.emptyState",
   t,
 }: ChatMessagesListProps) {
+  const activePendingTrainingIndex = messages.findLastIndex(
+    (msg) => msg.textTrainingPending && !msg.textTrainingOutcome
+  );
+
   return (
     <>
       {contextNotice ? (
@@ -72,6 +63,12 @@ export default function ChatMessagesList({
                   actionLabel={msg.actionLabel}
                   actionHref={msg.actionHref}
                   progressPercent={msg.progressPercent}
+                  textTrainingPending={msg.textTrainingPending}
+                  textTrainingInProgress={index === activePendingTrainingIndex && activeTrainingTitle !== null}
+                  textTrainingProgressPercent={displayedTrainingProgress}
+                  textTrainingOutcome={msg.textTrainingOutcome}
+                  textTrainingOutcomeDetail={msg.textTrainingOutcomeDetail}
+                  excludeFromAiContext={msg.excludeFromAiContext}
                   sources={msg.sources}
                   promptContext={msg.promptContext}
                   debug={msg.debug}
@@ -93,30 +90,6 @@ export default function ChatMessagesList({
                 </div>
               </div>
             </div>
-          ) : null}
-          {activeTrainingTitle ? (
-            <div className="mx-auto flex max-w-3xl items-start px-2 mb-[1px]">
-              <div className="flex w-full justify-end">
-                <div className="mr-4 flex w-[120px] flex-col items-center gap-1">
-                  <div className="h-1 w-full overflow-hidden rounded-full bg-[var(--color-border)]">
-                    <div
-                      className="h-full rounded-full bg-[var(--color-primary)] transition-all duration-300"
-                      style={{ width: `${Math.max(0, Math.min(100, Math.round(displayedTrainingProgress)))}%` }}
-                    />
-                  </div>
-                  <span className="text-xs font-medium text-[var(--color-muted)]">
-                    Tanítás {Math.max(0, Math.min(100, Math.round(displayedTrainingProgress)))}%
-                  </span>
-                </div>
-              </div>
-            </div>
-          ) : null}
-          {pendingTrainingConfirmation ? (
-            <TrainingConfirmationPanel
-              onCancel={pendingFileTraining ? onCancelPendingFileTraining : onCancelPendingTextTraining}
-              onConfirm={pendingFileTraining ? onStartPendingFileTraining : onStartPendingTextTraining}
-              t={t}
-            />
           ) : null}
           <div ref={messagesEndRef} />
         </div>

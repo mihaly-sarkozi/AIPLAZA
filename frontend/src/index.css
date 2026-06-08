@@ -136,6 +136,16 @@ input:focus, textarea:focus, select:focus {
   --tw-ring-color: transparent !important;
 }
 
+.chat-training-user-bubble {
+  background-color: #e2e8f0;
+  border: 1px solid var(--color-border);
+  color: var(--color-foreground);
+}
+
+.dark .chat-training-user-bubble {
+  background-color: #1e293b;
+}
+
 input[type="checkbox"]:focus {
   outline: none !important;
   box-shadow: none !important;

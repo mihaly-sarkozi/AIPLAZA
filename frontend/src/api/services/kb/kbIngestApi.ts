@@ -1,6 +1,13 @@
 import api from "../../axiosClient";
-import { getTrainingBatch, submitTextTraining, trainingSubmitToIngestRun } from "./kbTrainingApi";
-import type { FileIngestEstimate, IngestRun, IngestRunListResponse, TrainingSubmitResponse } from "./types";
+import {
+  estimateFileTraining,
+  getTrainingBatch,
+  submitFileTraining,
+  submitTextTraining,
+  trainingFileResponseToIngestRun,
+  trainingTextResponseToIngestRun,
+} from "./kbTrainingApi";
+import type { FileIngestEstimate, IngestRun, IngestRunListResponse, TrainingTextResponse } from "./types";
 
 /** @deprecated Használd a `submitTextTraining` függvényt a `kbTrainingApi`-ból. */
 export async function createTextIngestRun(
@@ -8,27 +15,26 @@ export async function createTextIngestRun(
   body: { content: string; title?: string | null }
 ): Promise<IngestRun> {
   const res = await api.post(`/kb/${kbUuid}/training/text`, body);
-  return trainingSubmitToIngestRun(res.data as TrainingSubmitResponse, kbUuid);
+  return trainingTextResponseToIngestRun(res.data as TrainingTextResponse, kbUuid);
 }
 
-export { getTrainingBatch, submitTextTraining };
+export { estimateFileTraining, getTrainingBatch, submitFileTraining, submitTextTraining };
 
-export async function createFileIngestRun(kbUuid: string, files: File[], characterCounts?: number[]): Promise<IngestRun> {
-  const form = new FormData();
-  files.forEach((file, index) => {
-    form.append("files", file);
-    const count = Math.max(0, Math.round(Number(characterCounts?.[index] ?? 0)));
-    if (count > 0) form.append("character_counts", String(count));
-  });
-  const res = await api.post(`/kb/${kbUuid}/ingest/files`, form);
-  return res.data as IngestRun;
-}
-
-export async function estimateFileIngestRun(kbUuid: string, files: File[]): Promise<FileIngestEstimate> {
+/** @deprecated Használd a `submitFileTraining` függvényt a `kbTrainingApi`-ból. */
+export async function createFileIngestRun(
+  kbUuid: string,
+  files: File[],
+  _characterCounts?: number[]
+): Promise<IngestRun> {
   const form = new FormData();
   files.forEach((file) => form.append("files", file));
-  const res = await api.post(`/kb/${kbUuid}/ingest/files/estimate`, form);
-  return res.data as FileIngestEstimate;
+  const res = await api.post(`/kb/${kbUuid}/training/files`, form);
+  return trainingFileResponseToIngestRun(res.data as TrainingTextResponse, kbUuid);
+}
+
+/** @deprecated Használd az `estimateFileTraining` függvényt a `kbTrainingApi`-ból. */
+export async function estimateFileIngestRun(kbUuid: string, files: File[]): Promise<FileIngestEstimate> {
+  return estimateFileTraining(kbUuid, files);
 }
 
 export async function createUrlIngestRun(

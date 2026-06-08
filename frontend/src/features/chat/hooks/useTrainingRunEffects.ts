@@ -5,8 +5,7 @@ import { getApiErrorMessage } from "../../../utils/getApiErrorMessage";
 import type { useIngestRun } from "../../knowledge-base/hooks/useKb";
 import { getTrainingFailureMessage, isTrainingActive } from "../../knowledge-base/utils/trainingProgress";
 import type { ChatMessageType } from "../types";
-import { formatInteger } from "../utils/chatNumbers";
-import { estimatedTrainingProgress, exactTrainingCharCount, isDuplicateOnlyTrainingRun } from "../utils/chatTraining";
+import { estimatedTrainingProgress, isDuplicateOnlyTrainingRun } from "../utils/chatTraining";
 
 const TRAINING_STALE_TIMEOUT_MS = 5 * 60 * 1000;
 
@@ -15,12 +14,16 @@ type UseTrainingRunEffectsOptions = {
   activeTrainingRunQuery: { isError: boolean; error: unknown };
   activeTrainingRunId: string | undefined;
   activeTrainingTitle: string | null;
-  locale: string;
   inputRef: RefObject<HTMLInputElement | null>;
   trainingStartedAtRef: React.MutableRefObject<number | null>;
   trainingEstimatedDurationMsRef: React.MutableRefObject<number | null>;
   setUser: (user: ReturnType<typeof useAuthStore.getState>["user"]) => void;
   appendMessage: (message: ChatMessageType) => void;
+  patchTextTrainingUserMessage: (patch: {
+    textTrainingOutcome: "success" | "error" | "cancelled";
+    textTrainingOutcomeDetail?: string;
+    trainingRun?: ReturnType<typeof useIngestRun>["data"];
+  }) => void;
   setActiveTrainingRunId: (value: string | undefined) => void;
   setActiveTrainingTitle: (value: string | null) => void;
   setTrainingVisualProgress: React.Dispatch<React.SetStateAction<number>>;
@@ -36,12 +39,12 @@ export function useTrainingRunEffects({
   activeTrainingRunQuery,
   activeTrainingRunId,
   activeTrainingTitle,
-  locale,
   inputRef,
   trainingStartedAtRef,
   trainingEstimatedDurationMsRef,
   setUser,
   appendMessage,
+  patchTextTrainingUserMessage,
   setActiveTrainingRunId,
   setActiveTrainingTitle,
   setTrainingVisualProgress,
@@ -77,7 +80,10 @@ export function useTrainingRunEffects({
     const ageMs = Number.isFinite(lastUpdatedAtMs) ? Math.max(0, Date.now() - lastUpdatedAtMs) : 0;
     const waitMs = Math.max(10_000, TRAINING_STALE_TIMEOUT_MS - ageMs);
     staleTrainingTimeoutRef.current = window.setTimeout(() => {
-      appendMessage({ role: "training-status", text: t("chat.trainingStaleWarning") });
+      patchTextTrainingUserMessage({
+        textTrainingOutcome: "error",
+        textTrainingOutcomeDetail: t("chat.trainingStaleWarning"),
+      });
       setActiveTrainingRunId(undefined);
       setActiveTrainingTitle(null);
       stopTrainingProgress();
@@ -93,6 +99,7 @@ export function useTrainingRunEffects({
     appendMessage,
     clearStaleTrainingTimeout,
     flushPersistToDisk,
+    patchTextTrainingUserMessage,
     refreshBillingCounters,
     refreshKnowledgeBaseList,
     setActiveTrainingRunId,
@@ -110,21 +117,20 @@ export function useTrainingRunEffects({
       const user = useAuthStore.getState().user;
       if (user && user.tenant_kb_has_training !== true) setUser({ ...user, tenant_kb_has_training: true });
       if (isDuplicateOnlyTrainingRun(activeTrainingRun)) {
-        appendMessage({ role: "training-status", text: t("chat.trainingAlreadyLoaded") });
+        patchTextTrainingUserMessage({
+          textTrainingOutcome: "error",
+          textTrainingOutcomeDetail: t("chat.trainingAlreadyLoaded"),
+        });
       } else {
-        const exactCharText = exactTrainingCharCount(activeTrainingRun);
-        const exactCharMessage =
-          exactCharText > 0 ? ` ${t("chat.fileCharacterCount").replace("{{count}}", formatInteger(exactCharText, locale))}` : "";
-        appendMessage({
-          role: "training-status",
-          text: `Tanítás: ${
-            activeTrainingRun.status === "partial_success" ? t("chat.trainingStatusPartialSuccess") : t("chat.trainingStatusCompleted")
-          } 100%.${exactCharMessage}`,
+        patchTextTrainingUserMessage({
+          textTrainingOutcome: "success",
+          trainingRun: activeTrainingRun,
         });
       }
       refreshKnowledgeBaseList();
     } else {
-      appendMessage({ role: "assistant", text: getTrainingFailureMessage(activeTrainingRun, t) ?? t("chat.trainingFailed") });
+      const failureMessage = getTrainingFailureMessage(activeTrainingRun, t) ?? t("chat.trainingFailed");
+      patchTextTrainingUserMessage({ textTrainingOutcome: "error", textTrainingOutcomeDetail: failureMessage });
     }
     setActiveTrainingRunId(undefined);
     setActiveTrainingTitle(null);
@@ -139,7 +145,7 @@ export function useTrainingRunEffects({
     appendMessage,
     flushPersistToDisk,
     inputRef,
-    locale,
+    patchTextTrainingUserMessage,
     refreshBillingCounters,
     refreshKnowledgeBaseList,
     setActiveTrainingRunId,
@@ -154,7 +160,8 @@ export function useTrainingRunEffects({
     if (!activeTrainingRunId || !activeTrainingRunQuery.isError) return;
     if (handledTrainingErrorRunIdRef.current === activeTrainingRunId) return;
     handledTrainingErrorRunIdRef.current = activeTrainingRunId;
-    appendMessage({ role: "assistant", text: getApiErrorMessage(activeTrainingRunQuery.error) ?? t("chat.trainingFailed") });
+    const pollError = getApiErrorMessage(activeTrainingRunQuery.error) ?? t("chat.trainingFailed");
+    patchTextTrainingUserMessage({ textTrainingOutcome: "error", textTrainingOutcomeDetail: pollError });
     setActiveTrainingRunId(undefined);
     setActiveTrainingTitle(null);
     stopTrainingProgress();
@@ -165,8 +172,10 @@ export function useTrainingRunEffects({
     activeTrainingRunId,
     activeTrainingRunQuery.error,
     activeTrainingRunQuery.isError,
+    activeTrainingRun,
     appendMessage,
     inputRef,
+    patchTextTrainingUserMessage,
     refreshBillingCounters,
     setActiveTrainingRunId,
     setActiveTrainingTitle,

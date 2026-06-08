@@ -3,7 +3,7 @@ import type {
   IngestRun,
   TrainingBatchStatusResponse,
   TrainingItemSummaryApi,
-  TrainingSubmitResponse,
+  TrainingTextResponse,
 } from "./types";
 
 function mapTrainingItem(item: TrainingItemSummaryApi, index: number, batchId: string, kbId: string): IngestItem {
@@ -38,6 +38,8 @@ function completedCountFromBatch(batch: TrainingBatchStatusResponse["batch"]): n
 export function normalizeTrainingBatchStatus(data: TrainingBatchStatusResponse): IngestRun {
   const batch = data.batch;
   const progress = batch.progress ?? undefined;
+  const items = (data.items ?? []).map((item, index) => mapTrainingItem(item, index, batch.id, batch.knowledge_base_id));
+  const totalCharCount = (data.items ?? []).reduce((sum, item) => sum + (item.char_count ?? 0), 0);
   return {
     id: batch.id,
     corpus_uuid: batch.knowledge_base_id,
@@ -56,19 +58,40 @@ export function normalizeTrainingBatchStatus(data: TrainingBatchStatusResponse):
     completed_at: batch.completed_at ?? null,
     updated_at: batch.completed_at ?? batch.created_at,
     created_by: undefined,
-    metadata: progress ? { progress_summary: progress } : {},
-    items: (data.items ?? []).map((item, index) => mapTrainingItem(item, index, batch.id, batch.knowledge_base_id)),
+    metadata: {
+      ...(progress ? { progress_summary: progress } : {}),
+      ...(totalCharCount > 0 ? { total_char_count: totalCharCount } : {}),
+    },
+    items,
     events: [],
   };
 }
 
-export function normalizeTrainingSubmit(
-  data: TrainingSubmitResponse,
+export function normalizeTrainingTextResponse(
+  data: TrainingTextResponse,
   kbUuid: string
-): Pick<IngestRun, "id" | "status" | "corpus_uuid" | "batch_size" | "completed_count" | "failed_count" | "duplicate_count" | "rejected_count" | "items" | "metadata" | "events"> & {
+): Pick<
+  IngestRun,
+  | "id"
+  | "status"
+  | "corpus_uuid"
+  | "batch_size"
+  | "completed_count"
+  | "failed_count"
+  | "duplicate_count"
+  | "rejected_count"
+  | "items"
+  | "metadata"
+  | "events"
+  | "created_at"
+  | "completed_at"
+  | "updated_at"
+> & {
   id: string;
 } {
   const items = (data.items ?? []).map((item, index) => mapTrainingItem(item, index, data.batch_id, kbUuid));
+  const totalCharCount = (data.items ?? []).reduce((sum, item) => sum + (item.char_count ?? 0), 0);
+  const completedAt = data.completed_at ?? null;
   return {
     id: data.batch_id,
     status: data.status,
@@ -78,8 +101,11 @@ export function normalizeTrainingSubmit(
     failed_count: data.failed_count ?? 0,
     duplicate_count: data.duplicate_count ?? 0,
     rejected_count: data.rejected_count ?? 0,
+    created_at: data.created_at,
+    completed_at: completedAt,
+    updated_at: completedAt ?? data.created_at,
     items,
-    metadata: {},
+    metadata: totalCharCount > 0 ? { total_char_count: totalCharCount } : {},
     events: [],
   };
 }
