@@ -24,7 +24,6 @@ SKIP_DIR_NAMES = {
     ".mypy_cache",
     ".pytest_cache",
     ".ruff_cache",
-    ".stanza_models",
 }
 
 
