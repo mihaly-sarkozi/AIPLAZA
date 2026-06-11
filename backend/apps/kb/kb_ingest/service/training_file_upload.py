@@ -4,13 +4,13 @@ from dataclasses import dataclass
 
 from fastapi import UploadFile
 
-from apps.kb.kb_reading.security.FileSniffer import FileSniffer
-from apps.kb.kb_reading.security.ReadingSecurityError import ReadingSecurityError
-from apps.kb.kb_reading.service.EstimateFilesService import estimate_chars_from_size
-from apps.kb.kb_reading.support.ReadingConfig import DEFAULT_READING_CONFIG, ReadingConfig
-from apps.kb.kb_reading.validation.ValidateFile import validate_extension, validate_file_name, validate_size
-from apps.kb.kb_training.enums.TrainingErrorCode import TrainingErrorCode
-from apps.kb.kb_training.validation.TrainingValidationError import TrainingValidationError
+from apps.kb.kb_ingest.security.FileSniffer import FileSniffer
+from apps.kb.kb_ingest.security.ReadingSecurityError import ReadingSecurityError
+from apps.kb.kb_ingest.service.EstimateFilesService import estimate_chars_from_size
+from apps.kb.kb_ingest.config.ReadingConfig import DEFAULT_READING_CONFIG, ReadingConfig
+from apps.kb.kb_ingest.validation.ValidateFile import validate_extension, validate_file_name, validate_size
+from apps.kb.kb_ingest.enums.TrainingErrorCode import TrainingErrorCode
+from apps.kb.kb_ingest.validation.TrainingValidationError import TrainingValidationError
 from apps.kb.shared.errors import KbValidationError
 
 READ_CHUNK_BYTES = 1024 * 1024

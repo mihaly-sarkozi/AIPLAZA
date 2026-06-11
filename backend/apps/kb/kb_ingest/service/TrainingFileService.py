@@ -1,25 +1,25 @@
 from __future__ import annotations
 
-# backend/apps/kb/kb_training/service/TrainingFileService.py
+# backend/apps/kb/kb_ingest/service/TrainingFileService.py
 # Feladat: Fájlos tanítás beküldése (validáció + storage + DB), majd understanding esemény.
 # Sárközi Mihály - 2026.06.07
 
 from fastapi import UploadFile
 
-from apps.kb.kb_reading.support.ReadingConfig import DEFAULT_READING_CONFIG, ReadingConfig
-from apps.kb.kb_training.config import MetricsConf
-from apps.kb.kb_training.dto.TrainingFileItemSave import TrainingFileItemSave
-from apps.kb.kb_training.dto.TrainingFilesBatchSave import TrainingFilesBatchSave
-from apps.kb.kb_training.dto.TrainingTextResult import TrainingTextResult
-from apps.kb.kb_training.enums.TrainingBatchStatus import TrainingBatchStatus
-from apps.kb.kb_training.enums.TrainingMetric import TrainingMetric
-from apps.kb.kb_training.errors.TrainingDuplicateError import TrainingDuplicateError
-from apps.kb.kb_training.errors.TrainingQueueUnavailableError import TrainingQueueUnavailableError
-from apps.kb.kb_training.events.understanding_requested_event import add_understanding_requested_event
-from apps.kb.kb_training.repository.TrainingRepository import TrainingRepository
-from apps.kb.kb_training.service.training_file_upload import prepare_training_upload
-from apps.kb.kb_training.validation.TrainingValidationError import TrainingValidationError
-from apps.kb.kb_training.enums.TrainingErrorCode import TrainingErrorCode
+from apps.kb.kb_ingest.config.ReadingConfig import DEFAULT_READING_CONFIG, ReadingConfig
+from apps.kb.kb_ingest.config import MetricsConf
+from apps.kb.kb_ingest.dto.TrainingFileItemSave import TrainingFileItemSave
+from apps.kb.kb_ingest.dto.TrainingFilesBatchSave import TrainingFilesBatchSave
+from apps.kb.kb_ingest.dto.TrainingTextResult import TrainingTextResult
+from apps.kb.kb_ingest.enums.TrainingBatchStatus import TrainingBatchStatus
+from apps.kb.kb_ingest.enums.TrainingMetric import TrainingMetric
+from apps.kb.kb_ingest.errors.TrainingDuplicateError import TrainingDuplicateError
+from apps.kb.kb_ingest.errors.TrainingQueueUnavailableError import TrainingQueueUnavailableError
+from apps.kb.kb_ingest.events.understanding_requested_event import add_understanding_requested_event
+from apps.kb.kb_ingest.repository.TrainingRepository import TrainingRepository
+from apps.kb.kb_ingest.service.training_file_upload import prepare_training_upload
+from apps.kb.kb_ingest.validation.TrainingValidationError import TrainingValidationError
+from apps.kb.kb_ingest.enums.TrainingErrorCode import TrainingErrorCode
 from apps.kb.ports.FileStorageInterface import FileStorageInterface
 from apps.kb.shared.ids import new_id
 from core.kernel.jobs.errors import JobQueueUnavailableError

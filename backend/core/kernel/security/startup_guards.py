@@ -22,11 +22,9 @@ from core.kernel.security.rate_limit_guards import (
 )
 from core.kernel.security.tenant_guards import (
     validate_billing_provider_hardening,
-    validate_claim_extractor_hardening,
     validate_demo_signup_hardening,
     validate_object_storage_hardening,
     validate_pii_legacy_plaintext_hardening,
-    validate_url_ingest_worker_hardening,
 )
 from core.kernel.security.token_ttl_guards import validate_refresh_token_policy
 
@@ -49,8 +47,6 @@ def run_kernel_security_guards(settings: object, env: str) -> None:
     validate_billing_provider_hardening(env)
     validate_object_storage_hardening(settings, env)
     validate_pii_legacy_plaintext_hardening(env)
-    validate_claim_extractor_hardening(settings, env)
-    validate_url_ingest_worker_hardening(settings, env)
     validate_demo_signup_hardening(settings, env)
     validate_refresh_token_policy(settings, env)
 

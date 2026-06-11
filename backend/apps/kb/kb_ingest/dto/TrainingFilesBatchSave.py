@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from apps.kb.kb_training.dto.TrainingFileItemSave import TrainingFileItemSave
+from apps.kb.kb_ingest.dto.TrainingFileItemSave import TrainingFileItemSave
 
 
 @dataclass(frozen=True)

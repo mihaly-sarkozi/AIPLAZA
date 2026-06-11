@@ -217,24 +217,6 @@ def test_prod_bootstrap_fails_when_legacy_plaintext_pii_read_is_enabled():
             run_kernel_security_guards(_settings(), "production")
 
 
-def test_prod_bootstrap_fails_when_legacy_claim_extractor_is_enabled():
-    with prod_env(JWT_SECRET="0123456789abcdef" * 4):
-        with pytest.raises(SecurityConfigError, match="claim_extractor_version|legacy claim pipeline"):
-            run_kernel_security_guards(_settings(claim_extractor_version="legacy"), "production")
-
-
-def test_prod_bootstrap_fails_when_url_ingest_enabled_without_isolated_worker():
-    with prod_env(JWT_SECRET="0123456789abcdef" * 4, INSTANCE_ROLE="worker"):
-        with pytest.raises(SecurityConfigError, match="izolált worker|knowledge_url_ingest_worker_isolated"):
-            run_kernel_security_guards(
-                _settings(
-                    knowledge_url_ingest_enabled=True,
-                    knowledge_url_ingest_worker_isolated=False,
-                ),
-                "production",
-            )
-
-
 def test_prod_bootstrap_fails_when_object_storage_is_disabled():
     with prod_env(JWT_SECRET="0123456789abcdef" * 4):
         with pytest.raises(SecurityConfigError, match="object_storage_enabled"):

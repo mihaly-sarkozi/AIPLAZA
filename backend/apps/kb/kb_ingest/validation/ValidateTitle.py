@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-# backend/apps/kb/kb_training/validation/ValidateTitle.py
+# backend/apps/kb/kb_ingest/validation/ValidateTitle.py
 # Feladat: Tanítási cím normalizálása.
 # Sárközi Mihály - 2026.06.07
 
-from apps.kb.kb_training.config.TrainingConf import DEFAULT_TRAINING_CONFIG, TrainingConfig
+from apps.kb.kb_ingest.config.TrainingConf import DEFAULT_TRAINING_CONFIG, TrainingConfig
 
 
 def normalize_title(

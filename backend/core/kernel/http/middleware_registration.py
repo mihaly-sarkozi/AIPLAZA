@@ -15,6 +15,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.requests import Request
 
 from core.kernel.config.config_loader import settings
+from core.kernel.config.environment import is_deployed_env
 from core.kernel.deps.facade import get_login_service, get_service, get_tenant_repository, get_token_service
 from core.kernel.interface.keys import PLATFORM_DOMAIN_ROUTING_POLICY, PLATFORM_TENANT_LIFECYCLE_POLICY
 from core.kernel.app.app_manifest import AppManifest
@@ -30,9 +31,11 @@ from core.modules.tenant.middleware import TenantMiddleware
 
 def _build_cors_origin_regex() -> str:
     base = re.escape(settings.tenant_base_domain)
+    # Deployolt környezetben (staging/production) credentials mellett csak HTTPS origin engedett.
+    scheme = "https" if is_deployed_env() else "https?"
     if settings.tenant_base_domain == "local":
-        return rf"^https?://(localhost|([a-z0-9][a-z0-9-]*\.)?{base})(:\d+)?$"
-    return rf"^https?://([a-z0-9][a-z0-9-]*\.)?{base}(:\d+)?$"
+        return rf"^{scheme}://(localhost|([a-z0-9][a-z0-9-]*\.)?{base})(:\d+)?$"
+    return rf"^{scheme}://([a-z0-9][a-z0-9-]*\.)?{base}(:\d+)?$"
 
 
 def register_middlewares(app: FastAPI, manifest: AppManifest) -> None:

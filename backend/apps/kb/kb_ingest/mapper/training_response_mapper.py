@@ -1,20 +1,20 @@
 from __future__ import annotations
 
-# backend/apps/kb/kb_training/mapper/training_response_mapper.py
+# backend/apps/kb/kb_ingest/mapper/training_response_mapper.py
 # Feladat: ORM rekordok → vékony training API válasz DTO-k.
 # Sárközi Mihály - 2026.06.07
 
 from datetime import datetime
 
-from apps.kb.kb_training.dto.TrainingBatchStatusResponse import TrainingBatchStatusResponse
-from apps.kb.kb_training.dto.TrainingBatchSummaryResponse import TrainingBatchSummaryResponse
-from apps.kb.kb_training.dto.TrainingItemSummaryResponse import TrainingItemSummaryResponse
-from apps.kb.kb_training.dto.TrainingTextResponse import TrainingTextResponse
-from apps.kb.kb_training.enums.TrainingBatchStatus import TrainingBatchStatus
-from apps.kb.kb_training.enums.TrainingErrorCode import TrainingErrorCode
-from apps.kb.kb_training.enums.TrainingItemStatus import TrainingItemStatus
-from apps.kb.kb_training.orm.TrainingBatch import TrainingBatch
-from apps.kb.kb_training.orm.TrainingItem import TrainingItem
+from apps.kb.kb_ingest.dto.TrainingBatchStatusResponse import TrainingBatchStatusResponse
+from apps.kb.kb_ingest.dto.TrainingBatchSummaryResponse import TrainingBatchSummaryResponse
+from apps.kb.kb_ingest.dto.TrainingItemSummaryResponse import TrainingItemSummaryResponse
+from apps.kb.kb_ingest.dto.TrainingTextResponse import TrainingTextResponse
+from apps.kb.kb_ingest.enums.TrainingBatchStatus import TrainingBatchStatus
+from apps.kb.kb_ingest.enums.TrainingErrorCode import TrainingErrorCode
+from apps.kb.kb_ingest.enums.TrainingItemStatus import TrainingItemStatus
+from apps.kb.kb_ingest.orm.TrainingBatch import TrainingBatch
+from apps.kb.kb_ingest.orm.TrainingItem import TrainingItem
 
 
 def _parse_batch_status(value: str) -> TrainingBatchStatus:

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-# backend/apps/kb/kb_training/service/TrainingTextService.py
+# backend/apps/kb/kb_ingest/service/TrainingTextService.py
 # Feladat: Szöveges tanítás beküldése (storage + DB), majd understanding esemény.
 # Sárközi Mihály - 2026.06.07
 #
@@ -8,19 +8,19 @@ from __future__ import annotations
 # DB hiba esetén árva raw file maradhat — később: pending DB → storage → accepted.
 
 from apps.kb.ports.FileStorageInterface import FileStorageInterface
-from apps.kb.kb_training.config import MetricsConf
-from apps.kb.kb_training.config.TrainingConf import DEFAULT_TRAINING_CONFIG, TrainingConfig
-from apps.kb.kb_training.dto.TrainingTextBatchSave import TrainingTextBatchSave
-from apps.kb.kb_training.dto.TrainingTextRequest import TrainingTextRequest
-from apps.kb.kb_training.dto.TrainingTextResult import TrainingTextResult
-from apps.kb.kb_training.enums.TrainingBatchStatus import TrainingBatchStatus
-from apps.kb.kb_training.enums.TrainingMetric import TrainingMetric
-from apps.kb.kb_training.errors.TrainingDuplicateError import TrainingDuplicateError
-from apps.kb.kb_training.errors.TrainingQueueUnavailableError import TrainingQueueUnavailableError
-from apps.kb.kb_training.events.understanding_requested_event import add_understanding_requested_event
-from apps.kb.kb_training.repository.TrainingRepository import TrainingRepository
-from apps.kb.kb_training.validation.ValidateText import validate_text
-from apps.kb.kb_training.validation.ValidateTitle import normalize_title
+from apps.kb.kb_ingest.config import MetricsConf
+from apps.kb.kb_ingest.config.TrainingConf import DEFAULT_TRAINING_CONFIG, TrainingConfig
+from apps.kb.kb_ingest.dto.TrainingTextBatchSave import TrainingTextBatchSave
+from apps.kb.kb_ingest.dto.TrainingTextRequest import TrainingTextRequest
+from apps.kb.kb_ingest.dto.TrainingTextResult import TrainingTextResult
+from apps.kb.kb_ingest.enums.TrainingBatchStatus import TrainingBatchStatus
+from apps.kb.kb_ingest.enums.TrainingMetric import TrainingMetric
+from apps.kb.kb_ingest.errors.TrainingDuplicateError import TrainingDuplicateError
+from apps.kb.kb_ingest.errors.TrainingQueueUnavailableError import TrainingQueueUnavailableError
+from apps.kb.kb_ingest.events.understanding_requested_event import add_understanding_requested_event
+from apps.kb.kb_ingest.repository.TrainingRepository import TrainingRepository
+from apps.kb.kb_ingest.validation.ValidateText import validate_text
+from apps.kb.kb_ingest.validation.ValidateTitle import normalize_title
 from apps.kb.shared.ids import new_id
 from core.kernel.jobs.errors import JobQueueUnavailableError
 from shared.utils.hash import sha256_text

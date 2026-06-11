@@ -19,7 +19,7 @@ def _create_test_app(module_loader):
 
 
 def test_platform_app_starts_without_business_modules(monkeypatch):
-    monkeypatch.setenv("DISABLED_APP_MODULES", "chat,knowledge")
+    monkeypatch.setenv("DISABLED_APP_MODULES", "chat,kb")
     app = _create_test_app(load_app_modules)
 
     routes = {getattr(route, "path", "") for route in app.routes}

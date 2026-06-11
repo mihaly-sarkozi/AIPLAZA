@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 
-from apps.kb.kb_training.enums.TrainingBatchStatus import TrainingBatchStatus
+from apps.kb.kb_ingest.enums.TrainingBatchStatus import TrainingBatchStatus
 
 
 @dataclass(frozen=True)

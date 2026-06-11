@@ -1,17 +1,13 @@
 from __future__ import annotations
 
-import asyncio
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
-from types import SimpleNamespace
 
 import pytest
 
 from apps.chat.channel_quota import release_usage_slot, reserve_usage_slot
 from apps.chat.service.llm_budget import LlmBudgetConfig, LlmBudgetManager
-from apps.knowledge.domain.retrieval_profile import DEFAULT_RETRIEVAL_PROFILE
-from apps.knowledge.service.retrieval_resilience_runner import RetrievalResilienceRunner
 
 pytestmark = [pytest.mark.unit, pytest.mark.must_pass]
 
@@ -86,45 +82,3 @@ def test_channel_quota_memory_fallback_enforces_per_minute_under_parallel_load(m
     for reservation in reservations:
         release_usage_slot(reservation, quota_lock=quota_lock, quota_fallback_counters=counters)
     assert counters == {}
-
-
-@pytest.mark.asyncio
-async def test_retrieval_resilience_timeout_fallback_records_single_failure_class() -> None:
-    class SlowRetrievalEngine:
-        async def retrieve(self, **_kwargs):
-            await asyncio.sleep(0.05)
-            return [{"id": "late"}]
-
-    class MetricsStore:
-        def __init__(self) -> None:
-            self.increments: list[tuple[str, int]] = []
-            self.timings: list[tuple[str, float]] = []
-
-        def increment(self, key: str, value: int) -> None:
-            self.increments.append((key, value))
-
-        def record_timing(self, key: str, value: float) -> None:
-            self.timings.append((key, value))
-
-    metrics = MetricsStore()
-    runner = RetrievalResilienceRunner(
-        retrieval_engine=SlowRetrievalEngine(),
-        metrics_store=metrics,
-        timeout_seconds=0.001,
-        retry_attempts=2,
-        retry_backoff_seconds=0.001,
-    )
-
-    hits = await runner.retrieve_hits(
-        tenant="demo",
-        corpus_uuid="kb-1",
-        query="slow query",
-        builds=[SimpleNamespace(id="build-1")],
-        retrieval_profile=DEFAULT_RETRIEVAL_PROFILE,
-        query_profile={},
-    )
-
-    assert hits == []
-    assert metrics.increments.count(("query_retrieval_timeout_count", 1)) == 2
-    assert ("query_retrieval_fallback_count", 1) in metrics.increments
-    assert metrics.timings == []

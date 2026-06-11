@@ -86,12 +86,12 @@ def test_channel_chat_route_has_rate_limit_contract() -> None:
     )
 
 
-def test_upload_ingest_route_has_rate_limit_contract() -> None:
+def test_kb_create_route_has_rate_limit_contract() -> None:
     assert _module_has_limited_route(
-        "apps/knowledge/api/router.py",
+        "apps/kb/kb_crud/router/KnowledgeBaseRouter.py",
         method="POST",
-        route="/knowledge/corpora/{corpus_uuid}/ingest/files",
-        limit_value="3/minute",
+        route="",
+        limit_value="5/minute",
     )
 
 

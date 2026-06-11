@@ -1,7 +1,7 @@
 import { getModule as getBillingModule } from "@apps/billing/web/module";
 import { getModule as getChatModule } from "@apps/chat/web/module";
 import { getModule as getDemoModule } from "@apps/demo/web/module";
-import { getModule as getKnowledgeModule } from "@apps/knowledge/web/module";
+import { getModule as getKbModule } from "@apps/kb/web/module";
 import { getModule as getLandingModule } from "@apps/landing/web/module";
 import { getModule as getPackagesModule } from "@apps/packages/web/module";
 import { getModule as getProfileModule } from "@apps/profile/web/module";
@@ -25,7 +25,7 @@ const modules: FrontendModuleDefinition[] = [
   getBillingModule(),
   getPackagesModule(),
   getSettingsModule(),
-  getKnowledgeModule(),
+  getKbModule(),
 ];
 
 export function getFrontendModules(): FrontendModuleDefinition[] {

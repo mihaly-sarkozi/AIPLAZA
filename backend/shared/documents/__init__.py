@@ -3,11 +3,19 @@
 # Sárközi Mihály - 2026.05.21
 
 from shared.documents.models import ExtractedDocument, ExtractedParagraph
+from shared.documents.sandboxed_extraction import (
+    DocumentParserResourceError,
+    DocumentParserTimeoutError,
+    extract_document_with_limits,
+)
 from shared.documents.text_extraction import extract_document_from_upload, extract_text_from_upload
 
 __all__ = [
+    "DocumentParserResourceError",
+    "DocumentParserTimeoutError",
     "ExtractedDocument",
     "ExtractedParagraph",
     "extract_document_from_upload",
+    "extract_document_with_limits",
     "extract_text_from_upload",
 ]

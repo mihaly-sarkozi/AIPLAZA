@@ -1,6 +1,5 @@
 from sqlalchemy import Column, Integer, MetaData, Table
 
-from apps.knowledge.bootstrap.tenant_hooks import register_knowledge_tenant_hooks
 import core.modules.tenant.schema.hooks as tenant_schema_hooks
 from core.modules.tenant.service import tenant_schema_service
 
@@ -78,21 +77,3 @@ def test_list_tenant_schema_table_names_uses_registered_hooks(monkeypatch):
     )
 
     assert tenant_schema_service.list_tenant_schema_table_names() == ["settings", "users"]
-
-
-def test_knowledge_fk_constraints_revision_runs_after_base_schema(monkeypatch):
-    monkeypatch.setattr(tenant_schema_hooks, "_registered_hooks", {})
-    monkeypatch.setattr(tenant_schema_hooks, "_kernel_hooks", ())
-
-    register_knowledge_tenant_hooks()
-
-    revisions = [
-        tenant_schema_service.tenant_migration_revision(hook)
-        for hook in tenant_schema_service.list_tenant_schema_hooks()
-        if hook.name.startswith("knowledge")
-    ]
-    assert "knowledge.schema.worker_first_ingest.v6.kb_visibility_flags" in revisions
-    assert "knowledge.schema.worker_first_ingest.v5.referential_integrity" in revisions
-    assert revisions.index("knowledge.schema.worker_first_ingest.v5.referential_integrity") < revisions.index(
-        "knowledge.schema.worker_first_ingest.v6.kb_visibility_flags"
-    )

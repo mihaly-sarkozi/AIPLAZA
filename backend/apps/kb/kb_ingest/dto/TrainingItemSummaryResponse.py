@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict
 
-from apps.kb.kb_training.enums.TrainingErrorCode import TrainingErrorCode
-from apps.kb.kb_training.enums.TrainingItemStatus import TrainingItemStatus
+from apps.kb.kb_ingest.enums.TrainingErrorCode import TrainingErrorCode
+from apps.kb.kb_ingest.enums.TrainingItemStatus import TrainingItemStatus
 
 
 class TrainingItemSummaryResponse(BaseModel):

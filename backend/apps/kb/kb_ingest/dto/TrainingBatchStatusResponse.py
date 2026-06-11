@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
-from apps.kb.kb_training.dto.TrainingBatchSummaryResponse import TrainingBatchSummaryResponse
-from apps.kb.kb_training.dto.TrainingItemSummaryResponse import TrainingItemSummaryResponse
+from apps.kb.kb_ingest.dto.TrainingBatchSummaryResponse import TrainingBatchSummaryResponse
+from apps.kb.kb_ingest.dto.TrainingItemSummaryResponse import TrainingItemSummaryResponse
 
 
 class TrainingBatchStatusResponse(BaseModel):

@@ -4,7 +4,7 @@ import pytest
 from admin.router.admin_router import router as platform_admin_router
 from apps.chat.router.channel_credentials_router import router as channel_credentials_router
 from apps.chat.router.chat_router import router as chat_router
-from apps.knowledge.api.router import router as knowledge_api_router
+from apps.kb.kb_crud.router import router as kb_crud_router
 from core.kernel.domain.router import router as domain_router
 from core.kernel.http.responses import (
     ErrorResponse,
@@ -55,8 +55,8 @@ def test_mutating_success_routes_use_operation_status_response_model() -> None:
         (domain_router, "POST", "/platform/domain/custom/delete"),
         (chat_router, "POST", "/chat/feedback"),
         (channel_credentials_router, "POST", "/channel/credentials/{credential_id}/revoke"),
-        (knowledge_api_router, "PUT", "/kb/{uuid}/permissions"),
-        (knowledge_api_router, "DELETE", "/kb/{uuid}"),
+        (kb_crud_router, "PUT", "/kb/{kb_id}/permissions"),
+        (kb_crud_router, "DELETE", "/kb/{kb_id}"),
         (platform_admin_router, "POST", "/platform-admin/auth/logout"),
         (platform_admin_router, "POST", "/platform-admin/auth/mfa/disable"),
         (platform_admin_router, "POST", "/platform-admin/auth/me/change-password"),

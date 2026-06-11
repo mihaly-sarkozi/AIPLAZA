@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-# backend/apps/kb/kb_training/orm/TrainingEvent.py
+# backend/apps/kb/kb_ingest/orm/TrainingEvent.py
 # Feladat: Tanítási folyamat eseménynapló (audit / timeline) perzisztencia.
 # Sárközi Mihály - 2026.06.07
 
@@ -19,7 +19,7 @@ class TrainingEvent(TenantSchemaBase):
     történik. A ``details_json`` strukturált, nyelvfüggetlen meta (azonosítók, számlálók).
     """
 
-    __tablename__ = "kb_training_events"
+    __tablename__ = "kb_ingest_events"
 
     # Egyedi esemény azonosító (pl. training_event_…).
     id = Column(String(64), primary_key=True)

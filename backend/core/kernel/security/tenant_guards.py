@@ -72,37 +72,6 @@ def validate_pii_legacy_plaintext_hardening(env: str) -> None:
         )
 
 
-def validate_url_ingest_worker_hardening(settings: object, env: str) -> None:
-    if not is_production_env(env):
-        return
-    if not bool(getattr(settings, "knowledge_url_ingest_enabled", False)):
-        return
-    if not bool(getattr(settings, "knowledge_url_ingest_requires_isolated_worker", True)):
-        raise SecurityConfigError(
-            "knowledge_url_ingest_requires_isolated_worker production-ben nem kapcsolható ki."
-        )
-    if not bool(getattr(settings, "knowledge_url_ingest_worker_isolated", False)):
-        raise SecurityConfigError(
-            "Production URL ingest csak izolált worker/egress policy mellett engedélyezhető "
-            "(knowledge_url_ingest_worker_isolated=true)."
-        )
-    if get_instance_role() == InstanceRole.COMBINED:
-        raise SecurityConfigError(
-            "Production URL ingest nem futhat combined processben; használj külön web és worker szerepkört."
-        )
-
-
-def validate_claim_extractor_hardening(settings: object, env: str) -> None:
-    if not is_production_env(env):
-        return
-    version = str(getattr(settings, "claim_extractor_version", "v1") or "v1").strip().lower()
-    if version != "v1":
-        raise SecurityConfigError(
-            f"claim_extractor_version={version!r} production-ben nem engedélyezett. "
-            "A legacy claim pipeline runtime visszakapcsolása tiltott."
-        )
-
-
 def validate_object_storage_hardening(settings: object, env: str) -> None:
     if not is_deployed_env(env):
         return
@@ -120,13 +89,21 @@ def validate_object_storage_hardening(settings: object, env: str) -> None:
         raise SecurityConfigError("Staging/production környezetben object_storage_endpoint kötelező.")
     if not bucket:
         raise SecurityConfigError("Staging/production környezetben object_storage_bucket kötelező.")
+    if not bool(getattr(settings, "object_storage_secure", False)):
+        raise SecurityConfigError(
+            "Staging/production környezetben object_storage_secure=true (TLS) kötelező az object storage kapcsolathoz."
+        )
+    access_key = str(getattr(settings, "object_storage_access_key", "") or "").strip()
+    secret_key = str(getattr(settings, "object_storage_secret_key", "") or "").strip()
+    if not access_key or not secret_key:
+        raise SecurityConfigError(
+            "Staging/production környezetben object_storage_access_key és object_storage_secret_key kötelező."
+        )
 
 
 __all__ = [
     "validate_billing_provider_hardening",
-    "validate_claim_extractor_hardening",
     "validate_demo_signup_hardening",
     "validate_object_storage_hardening",
     "validate_pii_legacy_plaintext_hardening",
-    "validate_url_ingest_worker_hardening",
 ]

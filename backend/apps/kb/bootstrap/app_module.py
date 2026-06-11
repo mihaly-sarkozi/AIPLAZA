@@ -7,25 +7,13 @@
 from __future__ import annotations
 
 from apps.kb.kb_crud.module import KbCrudModule
-from apps.kb.kb_feedback.module import KbFeedbackModule
-from apps.kb.kb_maintenance.module import KbMaintenanceModule
-from apps.kb.kb_reading.module import KbReadingModule
-from apps.kb.kb_training.module import KbTrainingModule
-from apps.kb.kb_search.module import KbSearchModule
-from apps.kb.kb_testing.module import KbTestingModule
-from apps.kb.kb_understanding.module import KbUnderstandingModule
+from apps.kb.kb_ingest.module import KbIngestModule
 from core.kernel.interface import BaseAppModule, ModuleContext, RouteRegistration
 from core.kernel.interface.app_conventions import module_key, module_route_tag
 
 KB_MODULES = [
     KbCrudModule(),
-    KbReadingModule(),
-    KbTrainingModule(),
-    KbUnderstandingModule(),
-    KbSearchModule(),
-    KbTestingModule(),
-    KbFeedbackModule(),
-    KbMaintenanceModule(),
+    KbIngestModule(),
 ]
 
 
@@ -71,12 +59,12 @@ class KbAppModule(BaseAppModule):
         )
 
     def tenant_schema_hooks(self) -> tuple:
-        from apps.kb.kb_reading.bootstrap.tenant_hooks import register_kb_reading_tenant_hooks
-        from apps.kb.kb_training.bootstrap.tenant_hooks import register_kb_training_tenant_hooks
+        from apps.kb.kb_crud.bootstrap.tenant_hooks import register_kb_crud_tenant_hooks
+        from apps.kb.kb_ingest.bootstrap.tenant_hooks import register_kb_ingest_tenant_hooks
 
         return (
-            register_kb_reading_tenant_hooks,
-            register_kb_training_tenant_hooks,
+            register_kb_crud_tenant_hooks,
+            register_kb_ingest_tenant_hooks,
         )
 
 

@@ -64,7 +64,7 @@ export default function KbTrainingTestPage() {
     <div className="app-page">
       <div className="app-page-container max-w-2xl">
         <PageHeader
-          eyebrow="kb_training"
+          eyebrow="kb_ingest"
           title="Szöveges tanítás teszt"
           description="Csak a POST /kb/{id}/training/text és GET /kb/training/batches/{id} végpontokhoz."
         />

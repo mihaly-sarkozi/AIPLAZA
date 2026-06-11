@@ -1,4 +1,4 @@
-# backend/apps/kb/kb_training/events/understanding_requested_event.py
+# backend/apps/kb/kb_ingest/events/understanding_requested_event.py
 # Feladat: Tanítás után understanding kérés esemény írása a platform job queue-ba.
 # A payload csak azonosítókat tartalmaz; a worker a DB-ből tölti az adatokat.
 # Sárközi Mihály - 2026.06.07
@@ -7,10 +7,10 @@ from __future__ import annotations
 
 from core.kernel.jobs import enqueue_job
 
-from apps.kb.kb_training.config import MetricsConf
-from apps.kb.kb_training.enums.TrainingErrorCode import TrainingErrorCode
-from apps.kb.kb_training.enums.TrainingMetric import TrainingMetric
-from apps.kb.kb_training.errors.TrainingProcessingError import TrainingProcessingError
+from apps.kb.kb_ingest.config import MetricsConf
+from apps.kb.kb_ingest.enums.TrainingErrorCode import TrainingErrorCode
+from apps.kb.kb_ingest.enums.TrainingMetric import TrainingMetric
+from apps.kb.kb_ingest.errors.TrainingProcessingError import TrainingProcessingError
 from apps.kb.shared.events import UNDERSTANDING_REQUESTED
 
 

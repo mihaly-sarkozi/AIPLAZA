@@ -1,14 +1,14 @@
 from __future__ import annotations
 
-# backend/apps/kb/kb_training/validation/ValidateText.py
+# backend/apps/kb/kb_ingest/validation/ValidateText.py
 # Feladat: Tanítási szöveg normalizálása és ellenőrzése (üres, hossz).
 # Sárközi Mihály - 2026.06.07
 
 import unicodedata
 
-from apps.kb.kb_training.enums.TrainingErrorCode import TrainingErrorCode
-from apps.kb.kb_training.config.TrainingConf import DEFAULT_TRAINING_CONFIG, TrainingConfig
-from apps.kb.kb_training.validation.TrainingValidationError import TrainingValidationError
+from apps.kb.kb_ingest.enums.TrainingErrorCode import TrainingErrorCode
+from apps.kb.kb_ingest.config.TrainingConf import DEFAULT_TRAINING_CONFIG, TrainingConfig
+from apps.kb.kb_ingest.validation.TrainingValidationError import TrainingValidationError
 
 
 def validate_text(

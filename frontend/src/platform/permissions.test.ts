@@ -11,7 +11,7 @@ describe("frontend permissions", () => {
   });
 
   it("allows admin permissions intended for admins", () => {
-    expect(hasRolePermission("admin", "knowledge.read")).toBe(true);
+    expect(hasRolePermission("admin", "kb.read")).toBe(true);
     expect(hasRolePermission("admin", "users.write")).toBe(true);
     expect(hasRolePermission("admin", "settings.read")).toBe(true);
     expect(hasRolePermission("admin", "settings.write")).toBe(true);
@@ -22,7 +22,7 @@ describe("frontend permissions", () => {
 
   it("denies admin/settings style permissions for regular users", () => {
     expect(hasRolePermission("user", "users.write")).toBe(false);
-    expect(hasRolePermission("user", "knowledge.read")).toBe(false);
+    expect(hasRolePermission("user", "kb.read")).toBe(false);
     expect(hasRolePermission("user", "settings.read")).toBe(false);
   });
 

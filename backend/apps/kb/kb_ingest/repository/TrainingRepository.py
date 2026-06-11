@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-# backend/apps/kb/kb_training/repository/TrainingRepository.py
+# backend/apps/kb/kb_ingest/repository/TrainingRepository.py
 # Feladat: Training batch / item / event SQLAlchemy perzisztencia (közvetlenül hívható).
 # Sárközi Mihály - 2026.06.07
 
@@ -8,18 +8,18 @@ from sqlalchemy import select
 
 from shared.utils.clock import utc_now
 
-from apps.kb.kb_training.config import MetricsConf
-from apps.kb.kb_training.dto.TrainingFileItemSave import TrainingFileItemSave
-from apps.kb.kb_training.dto.TrainingFilesBatchSave import TrainingFilesBatchSave
-from apps.kb.kb_training.dto.TrainingTextBatchSave import TrainingTextBatchSave
-from apps.kb.kb_training.dto.TrainingTextSavedBatch import TrainingTextSavedBatch
-from apps.kb.kb_training.enums.TrainingBatchStatus import TrainingBatchStatus
-from apps.kb.kb_training.enums.TrainingMetric import TrainingMetric
-from apps.kb.kb_training.enums.TrainingItemStatus import TrainingItemStatus
-from apps.kb.kb_training.orm.TrainingBatch import TrainingBatch
-from apps.kb.kb_training.orm.TrainingEvent import TrainingEvent
-from apps.kb.kb_training.orm.TrainingItem import TrainingItem
-from apps.kb.kb_training.enums.TrainingAuditEventType import TrainingAuditEventType
+from apps.kb.kb_ingest.config import MetricsConf
+from apps.kb.kb_ingest.dto.TrainingFileItemSave import TrainingFileItemSave
+from apps.kb.kb_ingest.dto.TrainingFilesBatchSave import TrainingFilesBatchSave
+from apps.kb.kb_ingest.dto.TrainingTextBatchSave import TrainingTextBatchSave
+from apps.kb.kb_ingest.dto.TrainingTextSavedBatch import TrainingTextSavedBatch
+from apps.kb.kb_ingest.enums.TrainingBatchStatus import TrainingBatchStatus
+from apps.kb.kb_ingest.enums.TrainingMetric import TrainingMetric
+from apps.kb.kb_ingest.enums.TrainingItemStatus import TrainingItemStatus
+from apps.kb.kb_ingest.orm.TrainingBatch import TrainingBatch
+from apps.kb.kb_ingest.orm.TrainingEvent import TrainingEvent
+from apps.kb.kb_ingest.orm.TrainingItem import TrainingItem
+from apps.kb.kb_ingest.enums.TrainingAuditEventType import TrainingAuditEventType
 from apps.kb.shared.ids import new_id
 
 
@@ -27,9 +27,14 @@ class TrainingRepository:
     def __init__(self, session_factory) -> None:
         self._session_factory = session_factory
 
-    def get_batch(self, batch_id: str) -> TrainingBatch | None:
+    def get_batch(self, batch_id: str, *, tenant: str | None = None) -> TrainingBatch | None:
         with self._session_factory() as session:
-            return session.get(TrainingBatch, batch_id)
+            batch = session.get(TrainingBatch, batch_id)
+            if batch is None:
+                return None
+            if tenant is not None and batch.tenant != tenant:
+                return None
+            return batch
 
     def get_item(self, item_id: str) -> TrainingItem | None:
         with self._session_factory() as session:

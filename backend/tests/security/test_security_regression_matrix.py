@@ -15,7 +15,6 @@ from apps.chat.channel_quota import reserve_usage_slot
 from apps.chat.service.chat_permission_service import ChatPermissionService
 from apps.chat.service.pii_chat_guard_service import PiiChatGuardService
 from apps.chat.service.prompt_builder import PromptBuilder
-from apps.knowledge.api.upload_malware_scanner import FileSecurityScanner
 from core.kernel.http.correlation_id_middleware import CorrelationIdMiddleware
 from core.kernel.http.exception_handlers import register_exception_handlers
 from core.kernel.security.csrf_middleware import CSRFMiddleware
@@ -172,22 +171,6 @@ def test_error_response_mapping_hides_internal_exception_detail() -> None:
     assert payload["message"] == "Internal server error."
     assert payload["request_id"] == "req-security-error"
     assert "sql password" not in str(payload)
-
-
-def test_upload_malware_scan_fails_closed_in_production_when_provider_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("apps.knowledge.api.upload_malware_scanner.get_app_env", lambda: "prod")
-    monkeypatch.setattr("apps.knowledge.api.upload_malware_scanner.settings.upload_malware_scan_provider", "clamav", raising=False)
-    monkeypatch.setattr("apps.knowledge.api.upload_malware_scanner.settings.upload_malware_scan_required_in_prod", True, raising=False)
-    monkeypatch.setattr(
-        "apps.knowledge.api.upload_malware_scanner.scan_with_clamav",
-        lambda _raw: (_ for _ in ()).throw(OSError("clamav down")),
-    )
-
-    with pytest.raises(HTTPException) as exc_info:
-        FileSecurityScanner().scan_bytes_or_raise(filename="invoice.pdf", raw=b"%PDF-1.7")
-
-    assert exc_info.value.status_code == 503
-    assert "clamav down" not in str(exc_info.value.detail).lower()
 
 
 def test_pii_guard_fails_closed_without_leaking_raw_personal_data() -> None:

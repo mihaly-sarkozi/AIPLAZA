@@ -7,24 +7,12 @@ ROOT = Path(__file__).resolve().parents[3] / "apps" / "kb"
 
 KB_MODULES = (
     "kb_crud",
-    "kb_reading",
-    "kb_training",
-    "kb_understanding",
-    "kb_search",
-    "kb_testing",
-    "kb_feedback",
-    "kb_maintenance",
+    "kb_ingest",
 )
 
 FORBIDDEN_IMPORTS: dict[str, set[str]] = {
     "kb_crud": set(KB_MODULES) - {"kb_crud"},
-    "kb_reading": set(KB_MODULES) - {"kb_reading"},
-    "kb_training": set(KB_MODULES) - {"kb_training"},
-    "kb_understanding": set(KB_MODULES) - {"kb_understanding"},
-    "kb_search": set(KB_MODULES) - {"kb_search"},
-    "kb_testing": set(KB_MODULES) - {"kb_testing", "kb_search"},
-    "kb_feedback": set(KB_MODULES) - {"kb_feedback"},
-    "kb_maintenance": set(KB_MODULES) - {"kb_maintenance", "kb_understanding"},
+    "kb_ingest": set(KB_MODULES) - {"kb_ingest"},
     "shared": set(KB_MODULES),
 }
 

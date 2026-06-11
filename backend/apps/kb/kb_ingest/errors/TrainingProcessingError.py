@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-# backend/apps/kb/kb_training/errors/TrainingProcessingError.py
+# backend/apps/kb/kb_ingest/errors/TrainingProcessingError.py
 # Feladat: Nyelvfüggetlen tanítási feldolgozási / tárolási hiba.
 # Sárközi Mihály - 2026.06.07
 
-from apps.kb.kb_training.enums.TrainingErrorCode import TrainingErrorCode
+from apps.kb.kb_ingest.enums.TrainingErrorCode import TrainingErrorCode
 from apps.kb.shared.errors import KbProcessingError
 
 

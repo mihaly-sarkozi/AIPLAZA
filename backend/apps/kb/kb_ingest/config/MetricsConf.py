@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-# backend/apps/kb/kb_training/config/MetricsConf.py
+# backend/apps/kb/kb_ingest/config/MetricsConf.py
 # Feladat: Tanítási metrikák rögzítése (jelenleg no-op; később observability bekötés).
 # Sárközi Mihály - 2026.06.07
 
-from apps.kb.kb_training.enums.TrainingMetric import TrainingMetric
+from apps.kb.kb_ingest.enums.TrainingMetric import TrainingMetric
 
 
 def increment(

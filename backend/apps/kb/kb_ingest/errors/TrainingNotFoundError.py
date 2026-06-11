@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-# backend/apps/kb/kb_training/errors/TrainingNotFoundError.py
+# backend/apps/kb/kb_ingest/errors/TrainingNotFoundError.py
 # Feladat: Nyelvfüggetlen tanítási batch nem található hiba.
 # Sárközi Mihály - 2026.06.07
 
-from apps.kb.kb_training.enums.TrainingErrorCode import TrainingErrorCode
+from apps.kb.kb_ingest.enums.TrainingErrorCode import TrainingErrorCode
 from apps.kb.shared.errors import KbNotFoundError
 
 

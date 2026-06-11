@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
-from apps.kb.kb_training.dto.TrainingFileEstimateItemResponse import TrainingFileEstimateItemResponse
+from apps.kb.kb_ingest.dto.TrainingFileEstimateItemResponse import TrainingFileEstimateItemResponse
 
 
 class TrainingFileEstimateResponse(BaseModel):

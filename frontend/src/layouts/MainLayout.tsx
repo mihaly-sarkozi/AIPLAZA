@@ -27,7 +27,7 @@ export default function MainLayout() {
   const shouldCheckOnboardingTraining =
     user?.tenant_demo_mode === true &&
     user.tenant_kb_has_training !== true &&
-    hasUserPermission(user, "knowledge.read");
+    hasUserPermission(user, "kb.read");
   const {
     data: availableKbList = [],
     isLoading: loadingAvailableKbList,

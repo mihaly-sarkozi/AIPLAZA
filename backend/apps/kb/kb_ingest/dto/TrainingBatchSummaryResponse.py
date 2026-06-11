@@ -5,7 +5,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict
 
-from apps.kb.kb_training.enums.TrainingBatchStatus import TrainingBatchStatus
+from apps.kb.kb_ingest.enums.TrainingBatchStatus import TrainingBatchStatus
 
 
 class TrainingBatchSummaryResponse(BaseModel):

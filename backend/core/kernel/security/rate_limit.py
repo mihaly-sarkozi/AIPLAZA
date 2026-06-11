@@ -2,6 +2,7 @@
 # Feladat: SlowAPI limitert, rate limit kulcsképzést és fallback throttle-t biztosít. Tenant+user/IP alapú kulcsokat használ, Redis storage-t választ, és érzékeny endpointokra dekorátor nélküli biztonsági throttlingot is ad memóriás fallbackkel. Core HTTP security helper, amelyet routerek és middleware regisztráció használ.
 # Sárközi Mihály - 2026.05.21
 
+import hashlib
 import threading
 import time
 from collections import defaultdict, deque
@@ -72,13 +73,18 @@ def get_rate_limit_redis():
 
 
 def refresh_token_key(request):
-    """Rate limit kulcs refresh végponthoz: tenant + session."""
+    """Rate limit kulcs refresh végponthoz: tenant + session.
+
+    A nyers refresh token nem kerülhet Redis kulcsba (keyspace/monitoring/dump
+    szivárgás), ezért SHA-256 hash-t használunk.
+    """
     from slowapi.util import get_remote_address
 
     tenant = getattr(request.state, "tenant_slug", None) or ""
     rt = request.cookies.get("refresh_token")
     if rt:
-        return f"t:{tenant}:refresh:{rt}"
+        digest = hashlib.sha256(rt.encode("utf-8")).hexdigest()
+        return f"t:{tenant}:refresh:{digest}"
     return f"t:{tenant}:ip:{get_remote_address(request)}"
 
 

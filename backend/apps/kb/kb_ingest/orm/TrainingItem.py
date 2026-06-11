@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-# backend/apps/kb/kb_training/orm/TrainingItem.py
+# backend/apps/kb/kb_ingest/orm/TrainingItem.py
 # Feladat: Egy tanítandó anyag (szöveg / később fájl, URL) perzisztencia rekordja.
 # Sárközi Mihály - 2026.06.07
 
@@ -19,11 +19,11 @@ class TrainingItem(TenantSchemaBase):
     az ``id`` és ``raw_ref`` alapján tölti be a nyers szöveget.
     """
 
-    __tablename__ = "kb_training_items"
+    __tablename__ = "kb_ingest_items"
 
     # Egyedi item azonosító (pl. training_item_…).
     id = Column(String(64), primary_key=True)
-    # Szülő batch azonosító — ``kb_training_batches.id``.
+    # Szülő batch azonosító — ``kb_ingest_batches.id``.
     training_batch_id = Column(String(64), nullable=False, index=True)
     # Cél tudástár UUID-ja (denormalizált a gyors szűréshez).
     knowledge_base_id = Column(String(36), nullable=False, index=True)

@@ -2,7 +2,7 @@
 
 ## Futtatás (projekt gyökeréből)
 
-A tesztek **mindig a repo gyökeréből** futtatandók. Importok: kizárólag **`apps.*`** és **`config.*`** (nincs top-level `knowledge`; a knowledge modul az `apps.knowledge`).
+A tesztek **mindig a repo gyökeréből** futtatandók. Importok: kizárólag **`apps.*`** és **`config.*`**.
 
 - A projekt gyökerének a `PYTHONPATH`-on kell lennie (pytest: `pythonpath = .` → a „.” a futtatás cwd-ja, ezért **pytest a repo gyökeréből**).
 - Ajánlott: `pip install -e .` a repo gyökeréből, így az `apps` és `config` mindenhol elérhető.

@@ -1,14 +1,17 @@
 # KB module
 
-A tudástár backend 7 külön modulból áll:
+A tudástár backend modulokból áll. Jelenleg telepítve:
 
-1. **kb_crud** — tudástár-kezelés
-2. **kb_reading** — beolvasás
-3. **kb_understanding** — megértés / feldolgozás
-4. **kb_search** — keresés
-5. **kb_testing** — tesztelés
-6. **kb_feedback** — visszajelzés
-7. **kb_maintenance** — karbantartás / újraindexelés
+1. **kb_crud** — tudástár-kezelés (CRUD + jogosultságok)
+2. **kb_ingest** — tanítás (szöveg/fájl beküldés, becslés, batch státusz)
+
+Tervezett (a legacy `apps/knowledge` törlése után újraépítendő) modulok:
+
+- **kb_understanding** — megértés / feldolgozás
+- **kb_search** — keresés
+- **kb_testing** — tesztelés
+- **kb_feedback** — visszajelzés
+- **kb_maintenance** — karbantartás / újraindexelés
 
 ## Szabályok
 
@@ -104,6 +107,7 @@ Az almodul könyvtárnevek: `kb_crud`, `kb_reading`, … — önálló egységek
 apps/kb/
   README.md
   router.py
+  events.py
   bootstrap/
     app_module.py
   shared/
@@ -112,13 +116,10 @@ apps/kb/
     errors.py
     events.py
     contracts.py
+  ports/
+  kb_storage/
   kb_crud/
-  kb_reading/
-  kb_understanding/
-  kb_search/
-  kb_testing/
-  kb_feedback/
-  kb_maintenance/
+  kb_ingest/
 ```
 
 ## Migráció
@@ -132,9 +133,11 @@ Lépésről lépésre, **nem másolunk** a régi `apps/knowledge`-ból — csak 
 | 2 | shared — types, ids, errors, events, contracts ✓ |
 | 3 | modulbekötési szerződés — almodul module.py + app_module ✓ |
 | 4 | router.py — almodul routerek összefűzése ✓ |
-| 5 | crud — KnowledgeBase CRUD ✓ |
-| 6+ | reading → understanding → search → … |
+| 5 | crud — KnowledgeBase CRUD + permission ✓ |
+| 6 | training — szöveg/fájl tanítás ✓ |
+| 7 | legacy `apps/knowledge` + `apps/knowledge_engine` törlése ✓ |
+| 8+ | understanding → search → maintenance → feedback → testing újraépítése |
 
 ## Bekötés
 
-Skeleton kész. A core registry-be (`apps/registry.py`) **még nincs** bekötve — párhuzamosan fut a legacy `knowledge` modul. Bekötés: `("kb", "apps.kb.bootstrap.app_module:get_module")` amikor az első modul (crud) kész.
+A core registry-ben (`apps/registry.py`) a `("kb", "apps.kb.bootstrap.app_module:get_module")` bejegyzés él; a legacy `knowledge` modul törölve. Az `UNDERSTANDING_REQUESTED` outbox eseményt a kb_understanding újraépítéséig egy no-op handler nyugtázza (`apps/kb/events.py`).

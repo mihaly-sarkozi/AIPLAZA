@@ -15,6 +15,10 @@ const API_ERROR_I18N_KEYS: Record<string, string> = {
   queue_unavailable: "kb.errorQueueUnavailable",
   kb_not_found: "kb.errorNotFound",
   kb_name_exists: "kb.errorNameExists",
+  kb_name_invalid: "kb.errorNameInvalid",
+  kb_confirm_name_mismatch: "kb.errorConfirmNameMismatch",
+  kb_limit_reached: "kb.errorLimitReached",
+  kb_delete_not_allowed: "kb.errorDeleteNotAllowed",
 };
 
 function applyParams(template: string, params: Record<string, unknown>): string {

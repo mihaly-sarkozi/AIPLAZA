@@ -4,8 +4,8 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from apps.kb.kb_training.dto.TrainingItemSummaryResponse import TrainingItemSummaryResponse
-from apps.kb.kb_training.enums.TrainingBatchStatus import TrainingBatchStatus
+from apps.kb.kb_ingest.dto.TrainingItemSummaryResponse import TrainingItemSummaryResponse
+from apps.kb.kb_ingest.enums.TrainingBatchStatus import TrainingBatchStatus
 
 
 class TrainingTextResponse(BaseModel):

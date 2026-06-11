@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-# backend/apps/kb/kb_training/config/TrainingConf.py
+# backend/apps/kb/kb_ingest/config/TrainingConf.py
 # Feladat: Tanítási modul konfigurációs értékei (validációs limitek).
 # Sárközi Mihály - 2026.06.07
 

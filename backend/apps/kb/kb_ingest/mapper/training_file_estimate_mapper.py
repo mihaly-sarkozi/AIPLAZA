@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from apps.kb.kb_reading.dto.ReadFileEstimateResponse import ReadFileEstimateResponse
-from apps.kb.kb_training.dto.TrainingFileEstimateItemResponse import TrainingFileEstimateItemResponse
-from apps.kb.kb_training.dto.TrainingFileEstimateResponse import TrainingFileEstimateResponse
+from apps.kb.kb_ingest.dto.ReadFileEstimateResponse import ReadFileEstimateResponse
+from apps.kb.kb_ingest.dto.TrainingFileEstimateItemResponse import TrainingFileEstimateItemResponse
+from apps.kb.kb_ingest.dto.TrainingFileEstimateResponse import TrainingFileEstimateResponse
 
 
 def to_training_file_estimate(data: ReadFileEstimateResponse) -> TrainingFileEstimateResponse:

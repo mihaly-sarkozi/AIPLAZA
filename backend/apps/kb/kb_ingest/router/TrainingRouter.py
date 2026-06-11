@@ -1,35 +1,35 @@
 from __future__ import annotations
 
-# backend/apps/kb/kb_training/router/TrainingRouter.py
+# backend/apps/kb/kb_ingest/router/TrainingRouter.py
 # Feladat: Tanítási HTTP végpontok (szöveg batch indítás, batch részletek).
 # Sárközi Mihály - 2026.06.07
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 
-from apps.kb.kb_reading.dto.FileEstimateCommand import FileEstimateCommand
-from apps.kb.kb_reading.service.EstimateFilesService import EstimateFilesService
-from apps.kb.kb_training.bootstrap.dependencies import (
+from apps.kb.kb_ingest.dto.FileEstimateCommand import FileEstimateCommand
+from apps.kb.kb_ingest.service.EstimateFilesService import EstimateFilesService
+from apps.kb.kb_ingest.bootstrap.dependencies import (
     get_estimate_files_service,
     get_training_batch_service,
     get_training_file_service,
     get_training_text_service,
     require_kb_train,
 )
-from apps.kb.kb_training.dto.TrainingBatchStatusResponse import TrainingBatchStatusResponse
-from apps.kb.kb_training.dto.TrainingFileEstimateResponse import TrainingFileEstimateResponse
-from apps.kb.kb_training.dto.TrainingTextResponse import TrainingTextResponse
-from apps.kb.kb_training.mapper.training_file_estimate_mapper import to_training_file_estimate
-from apps.kb.kb_training.mapper.training_response_mapper import to_text_response, to_text_response_from_batch_status
-from apps.kb.kb_training.dto.TrainingTextRequest import TrainingTextRequest
-from apps.kb.kb_training.enums.TrainingErrorCode import TrainingErrorCode
-from apps.kb.kb_training.errors.TrainingDuplicateError import TrainingDuplicateError
-from apps.kb.kb_training.errors.TrainingNotFoundError import TrainingNotFoundError
-from apps.kb.kb_training.errors.TrainingProcessingError import TrainingProcessingError
-from apps.kb.kb_training.errors.TrainingQueueUnavailableError import TrainingQueueUnavailableError
-from apps.kb.kb_training.service.TrainingBatchService import TrainingBatchService
-from apps.kb.kb_training.service.TrainingFileService import TrainingFileService
-from apps.kb.kb_training.service.TrainingTextService import TrainingTextService
-from apps.kb.kb_training.validation.TrainingValidationError import TrainingValidationError
+from apps.kb.kb_ingest.dto.TrainingBatchStatusResponse import TrainingBatchStatusResponse
+from apps.kb.kb_ingest.dto.TrainingFileEstimateResponse import TrainingFileEstimateResponse
+from apps.kb.kb_ingest.dto.TrainingTextResponse import TrainingTextResponse
+from apps.kb.kb_ingest.mapper.training_file_estimate_mapper import to_training_file_estimate
+from apps.kb.kb_ingest.mapper.training_response_mapper import to_text_response, to_text_response_from_batch_status
+from apps.kb.kb_ingest.dto.TrainingTextRequest import TrainingTextRequest
+from apps.kb.kb_ingest.enums.TrainingErrorCode import TrainingErrorCode
+from apps.kb.kb_ingest.errors.TrainingDuplicateError import TrainingDuplicateError
+from apps.kb.kb_ingest.errors.TrainingNotFoundError import TrainingNotFoundError
+from apps.kb.kb_ingest.errors.TrainingProcessingError import TrainingProcessingError
+from apps.kb.kb_ingest.errors.TrainingQueueUnavailableError import TrainingQueueUnavailableError
+from apps.kb.kb_ingest.service.TrainingBatchService import TrainingBatchService
+from apps.kb.kb_ingest.service.TrainingFileService import TrainingFileService
+from apps.kb.kb_ingest.service.TrainingTextService import TrainingTextService
+from apps.kb.kb_ingest.validation.TrainingValidationError import TrainingValidationError
 from apps.kb.shared.errors import KbNotFoundError, KbValidationError
 from shared.utils.tenant_slug import tenant_slug_or_default
 from core.kernel.http.tenant_dependencies import require_tenant_context
@@ -125,7 +125,9 @@ async def create_file_training_batch(
             created_by=current_user.id,
             uploads=files,
         )
-        return to_text_response_from_batch_status(batch_service.get_status(result.training_batch_id))
+        return to_text_response_from_batch_status(
+            batch_service.get_status(result.training_batch_id, tenant=tenant_slug_or_default(tenant))
+        )
     except TrainingDuplicateError as exc:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -156,11 +158,12 @@ async def create_file_training_batch(
 @router.get("/training/batches/{batch_id}", response_model=TrainingBatchStatusResponse)
 def get_training_batch(
     batch_id: str,
+    tenant: RequestTenantContext = Depends(require_tenant_context),
     batch_service: TrainingBatchService = Depends(get_training_batch_service),
     _: User = Depends(require_kb_train),
 ) -> TrainingBatchStatusResponse:
     try:
-        return batch_service.get_status(batch_id)
+        return batch_service.get_status(batch_id, tenant=tenant_slug_or_default(tenant))
     except TrainingNotFoundError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

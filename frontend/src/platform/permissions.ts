@@ -7,7 +7,6 @@ const rolePermissions: Record<string, Set<string>> = {
     "auth.refresh",
     "auth.logout",
     "chat.use",
-    "knowledge.read",
     "kb.read",
     "kb.train",
     "users.read",

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-# backend/apps/kb/kb_training/orm/TrainingBatch.py
+# backend/apps/kb/kb_ingest/orm/TrainingBatch.py
 # Feladat: Tanítási köteg (batch) perzisztencia — egy API hívás / feltöltési művelet összesítő rekordja.
 # Sárközi Mihály - 2026.06.07
 
@@ -16,10 +16,10 @@ class TrainingBatch(TenantSchemaBase):
 
     Egy batch több ``TrainingItem`` rekordot fog össze (jelenleg szöveges tanításnál
     tipikusan 1 item). A státusz és számlálók a batch szintű előrehaladást írják le;
-    az egyes elemek állapota a ``kb_training_items`` táblában van.
+    az egyes elemek állapota a ``kb_ingest_items`` táblában van.
     """
 
-    __tablename__ = "kb_training_batches"
+    __tablename__ = "kb_ingest_batches"
 
     # Egyedi batch azonosító (pl. training_batch_…).
     id = Column(String(64), primary_key=True)

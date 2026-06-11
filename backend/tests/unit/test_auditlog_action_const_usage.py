@@ -16,8 +16,7 @@ _SERVICE_FILES = [
     Path("core/modules/settings/service/settings_service.py"),
     Path("core/modules/brand/service/brand_service.py"),
     Path("admin/router/admin_router.py"),
-    Path("apps/knowledge/service/corpus_management_service.py"),
-    Path("apps/knowledge/service/corpus_permission_service.py"),
+    Path("apps/kb/kb_crud/service/KbCrudAuditLogger.py"),
     Path("core/modules/tenant/signup/new_demo_signup.py"),
 ]
 
@@ -31,8 +30,8 @@ def _collect_audit_action_names(path: Path) -> set[str]:
             continue
         action_expr = None
 
-        # Közvetlen audit.log(AuditLogAction.X, ...)
-        if isinstance(node.func, ast.Attribute) and node.func.attr == "log":
+        # Közvetlen audit.log(AuditLogAction.X, ...) vagy belső self._log(AuditLogAction.X, ...)
+        if isinstance(node.func, ast.Attribute) and node.func.attr in {"log", "_log"}:
             action_expr = node.args[0] if node.args else None
             if isinstance(action_expr, ast.Name):
                 # Wrapper függvény belső továbbadása (pl. audit.log(action, ...)) itt nem ellenőrizhető.

@@ -9,14 +9,6 @@ from core.kernel.http.error_payloads import build_error_payload
 from core.kernel.http.exception_handlers import register_exception_handlers
 from core.kernel.security.errors import security_http_exception
 from apps.chat.errors import ChannelCredentialRejected, ChatPermissionDenied, ChatRequestInvalid
-from apps.knowledge.errors import (
-    IngestRunNotFound,
-    KnowledgeIndexBuildConflict,
-    KnowledgeRetrievalUnavailable,
-    KnowledgePermissionDenied,
-    KnowledgeSourceNotFound,
-    KnowledgeValidationError,
-)
 
 import pytest
 
@@ -159,14 +151,6 @@ def test_knowledge_base_not_found_app_error_schema() -> None:
 def test_module_specific_app_errors_map_to_unified_schema() -> None:
     app = _app()
 
-    @app.get("/knowledge-denied")
-    def _knowledge_denied():  # type: ignore[no-untyped-def]
-        raise KnowledgePermissionDenied()
-
-    @app.get("/ingest-run")
-    def _ingest_run():  # type: ignore[no-untyped-def]
-        raise IngestRunNotFound()
-
     @app.get("/chat-denied")
     def _chat_denied():  # type: ignore[no-untyped-def]
         raise ChatPermissionDenied()
@@ -175,38 +159,16 @@ def test_module_specific_app_errors_map_to_unified_schema() -> None:
     def _channel_credential():  # type: ignore[no-untyped-def]
         raise ChannelCredentialRejected()
 
-    @app.get("/knowledge-source")
-    def _knowledge_source():  # type: ignore[no-untyped-def]
-        raise KnowledgeSourceNotFound()
-
-    @app.get("/knowledge-validation")
-    def _knowledge_validation():  # type: ignore[no-untyped-def]
-        raise KnowledgeValidationError()
-
-    @app.get("/knowledge-index-conflict")
-    def _knowledge_index_conflict():  # type: ignore[no-untyped-def]
-        raise KnowledgeIndexBuildConflict()
-
-    @app.get("/knowledge-retrieval-unavailable")
-    def _knowledge_retrieval_unavailable():  # type: ignore[no-untyped-def]
-        raise KnowledgeRetrievalUnavailable()
-
     @app.get("/chat-request-invalid")
     def _chat_request_invalid():  # type: ignore[no-untyped-def]
         raise ChatRequestInvalid()
 
     client = TestClient(app)
 
-    assert client.get("/knowledge-denied").json()["code"] == "KNOWLEDGE_PERMISSION_DENIED"
-    assert client.get("/ingest-run").json()["code"] == "INGEST_RUN_NOT_FOUND"
     assert client.get("/chat-denied").json()["code"] == "CHAT_PERMISSION_DENIED"
     response = client.get("/channel-credential")
     assert response.status_code == 401
     assert response.json()["code"] == "CHANNEL_CREDENTIAL_REJECTED"
-    assert client.get("/knowledge-source").json()["code"] == "KNOWLEDGE_SOURCE_NOT_FOUND"
-    assert client.get("/knowledge-validation").json()["code"] == "KNOWLEDGE_VALIDATION_ERROR"
-    assert client.get("/knowledge-index-conflict").status_code == 409
-    assert client.get("/knowledge-retrieval-unavailable").status_code == 503
     assert client.get("/chat-request-invalid").json()["code"] == "CHAT_REQUEST_INVALID"
 
 
