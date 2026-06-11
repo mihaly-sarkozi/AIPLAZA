@@ -1,0 +1,36 @@
+from __future__ import annotations
+
+# backend/apps/kb/kb_understanding/enums/UnderstandingErrorCode.py
+# Feladat: Megértési modul gépi hibakódjai (UI fordítás a kódból).
+# Sárközi Mihály - 2026.06.11
+
+from enum import Enum
+
+
+class UnderstandingErrorCode(str, Enum):
+    ITEM_NOT_FOUND = "item_not_found"
+    JOB_NOT_FOUND = "job_not_found"
+    JOB_ALREADY_RUNNING = "job_already_running"
+    JOB_NOT_RETRYABLE = "job_not_retryable"
+    RAW_REF_MISSING = "raw_ref_missing"
+    STORAGE_ERROR = "storage_error"
+    UNSUPPORTED_CONTENT_TYPE = "unsupported_content_type"
+    EXTRACTION_FAILED = "extraction_failed"
+    EMPTY_CONTENT = "empty_content"
+    NORMALIZATION_FAILED = "normalization_failed"
+    STRUCTURE_DETECTION_FAILED = "structure_detection_failed"
+    CHUNKING_FAILED = "chunking_failed"
+    NO_CHUNKS = "no_chunks"
+    ENTITY_EXTRACTION_FAILED = "entity_extraction_failed"
+    ENRICHMENT_FAILED = "enrichment_failed"
+    EMBEDDING_FAILED = "embedding_failed"
+    EMBEDDING_PROVIDER_UNAVAILABLE = "embedding_provider_unavailable"
+    LLM_UNAVAILABLE = "llm_unavailable"
+    RELATIONSHIP_BUILD_FAILED = "relationship_build_failed"
+    SCORING_FAILED = "scoring_failed"
+    VALIDATION_FAILED = "validation_failed"
+    INVALID_EVENT_PAYLOAD = "invalid_event_payload"
+    INTERNAL_ERROR = "internal_error"
+
+
+__all__ = ["UnderstandingErrorCode"]

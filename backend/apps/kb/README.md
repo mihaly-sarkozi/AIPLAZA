@@ -1,76 +1,149 @@
-# KB module
+# KB modul — tudástár architektúra
 
-A tudástár backend modulokból áll. Jelenleg telepítve:
+A tudástár nem egy nagy modul, hanem egymásra épülő, külön fejleszthető és külön
+tesztelhető komponensek rendszere. A „Training" üzleti fogalom marad, de technikailag
+több modulból áll:
 
-1. **kb_crud** — tudástár-kezelés (CRUD + jogosultságok)
-2. **kb_ingest** — tanítás (szöveg/fájl beküldés, becslés, batch státusz)
+```text
+Training = Ingest + Understanding + Indexing + Validation
+```
 
-Tervezett (a legacy `apps/knowledge` törlése után újraépítendő) modulok:
+## Végleges modulnévsor
 
-- **kb_understanding** — megértés / feldolgozás
-- **kb_search** — keresés
-- **kb_testing** — tesztelés
-- **kb_feedback** — visszajelzés
-- **kb_maintenance** — karbantartás / újraindexelés
+| Modul | Állapot | Feladat |
+|-------|---------|---------|
+| **kb_crud** | telepítve | tudástár CRUD, jogosultságok, tenant kezelés, státuszok, alapbeállítások |
+| **kb_ingest** | telepítve | input befogadás + bizonyíték mentés (szöveg/PDF/DOCX, checksum, batch/item, feldolgozás indítása) |
+| **kb_understanding** | skeleton | a betöltött anyag megértése: extract → … → validation pipeline |
+| **kb_indexing** | skeleton | a feldolgozott tudás kereshetővé tétele (full-text, vector, entity, keyword, metadata, hybrid index) |
+| **kb_search** | skeleton | keresés és kontextusépítés (query parser, hybrid ranking, context/citation builder) |
+| **kb_services** | skeleton | tudásra épülő üzleti szolgáltatások (vázlat, összefoglaló, Q&A, hiánylista, tudástérkép…) |
+| **kb_testing** | skeleton | a teljes tudásfolyamat minőségének mérése (pipeline-lépésenkénti tesztek) |
+| **kb_feedback** | skeleton | felhasználói visszajelzések és használati jelek gyűjtése |
+| **kb_maintenance** | skeleton | hosszú távú karbantartás (újraindexelés, újraembedding, retry, cleanup) |
 
-## Szabályok
+A `kb_training` és `kb_reading` technikai modulnevek megszűntek — helyettük: **kb_ingest**.
+
+## Modulhatárok (mit NEM csinál)
+
+- **kb_crud** nem végez betöltést, feldolgozást, embeddinget vagy keresést.
+- **kb_ingest** nem értelmez, nem chunkol, nem embeddingel. Célja: bizonyíték biztonságos
+  eltárolása + a feldolgozási folyamat elindítása.
+- **kb_understanding** nem ír keresőindexet és nem szolgál ki keresést.
+- **kb_indexing** külön modul, mert **írja** az indexeket; a **kb_search** külön modul,
+  mert **olvassa** őket.
+- **kb_search** nem dolgoz fel dokumentumot és nem módosítja a tudásanyagot.
+- **kb_services** a `kb_search`, `kb_understanding`, `kb_feedback` és `kb_indexing`
+  eredményeire épülhet, de nem végezhet nyers dokumentumfeldolgozást. Alapja:
+  chunks, entities, relationships, summaries, keywords, topics, scores,
+  search_events, feedback.
+
+## Pipeline szabály
+
+```text
+INGEST → EXTRACT → NORMALIZE → STRUCTURE DETECTION → CHUNKING
+→ ENTITY EXTRACTION → KNOWLEDGE ENRICHMENT → EMBEDDING
+→ HYBRID INDEXING → RELATIONSHIP BUILD → KNOWLEDGE SCORING
+→ VALIDATION → READY
+```
+
+Ezt **tilos** egyetlen nagy függvényként vagy service-ként megvalósítani. Minden lépés
+külön egység: külön class, külön service, külön input/output DTO, külön log, külön teszt.
+Az `UnderstandingPipelineService` csak összefűzi a lépéseket — nem abban van a logika.
+
+Minden lépésnek legyen: saját bemenete, kimenete, státusza, hibakezelése, tesztje és
+naplózható eredménye. Egy lépés hibája nem teheti tönkre az egész tudástárat — az adott
+item legyen `FAILED`, `PARTIAL` vagy `RETRYABLE` állapotú.
+
+## Állapotkezelési szabály
+
+Minden dokumentum, batch és item kapjon státuszt. A kanonikus státuszkészlet
+(`kb_understanding/enums/UnderstandingStatus.py`):
+
+```text
+CREATED, QUEUED, EXTRACTING, NORMALIZING, STRUCTURING, CHUNKING,
+EXTRACTING_ENTITIES, ENRICHING, EMBEDDING, BUILDING_RELATIONSHIPS, SCORING,
+VALIDATING, READY_FOR_INDEXING, PARTIAL, FAILED, RETRYABLE
+```
+
+## Bizonyíték szabály
+
+Minden tudáselemnek visszavezethetőnek kell lennie az eredeti forrásra. Kötelező
+metaadatok minden chunkon/tudáselemen:
+
+```text
+source_id, document_id, chunk_id, file_name, source_type, checksum, version,
+page_number vagy section, created_by, created_at, last_processed_at
+```
+
+Az AI-válasz nem lehet „bizonyíték nélküli".
+
+## Tesztelhetőségi szabály
+
+Minden pipeline-lépésnél ellenőrizhető legyen: mit kapott bemenetként, mit adott
+kimenetként, mennyi ideig futott, hibázott-e, újrafuttatható-e, módosított-e adatot.
+A feldolgozás legyen **idempotens**: ugyanarra az inputra ugyanazt vagy kompatibilis
+eredményt adja. Minden összetett pipeline-lépéshez tartozzon külön teszt
+(ingest, extract, normalize, chunking, entity extraction, embedding, indexing,
+search, ranking, AI válasz, forrásellenőrzés).
+
+## Bővíthetőségi szabály
+
+Új inputforrás vagy embedder hozzáadásakor nem szabad módosítani az egész pipeline-t —
+új forrás/szolgáltató csak új **adapter** legyen:
+
+```text
+PdfIngestAdapter, DocxIngestAdapter, ManualTextIngestAdapter, UrlIngestAdapter
+OpenAIEmbedder, LocalEmbedder, HuggingFaceEmbedder, CustomEmbedder
+```
+
+## Könyvtárszabály
+
+Minden almodul helye: `backend/apps/kb/<modul_neve>/`. A **kb_ingest a minta**.
+
+Kötelező minden modulban:
+
+| Elem | Szerep |
+|------|--------|
+| `module.py` | bekötés: route-ok, service-ek/repository-k, event handler-ek regisztrálása |
+| `bootstrap/` | `dependencies.py` (FastAPI Depends), `service_keys.py` (container kulcsok), `tenant_hooks.py` (ha van tenant DB tábla) |
+| `service/` | üzleti logika — egy felelősség = egy service osztály, egy fájl = egy osztály |
+| `dto/` | request/response/command/result DTO-k |
+| `errors/` | modulspecifikus hibák |
+
+Opcionális, csak ha tényleg kell (**kevesebb fájl > üres váz**):
+
+| Elem | Mikor kell |
+|------|-----------|
+| `router/` | ha van HTTP API — csak request/response + service hívás, nincs üzleti logika, minden endpointon permission check |
+| `orm/` | ha a modul saját táblákat kezel |
+| `repository/` | ha a modul DB-ből ír/olvas |
+| `adapters/` | külső vagy technikai integrációk |
+| `validation/` | input vagy pipeline-lépés validáció |
+| `enums/` | státuszok, típusok, hibakódok |
+| `mapper/` | DTO ↔ domain ↔ ORM átalakítás |
+| `events/` | ha a modul eseményeket bocsát ki vagy fogad |
+| `security/` | modulspecifikus biztonsági ellenőrzések (pl. `FileSniffer`, `ArchiveGuard`) |
+
+További szabályok:
 
 - Nincs központi `KnowledgeFacade`.
-- Minden modul saját **service** osztályokkal dolgozik (egy felelősség = egy osztály).
-- **Egy fájl = egy osztály** (Java-szerű elnevezés: fájlnév = osztálynév, pl. `CreateKnowledgeBaseService.py` → `CreateKnowledgeBaseService`).
-- **Ne szaporítsd a kódot:** nincs pass-through wrapper, nincs felesleges `manager` / `handler` / `coordinator` — csak ami döntést vagy perzisztenciát hordoz.
-- Audit és metrics modulon belül van, külön service fájlokban (`AuditLogger`, `MetricsRecorder` — ha kell).
-- Observability / trace a **kb_understanding** modul része (`LifecycleTracker`, `ProcessingTraceService` — nem külön globális modul).
-- A **shared** csak közös típusokat, hibákat, eseményeket tartalmaz — nincs benne üzleti logika.
-- **Jogosultság mindig kötelező:** minden route `Depends(require_permission("kb.…"))` — a kulcsok a `bootstrap/app_module.py`-ban deklaráltak.
+- **Egy fájl = egy osztály** (fájlnév = osztálynév, pl. `ChunkContentService.py`).
+- **Ne szaporítsd a kódot:** nincs pass-through wrapper, nincs felesleges
+  `manager` / `handler` / `coordinator` — csak ami döntést vagy perzisztenciát hordoz.
+- Audit és metrics modulon belül van, külön service fájlokban.
+- Observability / trace a **kb_understanding** része (`ProcessingTraceService`).
+- A **shared** csak közös típusokat, hibákat, eseményeket tartalmaz — nincs benne
+  üzleti logika, és nem importálhat konkrét modult.
 
-## Modul belső szerkezet
+## Bekötési szabály
 
-Minden almodul **külön könyvtárakba** szervezi a felelősségi köröket — ahogy a többi app modulnál (`chat`, `settings`):
+Új modul hozzáadásakor pontosan 4 helyen kell nyúlni:
 
-```
-apps/kb/<modul>/
-  README.md
-  module.py                 # bootstrap regisztráció (egy osztály)
-  router/
-    ...Router.py            # HTTP — csak request/response + service hívás
-  domain/
-    ...                     # modul-specifikus domain (ha kell; különben shared)
-  service/
-    ...Service.py           # üzleti műveletek, egy osztály / fájl
-  repository/               # csak ha van DB/ORM
-    ...Repository.py
-  adapter/                  # csak ha külső rendszer (storage, queue, vector)
-    ...Adapter.py
-  schemas/
-    ...                     # Pydantic DTO-k (egy request/response / fájl, ha értelmes)
-```
-
-**Mi NEM kell minden modulban:** `repository/`, `adapter/`, `domain/` — csak ha tényleg használatban van. Kevesebb fájl > üres váz.
-
-### Példa — `kb_crud/` (váz)
-
-```
-kb_crud/
-  module.py
-  router.py
-  use_cases.py
-  repository.py
-  schemas.py
-```
-
-### Példa — `kb_understanding/` (több belső lépés)
-
-```
-kb_understanding/
-  service/UnderstandMaterialService.py
-  service/ChunkTextService.py
-  service/VectorizeChunksService.py
-  service/IndexChunksService.py
-  service/LifecycleTracker.py
-  service/ProcessingTraceService.py
-  adapter/VectorStoreAdapter.py
-```
+1. Új mappa: `backend/apps/kb/<modul_neve>/`
+2. Saját `module.py` (`name`, `register_routes`, `register_services`, `register_event_handlers`)
+3. `backend/apps/kb/bootstrap/app_module.py` — a `KB_MODULES` listába bekerül a modul példánya
+4. `backend/apps/kb/router.py` — csak ha van HTTP routere
 
 ## Jogosultság
 
@@ -80,36 +153,65 @@ kb_understanding/
 | Router | minden route: `Depends(require_permission(...))` |
 | Service | tenant / corpus scope ellenőrzés, ha a router nem elég |
 
-**Szabály:** új endpoint = új permission check. Nincs kivétel „dev” vagy „internal” címkével sem production path-on.
+**Szabály:** új endpoint = új permission check. Nincs kivétel „dev" vagy „internal"
+címkével sem production path-on.
 
 ## Függés (irány)
 
-```
+```text
 router.py → modul router → modul service → repository/adapter
                               ↓
                            shared (types, errors, events)
 
-understanding ← reading (esemény / raw ref)
-search        ← understanding eredmény (index, chunk)
+understanding ← ingest (esemény / raw ref)
+indexing      ← understanding (esemény / chunk + embedding)
+search        ← indexing eredmény (indexek olvasása)
+services      ← search / understanding / feedback / indexing eredmények
 testing       → search
-maintenance   → understanding (esemény)
+feedback      → ranking / hiánylista / statisztika / karbantartás bemenete
+maintenance   → understanding (esemény / újrafuttatás)
 ```
-
-Az almodul könyvtárnevek: `kb_crud`, `kb_reading`, … — önálló egységek, `kb_` prefixszel.
 
 - A **shared** nem importálhat konkrét modult.
 - **Service** nem importál más modul **router**ét.
-- Modulok között: **shared contracts / events**, ne közvetlen facade.
+- **Modulok között tilos a közvetlen kereszt-import** (`apps.kb.kb_X` nem importál
+  `apps.kb.kb_Y`-t) — kommunikáció: **shared contracts / events** + container-ben
+  regisztrált portok. Kompozíciós gyökér kivétel: `apps/kb/router.py`,
+  `apps/kb/bootstrap/`, `apps/kb/events.py`.
+- A szabályokat a `scripts/check_import_boundaries.py` gépileg is kikényszeríti.
 
-## Gyökér fa (cél)
+## Fejlesztési sorrend
 
+```text
+ 1. kb_crud                                ✓
+ 2. kb_ingest                              ✓
+ 3. kb_understanding / extract
+ 4. kb_understanding / normalize
+ 5. kb_understanding / structure detection
+ 6. kb_understanding / chunking
+ 7. kb_indexing / full-text
+ 8. kb_understanding / embedding
+ 9. kb_indexing / vector
+10. kb_search / hybrid search
+11. kb_understanding / entity extraction
+12. kb_understanding / enrichment
+13. kb_services / question-answer
+14. kb_feedback
+15. kb_testing
+16. kb_maintenance
 ```
+
+## Gyökér fa
+
+```text
 apps/kb/
   README.md
   router.py
   events.py
+  module.py
   bootstrap/
     app_module.py
+    service_keys.py
   shared/
     types.py
     ids.py
@@ -117,27 +219,20 @@ apps/kb/
     events.py
     contracts.py
   ports/
-  kb_storage/
   kb_crud/
   kb_ingest/
+  kb_understanding/
+  kb_indexing/
+  kb_search/
+  kb_services/
+  kb_testing/
+  kb_feedback/
+  kb_maintenance/
 ```
 
-## Migráció
+## Bekötés a platformba
 
-Lépésről lépésre, **nem másolunk** a régi `apps/knowledge`-ból — csak a működést vesszük át újraírva.
-
-| Lépés | Tartalom |
-|-------|----------|
-| 0 | Döntések rögzítése ✓ |
-| 1 | Skeleton — mappák, üres osztályok ✓ |
-| 2 | shared — types, ids, errors, events, contracts ✓ |
-| 3 | modulbekötési szerződés — almodul module.py + app_module ✓ |
-| 4 | router.py — almodul routerek összefűzése ✓ |
-| 5 | crud — KnowledgeBase CRUD + permission ✓ |
-| 6 | training — szöveg/fájl tanítás ✓ |
-| 7 | legacy `apps/knowledge` + `apps/knowledge_engine` törlése ✓ |
-| 8+ | understanding → search → maintenance → feedback → testing újraépítése |
-
-## Bekötés
-
-A core registry-ben (`apps/registry.py`) a `("kb", "apps.kb.bootstrap.app_module:get_module")` bejegyzés él; a legacy `knowledge` modul törölve. Az `UNDERSTANDING_REQUESTED` outbox eseményt a kb_understanding újraépítéséig egy no-op handler nyugtázza (`apps/kb/events.py`).
+A core registry-ben (`apps/registry.py`) a
+`("kb", "apps.kb.bootstrap.app_module:get_module")` bejegyzés él. Az
+`UNDERSTANDING_REQUESTED` outbox eseményt a kb_understanding tényleges
+megvalósításáig egy no-op handler nyugtázza (`apps/kb/events.py`).

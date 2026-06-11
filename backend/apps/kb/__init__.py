@@ -1,1 +1,1 @@
-"""KB — tudástár modulcsalád (7 almodul)."""
+"""KB — tudástár modulcsalád (9 almodul)."""

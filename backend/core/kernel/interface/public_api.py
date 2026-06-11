@@ -43,6 +43,7 @@ PUBLIC_CORE_API_PREFIXES: tuple[str, ...] = (
     "core.infrastructure.audit.const",
     "core.infrastructure.audit.service",
     "core.kernel.process",
+    "core.kernel.jobs",
     "core.kernel.deps.facade",
     "core.kernel.http.tenant_dependencies",
     "core.kernel.db.model_bases",

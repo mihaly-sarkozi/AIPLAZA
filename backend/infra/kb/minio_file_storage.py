@@ -100,6 +100,16 @@ class MinioFileStorage:
         )
         return raw_ref
 
+    def read_bytes(self, *, raw_ref: str) -> bytes:
+        key = str(raw_ref or "").strip()
+        if not key:
+            raise KbStorageError("raw_ref_required")
+        try:
+            stored = self._minio.get_bytes(key=key)
+        except Exception as exc:
+            raise KbStorageError("raw_ref_read_failed") from exc
+        return stored.body
+
     @staticmethod
     def _build_training_text_ref(
         *,

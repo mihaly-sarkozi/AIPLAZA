@@ -60,3 +60,5 @@ redis>=4.5.0,<6
 dnspython
 # Nyelvdetektálás a chat szolgáltatásokhoz
 langdetect>=1.0.0
+# Lokális embedding modell (kb_understanding — BAAI/bge-m3)
+sentence-transformers>=3.0.0

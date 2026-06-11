@@ -36,5 +36,9 @@ class FileStorageInterface(Protocol):
         """Fájl mentése; visszaadja a raw_ref kulcsot."""
         ...
 
+    def read_bytes(self, *, raw_ref: str) -> bytes:
+        """Nyers anyag betöltése a raw_ref kulcs alapján (understanding pipeline)."""
+        ...
+
 
 __all__ = ["FileStorageInterface"]

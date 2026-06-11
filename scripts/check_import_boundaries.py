@@ -41,10 +41,14 @@ class Violation:
     rule: str
 
 
+def _skip_part(part: str) -> bool:
+    return part in SKIP_DIR_NAMES or part.startswith(".venv")
+
+
 def _iter_python_files() -> list[Path]:
     files: list[Path] = []
     for path in BACKEND_ROOT.rglob("*.py"):
-        if any(part in SKIP_DIR_NAMES for part in path.parts):
+        if any(_skip_part(part) for part in path.parts):
             continue
         files.append(path)
     return files
@@ -112,6 +116,53 @@ def _is_concrete_repository_module(module: str) -> bool:
     if ".ports.repositories" in text:
         return False
     return ".repositories." in text or text.endswith(".repositories")
+
+
+# KB almodulok — kereszt-import tilalom (apps.kb.kb_X nem importál apps.kb.kb_Y-t).
+_KB_MODULE_NAMES = {
+    "kb_crud",
+    "kb_ingest",
+    "kb_understanding",
+    "kb_indexing",
+    "kb_search",
+    "kb_services",
+    "kb_testing",
+    "kb_feedback",
+    "kb_maintenance",
+}
+
+# Kompozíciós gyökér + tesztek: itt megengedett a konkrét kb_* modulok importja.
+_KB_COMPOSITION_ROOT_PREFIXES = (
+    "backend/apps/kb/router.py",
+    "backend/apps/kb/events.py",
+    "backend/apps/kb/module.py",
+    "backend/apps/kb/bootstrap/",
+    "backend/tests/",
+)
+
+
+def _kb_module_of_path(rel: str) -> str | None:
+    prefix = "backend/apps/kb/"
+    if not rel.startswith(prefix):
+        return None
+    first = rel[len(prefix) :].split("/", 1)[0]
+    return first if first in _KB_MODULE_NAMES else None
+
+
+def _kb_module_of_import(module: str) -> str | None:
+    prefix = "apps.kb."
+    if not module.startswith(prefix):
+        return None
+    first = module[len(prefix) :].split(".", 1)[0]
+    return first if first in _KB_MODULE_NAMES else None
+
+
+def _is_kb_composition_root(rel: str) -> bool:
+    return rel.startswith(_KB_COMPOSITION_ROOT_PREFIXES)
+
+
+def _is_kb_shared_layer(rel: str) -> bool:
+    return rel.startswith(("backend/apps/kb/shared/", "backend/apps/kb/ports/"))
 
 
 _ROUTER_INFRA_ALLOWLIST: dict[str, set[str]] = {
@@ -194,6 +245,33 @@ def _collect_violations() -> tuple[list[Violation], list[str]]:
                             rule="repository_must_not_depend_on_router_or_service",
                         )
                     )
+
+            # Rule 5: KB almodulok között tilos a közvetlen kereszt-import.
+            # Kommunikáció: apps/kb/shared contracts/events + container portok.
+            # Kivétel a kompozíciós gyökér (router.py, events.py, module.py, bootstrap/).
+            imported_kb_module = _kb_module_of_import(module)
+            if imported_kb_module is not None and not _is_kb_composition_root(rel):
+                current_kb_module = _kb_module_of_path(rel)
+                if current_kb_module != imported_kb_module:
+                    violations.append(
+                        Violation(
+                            path=rel,
+                            line=item.line,
+                            imported_module=module,
+                            rule="kb_modules_must_not_cross_import",
+                        )
+                    )
+
+            # Rule 6: a kb shared/ports réteg nem importálhat konkrét kb_* modult.
+            if _is_kb_shared_layer(rel) and imported_kb_module is not None:
+                violations.append(
+                    Violation(
+                        path=rel,
+                        line=item.line,
+                        imported_module=module,
+                        rule="kb_shared_must_not_import_kb_modules",
+                    )
+                )
     return violations, parse_errors
 
 

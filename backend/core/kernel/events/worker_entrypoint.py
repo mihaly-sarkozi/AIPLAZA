@@ -57,6 +57,7 @@ def build_and_run_worker_process() -> None:
         security_logger=security.base_security_logger,
         audit_service=audit_service,
         email_service=infra.email_service,
+        db_session_factory=db_sf,
     )
     outbox_worker = _build_outbox_worker(
         outbox_repo=outbox_repo,
@@ -86,7 +87,7 @@ def build_and_run_worker_process() -> None:
     outbox_worker.run_blocking()
 
 
-def _build_dispatcher(*, security_logger, audit_service, email_service):
+def _build_dispatcher(*, security_logger, audit_service, email_service, db_session_factory=None):
     from core.kernel.events.dispatcher import EventDispatcher
     from core.kernel.events.handlers import register_security_audit_handlers
 
@@ -101,7 +102,7 @@ def _build_dispatcher(*, security_logger, audit_service, email_service):
         kb_events_module = importlib.import_module("apps.kb.events")
         register_kb_event_handlers = getattr(kb_events_module, "register_kb_event_handlers", None)
         if callable(register_kb_event_handlers):
-            register_kb_event_handlers(dispatcher)
+            register_kb_event_handlers(dispatcher, session_factory=db_session_factory)
     except Exception as exc:
         _log.warning("KB outbox handler regisztráció kihagyva: %s", exc)
     return dispatcher
