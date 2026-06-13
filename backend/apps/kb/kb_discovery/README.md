@@ -24,6 +24,11 @@ LANGUAGE_DETECTION → ENTITY_EXTRACTION → LOCAL_KNOWLEDGE_ENRICHMENT
 
 - Nincs LLM — csak regex, dictionary, alias, heurisztika
 - Nincs szintaktikai NLP pipeline (Stanza / spaCy / UDPipe nincs bekötve)
+- `GivenNameRecognizer`: csak gyenge candidate (0.35), önmagában nem persistál PERSON entity-t
+- `FullPersonNameRecognizer` + directory alias: teljes név / directory találat mentésre kerül (≥ 0.5)
+- Person mention szűrés: longest-match; teljes név nyer az átfedő aliasok felett
+- `ProductRecognizer` törölve — product típus a `DictionaryEntityRecognizer`-en keresztül jön
+- `CompanyNameRecognizer` törölve — helyette `LegalFormCompanyRecognizer`
 - Entitás/enrichment/relationship/score tulajdonosa: `kb_discovery`
 - Meglévő táblanevek kompatibilitás miatt megmaradhatnak (`kb_entities`, `kb_enrichments`, stb.)
 

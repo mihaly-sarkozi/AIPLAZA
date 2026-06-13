@@ -7,7 +7,6 @@ from apps.kb.kb_discovery.dto.DiscoveryJobContext import DiscoveryJobContext
 from apps.kb.kb_discovery.dto.KnowledgeEntityDto import EntityMentionDto, KnowledgeEntityDto
 from apps.kb.kb_discovery.entities.DictionaryEntityRecognizer import (
     DictionaryEntityRecognizer,
-    ProductRecognizer,
     SystemNameRecognizer,
 )
 from apps.kb.kb_discovery.entities.IdentifierRecognizer import IdentifierRecognizer
@@ -48,7 +47,6 @@ class EntityRecognitionService:
             LegalFormCompanyRecognizer(legal_forms),
             SystemNameRecognizer(systems),
             DictionaryEntityRecognizer(),
-            ProductRecognizer(),
             IdentifierRecognizer(),
         ]
 

@@ -18,7 +18,15 @@ _GIVEN_NAME_TOKEN = re.compile(
 
 
 class GivenNameRecognizer(BaseRecognizer):
-    """Gyenge jelölés — directory találat nélkül nem lesz magas confidence PERSON entity."""
+    """Gyenge jelölés — önmagában nem hoz létre végleges PERSON entity-t.
+
+    Szerepe:
+    - FullPersonNameRecognizer gazetteer jel forrása
+    - jövőbeli context boost (email/aláírás közeli jel)
+    - alacsony confidence candidate (GIVEN_NAME_CANDIDATE_CONFIDENCE)
+
+    A PersonRecognitionService csak >= PERSON_ENTITY_MIN_CONFIDENCE értéket persistál.
+    """
 
     name = "given_name"
     version = "1.0"

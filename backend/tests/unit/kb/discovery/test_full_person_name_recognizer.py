@@ -113,10 +113,39 @@ def test_given_name_alone_not_persisted_by_person_service():
     assert mentions == []
 
 
-def test_full_name_persisted_by_person_service():
-    service = PersonRecognitionService(_FakeRepo(), _FakeRepo())
+def test_person_service_keeps_single_mention_for_full_name_over_aliases():
     from apps.kb.kb_discovery.dto.DiscoveryJobContext import DiscoveryJobContext
 
+    service = PersonRecognitionService(_FakeRepo(), _FakeRepo())
+    ctx = DiscoveryJobContext(
+        job_id="job1",
+        understanding_job_id="und1",
+        training_item_id="item1",
+        training_batch_id="batch1",
+        knowledge_base_id="example-kb",
+        tenant_slug="demo",
+        created_by=1,
+        source_type="text",
+        title="t",
+    )
+    chunks = [
+        DiscoveryChunkDto(
+            chunk_id="c1",
+            text="Carlos García aláírta a szerződést.",
+            chunk_type="paragraph",
+            order_index=0,
+            language_code="es",
+        )
+    ]
+    _entities, mentions = service.run(ctx, chunks)
+    assert len(mentions) == 1
+    assert mentions[0].raw_text == "Carlos García"
+
+
+def test_full_name_persisted_by_person_service():
+    from apps.kb.kb_discovery.dto.DiscoveryJobContext import DiscoveryJobContext
+
+    service = PersonRecognitionService(_FakeRepo(), _FakeRepo())
     ctx = DiscoveryJobContext(
         job_id="job1",
         understanding_job_id="und1",

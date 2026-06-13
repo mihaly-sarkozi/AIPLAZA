@@ -6,8 +6,8 @@ import pytest
 from apps.kb.kb_discovery.common.DiscoveryContext import DiscoveryContext
 from apps.kb.kb_discovery.dto.DiscoveryChunkDto import DiscoveryChunkDto
 from apps.kb.kb_discovery.dto.DiscoveryJobContext import DiscoveryJobContext
-from apps.kb.kb_discovery.entities.CompanyNameRecognizer import CompanyNameRecognizer
 from apps.kb.kb_discovery.entities.DictionaryEntityRecognizer import SystemNameRecognizer
+from apps.kb.kb_discovery.entities.LegalFormCompanyRecognizer import LegalFormCompanyRecognizer
 from apps.kb.kb_discovery.enums.EntityType import EntityType
 from apps.kb.kb_discovery.keywords.KeywordExtractionService import KeywordExtractionService
 from apps.kb.kb_discovery.relationships.RelationshipBuildService import RelationshipBuildService
@@ -63,7 +63,7 @@ def test_full_sentence_company_system_temporal_spatial():
         training_item_id="item1",
     )
 
-    companies = CompanyNameRecognizer().recognize(chunks, context)
+    companies = LegalFormCompanyRecognizer().recognize(chunks, context)
     systems = SystemNameRecognizer().recognize(
         chunks,
         DiscoveryContext(

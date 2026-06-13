@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import json
+import re
 import sys
 import urllib.request
 from pathlib import Path
@@ -14,6 +15,78 @@ DATA_ROOT = ROOT / "backend" / "apps" / "kb" / "kb_discovery" / "data"
 NICKNAMES_URL = (
     "https://raw.githubusercontent.com/carltonnorthern/nicknames/master/names.csv"
 )
+GLEIF_ELF_CSV_URL = (
+    "https://www.gleif.org/lei-data/code-lists/"
+    "iso-20275-entity-legal-forms-code-list/2026-02-19-elf-code-list-v1.6.csv"
+)
+HUN_FIRSTNAMES_URL = (
+    "https://raw.githubusercontent.com/k-monitor/parldata/master/"
+    "src/elasticsearch/config/keyword_marker_lists/hun_firstnames.txt"
+)
+HU_NAMEDAYS_URL = (
+    "https://raw.githubusercontent.com/harkalygergo/hu_namedays/master/"
+    "hu-HU_magyar-nevnapok-abc-sorrendben.csv"
+)
+ES_GIVEN_NAMES_URL = (
+    "https://raw.githubusercontent.com/Rigonz/60k-Spanish-Given-Names/master/"
+    "03%20Names%20R3.csv"
+)
+ES_MALE_NAMES_URL = (
+    "https://raw.githubusercontent.com/jvalhondo/spanish-names-surnames/master/"
+    "male_names.csv"
+)
+ES_FEMALE_NAMES_URL = (
+    "https://raw.githubusercontent.com/jvalhondo/spanish-names-surnames/master/"
+    "female_names.csv"
+)
+EN_BABY_NAMES_URL = (
+    "https://raw.githubusercontent.com/hadley/data-baby-names/master/baby-names.csv"
+)
+WIKI_ES_HYPO_URL = (
+    "https://es.wikipedia.org/wiki/Anexo:Hipocor%C3%ADsticos_en_espa%C3%B1ol?action=raw"
+)
+WIKI_HU_NICKNAME_URL = (
+    "https://hu.wikipedia.org/wiki/Magyar_keresztnevek_bec%C3%A9z%C3%A9se?action=raw"
+)
+HUNGAROPEDIA_NICKNAME_URL = (
+    "https://hungaropedia.org/index.php?title=Magyar_keresztnevek_bec%C3%A9z%C3%A9se&action=raw"
+)
+
+_WIKI_LINK = re.compile(r"\[\[([^\]|]+)(?:\|([^\]]+))?\]\]")
+_GLEIF_COUNTRY_TO_LANG = {
+    "HU": "hu",
+    "GB": "en",
+    "UK": "en",
+    "US": "en",
+    "IE": "en",
+    "AU": "en",
+    "NZ": "en",
+    "CA": "en",
+    "ES": "es",
+    "MX": "es",
+    "AR": "es",
+}
+
+
+def _download_text(url: str, *, timeout: int = 60) -> str | None:
+    request = urllib.request.Request(
+        url,
+        headers={"User-Agent": "AIPLAZA-gazetteer-build/1.0 (+https://github.com/)"},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            return response.read().decode("utf-8", errors="replace")
+    except OSError as exc:
+        print(f"WARN: download failed ({url}): {exc}", file=sys.stderr)
+        return None
+
+
+def _download_file(url: str, target: Path, *, timeout: int = 60) -> bool:
+    raw = _download_text(url, timeout=timeout)
+    if raw is None:
+        return False
+    target.write_text(raw, encoding="utf-8")
+    return True
 
 
 def _ensure_dirs() -> None:
@@ -68,6 +141,96 @@ def _build_default_systems() -> None:
 
 
 def _build_legal_forms() -> None:
+    if _download_gleif_legal_forms():
+        return
+    print("WARN: GLEIF download failed; using fallback legal forms", file=sys.stderr)
+    _build_fallback_legal_forms()
+
+
+def _download_gleif_legal_forms() -> bool:
+    raw = _download_text(GLEIF_ELF_CSV_URL, timeout=120)
+    if not raw:
+        return False
+
+    archive = DATA_ROOT / "legal_forms" / "gleif_elf_v1.6.csv"
+    archive.write_text(raw, encoding="utf-8")
+
+    forms_by_lang: dict[str, set[str]] = {key: set() for key in ("hu", "en", "es", "global")}
+    reader = csv.DictReader(raw.splitlines())
+    for row in reader:
+        if (row.get("ELF Status ACTV/INAC") or "").strip().upper() != "ACTV":
+            continue
+        country = (row.get("Country Code (ISO 3166-1)") or "").strip().upper()
+        bucket = _GLEIF_COUNTRY_TO_LANG.get(country, "global")
+        for field in (
+            "Abbreviations Local language",
+            "Abbreviations transliterated",
+            "Entity Legal Form name Local name",
+        ):
+            for token in _split_gleif_tokens(row.get(field) or ""):
+                if _is_usable_legal_form(token):
+                    forms_by_lang[bucket].add(token)
+                    if bucket != "global":
+                        forms_by_lang["global"].update(_common_global_forms(token))
+
+    for key, values in forms_by_lang.items():
+        merged = sorted(values, key=lambda item: (-len(item), item.casefold()))
+        _write_json(DATA_ROOT / "legal_forms" / f"legal_forms_{key}.json", merged)
+    print(
+        "OK: GLEIF legal forms -> "
+        f"hu={len(forms_by_lang['hu'])}, en={len(forms_by_lang['en'])}, "
+        f"es={len(forms_by_lang['es'])}, global={len(forms_by_lang['global'])}"
+    )
+    return True
+
+
+def _split_gleif_tokens(value: str) -> list[str]:
+    tokens: list[str] = []
+    for chunk in value.replace("\n", " ").split(","):
+        chunk = chunk.strip()
+        if not chunk:
+            continue
+        for piece in chunk.split(";"):
+            piece = piece.strip()
+            if piece:
+                tokens.append(piece)
+    return tokens
+
+
+def _is_usable_legal_form(value: str) -> bool:
+    cleaned = value.strip()
+    if len(cleaned) < 2 or len(cleaned) > 80:
+        return False
+    if cleaned.isdigit():
+        return False
+    return any(char.isalpha() for char in cleaned)
+
+
+def _common_global_forms(value: str) -> set[str]:
+    upper = value.upper()
+    known = {
+        "GMBH",
+        "AG",
+        "BV",
+        "NV",
+        "LLC",
+        "LTD",
+        "PLC",
+        "LLP",
+        "INC",
+        "CORP",
+        "SA",
+        "SL",
+        "SRL",
+        "SPA",
+        "PTY LTD",
+        "PTE LTD",
+    }
+    hits = {value for marker in known if marker in upper.replace(".", "")}
+    return hits
+
+
+def _build_fallback_legal_forms() -> None:
     forms = {
         "hu": [
             "Kft.",
@@ -286,6 +449,138 @@ def _build_hu_es_aliases() -> None:
             writer.writerow(["canonical_name", "alias", "language"])
             writer.writerows(rows)
 
+    _download_hu_aliases_into_csv(DATA_ROOT / "person_aliases" / "person_aliases_hu.csv")
+    _download_es_aliases_into_csv(DATA_ROOT / "person_aliases" / "person_aliases_es.csv")
+
+
+def _clean_wiki_name(raw: str) -> str:
+    value = raw.strip()
+    if "|" in value:
+        value = value.split("|")[-1].strip()
+    return value.split("(")[0].strip()
+
+
+def _canonical_from_hu_alias_body(body: str) -> str:
+    links = _WIKI_LINK.findall(body)
+    if links:
+        return _clean_wiki_name(links[-1][1] or links[-1][0])
+    for part in reversed([segment.strip() for segment in body.split(",")]):
+        candidate = re.sub(r"[-~].*", "", part).strip()
+        candidate = candidate.replace("[[", "").replace("]]", "")
+        candidate = _clean_wiki_name(candidate)
+        if candidate and candidate[0].isupper():
+            return candidate
+    return ""
+
+
+def _add_hu_alias_row(
+    rows: set[tuple[str, str, str]],
+    canonical: str,
+    alias: str,
+) -> None:
+    canonical = canonical.strip()
+    if not canonical or len(canonical) > 60:
+        return
+    for part in re.split(r"~", alias):
+        value = part.strip(" .'\"")
+        if len(value) < 2 or len(value) > 40:
+            continue
+        if value.casefold() == canonical.casefold():
+            continue
+        if not value[0].isupper():
+            continue
+        rows.add((canonical, value, "hu"))
+
+
+def _parse_hu_alias_pairs(raw: str) -> set[tuple[str, str, str]]:
+    rows: set[tuple[str, str, str]] = set()
+    for match in re.finditer(r"''([^']+)''\s*\(([^)]+)\)", raw):
+        canonical = _canonical_from_hu_alias_body(match.group(2))
+        _add_hu_alias_row(rows, canonical, match.group(1).strip())
+
+    for match in _WIKI_LINK.finditer(raw):
+        canonical = _clean_wiki_name(match.group(2) or match.group(1))
+        tail = raw[match.end() : match.end() + 120]
+        lowered = tail.lower()
+        if "általában" in lowered:
+            tail = tail.split("általában", 1)[1]
+        elif ":" in tail[:40]:
+            tail = tail.split(":", 1)[1]
+        else:
+            continue
+        tail = tail.split(".", 1)[0]
+        for part in re.split(r",|\svagy\s", tail):
+            part = part.strip(" '\"")
+            if part and part[0].isupper() and " " not in part:
+                _add_hu_alias_row(rows, canonical, part)
+    return rows
+
+
+def _download_hu_aliases_into_csv(target: Path) -> None:
+    merged_rows: set[tuple[str, str, str]] = set()
+    if target.is_file():
+        with target.open(encoding="utf-8", newline="") as handle:
+            merged_rows.update(tuple(row.values()) for row in csv.DictReader(handle))
+
+    downloaded = 0
+    for url in (WIKI_HU_NICKNAME_URL, HUNGAROPEDIA_NICKNAME_URL):
+        raw = _download_text(url, timeout=60)
+        if not raw:
+            continue
+        pairs = _parse_hu_alias_pairs(raw)
+        before = len(merged_rows)
+        merged_rows.update(pairs)
+        downloaded += len(merged_rows) - before
+
+    if downloaded == 0 and not merged_rows:
+        return
+
+    with target.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(["canonical_name", "alias", "language"])
+        writer.writerows(sorted(merged_rows))
+    print(f"OK: {len(merged_rows)} hungarian aliases -> {target.relative_to(ROOT)}")
+
+
+def _download_es_aliases_into_csv(target: Path) -> None:
+    raw = _download_text(WIKI_ES_HYPO_URL, timeout=60)
+    if not raw:
+        return
+
+    rows: list[tuple[str, str, str]] = []
+    for line in raw.splitlines():
+        line = line.strip()
+        if not line.startswith("*"):
+            continue
+        body = line.lstrip("*").strip()
+        if ":" not in body:
+            continue
+        canonical_raw, aliases_raw = body.split(":", 1)
+        canonical = canonical_raw.replace("[[", "").replace("]]", "").strip()
+        aliases_raw = aliases_raw.replace("''", "")
+        if not canonical or len(canonical) > 60:
+            continue
+        for alias in aliases_raw.split(","):
+            alias = alias.strip().strip(".")
+            if not alias or alias.casefold() == canonical.casefold() or len(alias) > 40:
+                continue
+            rows.append((canonical, alias, "es"))
+
+    if not rows:
+        return
+
+    existing: set[tuple[str, str, str]] = set()
+    if target.is_file():
+        with target.open(encoding="utf-8", newline="") as handle:
+            existing.update(tuple(row.values()) for row in csv.DictReader(handle))
+
+    merged = sorted(existing | set(rows))
+    with target.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(["canonical_name", "alias", "language"])
+        writer.writerows(merged)
+    print(f"OK: {len(merged)} spanish aliases -> {target.relative_to(ROOT)}")
+
 
 def _download_en_nicknames() -> None:
     target = DATA_ROOT / "person_aliases" / "person_aliases_en.csv"
@@ -339,6 +634,10 @@ def _write_fallback_en_nicknames(target: Path) -> None:
 
 
 def _export_given_names() -> None:
+    generated = _download_given_names_from_sources()
+    if generated:
+        return
+
     try:
         from names_dataset import NameDataset  # type: ignore
     except ImportError:
@@ -352,7 +651,7 @@ def _export_given_names() -> None:
         names: set[str] = set()
         for gender in ("M", "F"):
             try:
-                top = dataset.get_top_names(n=300, gender=gender, country=country)
+                top = dataset.get_top_names(n=2000, gender=gender, country=country)
             except Exception:
                 continue
             for item in top or []:
@@ -365,6 +664,109 @@ def _export_given_names() -> None:
         path = DATA_ROOT / "names" / f"given_names_{code}.txt"
         path.write_text("\n".join(sorted(names)) + "\n", encoding="utf-8")
         print(f"OK: {len(names)} given names -> {path.relative_to(ROOT)}")
+
+
+def _download_given_names_from_sources() -> bool:
+    hu_names = _load_hu_given_names()
+    es_names = _load_es_given_names()
+    en_names = _load_en_given_names()
+    if not any((hu_names, es_names, en_names)):
+        return False
+
+    for code, names in (("hu", hu_names), ("en", en_names), ("es", es_names)):
+        if not names:
+            continue
+        path = DATA_ROOT / "names" / f"given_names_{code}.txt"
+        path.write_text("\n".join(sorted(names)) + "\n", encoding="utf-8")
+        print(f"OK: {len(names)} given names -> {path.relative_to(ROOT)}")
+    return True
+
+
+def _load_hu_given_names() -> set[str]:
+    names: set[str] = set()
+    raw = _download_text(HUN_FIRSTNAMES_URL)
+    if raw:
+        for line in raw.splitlines():
+            line = line.strip()
+            if line and not line.startswith("#"):
+                names.add(line)
+    raw = _download_text(HU_NAMEDAYS_URL)
+    if raw:
+        reader = csv.reader(raw.splitlines())
+        for row in reader:
+            if row:
+                names.add(str(row[0]).strip())
+    names.update(_names_from_dataset("Hungary"))
+    return {name for name in names if len(name) >= 2}
+
+
+def _load_es_given_names() -> set[str]:
+    names: set[str] = set()
+    raw = _download_text(ES_GIVEN_NAMES_URL)
+    if raw:
+        reader = csv.reader(raw.splitlines())
+        next(reader, None)
+        for row in reader:
+            if row:
+                first = str(row[0]).strip().split()[0]
+                if first:
+                    names.add(first.title())
+    for url in (ES_MALE_NAMES_URL, ES_FEMALE_NAMES_URL):
+        raw = _download_text(url)
+        if not raw:
+            continue
+        reader = csv.reader(raw.splitlines())
+        next(reader, None)
+        for row in reader:
+            if not row:
+                continue
+            first = str(row[0]).strip().split()[0]
+            if first:
+                names.add(first.title())
+    names.update(_names_from_dataset("Spain"))
+    return {name for name in names if len(name) >= 2}
+
+
+def _load_en_given_names() -> set[str]:
+    names: set[str] = set()
+    raw = _download_text(EN_BABY_NAMES_URL)
+    if raw:
+        reader = csv.reader(raw.splitlines())
+        next(reader, None)
+        counts: dict[str, float] = {}
+        for row in reader:
+            if len(row) < 3:
+                continue
+            name = str(row[1]).strip().title()
+            try:
+                weight = float(row[2])
+            except ValueError:
+                continue
+            counts[name] = counts.get(name, 0.0) + weight
+        for name, _weight in sorted(counts.items(), key=lambda item: item[1], reverse=True)[:2500]:
+            names.add(name)
+    names.update(_names_from_dataset("United Kingdom"))
+    return {name for name in names if len(name) >= 2}
+
+
+def _names_from_dataset(country: str) -> set[str]:
+    try:
+        from names_dataset import NameDataset  # type: ignore
+    except ImportError:
+        return set()
+    dataset = NameDataset()
+    collected: set[str] = set()
+    for gender in ("M", "F"):
+        try:
+            top = dataset.get_top_names(n=2000, gender=gender, country=country)
+        except Exception:
+            continue
+        for item in top or []:
+            if isinstance(item, (list, tuple)) and item:
+                collected.add(str(item[0]).strip())
+            elif isinstance(item, str):
+                collected.add(item.strip())
+    return collected
 
 
 def _build_example_tenant_kb_files() -> None:

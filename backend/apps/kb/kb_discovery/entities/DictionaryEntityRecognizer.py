@@ -99,44 +99,4 @@ class DictionaryEntityRecognizer(BaseRecognizer):
         return candidates
 
 
-class ProductRecognizer(BaseRecognizer):
-    name = "product"
-    version = "1.1"
-
-    def __init__(self) -> None:
-        self._normalizer = TextNormalizer()
-
-    def recognize(
-        self, chunks: list[DiscoveryChunkDto], context: DiscoveryContext
-    ) -> list[EntityCandidate]:
-        products = [
-            entry
-            for entry in context.entity_dictionary
-            if str(entry.get("type") or "").lower() == EntityType.PRODUCT.value
-        ]
-        candidates: list[EntityCandidate] = []
-        for chunk in chunks:
-            for entry in products:
-                name = str(entry.get("name") or "").strip()
-                if not name:
-                    continue
-                pattern = accent_insensitive_pattern(name)
-                for match in pattern.finditer(chunk.text):
-                    candidates.append(
-                        EntityCandidate(
-                            entity_type=EntityType.PRODUCT,
-                            name=match.group(0),
-                            normalized_name=self._normalizer.normalize(name),
-                            chunk_id=chunk.chunk_id,
-                            start_offset=match.start(),
-                            end_offset=match.end(),
-                            confidence=float(entry.get("confidence") or 0.85),
-                            source=self.name,
-                            language_code=chunk.language_code,
-                            subtype="product",
-                        )
-                    )
-        return candidates
-
-
-__all__ = ["DictionaryEntityRecognizer", "ProductRecognizer", "SystemNameRecognizer"]
+__all__ = ["DictionaryEntityRecognizer", "SystemNameRecognizer"]

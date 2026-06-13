@@ -10,6 +10,7 @@ from apps.kb.kb_discovery.mapper.discovery_mapper import mention_dto_from_candid
 from apps.kb.kb_discovery.persons.FullPersonNameRecognizer import FullPersonNameRecognizer
 from apps.kb.kb_discovery.persons.GivenNameRecognizer import GivenNameRecognizer
 from apps.kb.kb_discovery.persons.PersonAliasRecognizer import PersonAliasRecognizer
+from apps.kb.kb_discovery.persons.PersonCandidateFilter import PersonCandidateFilter
 from apps.kb.kb_discovery.persons.PersonConfidenceScorer import PERSON_ENTITY_MIN_CONFIDENCE
 from apps.kb.kb_discovery.persons.PersonDirectoryProvider import PersonDirectoryProvider
 from apps.kb.kb_discovery.repository.EntityRepository import EntityMentionRepository, EntityRepository
@@ -34,6 +35,7 @@ class PersonRecognitionService:
         self._given_name_recognizer = given_name_recognizer or GivenNameRecognizer(gazetteer)
         self._full_name_recognizer = full_name_recognizer or FullPersonNameRecognizer(gazetteer)
         self._merger = CandidateMerger()
+        self._candidate_filter = PersonCandidateFilter()
 
     def run(
         self,
@@ -55,7 +57,10 @@ class PersonRecognitionService:
         alias_candidates = self._alias_recognizer.recognize(chunks, context)
         given_candidates = self._given_name_recognizer.recognize(chunks, context)
         full_name_candidates = self._full_name_recognizer.recognize(chunks, context)
-        merged = self._merger.merge(alias_candidates + given_candidates + full_name_candidates)
+        filtered = self._candidate_filter.filter(
+            alias_candidates + given_candidates + full_name_candidates
+        )
+        merged = self._merger.merge(filtered)
 
         mentions: list[EntityMentionDto] = []
         entity_map: dict[tuple[str, str], KnowledgeEntityDto] = {}
