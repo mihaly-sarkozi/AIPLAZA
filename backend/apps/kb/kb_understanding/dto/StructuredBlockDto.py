@@ -17,6 +17,9 @@ class StructuredBlockDto:
     order_index: int
     page_number: int | None = None
     section_title: str | None = None
+    source_normalized_part_id: str | None = None
+    source_part_id: str | None = None
+    is_from_ocr: bool = False
     metadata: dict[str, Any] = field(default_factory=dict)
 
 

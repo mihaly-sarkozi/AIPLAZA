@@ -21,6 +21,9 @@ def block_dto_to_orm(ctx: UnderstandingJobContext, dto: StructuredBlockDto) -> S
         order_index=dto.order_index,
         page_number=dto.page_number,
         section_title=dto.section_title,
+        source_normalized_part_id=dto.source_normalized_part_id,
+        source_part_id=dto.source_part_id,
+        is_from_ocr=bool(dto.is_from_ocr),
         metadata_json=dict(dto.metadata or {}),
     )
 

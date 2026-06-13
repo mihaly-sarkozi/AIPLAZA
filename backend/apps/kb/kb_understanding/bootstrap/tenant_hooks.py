@@ -57,6 +57,14 @@ def _install_kb_understanding_schema(engine, slug: str) -> None:
             'ALTER TABLE "{schema}".kb_normalized_content ADD COLUMN IF NOT EXISTS total_chars INTEGER NOT NULL DEFAULT 0',
             'ALTER TABLE "{schema}".kb_normalized_content ADD COLUMN IF NOT EXISTS metadata JSONB NOT NULL DEFAULT \'{{}}\'::jsonb',
             'ALTER TABLE "{schema}".kb_normalized_content ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP NOT NULL DEFAULT NOW()',
+            # v7: structured block provenance columns
+            'ALTER TABLE "{schema}".kb_structured_blocks ADD COLUMN IF NOT EXISTS source_normalized_part_id VARCHAR(64)',
+            'ALTER TABLE "{schema}".kb_structured_blocks ADD COLUMN IF NOT EXISTS source_part_id VARCHAR(64)',
+            'CREATE INDEX IF NOT EXISTS ix_kb_structured_blocks_source_normalized_part_id ON "{schema}".kb_structured_blocks (source_normalized_part_id)',
+            'CREATE INDEX IF NOT EXISTS ix_kb_structured_blocks_source_part_id ON "{schema}".kb_structured_blocks (source_part_id)',
+            # v8: explicit OCR provenance column on structured blocks
+            'ALTER TABLE "{schema}".kb_structured_blocks ADD COLUMN IF NOT EXISTS is_from_ocr BOOLEAN NOT NULL DEFAULT false',
+            'CREATE INDEX IF NOT EXISTS ix_kb_structured_blocks_is_from_ocr ON "{schema}".kb_structured_blocks (is_from_ocr)',
         ),
     )
 
@@ -66,7 +74,7 @@ def register_kb_understanding_tenant_hooks() -> None:
         [
             TenantSchemaHook(
                 name="kb_understanding",
-                revision="kb.understanding.schema.v6",
+                revision="kb.understanding.schema.v8",
                 install=_install_kb_understanding_schema,
                 table_names=(
                     "kb_understanding_jobs",

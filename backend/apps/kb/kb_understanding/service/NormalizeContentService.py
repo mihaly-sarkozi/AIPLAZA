@@ -12,7 +12,7 @@ from apps.kb.kb_understanding.enums.ExtractPartType import NORMALIZABLE_PART_TYP
 from apps.kb.kb_understanding.enums.NormalizeStatus import NormalizeStatus
 from apps.kb.kb_understanding.enums.UnderstandingErrorCode import UnderstandingErrorCode
 from apps.kb.kb_understanding.errors.UnderstandingProcessingError import UnderstandingProcessingError
-from apps.kb.kb_understanding.extract.extract_metadata import slim_metadata_for_downstream
+from apps.kb.kb_understanding.extract.extract_metadata import is_ocr_source, slim_metadata_for_downstream
 from apps.kb.kb_understanding.mapper.content_mapper import (
     normalized_part_from_extracted,
     normalized_summary_to_orm,
@@ -86,6 +86,8 @@ class NormalizeContentService:
                         metadata["part_type"] = getattr(extracted_part, "part_type", None)
                         metadata["page_number"] = getattr(extracted_part, "page_number", None)
                         metadata["part_index"] = getattr(extracted_part, "part_index", None)
+                        if is_ocr_source(metadata):
+                            metadata["is_from_ocr"] = True
                         normalized_batch.append(
                             normalized_part_from_extracted(
                                 ctx,

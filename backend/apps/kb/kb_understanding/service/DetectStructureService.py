@@ -8,6 +8,7 @@ from apps.kb.kb_understanding.dto.NormalizedContentDto import NormalizedContentD
 from apps.kb.kb_understanding.dto.StructuredBlockDto import StructuredBlockDto
 from apps.kb.kb_understanding.dto.UnderstandingJobContext import UnderstandingJobContext
 from apps.kb.kb_understanding.enums.StructuredBlockType import StructuredBlockType
+from apps.kb.kb_understanding.extract.extract_metadata import is_ocr_source
 from apps.kb.kb_understanding.extract.heading_path import HeadingPathTracker
 from apps.kb.kb_understanding.mapper.structure_mapper import block_dto_to_orm
 from apps.kb.kb_understanding.repository.ContentRepository import ContentRepository
@@ -66,10 +67,14 @@ class DetectStructureService:
 
                 metadata = dict(part.metadata_json or {})
                 metadata.setdefault("source_part_id", part.source_part_id)
+                metadata.setdefault("source_normalized_part_id", getattr(part, "id", None))
                 metadata.setdefault("part_type", part.part_type)
                 metadata.setdefault("page_number", part.page_number)
                 metadata.setdefault("part_index", part.part_index)
                 metadata.setdefault("document_order", part.document_order)
+
+                if is_ocr_source(metadata):
+                    metadata["is_from_ocr"] = True
 
                 block_type = self._classify_from_metadata(metadata, block_text, is_first=order_index == 0)
                 path_info = self._resolve_heading_path(
@@ -81,6 +86,7 @@ class DetectStructureService:
                 section_title = path_info.get("current_section_title")
 
                 block_metadata = self._build_block_metadata(metadata, path_info)
+                is_from_ocr = bool(block_metadata.get("is_from_ocr"))
                 blocks.append(
                     StructuredBlockDto(
                         block_type=block_type,
@@ -96,6 +102,9 @@ class DetectStructureService:
                             StructuredBlockType.FOOTER,
                         )
                         else None,
+                        source_normalized_part_id=getattr(part, "id", None),
+                        source_part_id=part.source_part_id,
+                        is_from_ocr=is_from_ocr,
                         metadata=block_metadata,
                     )
                 )
@@ -128,6 +137,7 @@ class DetectStructureService:
     def _build_block_metadata(entry: dict[str, Any], path_info: dict[str, Any]) -> dict[str, Any]:
         return {
             "source_part_id": entry.get("source_part_id"),
+            "source_normalized_part_id": entry.get("source_normalized_part_id"),
             "document_order": entry.get("document_order"),
             "part_index": entry.get("part_index"),
             "part_type": entry.get("part_type"),
@@ -160,6 +170,7 @@ class DetectStructureService:
             "column_count": entry.get("column_count"),
             "ocr_confidence": entry.get("ocr_confidence"),
             "ocr_language": entry.get("ocr_language"),
+            "is_from_ocr": is_ocr_source(entry),
             "heading_path": list(path_info.get("heading_path") or []),
             "heading_levels": list(path_info.get("heading_levels") or []),
             "current_section_title": path_info.get("current_section_title"),
@@ -229,8 +240,6 @@ class DetectStructureService:
             return StructuredBlockType.FOOTER
         if block_kind == "list" or metadata.get("is_list"):
             return StructuredBlockType.LIST
-        if part_type == "OCR_TEXT" or block_kind == "ocr_text":
-            return StructuredBlockType.PARAGRAPH
         if metadata.get("heading_level") == 0:
             return StructuredBlockType.TITLE
         if block_kind == "heading" or metadata.get("is_heading") or metadata.get("is_heading_guess"):

@@ -12,7 +12,7 @@ from apps.kb.kb_understanding.dto.KnowledgeChunkDto import KnowledgeChunkDto
 from apps.kb.kb_understanding.dto.StructuredBlockDto import StructuredBlockDto
 from apps.kb.kb_understanding.dto.UnderstandingJobContext import UnderstandingJobContext
 from apps.kb.kb_understanding.enums.ChunkType import ChunkType
-from apps.kb.kb_understanding.enums.ExtractPartType import ExtractPartType
+from apps.kb.kb_understanding.extract.extract_metadata import is_ocr_source
 from apps.kb.kb_understanding.enums.StructuredBlockType import StructuredBlockType
 from apps.kb.kb_understanding.mapper.chunk_mapper import chunk_dto_to_orm
 from apps.kb.kb_understanding.repository.ChunkRepository import ChunkRepository
@@ -110,13 +110,17 @@ class ChunkContentService:
         return self._finalize(merged)
 
     @staticmethod
+    def _block_is_from_ocr(block: StructuredBlockDto) -> bool:
+        return bool(block.is_from_ocr or is_ocr_source(block.metadata))
+
+    @staticmethod
     def _seed_pending(block: StructuredBlockDto) -> _PendingChunk:
         pending = _PendingChunk(
             texts=[block.text],
             block_types=[block.block_type],
             page_number=block.page_number,
             section_title=block.metadata.get("current_section_title") or block.text[:512],
-            source_part_ids=[block.metadata.get("source_part_id")],
+            source_part_ids=[block.source_part_id or block.metadata.get("source_part_id")],
             page_numbers=[block.page_number],
             document_orders=[block.metadata.get("document_order")],
             block_kinds=[block.metadata.get("block_kind")],
@@ -126,7 +130,7 @@ class ChunkContentService:
             table_refs=[ChunkContentService._table_ref(block.metadata)],
             bbox_refs=[block.metadata.get("bbox")],
         )
-        if block.metadata.get("part_type") == ExtractPartType.OCR_TEXT.value:
+        if ChunkContentService._block_is_from_ocr(block):
             pending.is_from_ocr = True
             if block.metadata.get("ocr_confidence") is not None:
                 pending.ocr_confidences.append(float(block.metadata["ocr_confidence"]))
@@ -136,7 +140,7 @@ class ChunkContentService:
     def _append_block(pending: _PendingChunk, block: StructuredBlockDto) -> None:
         pending.texts.append(block.text)
         pending.block_types.append(block.block_type)
-        pending.source_part_ids.append(block.metadata.get("source_part_id"))
+        pending.source_part_ids.append(block.source_part_id or block.metadata.get("source_part_id"))
         pending.page_numbers.append(block.page_number)
         pending.document_orders.append(block.metadata.get("document_order"))
         pending.block_kinds.append(block.metadata.get("block_kind"))
@@ -145,7 +149,7 @@ class ChunkContentService:
         if table_ref:
             pending.table_refs.append(table_ref)
         pending.bbox_refs.append(block.metadata.get("bbox"))
-        if block.metadata.get("part_type") == ExtractPartType.OCR_TEXT.value:
+        if ChunkContentService._block_is_from_ocr(block):
             pending.is_from_ocr = True
             if block.metadata.get("ocr_confidence") is not None:
                 pending.ocr_confidences.append(float(block.metadata["ocr_confidence"]))

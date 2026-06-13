@@ -4,7 +4,7 @@ from __future__ import annotations
 # Feladat: A struktúrafelismerés egy blokkjának rekordja (structure detection kimenete).
 # Sárközi Mihály - 2026.06.11
 
-from sqlalchemy import Column, DateTime, Integer, String, Text
+from sqlalchemy import Boolean, Column, DateTime, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB
 
 from core.kernel.db.model_bases import TenantSchemaBase
@@ -28,6 +28,10 @@ class StructuredBlock(TenantSchemaBase):
     page_number = Column(Integer, nullable=True)
     # A blokkot tartalmazó szakasz címe (legközelebbi heading).
     section_title = Column(String(512), nullable=True)
+    # Bizonyítéklánc: normalized part → extracted part.
+    source_normalized_part_id = Column(String(64), nullable=True, index=True)
+    source_part_id = Column(String(64), nullable=True, index=True)
+    is_from_ocr = Column(Boolean, nullable=False, default=False, index=True)
     metadata_json = Column(JSONB, nullable=False, default=dict)
     created_at = Column(DateTime, default=utc_now_naive, nullable=False)
 

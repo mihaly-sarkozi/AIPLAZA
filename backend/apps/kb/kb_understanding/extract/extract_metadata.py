@@ -82,6 +82,7 @@ _DOWNSTREAM_KEYS = (
     "ocr_engine",
     "ocr_language",
     "ocr_confidence",
+    "is_from_ocr",
     "layout_order",
     "section_index",
 )
@@ -124,7 +125,19 @@ def slim_metadata_for_downstream(metadata: dict[str, Any]) -> dict[str, Any]:
     elif "dominant_font_size" not in slim:
         slim["dominant_font_size"] = metadata.get("dominant_font_size")
 
+    if "is_from_ocr" not in slim and is_ocr_source(metadata):
+        slim["is_from_ocr"] = True
+
     return slim
 
 
-__all__ = ["build_base_metadata", "merge_metadata", "slim_metadata_for_downstream"]
+def is_ocr_source(metadata: dict[str, Any]) -> bool:
+    if metadata.get("is_from_ocr"):
+        return True
+    part_type = str(metadata.get("part_type") or "").upper()
+    block_kind = str(metadata.get("block_kind") or "").lower()
+    source = str(metadata.get("source") or "").lower()
+    return part_type == "OCR_TEXT" or block_kind == "ocr_text" or source.startswith("ocr")
+
+
+__all__ = ["build_base_metadata", "is_ocr_source", "merge_metadata", "slim_metadata_for_downstream"]
