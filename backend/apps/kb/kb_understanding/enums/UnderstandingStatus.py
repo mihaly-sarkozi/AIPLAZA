@@ -8,7 +8,6 @@ class UnderstandingStatus(str, Enum):
     QUEUED = "queued"
     EXTRACTING = "extracting"
     NORMALIZING = "normalizing"
-    STRUCTURING = "structuring"
     CHUNKING = "chunking"
     VALIDATING = "validating"
     READY_FOR_DISCOVERY = "ready_for_discovery"

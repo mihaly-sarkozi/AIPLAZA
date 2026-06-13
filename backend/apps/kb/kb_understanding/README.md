@@ -14,7 +14,6 @@ relationship építést, scoringot vagy keresőindexelést — azok a
 raw input
   → EXTRACT
   → NORMALIZE
-  → STRUCTURE_DETECTION
   → CHUNKING
   → VALIDATION
   → READY_FOR_DISCOVERY
@@ -82,10 +81,12 @@ Ha a Tesseract vagy nyelvi csomag hiányzik, az extract pipeline nem áll le;
 ```text
 1. extract              → ExtractContentService
 2. normalize            → NormalizeContentService
-3. structure detection  → DetectStructureService
-4. chunking             → ChunkContentService
-5. validation           → ValidateUnderstandingService
+3. chunking             → ChunkContentService (normalized parts → chunks)
+4. validation           → ValidateUnderstandingService
 ```
+
+A chunking a `kb_normalized_content_parts` rekordokból dolgozik; a blokktípus-felismerés
+belső `NormalizedPartBlockClassifier` helperrel történik, külön DB réteg nélkül.
 
 Minden lépésnek saját bemenete, kimenete, státusza, hibakezelése, tesztje és
 naplózható eredménye van. Az `UnderstandingPipelineService` csak összefűzi a lépéseket.
@@ -116,8 +117,8 @@ kb_understanding/
 - Bizonyíték: minden chunk hordozza a kötelező forrás-metaadatokat.
 - Idempotencia: ugyanarra az inputra ugyanazt vagy kompatibilis eredményt adja.
 - Új extractor = új adapter, a pipeline nem módosul.
-- A modul zárt: csak extract → normalize → structure → chunk → validation.
+- A modul zárt: csak extract → normalize → chunk → validation.
 
 ## Fejlesztési sorrend
 
-extract → normalize → structure detection → chunking → validation → discovery (külön modul)
+extract → normalize → chunking → validation → discovery (külön modul)

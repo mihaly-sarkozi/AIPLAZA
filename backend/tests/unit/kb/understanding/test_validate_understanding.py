@@ -13,18 +13,13 @@ from apps.kb.kb_understanding.validation.ValidateUnderstandingResult import (
     ValidateUnderstandingResult,
 )
 
-from tests.unit.kb.understanding.conftest import (
-    FakeChunkRepository,
-    FakeContentRepository,
-    FakeStructureRepository,
-)
+from tests.unit.kb.understanding.conftest import FakeChunkRepository, FakeContentRepository
 
 pytestmark = pytest.mark.unit
 
 
 def _setup(ctx, *, chunks: int = 2, with_content: bool = True, with_source: bool = True):
     content_repo = FakeContentRepository()
-    structure_repo = FakeStructureRepository()
     chunk_repo = FakeChunkRepository()
     if with_content:
         content_repo.extracted[ctx.training_item_id] = SimpleNamespace(char_count=100)
@@ -37,13 +32,12 @@ def _setup(ctx, *, chunks: int = 2, with_content: bool = True, with_source: bool
         content_repo.normalized_parts[ctx.training_item_id] = [
             SimpleNamespace(status="completed", normalized_text="x")
         ]
-        structure_repo.blocks[ctx.training_item_id] = [SimpleNamespace(id="block_1")]
     chunk_rows = [
         SimpleNamespace(id=f"chunk_{index}", source_id=ctx.raw_ref if with_source else "", version=1)
         for index in range(chunks)
     ]
     chunk_repo.chunks[ctx.training_item_id] = chunk_rows
-    return ValidateUnderstandingService(content_repo, chunk_repo, structure_repo)
+    return ValidateUnderstandingService(content_repo, chunk_repo)
 
 
 def test_checklist_passes_when_everything_present():
@@ -52,7 +46,6 @@ def test_checklist_passes_when_everything_present():
         usable_part_count=1,
         has_normalized_summary=True,
         normalized_part_count=1,
-        structure_block_count=1,
         chunk_count=2,
         chunks_with_source=2,
     )
@@ -66,7 +59,6 @@ def test_checklist_reports_missing_items():
         usable_part_count=0,
         has_normalized_summary=False,
         normalized_part_count=0,
-        structure_block_count=0,
         chunk_count=0,
         chunks_with_source=0,
     )

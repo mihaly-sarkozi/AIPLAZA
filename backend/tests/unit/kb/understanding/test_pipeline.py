@@ -5,6 +5,7 @@ from typing import Any
 
 import pytest
 
+from apps.kb.kb_understanding.dto.ChunkContentResultDto import ChunkContentResultDto
 from apps.kb.kb_understanding.dto.ExtractedContentDto import ExtractedContentDto
 from apps.kb.kb_understanding.dto.NormalizedContentDto import NormalizedContentDto
 from apps.kb.kb_understanding.enums.UnderstandingErrorCode import UnderstandingErrorCode
@@ -71,8 +72,10 @@ def _build(recorder: _Recorder, *, failing: dict[str, Exception] | None = None):
             "normalize",
             NormalizedContentDto(normalized_content_id="und_norm_1", status="completed", char_count=1),
         ),
-        structure_service=step("structure", ["block"]),
-        chunk_service=step("chunk", ["chunk"]),
+        chunk_service=step(
+            "chunk",
+            ChunkContentResultDto(chunks=[], trace_summary={"chunks_created": 1}),
+        ),
         validate_service=_ValidateStep(recorder, "validate", error=failing.get("validate")),
         emit_discovery_requested=emit("discovery_requested"),
         emit_failed=emit("failed"),
@@ -85,11 +88,11 @@ def test_happy_path_runs_steps_in_order_and_emits_discovery_requested(ctx):
     pipeline, job_repo, step_runs, _ = _build(recorder)
     status = pipeline.run(ctx)
     assert status == UnderstandingStatus.READY_FOR_DISCOVERY
-    assert recorder.order == ["extract", "normalize", "structure", "chunk", "validate"]
+    assert recorder.order == ["extract", "normalize", "chunk", "validate"]
     assert job_repo.completed == (ctx.job_id, UnderstandingStatus.READY_FOR_DISCOVERY.value)
     assert [name for name, _ in recorder.events] == ["discovery_requested"]
     assert recorder.events[0][1]["understanding_job_id"] == ctx.job_id
-    assert len(step_runs.runs) == 5
+    assert len(step_runs.runs) == 4
     assert all(result.status == "completed" for _, result in step_runs.runs)
 
 
@@ -121,7 +124,6 @@ def test_status_history_follows_pipeline(ctx):
     assert job_repo.status_history == [
         UnderstandingStatus.EXTRACTING.value,
         UnderstandingStatus.NORMALIZING.value,
-        UnderstandingStatus.STRUCTURING.value,
         UnderstandingStatus.CHUNKING.value,
         UnderstandingStatus.VALIDATING.value,
     ]

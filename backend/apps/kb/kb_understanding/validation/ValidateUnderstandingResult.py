@@ -9,7 +9,6 @@ class UnderstandingChecklist:
     has_usable_parts: bool = False
     has_normalized_summary: bool = False
     has_normalized_parts: bool = False
-    has_structured_blocks: bool = False
     has_chunks: bool = False
     has_source_link: bool = False
     missing: tuple[str, ...] = field(default_factory=tuple)
@@ -21,7 +20,6 @@ class UnderstandingChecklist:
             and self.has_usable_parts
             and self.has_normalized_summary
             and self.has_normalized_parts
-            and self.has_structured_blocks
             and self.has_chunks
             and self.has_source_link
         )
@@ -35,7 +33,6 @@ class ValidateUnderstandingResult:
         usable_part_count: int,
         has_normalized_summary: bool,
         normalized_part_count: int,
-        structure_block_count: int,
         chunk_count: int,
         chunks_with_source: int,
     ) -> UnderstandingChecklist:
@@ -44,7 +41,6 @@ class ValidateUnderstandingResult:
             "usable_parts": usable_part_count > 0,
             "normalized_summary": has_normalized_summary,
             "normalized_parts": normalized_part_count > 0,
-            "structured_blocks": structure_block_count > 0,
             "chunks": chunk_count > 0,
             "source_link": chunk_count > 0 and chunks_with_source == chunk_count,
         }
@@ -54,7 +50,6 @@ class ValidateUnderstandingResult:
             has_usable_parts=checks["usable_parts"],
             has_normalized_summary=checks["normalized_summary"],
             has_normalized_parts=checks["normalized_parts"],
-            has_structured_blocks=checks["structured_blocks"],
             has_chunks=checks["chunks"],
             has_source_link=checks["source_link"],
             missing=missing,

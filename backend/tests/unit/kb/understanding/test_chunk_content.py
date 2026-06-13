@@ -6,54 +6,77 @@ import hashlib
 import pytest
 
 from apps.kb.kb_understanding.config.UnderstandingConf import UnderstandingConfig
-from apps.kb.kb_understanding.dto.StructuredBlockDto import StructuredBlockDto
+from apps.kb.kb_understanding.dto.NormalizedContentDto import NormalizedContentDto
 from apps.kb.kb_understanding.enums.ChunkType import ChunkType
-from apps.kb.kb_understanding.enums.StructuredBlockType import StructuredBlockType
 from apps.kb.kb_understanding.enums.UnderstandingErrorCode import UnderstandingErrorCode
 from apps.kb.kb_understanding.errors.UnderstandingValidationError import UnderstandingValidationError
 from apps.kb.kb_understanding.service.ChunkContentService import ChunkContentService
 
-from tests.unit.kb.understanding.conftest import FakeChunkRepository
+from tests.unit.kb.understanding.conftest import FakeChunkRepository, FakeContentRepository
 
 pytestmark = pytest.mark.unit
 
 _CONFIG = UnderstandingConfig(chunk_max_chars=200, chunk_min_chars=40, chunk_overlap_chars=30)
 
 
-def _block(text: str, order: int, block_type=StructuredBlockType.PARAGRAPH, section=None, page=None):
-    return StructuredBlockDto(
-        block_type=block_type, text=text, order_index=order, page_number=page, section_title=section
+def _norm_part(text: str, *, order: int = 0, metadata=None, part_type: str = "TEXT"):
+    return type(
+        "NormPart",
+        (),
+        {
+            "id": f"und_norm_part_{order}",
+            "normalized_text": text,
+            "page_number": 1,
+            "part_index": order,
+            "document_order": order,
+            "part_type": part_type,
+            "source_part_id": f"und_part_{order}",
+            "metadata_json": dict(metadata or {}),
+        },
+    )()
+
+
+def _normalized_summary():
+    return NormalizedContentDto(
+        normalized_content_id="und_norm_1",
+        status="completed",
+        part_count=1,
+        total_chars=100,
+        char_count=100,
     )
 
 
-def _chunk(ctx, blocks, repo=None):
-    repo = repo or FakeChunkRepository()
-    service = ChunkContentService(repo, _CONFIG)
-    return service.run(ctx, blocks), repo
+def _chunk(ctx, parts, chunk_repo=None):
+    content_repo = FakeContentRepository()
+    content_repo.normalized_parts[ctx.training_item_id] = list(parts)
+    chunk_repo = chunk_repo or FakeChunkRepository()
+    service = ChunkContentService(chunk_repo, content_repo, config=_CONFIG)
+    result = service.run(ctx, _normalized_summary())
+    return result.chunks, chunk_repo
 
 
 def test_chunks_respect_max_char_limit(ctx):
     long_text = "Ez egy mondat, ami ismétlődik. " * 30
-    chunks, _ = _chunk(ctx, [_block(long_text.strip(), 0)])
+    chunks, _ = _chunk(ctx, [_norm_part(long_text.strip())])
     assert len(chunks) > 1
     assert all(len(chunk.text) <= _CONFIG.chunk_max_chars for chunk in chunks)
 
 
 def test_long_split_has_overlap(ctx):
     words = " ".join(f"szo{index}" for index in range(120))
-    chunks, _ = _chunk(ctx, [_block(words, 0)])
+    chunks, _ = _chunk(ctx, [_norm_part(words)])
     assert len(chunks) >= 2
     first_tail = set(chunks[0].text.split()[-3:])
     assert first_tail & set(chunks[1].text.split())
 
 
 def test_short_chunks_are_merged(ctx):
-    blocks = [
-        _block("Heading egy", 0, StructuredBlockType.HEADING),
-        _block("Rövid.", 1),
-        _block("Még egy rövid.", 2),
+    parts = [
+        _norm_part("Heading egy", order=0, metadata={"block_kind": "heading", "is_heading": True, "heading_level": 1}),
+        _norm_part("Rövid.", order=1),
+        _norm_part("Még egy rövid.", order=2),
     ]
-    chunks, _ = _chunk(ctx, blocks)
+    chunks, _ = _chunk(ctx, parts)
     assert len(chunks) == 1
     assert "Rövid." in chunks[0].text and "Még egy rövid." in chunks[0].text
 
@@ -61,21 +84,23 @@ def test_short_chunks_are_merged(ctx):
 def test_section_change_starts_new_chunk(ctx):
     filler_a = "A szekció tartalma, elég hosszú ahhoz hogy ne kelljen összevonni. " * 2
     filler_b = "B szekció tartalma, elég hosszú ahhoz hogy ne kelljen összevonni. " * 2
-    blocks = [
-        _block("A szekció", 0, StructuredBlockType.HEADING),
-        _block(filler_a.strip(), 1),
-        _block("B szekció", 2, StructuredBlockType.HEADING),
-        _block(filler_b.strip(), 3),
+    parts = [
+        _norm_part("A szekció", order=0, metadata={"block_kind": "heading", "is_heading": True, "heading_level": 1}),
+        _norm_part(filler_a.strip(), order=1),
+        _norm_part("B szekció", order=2, metadata={"block_kind": "heading", "is_heading": True, "heading_level": 1}),
+        _norm_part(filler_b.strip(), order=3),
     ]
-    chunks, _ = _chunk(ctx, blocks)
+    chunks, _ = _chunk(ctx, parts)
     assert len(chunks) == 2
     assert chunks[0].section_title == "A szekció"
     assert chunks[1].section_title == "B szekció"
 
 
 def test_order_metadata_checksum_and_tokens(ctx):
-    blocks = [_block("Tartalom egy, kellően hosszú szöveg a chunkhoz. " * 2, 0, page=3)]
-    chunks, repo = _chunk(ctx, blocks)
+    text = "Tartalom egy, kellően hosszú szöveg a chunkhoz. " * 2
+    part = _norm_part(text, order=0)
+    part.page_number = 3
+    chunks, repo = _chunk(ctx, [part])
     chunk = chunks[0]
     assert chunk.order_index == 0
     assert chunk.page_number == 3
@@ -88,22 +113,47 @@ def test_order_metadata_checksum_and_tokens(ctx):
 
 
 def test_chunk_type_follows_dominant_block(ctx):
-    blocks = [
-        _block("1. lépés: csináld ezt\n2. lépés: csináld azt", 0, StructuredBlockType.STEP),
-    ]
-    chunks, _ = _chunk(ctx, blocks)
+    parts = [_norm_part("1. lépés: csináld ezt\n2. lépés: csináld azt", order=0)]
+    chunks, _ = _chunk(ctx, parts)
     assert chunks[0].chunk_type == ChunkType.STEP
 
 
 def test_version_increments_on_rerun(ctx):
     repo = FakeChunkRepository()
-    blocks = [_block("Tartalom, ami elég hosszú a chunkoláshoz és nem kerül összevonásra.", 0)]
-    _chunk(ctx, blocks, repo)
-    _chunk(ctx, blocks, repo)
+    parts = [_norm_part("Tartalom, ami elég hosszú a chunkoláshoz és nem kerül összevonásra.", order=0)]
+    _chunk(ctx, parts, repo)
+    _chunk(ctx, parts, repo)
     assert repo.chunks[ctx.training_item_id][0].version == 2
 
 
-def test_no_blocks_raises(ctx):
+def test_no_parts_raises(ctx):
+    content_repo = FakeContentRepository()
+    chunk_repo = FakeChunkRepository()
+    service = ChunkContentService(chunk_repo, content_repo, config=_CONFIG)
     with pytest.raises(UnderstandingValidationError) as excinfo:
-        _chunk(ctx, [])
-    assert excinfo.value.code == UnderstandingErrorCode.NO_CHUNKS.value
+        service.run(
+            ctx,
+            NormalizedContentDto(
+                normalized_content_id="und_norm_1",
+                status="completed",
+                part_count=0,
+                total_chars=0,
+                char_count=0,
+            ),
+        )
+    assert excinfo.value.code == UnderstandingErrorCode.CHUNKING_FAILED.value
+
+
+def test_headers_are_skipped(ctx):
+    parts = [
+        _norm_part("Oldalszám", order=0, part_type="HEADER", metadata={"block_kind": "header"}),
+        _norm_part("Valódi tartalom, elég hosszú ahhoz hogy chunk legyen belőle.", order=1),
+    ]
+    content_repo = FakeContentRepository()
+    content_repo.normalized_parts[ctx.training_item_id] = parts
+    chunk_repo = FakeChunkRepository()
+    service = ChunkContentService(chunk_repo, content_repo, config=_CONFIG)
+    result = service.run(ctx, _normalized_summary())
+    assert result.trace_summary["headers_skipped"] == 1
+    assert len(result.chunks) == 1
+    assert "Valódi tartalom" in result.chunks[0].text

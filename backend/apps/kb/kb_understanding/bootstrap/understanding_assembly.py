@@ -10,7 +10,6 @@ from apps.kb.kb_understanding.config.ExtractConfig import DEFAULT_EXTRACT_CONFIG
 from apps.kb.kb_understanding.ports.IngestItemReaderInterface import IngestItemReaderInterface
 from apps.kb.kb_understanding.repository.ChunkRepository import ChunkRepository
 from apps.kb.kb_understanding.repository.ContentRepository import ContentRepository
-from apps.kb.kb_understanding.repository.StructureRepository import StructureRepository
 from apps.kb.kb_understanding.repository.UnderstandingJobRepository import (
     UnderstandingJobRepository,
 )
@@ -18,7 +17,6 @@ from apps.kb.kb_understanding.repository.UnderstandingStepRunRepository import (
     UnderstandingStepRunRepository,
 )
 from apps.kb.kb_understanding.service.ChunkContentService import ChunkContentService
-from apps.kb.kb_understanding.service.DetectStructureService import DetectStructureService
 from apps.kb.kb_understanding.service.ExtractContentService import ExtractContentService
 from apps.kb.kb_understanding.service.NormalizeContentService import NormalizeContentService
 from apps.kb.kb_understanding.service.ProcessingTraceService import ProcessingTraceService
@@ -49,7 +47,6 @@ def build_understanding_services(
     job_repository = UnderstandingJobRepository(session_factory)
     step_run_repository = UnderstandingStepRunRepository(session_factory)
     content_repository = ContentRepository(session_factory)
-    structure_repository = StructureRepository(session_factory)
     chunk_repository = ChunkRepository(session_factory)
 
     trace = ProcessingTraceService(step_run_repository)
@@ -68,13 +65,8 @@ def build_understanding_services(
             config=extract_config,
         ),
         normalize_service=NormalizeContentService(content_repository),
-        structure_service=DetectStructureService(structure_repository, content_repository),
-        chunk_service=ChunkContentService(chunk_repository),
-        validate_service=ValidateUnderstandingService(
-            content_repository,
-            chunk_repository,
-            structure_repository,
-        ),
+        chunk_service=ChunkContentService(chunk_repository, content_repository),
+        validate_service=ValidateUnderstandingService(content_repository, chunk_repository),
     )
     return UnderstandingServices(
         job_repository=job_repository,

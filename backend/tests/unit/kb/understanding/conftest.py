@@ -125,20 +125,6 @@ class FakeContentRepository:
                 if (getattr(row, "text", "") or "").strip()
             ]
         )
-
-
-class FakeStructureRepository:
-    def __init__(self) -> None:
-        self.blocks: dict[str, list] = {}
-
-    def replace_for_item(self, training_item_id: str, blocks: list) -> int:
-        self.blocks[training_item_id] = list(blocks)
-        return len(blocks)
-
-    def list_for_item(self, training_item_id: str) -> list:
-        return list(self.blocks.get(training_item_id, []))
-
-
 class FakeChunkRepository:
     def __init__(self) -> None:
         self.chunks: dict[str, list] = {}

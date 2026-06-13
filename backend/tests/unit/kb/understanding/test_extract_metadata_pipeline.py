@@ -1,21 +1,27 @@
-"""Extract metadata propagation through normalize, structure, chunk."""
+"""Extract metadata propagation through normalize and chunk."""
 from __future__ import annotations
 
 import pytest
 
-from apps.kb.kb_understanding.dto.ExtractPartDto import ExtractPart
 from apps.kb.kb_understanding.dto.ExtractedContentDto import ExtractedContentDto
 from apps.kb.kb_understanding.dto.NormalizedContentDto import NormalizedContentDto
-from apps.kb.kb_understanding.dto.StructuredBlockDto import StructuredBlockDto
 from apps.kb.kb_understanding.enums.ExtractPartType import ExtractPartType
-from apps.kb.kb_understanding.enums.StructuredBlockType import StructuredBlockType
 from apps.kb.kb_understanding.service.ChunkContentService import ChunkContentService
-from apps.kb.kb_understanding.service.DetectStructureService import DetectStructureService
 from apps.kb.kb_understanding.service.NormalizeContentService import NormalizeContentService
 
-from tests.unit.kb.understanding.conftest import FakeChunkRepository, FakeContentRepository, FakeStructureRepository
+from tests.unit.kb.understanding.conftest import FakeChunkRepository, FakeContentRepository
 
 pytestmark = pytest.mark.unit
+
+
+def _normalized_summary(*, part_count: int = 1, total_chars: int = 20) -> NormalizedContentDto:
+    return NormalizedContentDto(
+        normalized_content_id="und_norm_1",
+        status="completed",
+        part_count=part_count,
+        total_chars=total_chars,
+        char_count=total_chars,
+    )
 
 
 def test_normalize_preserves_part_metadata(ctx) -> None:
@@ -51,7 +57,7 @@ def test_normalize_preserves_part_metadata(ctx) -> None:
     assert part.source_part_id == "und_part_1"
 
 
-def test_detect_structure_uses_normalized_parts(ctx) -> None:
+def test_chunking_from_normalized_parts_carries_provenance(ctx) -> None:
     content_repo = FakeContentRepository()
     content_repo.normalized_parts[ctx.training_item_id] = [
         type(
@@ -77,7 +83,7 @@ def test_detect_structure_uses_normalized_parts(ctx) -> None:
             (),
             {
                 "id": "und_norm_part_2",
-                "normalized_text": "Tartalom",
+                "normalized_text": "Tartalom, elég hosszú szöveg a chunkoláshoz.",
                 "page_number": 1,
                 "part_index": 1,
                 "document_order": 1,
@@ -87,28 +93,19 @@ def test_detect_structure_uses_normalized_parts(ctx) -> None:
             },
         )(),
     ]
-    structure_repo = FakeStructureRepository()
-    service = DetectStructureService(structure_repo, content_repo)
-    normalized = NormalizedContentDto(
-        normalized_content_id="und_norm_1",
-        status="completed",
-        part_count=2,
-        total_chars=20,
-        char_count=20,
-    )
-    blocks = service.run(ctx, normalized)
+    chunk_repo = FakeChunkRepository()
+    result = ChunkContentService(chunk_repo, content_repo).run(ctx, _normalized_summary(part_count=2))
 
-    assert blocks[0].block_type == StructuredBlockType.HEADING
-    assert blocks[1].block_type == StructuredBlockType.PARAGRAPH
-    assert blocks[0].metadata["block_kind"] == "heading"
-    assert blocks[0].source_normalized_part_id == "und_norm_part_1"
-    assert blocks[0].source_part_id == "und_part_1"
-    stored = structure_repo.blocks[ctx.training_item_id][0]
-    assert stored.source_normalized_part_id == "und_norm_part_1"
-    assert stored.source_part_id == "und_part_1"
+    assert result.trace_summary["input_normalized_parts"] == 2
+    assert result.trace_summary["headings_seen"] == 1
+    assert result.chunks[0].metadata["source_part_ids"] == ["und_part_1", "und_part_2"]
+    assert result.chunks[0].metadata["source_normalized_part_ids"] == [
+        "und_norm_part_1",
+        "und_norm_part_2",
+    ]
 
 
-def test_detect_structure_marks_ocr_source_in_metadata(ctx) -> None:
+def test_chunking_marks_ocr_source(ctx) -> None:
     content_repo = FakeContentRepository()
     content_repo.normalized_parts[ctx.training_item_id] = [
         type(
@@ -116,7 +113,7 @@ def test_detect_structure_marks_ocr_source_in_metadata(ctx) -> None:
             (),
             {
                 "id": "und_norm_part_ocr",
-                "normalized_text": "OCR-ből kinyert szöveg",
+                "normalized_text": "OCR-ből kinyert szöveg, elég hosszú chunkhoz.",
                 "page_number": 3,
                 "part_index": 0,
                 "document_order": 0,
@@ -130,140 +127,68 @@ def test_detect_structure_marks_ocr_source_in_metadata(ctx) -> None:
             },
         )(),
     ]
-    structure_repo = FakeStructureRepository()
-    service = DetectStructureService(structure_repo, content_repo)
-    blocks = service.run(
-        ctx,
-        NormalizedContentDto(
-            normalized_content_id="und_norm_1",
-            status="completed",
-            part_count=1,
-            total_chars=24,
-            char_count=24,
-        ),
-    )
+    chunk_repo = FakeChunkRepository()
+    result = ChunkContentService(chunk_repo, content_repo).run(ctx, _normalized_summary())
 
-    assert blocks[0].metadata["is_from_ocr"] is True
-    assert blocks[0].is_from_ocr is True
-    assert blocks[0].source_normalized_part_id == "und_norm_part_ocr"
-    assert blocks[0].source_part_id == "und_part_ocr"
-    assert blocks[0].metadata["part_type"] == ExtractPartType.OCR_TEXT.value
-    assert blocks[0].metadata["ocr_confidence"] == 0.91
-    assert blocks[0].metadata["block_kind"] == "ocr_text"
-    stored = structure_repo.blocks[ctx.training_item_id][0]
-    assert stored.is_from_ocr is True
-    assert stored.source_part_id == "und_part_ocr"
+    assert result.trace_summary["ocr_parts_seen"] == 1
+    assert result.chunks[0].metadata["is_from_ocr"] is True
+    assert result.chunks[0].metadata["ocr_confidence"] == 0.91
+    assert result.chunks[0].metadata["source_part_ids"] == ["und_part_ocr"]
 
 
-def test_detect_structure_ocr_heading_not_forced_to_paragraph(ctx) -> None:
+def test_chunking_skips_headers_and_reports_trace(ctx) -> None:
     content_repo = FakeContentRepository()
     content_repo.normalized_parts[ctx.training_item_id] = [
         type(
             "NormPart",
             (),
             {
-                "id": "und_norm_part_ocr_h",
-                "normalized_text": "1. Bevezetés",
+                "id": "und_norm_header",
+                "normalized_text": "Fejléc",
                 "page_number": 1,
                 "part_index": 0,
                 "document_order": 0,
-                "part_type": ExtractPartType.OCR_TEXT.value,
-                "source_part_id": "und_part_ocr_h",
-                "metadata_json": {
-                    "block_kind": "ocr_text",
-                    "is_heading": True,
-                    "heading_level": 1,
-                    "is_from_ocr": True,
-                },
+                "part_type": ExtractPartType.HEADER.value,
+                "source_part_id": "und_part_h",
+                "metadata_json": {"block_kind": "header"},
+            },
+        )(),
+        type(
+            "NormPart",
+            (),
+            {
+                "id": "und_norm_footer",
+                "normalized_text": "Lábléc",
+                "page_number": 1,
+                "part_index": 1,
+                "document_order": 1,
+                "part_type": ExtractPartType.FOOTER.value,
+                "source_part_id": "und_part_f",
+                "metadata_json": {"block_kind": "footer"},
+            },
+        )(),
+        type(
+            "NormPart",
+            (),
+            {
+                "id": "und_norm_body",
+                "normalized_text": "Törzs szöveg, elég hosszú ahhoz hogy chunk legyen.",
+                "page_number": 1,
+                "part_index": 2,
+                "document_order": 2,
+                "part_type": ExtractPartType.TEXT.value,
+                "source_part_id": "und_part_b",
+                "metadata_json": {"block_kind": "paragraph"},
             },
         )(),
     ]
-    structure_repo = FakeStructureRepository()
-    service = DetectStructureService(structure_repo, content_repo)
-    blocks = service.run(
-        ctx,
-        NormalizedContentDto(
-            normalized_content_id="und_norm_1",
-            status="completed",
-            part_count=1,
-            total_chars=12,
-            char_count=12,
-        ),
-    )
+    chunk_repo = FakeChunkRepository()
+    result = ChunkContentService(chunk_repo, content_repo).run(ctx, _normalized_summary(part_count=3))
 
-    assert blocks[0].block_type == StructuredBlockType.HEADING
-    assert blocks[0].metadata["is_from_ocr"] is True
-    assert blocks[0].is_from_ocr is True
-
-
-def test_chunk_carries_source_metadata(ctx) -> None:
-    repo = FakeChunkRepository()
-    service = ChunkContentService(repo)
-    blocks = [
-        StructuredBlockDto(
-            block_type=StructuredBlockType.HEADING,
-            text="Fejezet",
-            order_index=0,
-            page_number=2,
-            metadata={"source_part_id": "und_part_9", "block_kind": "heading", "heading_path": ["Fejezet"]},
-        ),
-        StructuredBlockDto(
-            block_type=StructuredBlockType.PARAGRAPH,
-            text="Részletes tartalom",
-            order_index=1,
-            page_number=2,
-            section_title="Fejezet",
-            metadata={"source_part_id": "und_part_10", "block_kind": "paragraph", "heading_path": ["Fejezet"]},
-        ),
-    ]
-    chunks = service.run(ctx, blocks)
-
-    assert chunks[0].metadata["source_part_ids"] == ["und_part_9", "und_part_10"]
-    assert chunks[0].metadata["heading_path"] == ["Fejezet"]
-    assert chunks[0].metadata["block_kinds"] == ["heading", "paragraph"]
-
-
-def test_chunk_marks_ocr_from_block_column(ctx) -> None:
-    repo = FakeChunkRepository()
-    service = ChunkContentService(repo)
-    blocks = [
-        StructuredBlockDto(
-            block_type=StructuredBlockType.PARAGRAPH,
-            text="OCR szöveg",
-            order_index=0,
-            page_number=4,
-            is_from_ocr=True,
-            metadata={"source_part_id": "und_part_ocr", "ocr_confidence": 0.88},
-        ),
-    ]
-    chunks = service.run(ctx, blocks)
-
-    assert chunks[0].metadata["is_from_ocr"] is True
-    assert chunks[0].metadata["ocr_confidence"] == 0.88
-
-
-def test_chunk_marks_ocr_from_block_metadata(ctx) -> None:
-    repo = FakeChunkRepository()
-    service = ChunkContentService(repo)
-    blocks = [
-        StructuredBlockDto(
-            block_type=StructuredBlockType.PARAGRAPH,
-            text="OCR szöveg",
-            order_index=0,
-            page_number=4,
-            metadata={
-                "source_part_id": "und_part_ocr",
-                "block_kind": "ocr_text",
-                "part_type": ExtractPartType.OCR_TEXT.value,
-                "is_from_ocr": True,
-                "ocr_confidence": 0.88,
-            },
-        ),
-    ]
-    chunks = service.run(ctx, blocks)
-
-    assert chunks[0].metadata["is_from_ocr"] is True
-    assert chunks[0].metadata["ocr_confidence"] == 0.88
+    assert result.trace_summary["headers_skipped"] == 1
+    assert result.trace_summary["footers_skipped"] == 1
+    assert len(result.chunks) == 1
+    assert result.chunks[0].metadata["source_part_ids"] == ["und_part_b"]
 
 
 def test_heading_path_tracker_builds_hierarchy() -> None:

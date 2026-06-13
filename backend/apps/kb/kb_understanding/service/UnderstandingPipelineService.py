@@ -31,7 +31,6 @@ class UnderstandingPipelineService:
         *,
         extract_service,
         normalize_service,
-        structure_service,
         chunk_service,
         validate_service,
         emit_discovery_requested: Callable[..., None] = enqueue_discovery_requested,
@@ -41,7 +40,6 @@ class UnderstandingPipelineService:
         self._trace = trace
         self._extract = extract_service
         self._normalize = normalize_service
-        self._structure = structure_service
         self._chunk = chunk_service
         self._validate = validate_service
         self._emit_discovery_requested = emit_discovery_requested
@@ -65,21 +63,13 @@ class UnderstandingPipelineService:
                 input_summary={"char_count": extracted.char_count},
                 output_summary=lambda result: dict(result.trace_summary),
             )
-            blocks = self._run_step(
-                ctx,
-                UnderstandingStep.STRUCTURE_DETECTION,
-                UnderstandingStatus.STRUCTURING,
-                lambda: self._structure.run(ctx, normalized),
-                input_summary={"char_count": normalized.char_count},
-                output_summary=lambda result: {"block_count": len(result)},
-            )
-            self._run_step(
+            chunk_result = self._run_step(
                 ctx,
                 UnderstandingStep.CHUNKING,
                 UnderstandingStatus.CHUNKING,
-                lambda: self._chunk.run(ctx, blocks),
-                input_summary={"block_count": len(blocks)},
-                output_summary=lambda result: {"chunk_count": len(result)},
+                lambda: self._chunk.run(ctx, normalized),
+                input_summary={"part_count": normalized.part_count},
+                output_summary=lambda result: dict(result.trace_summary),
             )
         except Exception as exc:
             return self._fail(ctx, exc)
@@ -90,7 +80,7 @@ class UnderstandingPipelineService:
                 UnderstandingStep.VALIDATION,
                 UnderstandingStatus.VALIDATING,
                 lambda: self._validate.run(ctx),
-                input_summary={},
+                input_summary={"chunk_count": len(chunk_result.chunks)},
                 output_summary=lambda result: {"status": result[0].value, "missing": list(result[1].missing)},
             )
         except Exception as exc:

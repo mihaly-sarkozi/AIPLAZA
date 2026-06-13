@@ -14,7 +14,7 @@ Training = Ingest + Understanding + Indexing + Validation
 |-------|---------|---------|
 | **kb_crud** | telepítve | tudástár CRUD, jogosultságok, tenant kezelés, státuszok, alapbeállítások |
 | **kb_ingest** | telepítve | input befogadás + bizonyíték mentés (szöveg/PDF/DOCX, checksum, batch/item, feldolgozás indítása) |
-| **kb_understanding** | telepítve | technikai előkészítés: extract → normalize → structure → chunk → validate |
+| **kb_understanding** | telepítve | technikai előkészítés: extract → normalize → chunk → validate |
 | **kb_discovery** | telepítve | lokális felismerés: person, entity, keyword, topic, time, space, relationship, scoring |
 | **kb_indexing** | skeleton | a feldolgozott tudás kereshetővé tétele (full-text, vector, entity, keyword, metadata, hybrid index) |
 | **kb_search** | skeleton | keresés és kontextusépítés (query parser, hybrid ranking, context/citation builder) |
@@ -42,7 +42,7 @@ A `kb_training` és `kb_reading` technikai modulnevek megszűntek — helyettük
 ## Pipeline szabály
 
 ```text
-INGEST → EXTRACT → NORMALIZE → STRUCTURE DETECTION → CHUNKING → VALIDATION
+INGEST → EXTRACT → NORMALIZE → CHUNKING → VALIDATION
 → DISCOVERY (person, entity, temporal, spatial, keyword, topic, …)
 → EMBEDDING → INDEXING → SEARCH
 ```
@@ -61,7 +61,7 @@ Minden dokumentum, batch és item kapjon státuszt. A kanonikus státuszkészlet
 (`kb_understanding/enums/UnderstandingStatus.py`):
 
 ```text
-CREATED, QUEUED, EXTRACTING, NORMALIZING, STRUCTURING, CHUNKING,
+CREATED, QUEUED, EXTRACTING, NORMALIZING, CHUNKING,
 VALIDATING, READY_FOR_DISCOVERY, PARTIAL, FAILED, RETRYABLE
 ```
 
@@ -188,17 +188,16 @@ maintenance   → understanding (esemény / újrafuttatás)
  2. kb_ingest                              ✓
  3. kb_understanding / extract
  4. kb_understanding / normalize
- 5. kb_understanding / structure detection
- 6. kb_understanding / chunking
- 7. kb_understanding / validation
- 8. kb_discovery / entity + enrichment + scoring
- 9. kb_embedding / vector
-10. kb_indexing / full-text + vector index
-11. kb_search / hybrid search
-12. kb_services / question-answer
-13. kb_feedback
-14. kb_testing
-15. kb_maintenance
+ 5. kb_understanding / chunking
+ 6. kb_understanding / validation
+ 7. kb_discovery / entity + enrichment + scoring
+ 8. kb_embedding / vector
+ 9. kb_indexing / full-text + vector index
+10. kb_search / hybrid search
+11. kb_services / question-answer
+12. kb_feedback
+13. kb_testing
+14. kb_maintenance
 ```
 
 ## Gyökér fa
