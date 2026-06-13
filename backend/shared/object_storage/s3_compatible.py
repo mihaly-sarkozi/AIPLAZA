@@ -12,6 +12,7 @@ from botocore.exceptions import ClientError
 
 from shared.object_storage.config import ObjectStorageConfig
 from shared.object_storage.contracts import ObjectStoragePort
+from shared.object_storage.metadata import sanitize_s3_metadata
 from shared.object_storage.models import StoredObjectData, StoredObjectRef
 
 MAX_OBJECT_KEY_LENGTH = 1024
@@ -75,7 +76,7 @@ class S3CompatibleObjectStorage(ObjectStoragePort):
         if content_type:
             extra_args["ContentType"] = content_type
         if metadata:
-            extra_args["Metadata"] = {str(k): str(v) for k, v in metadata.items()}
+            extra_args["Metadata"] = sanitize_s3_metadata(metadata)
         self._client.put_object(Bucket=resolved_bucket, Key=key, Body=content, **extra_args)
         head = self._client.head_object(Bucket=resolved_bucket, Key=key)
         return StoredObjectRef(
@@ -103,7 +104,7 @@ class S3CompatibleObjectStorage(ObjectStoragePort):
         if content_type:
             extra_args["ContentType"] = content_type
         if metadata:
-            extra_args["Metadata"] = {str(k): str(v) for k, v in metadata.items()}
+            extra_args["Metadata"] = sanitize_s3_metadata(metadata)
         self._client.upload_fileobj(fileobj, resolved_bucket, key, ExtraArgs=extra_args or None)
         head = self._client.head_object(Bucket=resolved_bucket, Key=key)
         return StoredObjectRef(

@@ -4,6 +4,8 @@ from __future__ import annotations
 # Feladat: FileStorageInterface MinIO/S3 implementáció.
 # Sárközi Mihály - 2026.06.07
 
+import base64
+import hashlib
 import os
 import re
 import tempfile
@@ -33,8 +35,33 @@ def _sanitize_filename(filename: str) -> str:
     return _UNSAFE_REF_SEGMENT.sub("_", name)
 
 
+def _is_ascii(value: str) -> bool:
+    try:
+        value.encode("ascii")
+        return True
+    except UnicodeEncodeError:
+        return False
+
+
+def _ascii_metadata_value(value: str) -> str:
+    text = str(value)
+    if _is_ascii(text):
+        return text
+    encoded = base64.urlsafe_b64encode(text.encode("utf-8")).decode("ascii").rstrip("=")
+    return f"b64url:{encoded}"
+
+
+def _ascii_storage_filename(filename: str) -> str:
+    name = _sanitize_filename(filename)
+    if _is_ascii(name):
+        return name
+    _stem, ext = os.path.splitext(name)
+    digest = hashlib.sha256(name.encode("utf-8")).hexdigest()[:16]
+    return f"{digest}{ext.lower()}" if ext else digest
+
+
 def _metadata(**values: Any) -> dict[str, str]:
-    return {key: str(value) for key, value in values.items() if value is not None}
+    return {key: _ascii_metadata_value(str(value)) for key, value in values.items() if value is not None}
 
 
 class MinioFileStorage:
@@ -82,7 +109,7 @@ class MinioFileStorage:
         filename: str,
         content_type: str | None = None,
     ) -> str:
-        safe_name = _sanitize_filename(filename)
+        safe_name = _ascii_storage_filename(filename)
         raw_ref = self._build_training_file_ref(
             tenant=tenant,
             knowledge_base_id=knowledge_base_id,
@@ -98,7 +125,7 @@ class MinioFileStorage:
                 knowledge_base_id=knowledge_base_id,
                 training_batch_id=training_batch_id,
                 training_item_id=training_item_id,
-                filename=safe_name,
+                filename=filename,
             ),
         )
         return raw_ref
@@ -170,7 +197,7 @@ class MinioFileStorage:
         kb_id = _safe_segment(knowledge_base_id)
         batch_id = _safe_segment(training_batch_id)
         item_id = _safe_segment(training_item_id)
-        safe_name = _sanitize_filename(filename)
+        safe_name = _ascii_storage_filename(filename)
         return f"tenants/{tenant_slug}/kb/{kb_id}/training/{batch_id}/{item_id}/{safe_name}"
 
 
