@@ -18,6 +18,13 @@ def _env_bool(name: str, default: bool) -> bool:
     return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _env_str(name: str, default: str) -> str:
+    raw = os.getenv(name)
+    if raw is None or not str(raw).strip():
+        return default
+    return raw.strip()
+
+
 @dataclass(frozen=True)
 class ExtractConfig:
     small_file_max_mb: int = 20
@@ -32,8 +39,16 @@ class ExtractConfig:
     ocr_min_text_chars: int = 50
     extract_batch_size: int = 50
     progress_update_interval_pages: int = 25
-    ocr_language: str = "hun+eng+spa"
     keep_temp_files_on_error: bool = False
+    ocr_enabled: bool = True
+    ocr_languages: str = "hun+eng+spa"
+    ocr_min_confidence: float = 0.50
+    ocr_deduplicate: bool = True
+    ocr_run_on_pdf_images: bool = True
+    ocr_run_on_docx_images: bool = True
+    ocr_run_on_low_text_pdf_pages: bool = True
+    ocr_max_image_pixels: int = 20_000_000
+    ocr_timeout_seconds: int = 120
 
     @property
     def small_file_max_bytes(self) -> int:
@@ -51,7 +66,6 @@ class ExtractConfig:
     def max_extract_file_size_bytes(self) -> int:
         return self.max_extract_file_size_mb * 1024 * 1024
 
-    # Backward-compatible alias
     @property
     def max_file_size_mb(self) -> int:
         return self.max_extract_file_size_mb
@@ -59,6 +73,11 @@ class ExtractConfig:
     @property
     def max_file_size_bytes(self) -> int:
         return self.max_extract_file_size_bytes
+
+    # Backward-compatible alias
+    @property
+    def ocr_language(self) -> str:
+        return self.ocr_languages
 
 
 DEFAULT_EXTRACT_CONFIG = ExtractConfig(
@@ -74,6 +93,15 @@ DEFAULT_EXTRACT_CONFIG = ExtractConfig(
     extract_batch_size=_env_int("EXTRACT_BATCH_SIZE", 50),
     progress_update_interval_pages=_env_int("EXTRACT_PROGRESS_INTERVAL_PAGES", 25),
     keep_temp_files_on_error=_env_bool("KEEP_TEMP_FILES_ON_ERROR", False),
+    ocr_enabled=_env_bool("OCR_ENABLED", True),
+    ocr_languages=_env_str("OCR_LANGUAGES", "hun+eng+spa"),
+    ocr_min_confidence=float(os.getenv("OCR_MIN_CONFIDENCE", "0.50") or "0.50"),
+    ocr_deduplicate=_env_bool("OCR_DEDUPLICATE", True),
+    ocr_run_on_pdf_images=_env_bool("OCR_RUN_ON_PDF_IMAGES", True),
+    ocr_run_on_docx_images=_env_bool("OCR_RUN_ON_DOCX_IMAGES", True),
+    ocr_run_on_low_text_pdf_pages=_env_bool("OCR_RUN_ON_LOW_TEXT_PDF_PAGES", True),
+    ocr_max_image_pixels=_env_int("OCR_MAX_IMAGE_PIXELS", 20_000_000),
+    ocr_timeout_seconds=_env_int("OCR_TIMEOUT_SECONDS", 120),
 )
 
 

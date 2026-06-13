@@ -35,8 +35,24 @@ def _install_kb_understanding_schema(engine, slug: str) -> None:
         engine,
         slug,
         (
+            # v4: downstream metadata columns
             'ALTER TABLE "{schema}".kb_normalized_content ADD COLUMN IF NOT EXISTS part_map JSONB NOT NULL DEFAULT \'[]\'::jsonb',
-            'ALTER TABLE "{schema}".kb_structured_blocks ADD COLUMN IF NOT EXISTS metadata_json JSONB NOT NULL DEFAULT \'{}\'::jsonb',
+            'ALTER TABLE "{schema}".kb_structured_blocks ADD COLUMN IF NOT EXISTS metadata_json JSONB NOT NULL DEFAULT \'{{}}\'::jsonb',
+            # v5: kb_extracted_content part-based extract schema (legacy v1 had text/page_map only)
+            'ALTER TABLE "{schema}".kb_extracted_content ADD COLUMN IF NOT EXISTS raw_ref VARCHAR(1024)',
+            'ALTER TABLE "{schema}".kb_extracted_content ADD COLUMN IF NOT EXISTS mime_type VARCHAR(255)',
+            'ALTER TABLE "{schema}".kb_extracted_content ADD COLUMN IF NOT EXISTS extractor_name VARCHAR(64) NOT NULL DEFAULT \'\'',
+            'ALTER TABLE "{schema}".kb_extracted_content ADD COLUMN IF NOT EXISTS extractor_version VARCHAR(32) NOT NULL DEFAULT \'1.0\'',
+            'ALTER TABLE "{schema}".kb_extracted_content ADD COLUMN IF NOT EXISTS total_pages INTEGER',
+            'ALTER TABLE "{schema}".kb_extracted_content ADD COLUMN IF NOT EXISTS total_chars INTEGER NOT NULL DEFAULT 0',
+            'ALTER TABLE "{schema}".kb_extracted_content ADD COLUMN IF NOT EXISTS text_parts_count INTEGER NOT NULL DEFAULT 0',
+            'ALTER TABLE "{schema}".kb_extracted_content ADD COLUMN IF NOT EXISTS table_parts_count INTEGER NOT NULL DEFAULT 0',
+            'ALTER TABLE "{schema}".kb_extracted_content ADD COLUMN IF NOT EXISTS ocr_text_parts_count INTEGER NOT NULL DEFAULT 0',
+            'ALTER TABLE "{schema}".kb_extracted_content ADD COLUMN IF NOT EXISTS ocr_empty_parts_count INTEGER NOT NULL DEFAULT 0',
+            'ALTER TABLE "{schema}".kb_extracted_content ADD COLUMN IF NOT EXISTS ocr_failed_parts_count INTEGER NOT NULL DEFAULT 0',
+            'ALTER TABLE "{schema}".kb_extracted_content ADD COLUMN IF NOT EXISTS status VARCHAR(32) NOT NULL DEFAULT \'completed\'',
+            'ALTER TABLE "{schema}".kb_extracted_content ADD COLUMN IF NOT EXISTS metadata JSONB NOT NULL DEFAULT \'{{}}\'::jsonb',
+            'ALTER TABLE "{schema}".kb_extracted_content ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP NOT NULL DEFAULT NOW()',
         ),
     )
 
@@ -46,7 +62,7 @@ def register_kb_understanding_tenant_hooks() -> None:
         [
             TenantSchemaHook(
                 name="kb_understanding",
-                revision="kb.understanding.schema.v4",
+                revision="kb.understanding.schema.v5",
                 install=_install_kb_understanding_schema,
                 table_names=(
                     "kb_understanding_jobs",

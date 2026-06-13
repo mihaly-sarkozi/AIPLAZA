@@ -22,6 +22,8 @@ class UnderstandingErrorCode(str, Enum):
     EXTRACTION_TIMEOUT = "extraction_timeout"
     PART_TOO_LARGE = "part_too_large"
     OCR_UNAVAILABLE = "ocr_unavailable"
+    OCR_ENGINE_UNAVAILABLE = "ocr_engine_unavailable"
+    OCR_LANGUAGE_PACK_MISSING = "ocr_language_pack_missing"
     OCR_FAILED = "ocr_failed"
     FILE_REJECTED = "file_rejected"
     TOO_MANY_PARTS = "too_many_parts"

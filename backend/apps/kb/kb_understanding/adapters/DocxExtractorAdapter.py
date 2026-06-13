@@ -4,6 +4,7 @@ import os
 from io import BytesIO
 from typing import Any, Iterator
 
+from apps.kb.kb_understanding.adapters.OcrExtractorAdapter import OcrExtractorAdapter
 from apps.kb.kb_understanding.config.ExtractConfig import DEFAULT_EXTRACT_CONFIG, ExtractConfig
 from apps.kb.kb_understanding.dto.ExtractPartDto import ExtractPart
 from apps.kb.kb_understanding.dto.ExtractResultDto import ExtractResult
@@ -16,9 +17,11 @@ from apps.kb.kb_understanding.extract.docx_metadata import (
     extract_paragraph_metadata,
     extract_table_metadata,
 )
+from apps.kb.kb_understanding.extract.docx_images import iter_docx_embedded_images, open_image_blob
 from apps.kb.kb_understanding.extract.extract_context import ExtractContext
 from apps.kb.kb_understanding.extract.extract_limits import ExtractLimits, finalize_extract_status
 from apps.kb.kb_understanding.extract.heading_path import HeadingPathTracker
+from apps.kb.kb_understanding.extract.ocr_engine import OcrExtractStats
 from apps.kb.kb_understanding.extract.part_builder import build_table_part, build_text_part, summarize_parts
 
 
@@ -26,8 +29,14 @@ class DocxExtractorAdapter:
     name = "python_docx"
     version = "2.3"
 
-    def __init__(self, *, config: ExtractConfig | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        config: ExtractConfig | None = None,
+        ocr_extractor: OcrExtractorAdapter | None = None,
+    ) -> None:
         self._config = config or DEFAULT_EXTRACT_CONFIG
+        self._ocr = ocr_extractor or OcrExtractorAdapter(self._config)
 
     def extract(self, data: bytes, *, mime_type: str | None = None) -> ExtractResult:
         return self.extract_from_bytes(data, mime_type=mime_type)
@@ -95,6 +104,7 @@ class DocxExtractorAdapter:
         failed_blocks = 0
         table_index = 0
         heading_tracker = HeadingPathTracker()
+        ocr_stats = self._resolve_ocr_stats(extract_ctx)
 
         def _emit(batch: list[ExtractPart]) -> None:
             if extract_ctx is not None:
@@ -177,6 +187,17 @@ class DocxExtractorAdapter:
                 part_index = max(part.part_index for part in block_parts) + 1
                 document_order = max(part.metadata.get("document_order", document_order) for part in block_parts) + 1
 
+        image_parts = self._extract_embedded_image_ocr_parts(
+            document,
+            start_index=part_index,
+            document_order=document_order,
+            ocr_stats=ocr_stats,
+        )
+        if image_parts:
+            if extract_ctx is not None:
+                limits.check_part_count(extract_ctx.counters.total_parts + len(image_parts))
+            _emit(image_parts)
+
         return self._finalize_result(
             parts=parts,
             warnings=warnings,
@@ -184,6 +205,7 @@ class DocxExtractorAdapter:
             failed_blocks=failed_blocks,
             mime_type=mime_type,
             extract_ctx=extract_ctx,
+            ocr_stats=ocr_stats,
         )
 
     def _extract_header_footer_parts(
@@ -353,6 +375,79 @@ class DocxExtractorAdapter:
             limits.check_duration()
         return chunks
 
+    def _resolve_ocr_stats(self, extract_ctx: ExtractContext | None) -> OcrExtractStats:
+        stats = extract_ctx.ocr_stats if extract_ctx is not None else OcrExtractStats()
+        stats.ocr_engine_available = self._ocr.is_available
+        stats.ocr_language = self._config.ocr_languages if self._config.ocr_enabled else ""
+        return stats
+
+    @staticmethod
+    def _ocr_result_fields(ocr_stats: OcrExtractStats) -> dict[str, int | bool | str]:
+        return {
+            "pdf_pages_ocr_scanned": ocr_stats.pdf_pages_ocr_scanned,
+            "docx_images_ocr_scanned": ocr_stats.docx_images_ocr_scanned,
+            "ocr_engine_available": ocr_stats.ocr_engine_available,
+            "ocr_language": ocr_stats.ocr_language,
+        }
+
+    def _extract_embedded_image_ocr_parts(
+        self,
+        document,
+        *,
+        start_index: int,
+        document_order: int,
+        ocr_stats: OcrExtractStats,
+    ) -> list[ExtractPart]:
+        if not self._config.ocr_enabled or not self._config.ocr_run_on_docx_images:
+            return []
+
+        parts: list[ExtractPart] = []
+        index = start_index
+        order = document_order
+
+        for image_name, blob in iter_docx_embedded_images(document):
+            ocr_stats.docx_images_ocr_scanned += 1
+            try:
+                image = open_image_blob(blob)
+                ocr_part = self._ocr.ocr_embedded_image(
+                    image,
+                    part_index=index,
+                    document_order=order,
+                    image_name=image_name,
+                )
+            except Exception as exc:
+                ocr_part = ExtractPart(
+                    part_type=ExtractPartType.OCR_FAILED.value,
+                    page_number=None,
+                    part_index=index,
+                    text=None,
+                    char_count=0,
+                    status="failed",
+                    error_code=UnderstandingErrorCode.OCR_FAILED.value,
+                    error_message=str(exc)[:1000],
+                    metadata={
+                        "source": "docx_embedded_image_ocr",
+                        "document_order": order,
+                        "block_kind": "ocr_text",
+                        "image_name": image_name,
+                        "order_confidence": "low",
+                    },
+                )
+
+            if ocr_part is None:
+                continue
+
+            if ocr_part.metadata.get("document_order") is None:
+                ocr_part.metadata["document_order"] = order
+            if "order_confidence" not in ocr_part.metadata:
+                ocr_part.metadata["order_confidence"] = "low"
+
+            parts.append(ocr_part)
+            index += 1
+            order += 1
+
+        return parts
+
     def _finalize_result(
         self,
         *,
@@ -362,11 +457,14 @@ class DocxExtractorAdapter:
         failed_blocks: int,
         mime_type: str | None,
         extract_ctx: ExtractContext | None,
+        ocr_stats: OcrExtractStats | None = None,
     ) -> ExtractResult:
         if extract_ctx is not None:
             extract_ctx.flush()
 
         source_mime = mime_type or "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        stats = ocr_stats or self._resolve_ocr_stats(extract_ctx)
+        ocr_fields = self._ocr_result_fields(stats)
         status = finalize_extract_status(
             parts=parts,
             failed_pages=failed_blocks,
@@ -385,6 +483,7 @@ class DocxExtractorAdapter:
                 extractor_name=self.name,
                 extractor_version=self.version,
                 source_mime=source_mime,
+                **ocr_fields,
             )
 
         return ExtractResult(
@@ -404,6 +503,10 @@ class DocxExtractorAdapter:
                 if part.part_type in {ExtractPartType.TEXT.value, ExtractPartType.HEADER.value, ExtractPartType.FOOTER.value}
             ),
             table_parts_count=sum(1 for part in parts if part.part_type == ExtractPartType.TABLE.value),
+            ocr_text_parts_count=sum(1 for part in parts if part.part_type == ExtractPartType.OCR_TEXT.value),
+            ocr_empty_parts_count=sum(1 for part in parts if part.part_type == ExtractPartType.OCR_EMPTY.value),
+            ocr_failed_parts_count=sum(1 for part in parts if part.part_type == ExtractPartType.OCR_FAILED.value),
+            **ocr_fields,
         )
 
 

@@ -12,6 +12,7 @@ from apps.kb.kb_understanding.enums.UnderstandingErrorCode import UnderstandingE
 from apps.kb.kb_understanding.errors.UnderstandingProcessingError import UnderstandingProcessingError
 from apps.kb.kb_understanding.extract.extract_context import ExtractContext
 from apps.kb.kb_understanding.extract.extract_limits import ExtractLimits, finalize_extract_status
+from apps.kb.kb_understanding.extract.ocr_engine import OcrExtractStats
 from apps.kb.kb_understanding.extract.part_builder import build_table_part, build_text_part, summarize_parts
 from apps.kb.kb_understanding.extract.pdf_metadata import (
     build_table_metadata,
@@ -77,6 +78,7 @@ class PdfExtractorAdapter:
         document_order = 0
         total_pages = 0
         timed_out = False
+        ocr_stats = self._resolve_ocr_stats(extract_ctx)
 
         try:
             with pdfplumber.open(source) as pdf:
@@ -100,6 +102,7 @@ class PdfExtractorAdapter:
                             page_number=page_number,
                             start_index=part_index,
                             document_order=document_order,
+                            ocr_stats=ocr_stats,
                         )
                     except Exception as exc:
                         page_failed = True
@@ -176,6 +179,8 @@ class PdfExtractorAdapter:
             counters=extract_ctx.counters if extract_ctx is not None else None,
         )
 
+        ocr_fields = self._ocr_result_fields(ocr_stats)
+
         if extract_ctx is not None and extract_ctx.streaming:
             return ExtractResult.from_counters(
                 counters=extract_ctx.counters,
@@ -187,6 +192,7 @@ class PdfExtractorAdapter:
                 extractor_name=self.name,
                 extractor_version=self.version,
                 source_mime=mime_type or "application/pdf",
+                **ocr_fields,
             )
 
         return ExtractResult(
@@ -210,7 +216,54 @@ class PdfExtractorAdapter:
             ocr_text_parts_count=sum(1 for part in parts if part.part_type == ExtractPartType.OCR_TEXT.value),
             ocr_empty_parts_count=sum(1 for part in parts if part.part_type == ExtractPartType.OCR_EMPTY.value),
             ocr_failed_parts_count=sum(1 for part in parts if part.part_type == ExtractPartType.OCR_FAILED.value),
+            **ocr_fields,
         )
+
+    def _resolve_ocr_stats(self, extract_ctx: ExtractContext | None) -> OcrExtractStats:
+        stats = extract_ctx.ocr_stats if extract_ctx is not None else OcrExtractStats()
+        stats.ocr_engine_available = self._ocr.is_available
+        stats.ocr_language = self._config.ocr_languages if self._config.ocr_enabled else ""
+        return stats
+
+    @staticmethod
+    def _ocr_result_fields(ocr_stats: OcrExtractStats) -> dict[str, int | bool | str]:
+        return {
+            "pdf_pages_ocr_scanned": ocr_stats.pdf_pages_ocr_scanned,
+            "docx_images_ocr_scanned": ocr_stats.docx_images_ocr_scanned,
+            "ocr_engine_available": ocr_stats.ocr_engine_available,
+            "ocr_language": ocr_stats.ocr_language,
+        }
+
+    @staticmethod
+    def _page_has_images(page) -> bool:
+        return bool(getattr(page, "images", None))
+
+    def _should_run_page_ocr(self, page, text_chars: int) -> tuple[bool, str | None]:
+        if not self._config.ocr_enabled:
+            return False, None
+        if self._config.ocr_run_on_pdf_images and self._page_has_images(page):
+            return True, "page_contains_images"
+        if self._config.ocr_run_on_low_text_pdf_pages and text_chars < self._config.ocr_min_text_chars:
+            return True, "low_text_layer"
+        return False, None
+
+    @staticmethod
+    def _collect_page_text(parts: list[ExtractPart]) -> str:
+        return " ".join(part.text or "" for part in parts if part.text)
+
+    def _append_ocr_part(
+        self,
+        parts: list[ExtractPart],
+        ocr_part: ExtractPart | None,
+        *,
+        index: int,
+        order: int,
+    ) -> tuple[int, int, bool]:
+        if ocr_part is None:
+            return index, order, False
+        parts.append(ocr_part)
+        page_failed = ocr_part.part_type == ExtractPartType.OCR_FAILED.value
+        return index + 1, order + 1, page_failed
 
     def _extract_page(
         self,
@@ -219,6 +272,7 @@ class PdfExtractorAdapter:
         page_number: int,
         start_index: int,
         document_order: int,
+        ocr_stats: OcrExtractStats,
     ) -> tuple[list[ExtractPart], bool, int, int]:
         parts: list[ExtractPart] = []
         index = start_index
@@ -292,21 +346,29 @@ class PdfExtractorAdapter:
             index += 1
             order += 1
 
+        existing_text = self._collect_page_text(parts)
         text_chars = sum(len(part.text or "") for part in parts)
-        if text_chars < self._config.ocr_min_text_chars:
+
+        should_page_ocr, reason = self._should_run_page_ocr(page, text_chars)
+        if should_page_ocr:
+            ocr_stats.pdf_pages_ocr_scanned += 1
             try:
-                image = page.to_image(resolution=200).original
+                page_image = page.to_image(resolution=200).original
                 ocr_part = self._ocr.ocr_page_image(
-                    image,
+                    page_image,
                     page_number=page_number,
                     part_index=index,
                     document_order=order,
+                    reason=reason or "page_contains_images",
+                    existing_text=existing_text,
                 )
-                parts.append(ocr_part)
-                if ocr_part.part_type == ExtractPartType.OCR_FAILED.value:
+                index, order, failed = self._append_ocr_part(
+                    parts, ocr_part, index=index, order=order
+                )
+                if failed:
                     page_failed = True
-                index += 1
-                order += 1
+                if ocr_part is not None and ocr_part.text:
+                    existing_text = f"{existing_text} {ocr_part.text}".strip()
             except Exception as exc:
                 page_failed = True
                 parts.append(
@@ -320,14 +382,65 @@ class PdfExtractorAdapter:
                         error_code=UnderstandingErrorCode.OCR_FAILED.value,
                         error_message=str(exc)[:1000],
                         metadata={
-                            "source": "ocr",
+                            "source": "pdf_page_ocr",
                             "document_order": order,
                             "block_kind": "ocr_text",
+                            "reason": reason or "page_contains_images",
                         },
                     )
                 )
                 index += 1
                 order += 1
+
+        if self._config.ocr_enabled and self._config.ocr_run_on_pdf_images and self._page_has_images(page):
+            for image_meta in page.images or []:
+                try:
+                    bbox = (
+                        image_meta.get("x0"),
+                        image_meta.get("top"),
+                        image_meta.get("x1"),
+                        image_meta.get("bottom"),
+                    )
+                    if any(value is None for value in bbox):
+                        continue
+                    cropped = page.crop(bbox)
+                    image = cropped.to_image(resolution=200).original
+                    ocr_part = self._ocr.ocr_pdf_embedded_image(
+                        image,
+                        page_number=page_number,
+                        part_index=index,
+                        document_order=order,
+                        existing_text=existing_text,
+                    )
+                    index, order, failed = self._append_ocr_part(
+                        parts, ocr_part, index=index, order=order
+                    )
+                    if failed:
+                        page_failed = True
+                    if ocr_part is not None and ocr_part.text:
+                        existing_text = f"{existing_text} {ocr_part.text}".strip()
+                except Exception as exc:
+                    page_failed = True
+                    parts.append(
+                        ExtractPart(
+                            part_type=ExtractPartType.OCR_FAILED.value,
+                            page_number=page_number,
+                            part_index=index,
+                            text=None,
+                            char_count=0,
+                            status="failed",
+                            error_code=UnderstandingErrorCode.OCR_FAILED.value,
+                            error_message=str(exc)[:1000],
+                            metadata={
+                                "source": "pdf_embedded_image_ocr",
+                                "document_order": order,
+                                "block_kind": "ocr_text",
+                                "reason": "embedded_image",
+                            },
+                        )
+                    )
+                    index += 1
+                    order += 1
 
         return parts, page_failed, index, order
 

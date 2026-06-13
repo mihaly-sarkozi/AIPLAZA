@@ -23,6 +23,10 @@ class ExtractResult:
     ocr_text_parts_count: int = 0
     ocr_empty_parts_count: int = 0
     ocr_failed_parts_count: int = 0
+    pdf_pages_ocr_scanned: int = 0
+    docx_images_ocr_scanned: int = 0
+    ocr_engine_available: bool = False
+    ocr_language: str = ""
 
     @classmethod
     def from_counters(
@@ -37,6 +41,10 @@ class ExtractResult:
         extractor_name: str,
         extractor_version: str,
         source_mime: str | None,
+        pdf_pages_ocr_scanned: int = 0,
+        docx_images_ocr_scanned: int = 0,
+        ocr_engine_available: bool = False,
+        ocr_language: str = "",
     ) -> "ExtractResult":
         return cls(
             total_pages=total_pages,
@@ -55,6 +63,10 @@ class ExtractResult:
             ocr_text_parts_count=counters.ocr_text_parts,
             ocr_empty_parts_count=counters.ocr_empty_parts,
             ocr_failed_parts_count=counters.ocr_failed_parts,
+            pdf_pages_ocr_scanned=pdf_pages_ocr_scanned,
+            docx_images_ocr_scanned=docx_images_ocr_scanned,
+            ocr_engine_available=ocr_engine_available,
+            ocr_language=ocr_language,
         )
 
 

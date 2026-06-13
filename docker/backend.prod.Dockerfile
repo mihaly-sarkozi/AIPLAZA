@@ -7,7 +7,13 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app/backend
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends build-essential curl \
+    && apt-get install -y --no-install-recommends \
+        build-essential \
+        curl \
+        tesseract-ocr \
+        tesseract-ocr-hun \
+        tesseract-ocr-eng \
+        tesseract-ocr-spa \
     && rm -rf /var/lib/apt/lists/*
 
 COPY backend/requirements.txt ./requirements.txt
