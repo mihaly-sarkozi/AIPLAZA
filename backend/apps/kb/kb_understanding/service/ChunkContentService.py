@@ -1,12 +1,8 @@
 from __future__ import annotations
 
-# backend/apps/kb/kb_understanding/service/ChunkContentService.py
-# Feladat: A strukturált blokkokból kereshető chunkok készítése — section-aware,
-# limit + overlap, rövid chunkok összevonása, hosszúak bontása, forráshely megőrzése.
-# Sárközi Mihály - 2026.06.11
-
 import hashlib
 from dataclasses import dataclass, field
+from typing import Any
 
 from apps.kb.kb_understanding.config.UnderstandingConf import (
     DEFAULT_UNDERSTANDING_CONFIG,
@@ -38,6 +34,12 @@ class _PendingChunk:
     block_types: list[StructuredBlockType] = field(default_factory=list)
     page_number: int | None = None
     section_title: str | None = None
+    source_part_ids: list[str | None] = field(default_factory=list)
+    page_numbers: list[int | None] = field(default_factory=list)
+    block_kinds: list[str | None] = field(default_factory=list)
+    heading_path: list[str] = field(default_factory=list)
+    table_refs: list[dict[str, Any]] = field(default_factory=list)
+    bbox_refs: list[dict[str, Any] | None] = field(default_factory=list)
 
     @property
     def length(self) -> int:
@@ -74,7 +76,6 @@ class ChunkContentService:
         current_section: str | None = None
 
         for block in blocks:
-            # A cím / heading bekerül a követő tartalom elejére kontextusként.
             if block.block_type in (StructuredBlockType.TITLE, StructuredBlockType.HEADING):
                 if current.texts:
                     pending_chunks.append(current)
@@ -83,6 +84,12 @@ class ChunkContentService:
                     block_types=[block.block_type],
                     page_number=block.page_number,
                     section_title=block.text[:512],
+                    source_part_ids=[block.metadata.get("source_part_id")],
+                    page_numbers=[block.page_number],
+                    block_kinds=[block.metadata.get("block_kind")],
+                    heading_path=list(block.metadata.get("heading_path") or [block.text[:512]]),
+                    table_refs=[self._table_ref(block.metadata)],
+                    bbox_refs=[block.metadata.get("bbox")],
                 )
                 current_section = block.text[:512]
                 continue
@@ -97,14 +104,33 @@ class ChunkContentService:
             if not current.texts:
                 current.page_number = block.page_number
                 current.section_title = section
+                current.heading_path = list(block.metadata.get("heading_path") or [])
             current.texts.append(block.text)
             current.block_types.append(block.block_type)
+            current.source_part_ids.append(block.metadata.get("source_part_id"))
+            current.page_numbers.append(block.page_number)
+            current.block_kinds.append(block.metadata.get("block_kind"))
+            table_ref = self._table_ref(block.metadata)
+            if table_ref:
+                current.table_refs.append(table_ref)
+            current.bbox_refs.append(block.metadata.get("bbox"))
 
         if current.texts:
             pending_chunks.append(current)
 
         merged = self._merge_short(pending_chunks)
         return self._finalize(merged)
+
+    @staticmethod
+    def _table_ref(metadata: dict[str, Any]) -> dict[str, Any] | None:
+        if not metadata.get("headers") and not metadata.get("rows"):
+            return None
+        return {
+            "table_index": metadata.get("table_index"),
+            "headers": metadata.get("headers"),
+            "row_count": metadata.get("row_count"),
+            "column_count": metadata.get("column_count"),
+        }
 
     def _merge_short(self, chunks: list[_PendingChunk]) -> list[_PendingChunk]:
         merged: list[_PendingChunk] = []
@@ -117,6 +143,13 @@ class ChunkContentService:
                 previous = merged[-1]
                 previous.texts.extend(chunk.texts)
                 previous.block_types.extend(chunk.block_types)
+                previous.source_part_ids.extend(chunk.source_part_ids)
+                previous.page_numbers.extend(chunk.page_numbers)
+                previous.block_kinds.extend(chunk.block_kinds)
+                previous.table_refs.extend(chunk.table_refs)
+                previous.bbox_refs.extend(chunk.bbox_refs)
+                if chunk.heading_path:
+                    previous.heading_path = chunk.heading_path
                 continue
             merged.append(chunk)
         return merged
@@ -125,6 +158,15 @@ class ChunkContentService:
         result: list[KnowledgeChunkDto] = []
         order_index = 0
         for chunk in chunks:
+            metadata = {
+                "source_part_ids": [part_id for part_id in chunk.source_part_ids if part_id],
+                "page_numbers": sorted({page for page in chunk.page_numbers if page is not None}),
+                "section_title": chunk.section_title,
+                "heading_path": chunk.heading_path,
+                "block_kinds": [kind for kind in chunk.block_kinds if kind],
+                "table_refs": chunk.table_refs,
+                "bbox_refs": [bbox for bbox in chunk.bbox_refs if bbox],
+            }
             for part in self._split_long(chunk.text):
                 result.append(
                     KnowledgeChunkDto(
@@ -136,6 +178,7 @@ class ChunkContentService:
                         checksum=hashlib.sha256(part.encode("utf-8")).hexdigest(),
                         page_number=chunk.page_number,
                         section_title=chunk.section_title,
+                        metadata=metadata,
                     )
                 )
                 order_index += 1
@@ -151,7 +194,6 @@ class ChunkContentService:
         while start < len(text):
             end = min(start + max_chars, len(text))
             if end < len(text):
-                # Mondat- vagy szóhatáron vágunk, ha lehet.
                 window = text[start:end]
                 cut = max(window.rfind(". "), window.rfind("\n"), window.rfind(" "))
                 if cut > max_chars // 2:

@@ -16,6 +16,7 @@ class UnderstandingErrorCode(str, Enum):
     STORAGE_ERROR = "storage_error"
     UNSUPPORTED_CONTENT_TYPE = "unsupported_content_type"
     EXTRACTION_FAILED = "extraction_failed"
+    DOCX_PART_PARSE_ERROR = "docx_part_parse_error"
     FILE_TOO_LARGE = "file_too_large"
     TOO_MANY_PAGES = "too_many_pages"
     EXTRACTION_TIMEOUT = "extraction_timeout"

@@ -5,6 +5,7 @@ from __future__ import annotations
 # Sárközi Mihály - 2026.06.11
 
 from sqlalchemy import Column, DateTime, Integer, String, Text
+from sqlalchemy.dialects.postgresql import JSONB
 
 from core.kernel.db.model_bases import TenantSchemaBase
 from shared.utils.clock import utc_now_naive
@@ -27,6 +28,7 @@ class StructuredBlock(TenantSchemaBase):
     page_number = Column(Integer, nullable=True)
     # A blokkot tartalmazó szakasz címe (legközelebbi heading).
     section_title = Column(String(512), nullable=True)
+    metadata_json = Column(JSONB, nullable=False, default=dict)
     created_at = Column(DateTime, default=utc_now_naive, nullable=False)
 
 

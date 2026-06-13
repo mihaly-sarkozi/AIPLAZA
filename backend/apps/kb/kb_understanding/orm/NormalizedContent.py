@@ -22,6 +22,8 @@ class NormalizedContent(TenantSchemaBase):
     text = Column(Text, nullable=False, default="")
     # Normalizálás után érvényes oldaltérkép.
     page_map = Column(JSONB, nullable=False, default=list)
+    # Forrás partok metaadat-térképe (offset + extract metadata).
+    part_map = Column(JSONB, nullable=False, default=list)
     char_count = Column(Integer, nullable=False, default=0)
     # Alkalmazott normalizálási műveletek összegzése (pl. removed_lines, fixed_encoding).
     applied_rules = Column(JSONB, nullable=False, default=dict)

@@ -13,6 +13,8 @@ class StructuredBlockType(str, Enum):
     PARAGRAPH = "paragraph"
     LIST = "list"
     TABLE = "table"
+    HEADER = "header"
+    FOOTER = "footer"
     FAQ = "faq"
     STEP = "step"
     NOTE = "note"

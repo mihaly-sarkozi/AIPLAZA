@@ -12,6 +12,7 @@ from core.modules.tenant.service import (
     TenantSchemaHook,
     install_schema_tables,
     register_tenant_schema_hooks,
+    run_schema_statements,
 )
 
 
@@ -30,6 +31,14 @@ def _install_kb_understanding_schema(engine, slug: str) -> None:
             KnowledgeEmbedding.__table__,
         ),
     )
+    run_schema_statements(
+        engine,
+        slug,
+        (
+            'ALTER TABLE "{schema}".kb_normalized_content ADD COLUMN IF NOT EXISTS part_map JSONB NOT NULL DEFAULT \'[]\'::jsonb',
+            'ALTER TABLE "{schema}".kb_structured_blocks ADD COLUMN IF NOT EXISTS metadata_json JSONB NOT NULL DEFAULT \'{}\'::jsonb',
+        ),
+    )
 
 
 def register_kb_understanding_tenant_hooks() -> None:
@@ -37,7 +46,7 @@ def register_kb_understanding_tenant_hooks() -> None:
         [
             TenantSchemaHook(
                 name="kb_understanding",
-                revision="kb.understanding.schema.v3",
+                revision="kb.understanding.schema.v4",
                 install=_install_kb_understanding_schema,
                 table_names=(
                     "kb_understanding_jobs",

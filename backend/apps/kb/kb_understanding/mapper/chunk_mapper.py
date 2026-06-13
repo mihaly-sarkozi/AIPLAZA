@@ -32,7 +32,11 @@ def chunk_dto_to_orm(
         text=dto.text,
         token_count=dto.token_count,
         created_by=ctx.created_by,
-        metadata_json={"title": ctx.title, "content_hash": ctx.content_hash},
+        metadata_json={
+            "title": ctx.title,
+            "content_hash": ctx.content_hash,
+            **dict(dto.metadata or {}),
+        },
     )
 
 

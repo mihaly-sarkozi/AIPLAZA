@@ -13,11 +13,16 @@ from apps.kb.kb_understanding.errors.UnderstandingProcessingError import Underst
 from apps.kb.kb_understanding.extract.extract_context import ExtractContext
 from apps.kb.kb_understanding.extract.extract_limits import ExtractLimits, finalize_extract_status
 from apps.kb.kb_understanding.extract.part_builder import build_table_part, build_text_part, summarize_parts
+from apps.kb.kb_understanding.extract.pdf_metadata import (
+    build_table_metadata,
+    build_text_block_metadata,
+    group_words_into_blocks,
+)
 
 
 class PdfExtractorAdapter:
     name = "pdfplumber_layout"
-    version = "2.1"
+    version = "2.3"
 
     def __init__(
         self,
@@ -69,6 +74,7 @@ class PdfExtractorAdapter:
         failed_pages = 0
         processed_pages = 0
         part_index = 0
+        document_order = 0
         total_pages = 0
         timed_out = False
 
@@ -89,7 +95,12 @@ class PdfExtractorAdapter:
 
                     processed_pages += 1
                     try:
-                        page_parts, page_failed = self._extract_page(page, page_number, part_index)
+                        page_parts, page_failed, next_index, next_order = self._extract_page(
+                            page,
+                            page_number=page_number,
+                            start_index=part_index,
+                            document_order=document_order,
+                        )
                     except Exception as exc:
                         page_failed = True
                         page_parts = [
@@ -102,9 +113,15 @@ class PdfExtractorAdapter:
                                 status="failed",
                                 error_code=UnderstandingErrorCode.EXTRACTION_FAILED.value,
                                 error_message=str(exc)[:1000],
-                                metadata={"source": "pdf_page"},
+                                metadata={
+                                    "source": "pdf_page",
+                                    "document_order": document_order,
+                                    "block_kind": "unknown",
+                                },
                             )
                         ]
+                        next_index = part_index + 1
+                        next_order = document_order + 1
 
                     if page_failed:
                         failed_pages += 1
@@ -115,8 +132,8 @@ class PdfExtractorAdapter:
                     if extract_ctx is not None:
                         limits.check_part_count(extract_ctx.counters.total_parts + len(page_parts))
                         extract_ctx.emit_parts(page_parts, batch_size=self._config.extract_batch_size)
-                        if page_parts:
-                            part_index = max(part.part_index for part in page_parts) + 1
+                        part_index = next_index
+                        document_order = next_order
                         if (
                             extract_ctx.on_progress is not None
                             and page_number % self._config.progress_update_interval_pages == 0
@@ -132,8 +149,8 @@ class PdfExtractorAdapter:
                     else:
                         limits.check_part_count(len(parts) + len(page_parts))
                         parts.extend(page_parts)
-                        if page_parts:
-                            part_index = max(part.part_index for part in page_parts) + 1
+                        part_index = next_index
+                        document_order = next_order
 
                 if extract_ctx is not None:
                     extract_ctx.flush()
@@ -183,38 +200,85 @@ class PdfExtractorAdapter:
             processed_pages=processed_pages,
             failed_pages=failed_pages,
             source_mime=mime_type or "application/pdf",
-            text_parts_count=sum(1 for part in parts if part.part_type == ExtractPartType.TEXT.value),
+            text_parts_count=sum(
+                1
+                for part in parts
+                if part.part_type
+                in {ExtractPartType.TEXT.value, ExtractPartType.HEADER.value, ExtractPartType.FOOTER.value}
+            ),
             table_parts_count=sum(1 for part in parts if part.part_type == ExtractPartType.TABLE.value),
             ocr_text_parts_count=sum(1 for part in parts if part.part_type == ExtractPartType.OCR_TEXT.value),
             ocr_empty_parts_count=sum(1 for part in parts if part.part_type == ExtractPartType.OCR_EMPTY.value),
             ocr_failed_parts_count=sum(1 for part in parts if part.part_type == ExtractPartType.OCR_FAILED.value),
         )
 
-    def _extract_page(self, page, page_number: int, start_index: int) -> tuple[list[ExtractPart], bool]:
+    def _extract_page(
+        self,
+        page,
+        *,
+        page_number: int,
+        start_index: int,
+        document_order: int,
+    ) -> tuple[list[ExtractPart], bool, int, int]:
         parts: list[ExtractPart] = []
         index = start_index
+        order = document_order
         page_failed = False
+        page_height = float(getattr(page, "height", 0) or 0)
 
-        page_text = (page.extract_text() or "").strip()
-        if page_text:
-            for block in self._split_text_blocks(page_text):
+        words = page.extract_words(extra_attrs=["fontname", "size"]) or []
+        blocks = group_words_into_blocks(words, page_height=page_height)
+        for block in blocks:
+            text = (block.get("text") or "").strip()
+            if not text:
+                continue
+            metadata = build_text_block_metadata(
+                block,
+                page_number=page_number,
+                part_index=index,
+                document_order=order,
+            )
+            part_type = ExtractPartType.HEADER if metadata.get("block_kind") == "header" else (
+                ExtractPartType.FOOTER if metadata.get("block_kind") == "footer" else ExtractPartType.TEXT
+            )
+            for chunk in self._split_text_blocks(text):
+                chunk_metadata = dict(metadata)
+                chunk_metadata["part_index"] = index
+                chunk_metadata["document_order"] = order
                 parts.append(
-                    build_text_part(
+                    ExtractPart(
+                        part_type=part_type.value,
                         page_number=page_number,
                         part_index=index,
-                        text=block,
-                        metadata={"source": "pdf_text_layer"},
+                        text=chunk,
+                        char_count=len(chunk),
+                        metadata=chunk_metadata,
                     )
                 )
                 index += 1
+                order += 1
 
-        for table_index, table in enumerate(page.extract_tables() or []):
-            cleaned = [[(cell or "").strip() for cell in row] for row in table if row]
+        tables = page.find_tables() or []
+        for table_index, table in enumerate(tables):
+            cleaned = [[(cell or "").strip() for cell in row] for row in (table.extract() or []) if row]
             cleaned = [row for row in cleaned if any(cell for cell in row)]
             if not cleaned:
                 continue
             headers = cleaned[0]
             rows = cleaned[1:] if len(cleaned) > 1 else []
+            bbox = None
+            if getattr(table, "bbox", None):
+                x0, top, x1, bottom = table.bbox
+                bbox = {"x0": x0, "y0": top, "x1": x1, "y1": bottom}
+            metadata = build_table_metadata(
+                page_number=page_number,
+                part_index=index,
+                document_order=order,
+                table_index=table_index,
+                bbox=bbox,
+                headers=headers,
+                rows=rows,
+            )
             parts.append(
                 build_table_part(
                     page_number=page_number,
@@ -222,19 +286,27 @@ class PdfExtractorAdapter:
                     headers=headers,
                     rows=rows,
                     source="pdf_table",
-                    metadata={"table_index": table_index},
+                    metadata=metadata,
                 )
             )
             index += 1
+            order += 1
 
         text_chars = sum(len(part.text or "") for part in parts)
         if text_chars < self._config.ocr_min_text_chars:
             try:
                 image = page.to_image(resolution=200).original
-                ocr_part = self._ocr.ocr_page_image(image, page_number=page_number, part_index=index)
+                ocr_part = self._ocr.ocr_page_image(
+                    image,
+                    page_number=page_number,
+                    part_index=index,
+                    document_order=order,
+                )
                 parts.append(ocr_part)
                 if ocr_part.part_type == ExtractPartType.OCR_FAILED.value:
                     page_failed = True
+                index += 1
+                order += 1
             except Exception as exc:
                 page_failed = True
                 parts.append(
@@ -247,11 +319,17 @@ class PdfExtractorAdapter:
                         status="failed",
                         error_code=UnderstandingErrorCode.OCR_FAILED.value,
                         error_message=str(exc)[:1000],
-                        metadata={"source": "pdf_page_image"},
+                        metadata={
+                            "source": "ocr",
+                            "document_order": order,
+                            "block_kind": "ocr_text",
+                        },
                     )
                 )
+                index += 1
+                order += 1
 
-        return parts, page_failed
+        return parts, page_failed, index, order
 
     @staticmethod
     def _split_text_blocks(text: str) -> list[str]:

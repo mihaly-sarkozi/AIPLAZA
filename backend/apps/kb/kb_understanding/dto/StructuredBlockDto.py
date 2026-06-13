@@ -4,7 +4,8 @@ from __future__ import annotations
 # Feladat: A struktúrafelismerés egy blokkja.
 # Sárközi Mihály - 2026.06.11
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Any
 
 from apps.kb.kb_understanding.enums.StructuredBlockType import StructuredBlockType
 
@@ -16,6 +17,7 @@ class StructuredBlockDto:
     order_index: int
     page_number: int | None = None
     section_title: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 __all__ = ["StructuredBlockDto"]

@@ -117,6 +117,7 @@ def normalized_dto_to_orm(ctx: UnderstandingJobContext, dto) -> "NormalizedConte
         knowledge_base_id=ctx.knowledge_base_id,
         text=dto.text,
         page_map=list(dto.page_map),
+        part_map=list(getattr(dto, "part_map", []) or []),
         char_count=dto.char_count,
         applied_rules=dict(dto.applied_rules),
     )

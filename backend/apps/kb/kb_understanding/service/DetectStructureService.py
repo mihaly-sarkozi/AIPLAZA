@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 # backend/apps/kb/kb_understanding/service/DetectStructureService.py
-# Feladat: A normalizált szöveg szerkezetének heurisztikus felismerése —
-# cím, alcím, bekezdés, lista, táblázat, FAQ, lépéssor, megjegyzés, figyelmeztetés.
+# Feladat: A normalizált szöveg szerkezetének felismerése — extract metadata elsődleges,
+# heurisztika fallback.
 # Sárközi Mihály - 2026.06.11
 
 import re
@@ -33,6 +33,71 @@ class DetectStructureService:
         self._validate = ValidateStructuredBlocks()
 
     def run(self, ctx: UnderstandingJobContext, normalized: NormalizedContentDto) -> list[StructuredBlockDto]:
+        if normalized.part_map:
+            blocks = self._blocks_from_part_map(normalized)
+        else:
+            blocks = self._blocks_from_text(normalized)
+
+        self._validate(blocks)
+        self._structure_repository.replace_for_item(
+            ctx.training_item_id,
+            [block_dto_to_orm(ctx, block) for block in blocks],
+        )
+        return blocks
+
+    def _blocks_from_part_map(self, normalized: NormalizedContentDto) -> list[StructuredBlockDto]:
+        blocks: list[StructuredBlockDto] = []
+        section_title: str | None = None
+        heading_path: list[str] = []
+        order_index = 0
+
+        for entry in normalized.part_map:
+            start = int(entry.get("start", 0))
+            end = int(entry.get("end", start))
+            block_text = normalized.text[start:end].strip()
+            if not block_text:
+                continue
+
+            metadata = dict(entry)
+            block_type = self._classify_from_metadata(metadata, block_text, is_first=order_index == 0)
+            if block_type in (StructuredBlockType.TITLE, StructuredBlockType.HEADING):
+                section_title = block_text[:512]
+                heading_path = [section_title]
+                current_section = None if block_type == StructuredBlockType.TITLE else section_title
+            else:
+                current_section = section_title
+
+            block_metadata = {
+                "source_part_id": entry.get("source_part_id"),
+                "document_order": entry.get("document_order"),
+                "block_kind": entry.get("block_kind"),
+                "page_number": entry.get("page_number") or entry.get("page"),
+                "part_index": entry.get("part_index"),
+                "style_name": entry.get("style_name"),
+                "heading_level": entry.get("heading_level"),
+                "list_level": entry.get("list_level"),
+                "bbox": entry.get("bbox"),
+                "table_index": entry.get("table_index"),
+                "headers": entry.get("headers"),
+                "rows": entry.get("rows"),
+                "heading_path": list(heading_path),
+            }
+            blocks.append(
+                StructuredBlockDto(
+                    block_type=block_type,
+                    text=block_text,
+                    order_index=order_index,
+                    page_number=entry.get("page") or entry.get("page_number"),
+                    section_title=current_section
+                    if block_type not in (StructuredBlockType.TITLE, StructuredBlockType.HEADING)
+                    else None,
+                    metadata=block_metadata,
+                )
+            )
+            order_index += 1
+        return blocks
+
+    def _blocks_from_text(self, normalized: NormalizedContentDto) -> list[StructuredBlockDto]:
         blocks: list[StructuredBlockDto] = []
         section_title: str | None = None
         order_index = 0
@@ -64,12 +129,6 @@ class DetectStructureService:
                 )
             )
             order_index += 1
-
-        self._validate(blocks)
-        self._structure_repository.replace_for_item(
-            ctx.training_item_id,
-            [block_dto_to_orm(ctx, block) for block in blocks],
-        )
         return blocks
 
     @staticmethod
@@ -83,6 +142,32 @@ class DetectStructureService:
                 page = entry.get("page")
                 return int(page) if page is not None else None
         return None
+
+    def _classify_from_metadata(
+        self,
+        metadata: dict[str, Any],
+        text: str,
+        *,
+        is_first: bool,
+    ) -> StructuredBlockType:
+        part_type = str(metadata.get("part_type") or "").upper()
+        block_kind = str(metadata.get("block_kind") or "").lower()
+
+        if part_type == "TABLE" or block_kind == "table":
+            return StructuredBlockType.TABLE
+        if block_kind == "header" or part_type == "HEADER":
+            return StructuredBlockType.HEADER
+        if block_kind == "footer" or part_type == "FOOTER":
+            return StructuredBlockType.FOOTER
+        if block_kind == "list" or metadata.get("is_list"):
+            return StructuredBlockType.LIST
+        if block_kind == "paragraph":
+            return StructuredBlockType.PARAGRAPH
+        if metadata.get("heading_level") == 0:
+            return StructuredBlockType.TITLE
+        if block_kind == "heading" or metadata.get("is_heading") or metadata.get("is_heading_guess"):
+            return StructuredBlockType.HEADING
+        return self._classify(text, is_first=is_first)
 
     def _classify(self, text: str, *, is_first: bool) -> StructuredBlockType:
         first_line = text.split("\n", 1)[0].strip()
@@ -124,7 +209,6 @@ class DetectStructureService:
         letters = [char for char in line if char.isalpha()]
         if letters and all(char.isupper() for char in letters):
             return True
-        # Rövid, írásjel nélküli sor, kevés szóval.
         return len(line.split()) <= 8 and not any(char in line for char in ".!?")
 
 

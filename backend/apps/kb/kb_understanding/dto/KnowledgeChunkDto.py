@@ -4,7 +4,8 @@ from __future__ import annotations
 # Feladat: A chunking lépés kimenete — egy kereshető tudás-chunk tartalma + forráshelye.
 # Sárközi Mihály - 2026.06.11
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Any
 
 from apps.kb.kb_understanding.enums.ChunkType import ChunkType
 
@@ -20,6 +21,7 @@ class KnowledgeChunkDto:
     checksum: str
     page_number: int | None = None
     section_title: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 __all__ = ["KnowledgeChunkDto"]

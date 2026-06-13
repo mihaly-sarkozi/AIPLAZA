@@ -55,6 +55,7 @@ def build_table_part(
             "row_count": len(rows),
             "column_count": len(headers) if headers else (len(rows[0]) if rows else 0),
             "plain_text": plain,
+            "source": source,
         },
         char_count=len(text),
         metadata={"source": source, **(metadata or {})},

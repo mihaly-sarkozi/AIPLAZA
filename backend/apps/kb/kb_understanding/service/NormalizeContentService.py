@@ -8,6 +8,7 @@ from apps.kb.kb_understanding.dto.ExtractedContentDto import ExtractedContentDto
 from apps.kb.kb_understanding.dto.NormalizedContentDto import NormalizedContentDto
 from apps.kb.kb_understanding.dto.UnderstandingJobContext import UnderstandingJobContext
 from apps.kb.kb_understanding.enums.ExtractPartType import NORMALIZABLE_PART_TYPES
+from apps.kb.kb_understanding.extract.extract_metadata import slim_metadata_for_downstream
 from apps.kb.kb_understanding.mapper.content_mapper import normalized_dto_to_orm
 from apps.kb.kb_understanding.repository.ContentRepository import ContentRepository
 from apps.kb.kb_understanding.validation.ValidateNormalizedContent import ValidateNormalizedContent
@@ -37,9 +38,12 @@ class NormalizeContentService:
                 "Part",
                 (),
                 {
+                    "id": None,
                     "text": part.text,
                     "page_number": part.page_number,
                     "part_type": part.part_type,
+                    "part_index": part.part_index,
+                    "metadata_json": dict(part.metadata),
                 },
             )()
             for part in extracted.parts
@@ -49,6 +53,7 @@ class NormalizeContentService:
         applied: dict[str, Any] = {"normalized_part_types": sorted(part_types)}
         normalized_chunks: list[str] = []
         page_map: list[dict[str, Any]] = []
+        part_map: list[dict[str, Any]] = []
         offset = 0
         current_page: int | None = None
         page_start = 0
@@ -59,6 +64,7 @@ class NormalizeContentService:
                 applied[key] = applied.get(key, 0) + value
             if not text:
                 continue
+            start = offset
             normalized_chunks.append(text)
             page = getattr(part, "page_number", None)
             if page != current_page:
@@ -68,6 +74,19 @@ class NormalizeContentService:
                 page_start = offset
             offset += len(text) + 2
 
+            raw_metadata = getattr(part, "metadata_json", None) or {}
+            part_map.append(
+                {
+                    "start": start,
+                    "end": offset - 2,
+                    "page": page,
+                    "part_index": getattr(part, "part_index", None),
+                    "part_type": getattr(part, "part_type", None),
+                    "source_part_id": getattr(part, "id", None),
+                    **slim_metadata_for_downstream(dict(raw_metadata)),
+                }
+            )
+
         if current_page is not None:
             page_map.append({"page": current_page, "start": page_start, "end": offset})
 
@@ -75,6 +94,7 @@ class NormalizeContentService:
         normalized = NormalizedContentDto(
             text=text,
             page_map=page_map,
+            part_map=part_map,
             char_count=len(text),
             applied_rules=applied,
         )

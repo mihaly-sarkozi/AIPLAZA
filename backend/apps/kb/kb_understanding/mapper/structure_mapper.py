@@ -21,6 +21,7 @@ def block_dto_to_orm(ctx: UnderstandingJobContext, dto: StructuredBlockDto) -> S
         order_index=dto.order_index,
         page_number=dto.page_number,
         section_title=dto.section_title,
+        metadata_json=dict(dto.metadata or {}),
     )
 
 
