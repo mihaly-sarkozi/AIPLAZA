@@ -11,11 +11,13 @@ from fastapi import APIRouter
 
 from apps.kb.kb_crud.router import router as crud_router
 from apps.kb.kb_ingest.router import router as training_router
+from apps.kb.kb_processing.router import router as processing_router
 from apps.kb.kb_understanding.router import router as understanding_router
 
 router = APIRouter()
 router.include_router(crud_router)
 router.include_router(training_router)
 router.include_router(understanding_router)
+router.include_router(processing_router)
 
 __all__ = ["router"]

@@ -27,6 +27,10 @@ from apps.kb.kb_understanding.service.UnderstandingPipelineService import (
 from apps.kb.kb_understanding.service.ValidateUnderstandingService import (
     ValidateUnderstandingService,
 )
+from apps.kb.shared.ports.processing_flow_recorder import (
+    NoOpProcessingFlowRecorder,
+    ProcessingFlowRecorder,
+)
 
 
 @dataclass(frozen=True)
@@ -43,6 +47,7 @@ def build_understanding_services(
     session_factory,
     file_storage,
     item_reader: IngestItemReaderInterface,
+    flow_recorder: ProcessingFlowRecorder | None = None,
 ) -> UnderstandingServices:
     job_repository = UnderstandingJobRepository(session_factory)
     step_run_repository = UnderstandingStepRunRepository(session_factory)
@@ -67,6 +72,7 @@ def build_understanding_services(
         normalize_service=NormalizeContentService(content_repository),
         chunk_service=ChunkContentService(chunk_repository, content_repository),
         validate_service=ValidateUnderstandingService(content_repository, chunk_repository),
+        flow_recorder=flow_recorder or NoOpProcessingFlowRecorder(),
     )
     return UnderstandingServices(
         job_repository=job_repository,

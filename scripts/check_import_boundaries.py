@@ -123,6 +123,8 @@ _KB_MODULE_NAMES = {
     "kb_crud",
     "kb_ingest",
     "kb_understanding",
+    "kb_processing",
+    "kb_discovery",
     "kb_indexing",
     "kb_search",
     "kb_services",

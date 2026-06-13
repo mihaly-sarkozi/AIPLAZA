@@ -30,15 +30,18 @@ def make_understanding_services_provider(session_factory: Any):
         with lock:
             if "services" not in cache:
                 from apps.kb.kb_ingest.adapters.TrainingItemReader import TrainingItemReader
+                from apps.kb.kb_processing.bootstrap.processing_assembly import build_processing_services
                 from apps.kb.kb_understanding.bootstrap.understanding_assembly import (
                     build_understanding_services,
                 )
                 from infra.kb import MinioFileStorage
 
+                processing = build_processing_services(session_factory=session_factory)
                 cache["services"] = build_understanding_services(
                     session_factory=session_factory,
                     file_storage=MinioFileStorage(),
                     item_reader=TrainingItemReader(session_factory),
+                    flow_recorder=processing.flow_recorder,
                 )
             return cache["services"]
 

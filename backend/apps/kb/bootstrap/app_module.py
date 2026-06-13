@@ -12,6 +12,7 @@ from apps.kb.kb_feedback.module import KbFeedbackModule
 from apps.kb.kb_indexing.module import KbIndexingModule
 from apps.kb.kb_ingest.module import KbIngestModule
 from apps.kb.kb_maintenance.module import KbMaintenanceModule
+from apps.kb.kb_processing.module import KbProcessingModule
 from apps.kb.kb_search.module import KbSearchModule
 from apps.kb.kb_services.module import KbServicesModule
 from apps.kb.kb_testing.module import KbTestingModule
@@ -24,6 +25,7 @@ KB_MODULES = [
     KbCrudModule(),
     KbIngestModule(),
     KbUnderstandingModule(),
+    KbProcessingModule(),
     KbDiscoveryModule(),
     KbIndexingModule(),
     KbSearchModule(),
@@ -82,6 +84,7 @@ class KbAppModule(BaseAppModule):
         from apps.kb.kb_crud.bootstrap.tenant_hooks import register_kb_crud_tenant_hooks
         from apps.kb.kb_discovery.bootstrap.tenant_hooks import register_kb_discovery_tenant_hooks
         from apps.kb.kb_ingest.bootstrap.tenant_hooks import register_kb_ingest_tenant_hooks
+        from apps.kb.kb_processing.bootstrap.tenant_hooks import register_kb_processing_tenant_hooks
         from apps.kb.kb_understanding.bootstrap.tenant_hooks import (
             register_kb_understanding_tenant_hooks,
         )
@@ -90,6 +93,7 @@ class KbAppModule(BaseAppModule):
             register_kb_crud_tenant_hooks,
             register_kb_ingest_tenant_hooks,
             register_kb_understanding_tenant_hooks,
+            register_kb_processing_tenant_hooks,
             register_kb_discovery_tenant_hooks,
         )
 
