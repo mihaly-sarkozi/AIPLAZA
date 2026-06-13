@@ -12,6 +12,7 @@ from apps.kb.kb_understanding.dto.KnowledgeChunkDto import KnowledgeChunkDto
 from apps.kb.kb_understanding.dto.StructuredBlockDto import StructuredBlockDto
 from apps.kb.kb_understanding.dto.UnderstandingJobContext import UnderstandingJobContext
 from apps.kb.kb_understanding.enums.ChunkType import ChunkType
+from apps.kb.kb_understanding.enums.ExtractPartType import ExtractPartType
 from apps.kb.kb_understanding.enums.StructuredBlockType import StructuredBlockType
 from apps.kb.kb_understanding.mapper.chunk_mapper import chunk_dto_to_orm
 from apps.kb.kb_understanding.repository.ChunkRepository import ChunkRepository
@@ -36,10 +37,15 @@ class _PendingChunk:
     section_title: str | None = None
     source_part_ids: list[str | None] = field(default_factory=list)
     page_numbers: list[int | None] = field(default_factory=list)
+    document_orders: list[int | None] = field(default_factory=list)
     block_kinds: list[str | None] = field(default_factory=list)
     heading_path: list[str] = field(default_factory=list)
+    heading_levels: list[int] = field(default_factory=list)
+    style_names: list[str | None] = field(default_factory=list)
     table_refs: list[dict[str, Any]] = field(default_factory=list)
     bbox_refs: list[dict[str, Any] | None] = field(default_factory=list)
+    ocr_confidences: list[float] = field(default_factory=list)
+    is_from_ocr: bool = False
 
     @property
     def length(self) -> int:
@@ -79,22 +85,11 @@ class ChunkContentService:
             if block.block_type in (StructuredBlockType.TITLE, StructuredBlockType.HEADING):
                 if current.texts:
                     pending_chunks.append(current)
-                current = _PendingChunk(
-                    texts=[block.text],
-                    block_types=[block.block_type],
-                    page_number=block.page_number,
-                    section_title=block.text[:512],
-                    source_part_ids=[block.metadata.get("source_part_id")],
-                    page_numbers=[block.page_number],
-                    block_kinds=[block.metadata.get("block_kind")],
-                    heading_path=list(block.metadata.get("heading_path") or [block.text[:512]]),
-                    table_refs=[self._table_ref(block.metadata)],
-                    bbox_refs=[block.metadata.get("bbox")],
-                )
-                current_section = block.text[:512]
+                current = self._seed_pending(block)
+                current_section = block.metadata.get("current_section_title") or block.text[:512]
                 continue
 
-            section = block.section_title or current_section
+            section = block.section_title or block.metadata.get("current_section_title") or current_section
             section_changed = current.texts and current.section_title not in (None, section)
             would_overflow = current.length + len(block.text) > self._config.chunk_max_chars
             if current.texts and (section_changed or would_overflow):
@@ -105,21 +100,59 @@ class ChunkContentService:
                 current.page_number = block.page_number
                 current.section_title = section
                 current.heading_path = list(block.metadata.get("heading_path") or [])
-            current.texts.append(block.text)
-            current.block_types.append(block.block_type)
-            current.source_part_ids.append(block.metadata.get("source_part_id"))
-            current.page_numbers.append(block.page_number)
-            current.block_kinds.append(block.metadata.get("block_kind"))
-            table_ref = self._table_ref(block.metadata)
-            if table_ref:
-                current.table_refs.append(table_ref)
-            current.bbox_refs.append(block.metadata.get("bbox"))
+                current.heading_levels = list(block.metadata.get("heading_levels") or [])
+            self._append_block(current, block)
 
         if current.texts:
             pending_chunks.append(current)
 
         merged = self._merge_short(pending_chunks)
         return self._finalize(merged)
+
+    @staticmethod
+    def _seed_pending(block: StructuredBlockDto) -> _PendingChunk:
+        pending = _PendingChunk(
+            texts=[block.text],
+            block_types=[block.block_type],
+            page_number=block.page_number,
+            section_title=block.metadata.get("current_section_title") or block.text[:512],
+            source_part_ids=[block.metadata.get("source_part_id")],
+            page_numbers=[block.page_number],
+            document_orders=[block.metadata.get("document_order")],
+            block_kinds=[block.metadata.get("block_kind")],
+            heading_path=list(block.metadata.get("heading_path") or [block.text[:512]]),
+            heading_levels=list(block.metadata.get("heading_levels") or []),
+            style_names=[block.metadata.get("style_name")],
+            table_refs=[ChunkContentService._table_ref(block.metadata)],
+            bbox_refs=[block.metadata.get("bbox")],
+        )
+        if block.metadata.get("part_type") == ExtractPartType.OCR_TEXT.value:
+            pending.is_from_ocr = True
+            if block.metadata.get("ocr_confidence") is not None:
+                pending.ocr_confidences.append(float(block.metadata["ocr_confidence"]))
+        return pending
+
+    @staticmethod
+    def _append_block(pending: _PendingChunk, block: StructuredBlockDto) -> None:
+        pending.texts.append(block.text)
+        pending.block_types.append(block.block_type)
+        pending.source_part_ids.append(block.metadata.get("source_part_id"))
+        pending.page_numbers.append(block.page_number)
+        pending.document_orders.append(block.metadata.get("document_order"))
+        pending.block_kinds.append(block.metadata.get("block_kind"))
+        pending.style_names.append(block.metadata.get("style_name"))
+        table_ref = ChunkContentService._table_ref(block.metadata)
+        if table_ref:
+            pending.table_refs.append(table_ref)
+        pending.bbox_refs.append(block.metadata.get("bbox"))
+        if block.metadata.get("part_type") == ExtractPartType.OCR_TEXT.value:
+            pending.is_from_ocr = True
+            if block.metadata.get("ocr_confidence") is not None:
+                pending.ocr_confidences.append(float(block.metadata["ocr_confidence"]))
+        if block.metadata.get("heading_path"):
+            pending.heading_path = list(block.metadata.get("heading_path") or [])
+        if block.metadata.get("heading_levels"):
+            pending.heading_levels = list(block.metadata.get("heading_levels") or [])
 
     @staticmethod
     def _table_ref(metadata: dict[str, Any]) -> dict[str, Any] | None:
@@ -145,11 +178,17 @@ class ChunkContentService:
                 previous.block_types.extend(chunk.block_types)
                 previous.source_part_ids.extend(chunk.source_part_ids)
                 previous.page_numbers.extend(chunk.page_numbers)
+                previous.document_orders.extend(chunk.document_orders)
                 previous.block_kinds.extend(chunk.block_kinds)
+                previous.style_names.extend(chunk.style_names)
                 previous.table_refs.extend(chunk.table_refs)
                 previous.bbox_refs.extend(chunk.bbox_refs)
+                previous.ocr_confidences.extend(chunk.ocr_confidences)
+                previous.is_from_ocr = previous.is_from_ocr or chunk.is_from_ocr
                 if chunk.heading_path:
                     previous.heading_path = chunk.heading_path
+                if chunk.heading_levels:
+                    previous.heading_levels = chunk.heading_levels
                 continue
             merged.append(chunk)
         return merged
@@ -161,11 +200,18 @@ class ChunkContentService:
             metadata = {
                 "source_part_ids": [part_id for part_id in chunk.source_part_ids if part_id],
                 "page_numbers": sorted({page for page in chunk.page_numbers if page is not None}),
+                "document_orders": sorted({order for order in chunk.document_orders if order is not None}),
                 "section_title": chunk.section_title,
                 "heading_path": chunk.heading_path,
+                "heading_levels": chunk.heading_levels,
                 "block_kinds": [kind for kind in chunk.block_kinds if kind],
                 "table_refs": chunk.table_refs,
                 "bbox_refs": [bbox for bbox in chunk.bbox_refs if bbox],
+                "style_names": [name for name in chunk.style_names if name],
+                "is_from_ocr": chunk.is_from_ocr,
+                "ocr_confidence": round(sum(chunk.ocr_confidences) / len(chunk.ocr_confidences), 4)
+                if chunk.ocr_confidences
+                else None,
             }
             for part in self._split_long(chunk.text):
                 result.append(

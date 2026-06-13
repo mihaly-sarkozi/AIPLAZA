@@ -50,16 +50,27 @@ def build_text_block_metadata(
     part_index: int,
     document_order: int,
 ) -> dict[str, Any]:
-    font_names = block.get("font_names") or []
-    font_sizes = block.get("font_sizes") or []
+    font_names = list(block.get("font_names") or [])
+    font_sizes = list(block.get("font_sizes") or [])
     is_bold = any("bold" in name.lower() for name in font_names)
-    avg_size = sum(font_sizes) / len(font_sizes) if font_sizes else 0.0
-    is_heading = _heading_guess(block.get("text") or "", font_names=font_names, avg_size=avg_size)
+    dominant_font_size = max(font_sizes) if font_sizes else None
+    is_heading, heading_confidence = _heading_guess_with_confidence(
+        block.get("text") or "",
+        font_names=font_names,
+        dominant_font_size=dominant_font_size,
+        is_bold=is_bold,
+    )
     header_footer = block.get("header_footer") or {}
+    role = header_footer.get("role")
+    header_footer_confidence = float(header_footer.get("confidence", 0.0) or 0.0)
+    is_header_candidate = role == "header"
+    is_footer_candidate = role == "footer"
     block_kind = _text_block_kind(
         is_heading=is_heading,
-        header_footer=header_footer,
+        is_header_candidate=is_header_candidate,
+        is_footer_candidate=is_footer_candidate,
     )
+    bbox = block.get("bbox")
     return build_base_metadata(
         source="pdf_text_layer",
         document_order=document_order,
@@ -69,24 +80,32 @@ def build_text_block_metadata(
         style={
             "font_names": font_names,
             "font_sizes": font_sizes,
+            "dominant_font_size": dominant_font_size,
             "is_bold_guess": is_bold,
             "is_heading_guess": is_heading,
+            "heading_confidence": heading_confidence,
         },
         layout={
-            "bbox": block.get("bbox"),
+            "bbox": bbox,
             "layout_order": block.get("layout_order"),
-            "header_footer_confidence": header_footer.get("confidence", 0.0),
-            "header_footer_role": header_footer.get("role"),
+            "header_footer_confidence": header_footer_confidence,
+            "is_header_candidate": is_header_candidate,
+            "is_footer_candidate": is_footer_candidate,
+            "heading_confidence": heading_confidence,
         },
-        confidence=float(header_footer.get("confidence", 0.0) or 0.0),
+        confidence=header_footer_confidence,
         extra={
             "font_names": font_names,
             "font_sizes": font_sizes,
+            "dominant_font_size": dominant_font_size,
             "is_bold_guess": is_bold,
             "is_heading_guess": is_heading,
-            "bbox": block.get("bbox"),
+            "heading_confidence": heading_confidence,
+            "is_header_candidate": is_header_candidate,
+            "is_footer_candidate": is_footer_candidate,
+            "header_footer_confidence": header_footer_confidence,
+            "bbox": bbox,
             "layout_order": block.get("layout_order"),
-            "header_footer_confidence": header_footer.get("confidence", 0.0),
         },
     )
 
@@ -101,6 +120,8 @@ def build_table_metadata(
     headers: list[str],
     rows: list[list[str]],
 ) -> dict[str, Any]:
+    row_count = len(rows)
+    column_count = len(headers) if headers else (len(rows[0]) if rows else 0)
     return build_base_metadata(
         source="pdf_table",
         document_order=document_order,
@@ -109,8 +130,8 @@ def build_table_metadata(
         block_kind="table",
         layout={"bbox": bbox, "table_index": table_index, "layout_order": table_index},
         extra={
-            "row_count": len(rows),
-            "column_count": len(headers) if headers else (len(rows[0]) if rows else 0),
+            "row_count": row_count,
+            "column_count": column_count,
             "headers": headers,
             "rows": rows,
             "table_index": table_index,
@@ -146,19 +167,23 @@ def build_ocr_metadata(
 def _block_from_lines(lines: list[list[dict[str, Any]]], *, page_height: float, layout_order: int) -> dict[str, Any]:
     words = [word for line in lines for word in line]
     text = " ".join(word.get("text", "") for word in words).strip()
-    x0 = min(float(word.get("x0", 0)) for word in words)
-    x1 = max(float(word.get("x1", 0)) for word in words)
-    top = min(float(word.get("top", 0)) for word in words)
-    bottom = max(float(word.get("bottom", 0)) for word in words)
+    if words:
+        x0 = min(float(word.get("x0", 0)) for word in words)
+        x1 = max(float(word.get("x1", 0)) for word in words)
+        top = min(float(word.get("top", 0)) for word in words)
+        bottom = max(float(word.get("bottom", 0)) for word in words)
+        bbox = {"x0": x0, "y0": top, "x1": x1, "y1": bottom}
+    else:
+        bbox = None
     font_names = sorted({str(word.get("fontname") or "") for word in words if word.get("fontname")})
     font_sizes = sorted({round(float(word.get("size") or 0), 2) for word in words if word.get("size")})
     return {
         "text": text,
-        "bbox": {"x0": x0, "y0": top, "x1": x1, "y1": bottom},
+        "bbox": bbox,
         "font_names": font_names,
         "font_sizes": font_sizes,
         "layout_order": layout_order,
-        "header_footer": _header_footer_guess(top=top, bottom=bottom, page_height=page_height),
+        "header_footer": _header_footer_guess(top=bbox["y0"], bottom=bbox["y1"], page_height=page_height) if bbox else {"role": None, "confidence": 0.0},
     }
 
 
@@ -176,20 +201,30 @@ def _header_footer_guess(*, top: float, bottom: float, page_height: float) -> di
     return {"role": None, "confidence": 0.0}
 
 
-def _heading_guess(text: str, *, font_names: list[str], avg_size: float) -> bool:
+def _heading_guess_with_confidence(
+    text: str,
+    *,
+    font_names: list[str],
+    dominant_font_size: float | None,
+    is_bold: bool,
+) -> tuple[bool, float]:
     line = text.strip()
     if not line or len(line) > 120:
-        return False
-    if any("bold" in name.lower() for name in font_names) and len(line.split()) <= 12:
-        return True
-    return avg_size >= 14 and len(line.split()) <= 10
+        return False, 0.0
+    confidence = 0.0
+    if is_bold and len(line.split()) <= 12:
+        confidence = max(confidence, 0.72)
+    if dominant_font_size is not None and dominant_font_size >= 14 and len(line.split()) <= 10:
+        confidence = max(confidence, 0.74)
+    if len(line.split()) <= 6 and not any(char in line for char in ".!?"):
+        confidence = max(confidence, 0.55)
+    return confidence >= 0.55, round(confidence, 2)
 
 
-def _text_block_kind(*, is_heading: bool, header_footer: dict[str, Any]) -> str:
-    role = header_footer.get("role")
-    if role == "header":
+def _text_block_kind(*, is_heading: bool, is_header_candidate: bool, is_footer_candidate: bool) -> str:
+    if is_header_candidate:
         return "header"
-    if role == "footer":
+    if is_footer_candidate:
         return "footer"
     if is_heading:
         return "heading"

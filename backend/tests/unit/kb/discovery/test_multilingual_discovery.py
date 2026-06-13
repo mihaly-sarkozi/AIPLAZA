@@ -93,10 +93,10 @@ def test_misi_okos_enrichment_extracts_keywords():
     [
         ("Az ügyfél számlázása Budapesten történik.", SupportedLanguage.HU),
         ("The customer onboarding starts in London.", SupportedLanguage.EN),
-        ("Die Rechnung wird in Berlin erstellt.", SupportedLanguage.DE),
+        ("La factura se crea en Madrid.", SupportedLanguage.ES),
     ],
 )
-def test_language_detection_hu_en_de(text, expected):
+def test_language_detection_hu_en_es(text, expected):
     repo = _FakeJobRepo()
     service = LanguageDetectionService(repo)
     chunks = [DiscoveryChunkDto(chunk_id="c1", text=text, chunk_type="paragraph", order_index=0)]
@@ -115,7 +115,7 @@ def test_multilingual_enrichment_topics_by_language():
     cases = [
         ("Az ügyfél számlázása Budapesten történik.", "hu", "finance"),
         ("The customer onboarding starts in London.", "en", "sales"),
-        ("Die Rechnung wird in Berlin erstellt.", "de", "finance"),
+        ("La factura se crea en Madrid.", "es", "finance"),
     ]
     for text, language_code, expected_topic in cases:
         chunks = [DiscoveryChunkDto(chunk_id="c1", text=text, chunk_type="paragraph", order_index=0)]

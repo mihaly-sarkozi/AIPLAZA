@@ -6,7 +6,7 @@ from enum import Enum
 class SupportedLanguage(str, Enum):
     HU = "hu"
     EN = "en"
-    DE = "de"
+    ES = "es"
     UNKNOWN = "unknown"
 
 

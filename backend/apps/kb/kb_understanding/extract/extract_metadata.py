@@ -44,52 +44,86 @@ def merge_metadata(base: dict[str, Any], extra: dict[str, Any] | None = None) ->
     return merged
 
 
+_DOWNSTREAM_KEYS = (
+    "source",
+    "document_order",
+    "page_number",
+    "part_index",
+    "part_type",
+    "block_kind",
+    "style_name",
+    "style_id",
+    "heading_level",
+    "heading_path",
+    "heading_levels",
+    "current_section_title",
+    "is_heading",
+    "is_list",
+    "list_level",
+    "numbering_id",
+    "numbering_level",
+    "list_marker",
+    "runs",
+    "bbox",
+    "font_names",
+    "font_sizes",
+    "dominant_font_size",
+    "is_bold_guess",
+    "is_heading_guess",
+    "heading_confidence",
+    "is_header_candidate",
+    "is_footer_candidate",
+    "header_footer_confidence",
+    "table_index",
+    "row_count",
+    "column_count",
+    "headers",
+    "rows",
+    "ocr_engine",
+    "ocr_language",
+    "ocr_confidence",
+    "layout_order",
+    "section_index",
+)
+
+
 def slim_metadata_for_downstream(metadata: dict[str, Any]) -> dict[str, Any]:
-    keys = (
-        "source",
-        "document_order",
-        "page_number",
-        "part_index",
-        "block_kind",
-        "style_name",
-        "style_id",
-        "heading_level",
-        "is_heading",
-        "is_list",
-        "list_level",
-        "numbering_id",
-        "numbering_level",
-        "bbox",
-        "font_names",
-        "font_sizes",
-        "is_bold_guess",
-        "is_heading_guess",
-        "header_footer_confidence",
-        "table_index",
-        "row_count",
-        "column_count",
-        "headers",
-        "rows",
-        "ocr_engine",
-        "ocr_language",
-        "ocr_confidence",
-        "layout_order",
-        "section_index",
-    )
     slim: dict[str, Any] = {}
-    for key in keys:
+    for key in _DOWNSTREAM_KEYS:
         if key in metadata:
             slim[key] = metadata[key]
+
     style = metadata.get("style")
     if isinstance(style, dict):
-        for nested_key in ("style_name", "style_id", "heading_level"):
+        for nested_key in ("style_name", "style_id", "heading_level", "font_names", "font_sizes", "is_bold_guess", "is_heading_guess"):
             if nested_key in style and nested_key not in slim:
                 slim[nested_key] = style[nested_key]
+
     layout = metadata.get("layout")
     if isinstance(layout, dict):
-        for nested_key in ("bbox", "layout_order", "header_footer_confidence"):
+        for nested_key in (
+            "bbox",
+            "layout_order",
+            "header_footer_confidence",
+            "is_header_candidate",
+            "is_footer_candidate",
+            "heading_confidence",
+        ):
             if nested_key in layout and nested_key not in slim:
                 slim[nested_key] = layout[nested_key]
+
+    if "bbox" not in slim:
+        slim["bbox"] = metadata.get("bbox")
+    if "font_names" not in slim:
+        slim["font_names"] = metadata.get("font_names") or []
+    if "font_sizes" not in slim:
+        slim["font_sizes"] = metadata.get("font_sizes") or []
+    if "dominant_font_size" not in slim and metadata.get("font_sizes"):
+        sizes = metadata.get("font_sizes") or []
+        slim["dominant_font_size"] = max(sizes) if sizes else None
+    elif "dominant_font_size" not in slim:
+        slim["dominant_font_size"] = metadata.get("dominant_font_size")
+
     return slim
 
 

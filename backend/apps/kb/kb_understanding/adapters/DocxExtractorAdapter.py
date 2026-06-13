@@ -18,6 +18,7 @@ from apps.kb.kb_understanding.extract.docx_metadata import (
 )
 from apps.kb.kb_understanding.extract.extract_context import ExtractContext
 from apps.kb.kb_understanding.extract.extract_limits import ExtractLimits, finalize_extract_status
+from apps.kb.kb_understanding.extract.heading_path import HeadingPathTracker
 from apps.kb.kb_understanding.extract.part_builder import build_table_part, build_text_part, summarize_parts
 
 
@@ -93,6 +94,7 @@ class DocxExtractorAdapter:
         document_order = 0
         failed_blocks = 0
         table_index = 0
+        heading_tracker = HeadingPathTracker()
 
         def _emit(batch: list[ExtractPart]) -> None:
             if extract_ctx is not None:
@@ -131,6 +133,7 @@ class DocxExtractorAdapter:
                         start_index=part_index,
                         document_order=document_order,
                         limits=limits,
+                        heading_tracker=heading_tracker,
                     )
                 else:
                     block_parts = self._extract_table_block(
@@ -139,6 +142,7 @@ class DocxExtractorAdapter:
                         start_index=part_index,
                         document_order=document_order,
                         table_index=table_index,
+                        heading_tracker=heading_tracker,
                     )
                     if block_parts:
                         table_index += 1
@@ -246,6 +250,7 @@ class DocxExtractorAdapter:
         start_index: int,
         document_order: int,
         limits: ExtractLimits,
+        heading_tracker: HeadingPathTracker,
     ) -> list[ExtractPart]:
         text = (paragraph.text or "").strip()
         if not text:
@@ -257,11 +262,17 @@ class DocxExtractorAdapter:
             part_index=start_index,
             block_index=block_index,
         )
+        if base_metadata.get("is_heading") and base_metadata.get("heading_level") is not None:
+            path_info = heading_tracker.update(int(base_metadata["heading_level"]), text)
+        else:
+            path_info = heading_tracker.current()
+
         parts: list[ExtractPart] = []
         index = start_index
         order = document_order
         for chunk in self._split_text_chunks(text, limits):
             metadata = dict(base_metadata)
+            metadata.update(path_info)
             metadata["part_index"] = index
             metadata["document_order"] = order
             parts.append(
@@ -284,6 +295,7 @@ class DocxExtractorAdapter:
         start_index: int,
         document_order: int,
         table_index: int,
+        heading_tracker: HeadingPathTracker,
     ) -> list[ExtractPart]:
         rows: list[list[str]] = []
         for row in table.rows:
@@ -306,6 +318,7 @@ class DocxExtractorAdapter:
             rows=body_rows,
             merged_cells=merged_cells,
         )
+        metadata.update(heading_tracker.current())
         part = build_table_part(
             page_number=block_index,
             part_index=start_index,

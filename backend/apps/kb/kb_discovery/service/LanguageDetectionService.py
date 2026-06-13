@@ -18,7 +18,7 @@ class LanguageDetectionService:
 
     def run(self, ctx: DiscoveryJobContext, chunks: list[DiscoveryChunkDto]) -> LanguageDetectionResult:
         chunk_languages: dict[str, str] = {}
-        scores = {lang: 0 for lang in (SupportedLanguage.HU, SupportedLanguage.EN, SupportedLanguage.DE)}
+        scores = {lang: 0 for lang in (SupportedLanguage.HU, SupportedLanguage.EN, SupportedLanguage.ES)}
 
         for chunk in chunks:
             lang, confidence = self._detect_chunk(chunk.text)

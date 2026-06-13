@@ -7,6 +7,7 @@ from apps.kb.kb_understanding.extract.extract_metadata import build_base_metadat
 
 _HEADING_STYLE = re.compile(r"^Heading\s*(\d+)$", re.IGNORECASE)
 _LIST_STYLE = re.compile(r"^List\s", re.IGNORECASE)
+_LIST_MARKER = re.compile(r"^(\d+[.)]|[•\-*–])\s+")
 
 
 def extract_paragraph_metadata(paragraph, *, document_order: int, part_index: int, block_index: int) -> dict[str, Any]:
@@ -184,16 +185,21 @@ def _numbering_info(paragraph) -> dict[str, Any]:
         "list_marker": None,
     }
     p_pr = paragraph._p.pPr
-    if p_pr is None or p_pr.numPr is None:
-        return result
+    if p_pr is not None and p_pr.numPr is not None:
+        num_pr = p_pr.numPr
+        if num_pr.ilvl is not None:
+            result["list_level"] = int(num_pr.ilvl.val)
+            result["numbering_level"] = str(num_pr.ilvl.val)
+        if num_pr.numId is not None:
+            result["numbering_id"] = str(num_pr.numId.val)
+        result["is_list"] = True
 
-    num_pr = p_pr.numPr
-    if num_pr.ilvl is not None:
-        result["list_level"] = int(num_pr.ilvl.val)
-        result["numbering_level"] = str(num_pr.ilvl.val)
-    if num_pr.numId is not None:
-        result["numbering_id"] = str(num_pr.numId.val)
-    result["is_list"] = True
+    text = (paragraph.text or "").strip()
+    marker_match = _LIST_MARKER.match(text)
+    if marker_match:
+        result["is_list"] = True
+        if result["list_marker"] is None:
+            result["list_marker"] = marker_match.group(1)
     return result
 
 

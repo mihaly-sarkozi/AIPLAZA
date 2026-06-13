@@ -32,7 +32,7 @@ class ExtractConfig:
     ocr_min_text_chars: int = 50
     extract_batch_size: int = 50
     progress_update_interval_pages: int = 25
-    ocr_language: str = "hun+eng+deu"
+    ocr_language: str = "hun+eng+spa"
     keep_temp_files_on_error: bool = False
 
     @property

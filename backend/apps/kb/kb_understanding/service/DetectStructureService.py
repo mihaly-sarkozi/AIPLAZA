@@ -12,6 +12,7 @@ from apps.kb.kb_understanding.dto.NormalizedContentDto import NormalizedContentD
 from apps.kb.kb_understanding.dto.StructuredBlockDto import StructuredBlockDto
 from apps.kb.kb_understanding.dto.UnderstandingJobContext import UnderstandingJobContext
 from apps.kb.kb_understanding.enums.StructuredBlockType import StructuredBlockType
+from apps.kb.kb_understanding.extract.heading_path import HeadingPathTracker
 from apps.kb.kb_understanding.mapper.structure_mapper import block_dto_to_orm
 from apps.kb.kb_understanding.repository.StructureRepository import StructureRepository
 from apps.kb.kb_understanding.validation.ValidateStructuredBlocks import ValidateStructuredBlocks
@@ -47,8 +48,7 @@ class DetectStructureService:
 
     def _blocks_from_part_map(self, normalized: NormalizedContentDto) -> list[StructuredBlockDto]:
         blocks: list[StructuredBlockDto] = []
-        section_title: str | None = None
-        heading_path: list[str] = []
+        heading_tracker = HeadingPathTracker()
         order_index = 0
 
         for entry in normalized.part_map:
@@ -60,42 +60,93 @@ class DetectStructureService:
 
             metadata = dict(entry)
             block_type = self._classify_from_metadata(metadata, block_text, is_first=order_index == 0)
-            if block_type in (StructuredBlockType.TITLE, StructuredBlockType.HEADING):
-                section_title = block_text[:512]
-                heading_path = [section_title]
-                current_section = None if block_type == StructuredBlockType.TITLE else section_title
-            else:
-                current_section = section_title
+            path_info = self._resolve_heading_path(
+                heading_tracker,
+                metadata=metadata,
+                block_text=block_text,
+                block_type=block_type,
+            )
+            section_title = path_info.get("current_section_title")
 
-            block_metadata = {
-                "source_part_id": entry.get("source_part_id"),
-                "document_order": entry.get("document_order"),
-                "block_kind": entry.get("block_kind"),
-                "page_number": entry.get("page_number") or entry.get("page"),
-                "part_index": entry.get("part_index"),
-                "style_name": entry.get("style_name"),
-                "heading_level": entry.get("heading_level"),
-                "list_level": entry.get("list_level"),
-                "bbox": entry.get("bbox"),
-                "table_index": entry.get("table_index"),
-                "headers": entry.get("headers"),
-                "rows": entry.get("rows"),
-                "heading_path": list(heading_path),
-            }
+            block_metadata = self._build_block_metadata(entry, path_info)
             blocks.append(
                 StructuredBlockDto(
                     block_type=block_type,
                     text=block_text,
                     order_index=order_index,
                     page_number=entry.get("page") or entry.get("page_number"),
-                    section_title=current_section
-                    if block_type not in (StructuredBlockType.TITLE, StructuredBlockType.HEADING)
+                    section_title=section_title
+                    if block_type
+                    not in (StructuredBlockType.TITLE, StructuredBlockType.HEADING, StructuredBlockType.HEADER, StructuredBlockType.FOOTER)
                     else None,
                     metadata=block_metadata,
                 )
             )
             order_index += 1
         return blocks
+
+    @staticmethod
+    def _resolve_heading_path(
+        heading_tracker: HeadingPathTracker,
+        *,
+        metadata: dict[str, Any],
+        block_text: str,
+        block_type: StructuredBlockType,
+    ) -> dict[str, Any]:
+        if metadata.get("heading_path"):
+            return {
+                "heading_path": list(metadata.get("heading_path") or []),
+                "heading_levels": list(metadata.get("heading_levels") or []),
+                "current_section_title": metadata.get("current_section_title")
+                or (metadata.get("heading_path") or [None])[-1],
+            }
+        if block_type in (StructuredBlockType.TITLE, StructuredBlockType.HEADING):
+            level = metadata.get("heading_level")
+            if level is None:
+                level = 0 if block_type == StructuredBlockType.TITLE else 1
+            return heading_tracker.update(int(level), block_text)
+        return heading_tracker.current()
+
+    @staticmethod
+    def _build_block_metadata(entry: dict[str, Any], path_info: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "source_part_id": entry.get("source_part_id"),
+            "document_order": entry.get("document_order"),
+            "part_index": entry.get("part_index"),
+            "part_type": entry.get("part_type"),
+            "block_kind": entry.get("block_kind"),
+            "page_number": entry.get("page_number") or entry.get("page"),
+            "style_name": entry.get("style_name"),
+            "style_id": entry.get("style_id"),
+            "heading_level": entry.get("heading_level"),
+            "is_heading": entry.get("is_heading"),
+            "is_list": entry.get("is_list"),
+            "list_level": entry.get("list_level"),
+            "numbering_id": entry.get("numbering_id"),
+            "numbering_level": entry.get("numbering_level"),
+            "list_marker": entry.get("list_marker"),
+            "runs": entry.get("runs"),
+            "bbox": entry.get("bbox"),
+            "font_names": entry.get("font_names"),
+            "font_sizes": entry.get("font_sizes"),
+            "dominant_font_size": entry.get("dominant_font_size"),
+            "is_bold_guess": entry.get("is_bold_guess"),
+            "is_heading_guess": entry.get("is_heading_guess"),
+            "heading_confidence": entry.get("heading_confidence"),
+            "is_header_candidate": entry.get("is_header_candidate"),
+            "is_footer_candidate": entry.get("is_footer_candidate"),
+            "header_footer_confidence": entry.get("header_footer_confidence"),
+            "table_index": entry.get("table_index"),
+            "headers": entry.get("headers"),
+            "rows": entry.get("rows"),
+            "row_count": entry.get("row_count"),
+            "column_count": entry.get("column_count"),
+            "ocr_confidence": entry.get("ocr_confidence"),
+            "ocr_language": entry.get("ocr_language"),
+            "heading_path": list(path_info.get("heading_path") or []),
+            "heading_levels": list(path_info.get("heading_levels") or []),
+            "current_section_title": path_info.get("current_section_title"),
+        }
 
     def _blocks_from_text(self, normalized: NormalizedContentDto) -> list[StructuredBlockDto]:
         blocks: list[StructuredBlockDto] = []
@@ -155,18 +206,20 @@ class DetectStructureService:
 
         if part_type == "TABLE" or block_kind == "table":
             return StructuredBlockType.TABLE
-        if block_kind == "header" or part_type == "HEADER":
+        if block_kind == "header" or part_type == "HEADER" or metadata.get("is_header_candidate"):
             return StructuredBlockType.HEADER
-        if block_kind == "footer" or part_type == "FOOTER":
+        if block_kind == "footer" or part_type == "FOOTER" or metadata.get("is_footer_candidate"):
             return StructuredBlockType.FOOTER
         if block_kind == "list" or metadata.get("is_list"):
             return StructuredBlockType.LIST
-        if block_kind == "paragraph":
+        if part_type == "OCR_TEXT" or block_kind == "ocr_text":
             return StructuredBlockType.PARAGRAPH
         if metadata.get("heading_level") == 0:
             return StructuredBlockType.TITLE
         if block_kind == "heading" or metadata.get("is_heading") or metadata.get("is_heading_guess"):
             return StructuredBlockType.HEADING
+        if block_kind == "paragraph":
+            return StructuredBlockType.PARAGRAPH
         return self._classify(text, is_first=is_first)
 
     def _classify(self, text: str, *, is_first: bool) -> StructuredBlockType:

@@ -12,7 +12,7 @@ LANGUAGE_DETECTION → ENTITY_EXTRACTION → LOCAL_KNOWLEDGE_ENRICHMENT
 
 ## Támogatott nyelvek
 
-- `hu`, `en`, `de` (+ `unknown`)
+- `hu`, `en`, `es` (+ `unknown`) — magyar, angol, spanyol
 - Nyelvspecifikus stopword / keyword / topic szabályok: `languages/`
 
 ## Események
