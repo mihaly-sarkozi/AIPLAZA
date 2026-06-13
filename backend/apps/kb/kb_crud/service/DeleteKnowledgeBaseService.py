@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 # backend/apps/kb/kb_crud/service/DeleteKnowledgeBaseService.py
-# Feladat: Tudástár törlés use-case (dev/demo kapu, név megerősítés, tartalom
+# Feladat: Tudástár törlés use-case (csak owner, név megerősítés, tartalom
 # ürítés, soft delete a tanított karakterszám megőrzésével, audit).
 # Sárközi Mihály - 2026.06.07
 
@@ -16,7 +16,6 @@ from apps.kb.kb_crud.ports.KnowledgeBaseRepository import KnowledgeBaseRepositor
 from apps.kb.kb_crud.ports.TrainingSummaryInterface import TrainingSummaryInterface
 from apps.kb.kb_crud.service.KbAccessPolicy import KbAccessPolicy
 from apps.kb.kb_crud.service.KbCrudAuditLogger import KbCrudAuditLogger
-from core.kernel.config.config_loader import get_app_env
 
 
 class DeleteKnowledgeBaseService:
@@ -40,11 +39,10 @@ class DeleteKnowledgeBaseService:
         *,
         confirm_name: str,
         actor: Any,
-        demo_mode: bool = False,
         ip: str | None = None,
         user_agent: str | None = None,
     ) -> None:
-        if get_app_env() != "dev" and not demo_mode:
+        if not self._access_policy.is_owner(actor):
             raise CrudPermissionError(CrudErrorCode.KB_DELETE_NOT_ALLOWED)
         if not await self._access_policy.user_can_train(kb_uuid, actor):
             raise CrudPermissionError()

@@ -79,8 +79,7 @@ export default function KBList() {
   const billingRestricted =
     String((billingOverview?.subscription as Record<string, unknown> | undefined)?.status ?? "").toLowerCase() === "restricted" ||
     paymentWarning?.is_expired === true;
-  const demoMode = Boolean(billingOverview?.demo_mode);
-  const canDeleteKb = isOwner && (import.meta.env.DEV || demoMode);
+  const canDeleteKb = isOwner;
   const activeKnowledgeBaseCount = useMemo(() => items.filter((kb) => !isDeletedKb(kb)).length, [items]);
   const visibleItems = useMemo(
     () =>
@@ -285,7 +284,7 @@ export default function KBList() {
   const handleDelete = () => {
     if (!deleteConfirmKb) return;
     if (!canDeleteKb) {
-      toast.error("A tudástár törlése csak fejlesztői vagy tesztüzemmódban érhető el.");
+      toast.error(t("kb.errorDeleteNotAllowed"));
       return;
     }
     if (deleteTypeName.trim() !== deleteConfirmKb.name) {

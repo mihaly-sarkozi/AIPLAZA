@@ -42,7 +42,7 @@ class _FakePipeline:
 
     def run(self, ctx):
         self.calls.append(ctx)
-        return UnderstandingStatus.READY_FOR_INDEXING
+        return UnderstandingStatus.READY_FOR_DISCOVERY
 
 
 def _handler(start_error: Exception | None = None):

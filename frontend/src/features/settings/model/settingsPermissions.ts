@@ -11,3 +11,7 @@ export function canAccessSettings(user: User | null | undefined): user is User {
 export function canManageBillingAndDomains(user: User | null | undefined): boolean {
   return canAccessSettings(user);
 }
+
+export function canResetTenant(user: User | null | undefined): boolean {
+  return Boolean(user && user.role === "owner");
+}

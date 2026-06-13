@@ -7,8 +7,9 @@ from __future__ import annotations
 import os
 
 from apps.settings.api.router import router as settings_router
-from apps.settings.bootstrap.service_keys import SETTINGS_SERVICE
+from apps.settings.bootstrap.service_keys import SETTINGS_SERVICE, TENANT_RESET_SERVICE
 from apps.settings.service.settings_facade import SettingsFacade
+from apps.settings.service.tenant_reset_service import TenantResetService
 from core.kernel.config.environment import normalize_app_env
 from core.kernel.interface import BaseAppModule, ModuleContext, RouteRegistration
 from core.kernel.interface.app_conventions import module_key, module_route_tag
@@ -34,6 +35,10 @@ class SettingsAppModule(BaseAppModule):
                 sections_lister=list_settings_sections,
                 require_eu_vat_validation=_require_eu_vat_validation(),
             ),
+        )
+        container.register_service(
+            TENANT_RESET_SERVICE,
+            TenantResetService(session_factory=container.session_factory),
         )
 
     def routers(self) -> tuple[RouteRegistration, ...]:

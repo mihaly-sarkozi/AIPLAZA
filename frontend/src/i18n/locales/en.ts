@@ -339,7 +339,7 @@ export const en = {
       errorNameInvalid: "The knowledge base name is invalid (empty or too long).",
       errorConfirmNameMismatch: "The confirmation name does not match the knowledge base name.",
       errorLimitReached: "You have reached the number of knowledge bases available in your plan.",
-      errorDeleteNotAllowed: "Knowledge base deletion is available only in dev mode or free test mode.",
+      errorDeleteNotAllowed: "Only the tenant owner can delete knowledge bases.",
       trainUploadButton: "Upload",
       trainFileUploadButton: "File upload",
       trainUploadModalTitle: "Load file into content",
@@ -669,6 +669,8 @@ export const en = {
         "This checkout is only for accounts already on a paid plan. If you are on the free plan, use the standard subscription checkout.",
       upgradeCheckoutSuccessPaid: "Your plan was updated. Payment recorded now: {{amount}} €. Your period is valid through {{date}}.",
       upgradeCheckoutSuccessZero: "Your plan was updated.",
+      upgradeCheckoutPending:
+        "Your payment is being processed. The plan change will take effect once the payment is confirmed.",
       planNotSelectableBadge: "Not available",
       planNotSelectableHint:
         "Your storage usage or number of knowledge bases exceeds this plan. Click the button for details.",
@@ -859,6 +861,19 @@ export const en = {
       sectionPreferences: "Localization",
       sectionBilling: "Billing",
       sectionDomains: "Domains",
+      sectionReset: "Reset",
+      resetTitle: "Reset workspace",
+      resetIntro:
+        "This removes all tenant data (knowledge bases, users, audit log, billing history, channel keys) and restores the free trial plan. The owner email, password, and authenticator setup stay unchanged.",
+      resetWarning: "This action cannot be undone. Every other user, record, and log is permanently deleted.",
+      resetConfirmLabel: "Confirmation: type the tenant slug",
+      resetConfirmPlaceholder: "e.g. acme",
+      resetSlugHint: "Slug: {{slug}}",
+      resetSubmit: "Reset workspace to defaults",
+      resetPending: "Reset in progress…",
+      resetConfirmDialog:
+        "Are you sure you want to reset this workspace? All data will be deleted except the owner login.",
+      resetSuccess: "Workspace reset completed.",
       domainTitle: "Domain settings",
       domainIntro: "Add a custom domain and activate it after DNS verification.",
       domainHowToTitle: "Quick steps",

@@ -1,19 +1,28 @@
-from __future__ import annotations
-
 # backend/apps/settings/api/router.py
 # Feladat: A settings modul FastAPI routere. Beállítások olvasását, módosítását és settings szekciók listázását delegálja a SettingsFacade felé.
 # Sárközi Mihály - 2026.05.24
 
-from fastapi import APIRouter, Body, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException, Request
 
 from apps.settings.api.schemas import (
     BillingSettingsUpdateRequest,
     LocaleSettingsUpdateRequest,
     SettingsSectionResponse,
     SettingsUpdateRequest,
+    TenantResetRequest,
+    TenantResetResponse,
     TwoFactorSettingsUpdateRequest,
 )
-from apps.settings.bootstrap.dependencies import SettingsFacadeDep, SettingsReadUserDep, SettingsWriteUserDep
+from apps.settings.bootstrap.dependencies import (
+    SettingsFacadeDep,
+    SettingsReadUserDep,
+    SettingsWriteUserDep,
+    TenantResetServiceDep,
+)
+from core.kernel.http.tenant_dependencies import RequestTenantContext, require_tenant_context
+from core.kernel.security.rate_limit import limiter
+from core.modules.auth.web.dependencies.auth_dependencies import require_role
+from core.modules.users.domain.dto import User
 from apps.settings.domain.settings_state import (
     BillingSettingsState,
     LocaleSettingsState,
@@ -149,6 +158,35 @@ def get_settings_sections(
     _current_user: SettingsReadUserDep,
 ):
     return facade.get_sections()
+
+
+@router.post("/settings/reset", response_model=TenantResetResponse)
+@limiter.limit("2/minute")
+def reset_tenant_data(
+    body: TenantResetRequest,
+    request: Request,
+    reset_service: TenantResetServiceDep,
+    tenant: RequestTenantContext = Depends(require_tenant_context),
+    current_user: User = Depends(require_role("owner")),
+):
+    del request
+    if tenant.tenant_id is None or not tenant.slug:
+        raise HTTPException(status_code=400, detail="Tenant required.")
+    try:
+        result = reset_service.reset_tenant(
+            tenant_id=tenant.tenant_id,
+            tenant_slug=tenant.slug,
+            owner_user_id=current_user.id,
+            confirm_slug=body.confirm_slug,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return TenantResetResponse(
+        status=result.status,
+        message=result.message,
+        tenant_slug=result.tenant_slug,
+        owner_user_id=result.owner_user_id,
+    )
 
 
 __all__ = ["router"]

@@ -2,7 +2,7 @@
 // Feladat: A settings szekciók kulcsainak és tab-listájának központi modellje.
 // Sárközi Mihály - 2026.05.29
 
-export type SettingsSectionKey = "security" | "preferences" | "billing" | "domains";
+export type SettingsSectionKey = "security" | "preferences" | "billing" | "domains" | "reset";
 
 export type SettingsSectionTab = {
   key: SettingsSectionKey;
@@ -11,7 +11,8 @@ export type SettingsSectionTab = {
 
 export function buildSettingsSections(
   t: (key: string) => string,
-  includeBusinessSections: boolean
+  includeBusinessSections: boolean,
+  includeResetSection: boolean
 ): SettingsSectionTab[] {
   return [
     { key: "security", label: t("settings.sectionSecurity") },
@@ -22,5 +23,6 @@ export function buildSettingsSections(
           { key: "domains" as const, label: t("settings.sectionDomains") },
         ]
       : []),
+    ...(includeResetSection ? [{ key: "reset" as const, label: t("settings.sectionReset") }] : []),
   ];
 }

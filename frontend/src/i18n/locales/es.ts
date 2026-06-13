@@ -340,7 +340,7 @@ export const es = {
       errorNameInvalid: "El nombre de la base de conocimiento no es válido (vacío o demasiado largo).",
       errorConfirmNameMismatch: "El nombre de confirmación no coincide con el nombre de la base de conocimiento.",
       errorLimitReached: "Has alcanzado el número de bases de conocimiento disponibles en tu plan.",
-      errorDeleteNotAllowed: "La eliminación de bases de conocimiento solo está disponible en modo dev o de prueba gratuita.",
+      errorDeleteNotAllowed: "Solo el propietario del tenant puede eliminar bases de conocimiento.",
       trainUploadButton: "Subir",
       trainFileUploadButton: "Subir archivo",
       trainUploadModalTitle: "Cargar archivo en el contenido",
@@ -670,6 +670,8 @@ export const es = {
         "Este pago solo está disponible si ya tiene un plan de pago. Con el plan gratuito, use la página de suscripción habitual.",
       upgradeCheckoutSuccessPaid: "Plan actualizado. Pago registrado ahora: {{amount}} €. El periodo es válido hasta {{date}}.",
       upgradeCheckoutSuccessZero: "Plan actualizado.",
+      upgradeCheckoutPending:
+        "El pago se está procesando. El cambio de plan se aplicará cuando se confirme el pago.",
       planNotSelectableBadge: "No disponible",
       planNotSelectableHint:
         "El uso de almacenamiento o el número de bases de conocimiento supera este plan. Pulse el botón para ver los detalles.",
@@ -860,6 +862,19 @@ export const es = {
       sectionPreferences: "Localización",
       sectionBilling: "Facturación",
       sectionDomains: "Dominios",
+      sectionReset: "Reset",
+      resetTitle: "Restablecer espacio de trabajo",
+      resetIntro:
+        "Elimina todos los datos del tenant (bases de conocimiento, usuarios, auditoría, historial de facturación, claves de canal) y restaura el plan de prueba gratuito. El correo, la contraseña y el authenticator del propietario no cambian.",
+      resetWarning: "Esta acción no se puede deshacer. El resto de usuarios, datos y registros se borran permanentemente.",
+      resetConfirmLabel: "Confirmación: escribe el slug del tenant",
+      resetConfirmPlaceholder: "p. ej. acme",
+      resetSlugHint: "Slug: {{slug}}",
+      resetSubmit: "Restablecer espacio de trabajo",
+      resetPending: "Restableciendo…",
+      resetConfirmDialog:
+        "¿Seguro que quieres restablecer este espacio? Se borrarán todos los datos excepto el acceso del propietario.",
+      resetSuccess: "Espacio de trabajo restablecido.",
       domainTitle: "Ajustes de dominio",
       domainIntro: "Añade un dominio personalizado y actívalo tras verificar el DNS.",
       domainHowToTitle: "Pasos rápidos",

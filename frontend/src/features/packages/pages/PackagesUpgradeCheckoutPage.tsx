@@ -137,8 +137,10 @@ export default function PackagesUpgradeCheckoutPage() {
       });
       const res = await completeUpgradeMutation.mutateAsync({ plan_code: plan.code, billing_period: billingPeriod });
       const amountLabel = formatEuroFromCents(res.total_charge_cents, locale);
-      const message =
-        res.total_charge_cents > 0
+      const activated = res.status === "updated" || res.status === "already_active";
+      const message = !activated
+        ? t("packages.upgradeCheckoutPending")
+        : res.total_charge_cents > 0
           ? t("packages.upgradeCheckoutSuccessPaid")
               .replace("{{amount}}", amountLabel)
               .replace(

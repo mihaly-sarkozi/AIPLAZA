@@ -1,0 +1,106 @@
+from __future__ import annotations
+
+from apps.kb.kb_discovery.dto.DiscoveryJobContext import DiscoveryJobContext
+from apps.kb.kb_discovery.dto.KnowledgeEntityDto import EntityMentionDto, KnowledgeEntityDto
+from apps.kb.kb_discovery.mapper.discovery_mapper import entity_dto_to_orm, mention_dto_to_orm
+from apps.kb.kb_discovery.common.CandidateMerger import CandidateMerger
+from apps.kb.kb_discovery.common.DiscoveryContext import DiscoveryContext
+from apps.kb.kb_discovery.dto.DiscoveryChunkDto import DiscoveryChunkDto
+from apps.kb.kb_discovery.entities.CompanyNameRecognizer import CompanyNameRecognizer
+from apps.kb.kb_discovery.entities.DictionaryEntityRecognizer import (
+    DictionaryEntityRecognizer,
+    ProductRecognizer,
+    SystemNameRecognizer,
+)
+from apps.kb.kb_discovery.entities.IdentifierRecognizer import IdentifierRecognizer
+from apps.kb.kb_discovery.repository.EntityRepository import EntityMentionRepository, EntityRepository
+
+
+class EntityRecognitionService:
+    def __init__(
+        self,
+        entity_repository: EntityRepository,
+        mention_repository: EntityMentionRepository,
+    ) -> None:
+        self._entity_repository = entity_repository
+        self._mention_repository = mention_repository
+        self._merger = CandidateMerger()
+        self._recognizers = [
+            CompanyNameRecognizer(),
+            SystemNameRecognizer(),
+            DictionaryEntityRecognizer(),
+            ProductRecognizer(),
+            IdentifierRecognizer(),
+        ]
+
+    def run(
+        self,
+        ctx: DiscoveryJobContext,
+        chunks: list[DiscoveryChunkDto],
+        *,
+        person_entities: list[KnowledgeEntityDto] | None = None,
+        person_mentions: list[EntityMentionDto] | None = None,
+    ) -> tuple[list[KnowledgeEntityDto], list[EntityMentionDto]]:
+        context = DiscoveryContext(
+            tenant_slug=ctx.tenant_slug,
+            knowledge_base_id=ctx.knowledge_base_id,
+            training_item_id=ctx.training_item_id,
+        )
+        candidates = []
+        for recognizer in self._recognizers:
+            candidates.extend(recognizer.recognize(chunks, context))
+        candidates = self._merger.merge(candidates)
+
+        entity_map: dict[tuple[str, str], KnowledgeEntityDto] = {}
+        mentions: list[EntityMentionDto] = list(person_mentions or [])
+
+        for candidate in candidates:
+            mentions.append(
+                EntityMentionDto(
+                    entity_type=candidate.entity_type,
+                    chunk_id=candidate.chunk_id,
+                    raw_text=candidate.name,
+                    normalized_name=candidate.normalized_name,
+                    start_offset=candidate.start_offset,
+                    end_offset=candidate.end_offset,
+                    confidence=candidate.confidence,
+                )
+            )
+            key = (candidate.entity_type.value, candidate.normalized_name)
+            existing = entity_map.get(key)
+            chunk_ids = tuple({*(existing.chunk_ids if existing else ()), candidate.chunk_id})
+            entity_map[key] = KnowledgeEntityDto(
+                entity_type=candidate.entity_type,
+                name=candidate.name,
+                normalized_name=candidate.normalized_name,
+                confidence=max(existing.confidence if existing else 0.0, candidate.confidence),
+                aliases=candidate.aliases,
+                chunk_ids=chunk_ids,
+            )
+
+        for person in person_entities or []:
+            key = (person.entity_type.value, person.normalized_name)
+            if key in entity_map:
+                old = entity_map[key]
+                entity_map[key] = KnowledgeEntityDto(
+                    entity_type=old.entity_type,
+                    name=old.name,
+                    normalized_name=old.normalized_name,
+                    confidence=max(old.confidence, person.confidence),
+                    aliases=tuple(dict.fromkeys(old.aliases + person.aliases)),
+                    chunk_ids=tuple(dict.fromkeys(old.chunk_ids + person.chunk_ids)),
+                )
+            else:
+                entity_map[key] = person
+
+        entities = list(entity_map.values())
+        self._entity_repository.replace_for_document(
+            ctx.training_item_id, [entity_dto_to_orm(ctx, entity) for entity in entities]
+        )
+        self._mention_repository.replace_for_job(
+            ctx.job_id, [mention_dto_to_orm(ctx, mention) for mention in mentions]
+        )
+        return entities, mentions
+
+
+__all__ = ["EntityRecognitionService"]

@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 # backend/apps/kb/kb_crud/router/KnowledgeBaseRouter.py
 # Feladat: Tudástár CRUD és jogosultság HTTP végpontok.
 # Sárközi Mihály - 2026.06.07
@@ -56,12 +54,6 @@ def _validation_detail(exc: CrudValidationError) -> dict[str, object]:
     return {"code": exc.code}
 
 
-def _is_demo_mode(tenant: RequestTenantContext) -> bool:
-    config = getattr(tenant, "config", None)
-    feature_flags = getattr(config, "feature_flags", None) if config else None
-    return bool(feature_flags and feature_flags.get("demo_mode"))
-
-
 @router.get("", response_model=list[KnowledgeBaseResponse])
 async def list_kb(
     request: Request,
@@ -77,14 +69,14 @@ async def list_kb(
 @limiter.limit("5/minute")
 async def create_kb(
     request: Request,
-    body: CreateKnowledgeBaseRequest,
+    payload: CreateKnowledgeBaseRequest,
     tenant: RequestTenantContext = Depends(require_tenant_context),
     service: CreateKnowledgeBaseService = Depends(get_create_knowledge_base_service),
     current_user: User = Depends(get_current_user),
 ) -> KnowledgeBaseResponse:
     try:
         return await service.execute(
-            body,
+            payload,
             actor=current_user,
             tenant=tenant,
             ip=_request_ip(request),
@@ -171,7 +163,6 @@ async def delete_kb(
             kb_id,
             confirm_name=body.confirm_name,
             actor=current_user,
-            demo_mode=_is_demo_mode(tenant),
             ip=_request_ip(request),
             user_agent=request.headers.get("user-agent"),
         )
@@ -182,7 +173,7 @@ async def delete_kb(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail={
                     "code": exc.code,
-                    "message": "Knowledge base deletion is available only in dev mode or free test mode",
+                    "message": "Only the tenant owner can delete knowledge bases",
                 },
             ) from exc
         raise security_http_exception() from exc
@@ -218,13 +209,13 @@ async def get_kb_permissions(
 @limiter.limit("20/minute")
 async def get_kb_permissions_batch(
     request: Request,
-    body: BatchPermissionsRequest,
+    payload: BatchPermissionsRequest,
     tenant: RequestTenantContext = Depends(require_tenant_context),
     service: GetPermissionsBatchService = Depends(get_kb_permissions_batch_service),
     current_user: User = Depends(get_current_user),
 ) -> dict[str, list[KbPermissionResponse]]:
     try:
-        return await service.execute(body.uuids, actor=current_user)
+        return await service.execute(payload.uuids, actor=current_user)
     except CrudPermissionError as exc:
         raise security_http_exception() from exc
     except CrudValidationError as exc:

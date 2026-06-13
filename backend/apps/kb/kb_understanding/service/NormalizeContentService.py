@@ -1,10 +1,5 @@
 from __future__ import annotations
 
-# backend/apps/kb/kb_understanding/service/NormalizeContentService.py
-# Feladat: A kinyert szöveg tisztítása — whitespace, sortörés, encoding, header/footer,
-# oldalszám sorok, duplikált sorok kezelése.
-# Sárközi Mihály - 2026.06.11
-
 import re
 from collections import Counter
 from typing import Any
@@ -12,16 +7,15 @@ from typing import Any
 from apps.kb.kb_understanding.dto.ExtractedContentDto import ExtractedContentDto
 from apps.kb.kb_understanding.dto.NormalizedContentDto import NormalizedContentDto
 from apps.kb.kb_understanding.dto.UnderstandingJobContext import UnderstandingJobContext
+from apps.kb.kb_understanding.enums.ExtractPartType import NORMALIZABLE_PART_TYPES
 from apps.kb.kb_understanding.mapper.content_mapper import normalized_dto_to_orm
 from apps.kb.kb_understanding.repository.ContentRepository import ContentRepository
 from apps.kb.kb_understanding.validation.ValidateNormalizedContent import ValidateNormalizedContent
 
-# Csak oldalszámot tartalmazó sorok: "12", "- 12 -", "Page 12", "12. oldal", "12 / 34".
 _PAGE_NUMBER_LINE = re.compile(
     r"^\s*(?:-\s*)?(?:page\s+)?\d{1,4}(?:\s*[./]\s*\d{1,4})?(?:\s*-)?(?:\s*\.?\s*oldal)?\s*$",
     re.IGNORECASE,
 )
-# Ismétlődő header/footer jelöltek: rövid sor, amely sokszor fordul elő.
 _HEADER_FOOTER_MIN_OCCURRENCES = 3
 _HEADER_FOOTER_MAX_LENGTH = 80
 
@@ -32,28 +26,48 @@ class NormalizeContentService:
         self._validate = ValidateNormalizedContent()
 
     def run(self, ctx: UnderstandingJobContext, extracted: ExtractedContentDto) -> NormalizedContentDto:
-        applied: dict[str, Any] = {}
-        text = extracted.text
-
-        text, applied["fixed_encoding"] = self._fix_encoding(text)
-        lines = text.split("\n")
-        lines, applied["removed_page_number_lines"] = self._remove_page_number_lines(lines)
-        lines, applied["removed_header_footer_lines"] = self._remove_repeated_lines(lines)
-        lines, applied["deduplicated_lines"] = self._dedupe_consecutive_lines(lines)
-        text = "\n".join(lines)
-        text, applied["collapsed_whitespace"] = self._collapse_whitespace(text)
-
-        original_length = max(1, len(extracted.text))
-        ratio = len(text) / original_length
-        page_map = [
-            {
-                "page": entry.get("page"),
-                "start": int(int(entry.get("start", 0)) * ratio),
-                "end": int(int(entry.get("end", 0)) * ratio),
-            }
-            for entry in extracted.page_map
+        part_types = {item.value for item in NORMALIZABLE_PART_TYPES}
+        stored_parts = self._content_repository.list_parts_for_item(ctx.training_item_id, part_types=part_types)
+        source_parts = stored_parts or [
+            type(
+                "Part",
+                (),
+                {
+                    "text": part.text,
+                    "page_number": part.page_number,
+                    "part_type": part.part_type,
+                },
+            )()
+            for part in extracted.parts
+            if part.part_type in part_types
         ]
 
+        applied: dict[str, Any] = {"normalized_part_types": sorted(part_types)}
+        normalized_chunks: list[str] = []
+        page_map: list[dict[str, Any]] = []
+        offset = 0
+        current_page: int | None = None
+        page_start = 0
+
+        for part in source_parts:
+            text, part_applied = self._normalize_part_text(part.text or "")
+            for key, value in part_applied.items():
+                applied[key] = applied.get(key, 0) + value
+            if not text:
+                continue
+            normalized_chunks.append(text)
+            page = getattr(part, "page_number", None)
+            if page != current_page:
+                if current_page is not None:
+                    page_map.append({"page": current_page, "start": page_start, "end": offset})
+                current_page = page
+                page_start = offset
+            offset += len(text) + 2
+
+        if current_page is not None:
+            page_map.append({"page": current_page, "start": page_start, "end": offset})
+
+        text = "\n\n".join(normalized_chunks)
         normalized = NormalizedContentDto(
             text=text,
             page_map=page_map,
@@ -65,6 +79,22 @@ class NormalizeContentService:
             ctx.training_item_id, normalized_dto_to_orm(ctx, normalized)
         )
         return normalized
+
+    def _normalize_part_text(self, text: str) -> tuple[str, dict[str, int]]:
+        applied: dict[str, int] = {}
+        text, count = self._fix_encoding(text)
+        applied["fixed_encoding"] = count
+        lines = text.split("\n")
+        lines, count = self._remove_page_number_lines(lines)
+        applied["removed_page_number_lines"] = count
+        lines, count = self._remove_repeated_lines(lines)
+        applied["removed_header_footer_lines"] = count
+        lines, count = self._dedupe_consecutive_lines(lines)
+        applied["deduplicated_lines"] = count
+        text = "\n".join(lines)
+        text, count = self._collapse_whitespace(text)
+        applied["collapsed_whitespace"] = count
+        return text, applied
 
     @staticmethod
     def _fix_encoding(text: str) -> tuple[str, int]:
@@ -120,9 +150,7 @@ class NormalizeContentService:
     @staticmethod
     def _collapse_whitespace(text: str) -> tuple[str, int]:
         before = len(text)
-        # Soron belüli többszörös szóköz / tab összevonása, sorvégi whitespace törlése.
         text = "\n".join(re.sub(r"[ \t]+", " ", line).rstrip() for line in text.split("\n"))
-        # 3+ üres sor → 1 üres sor.
         text = re.sub(r"\n{3,}", "\n\n", text)
         return text.strip(), before - len(text)
 

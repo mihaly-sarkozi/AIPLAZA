@@ -122,6 +122,22 @@ export async function patchBillingSettings(body: PatchBillingSettingsPayload): P
   return res.data as BillingSettingsResponse;
 }
 
+export type TenantResetPayload = {
+  confirm_slug: string;
+};
+
+export type TenantResetResponse = {
+  status: string;
+  message: string;
+  tenant_slug: string;
+  owner_user_id: number;
+};
+
+export async function postTenantReset(body: TenantResetPayload): Promise<TenantResetResponse> {
+  const res = await api.post("/settings/reset", body);
+  return res.data as TenantResetResponse;
+}
+
 export type LegacyPatchSettingsPayload = {
   two_factor_enabled?: boolean;
   timezone?: SettingsTimezone;

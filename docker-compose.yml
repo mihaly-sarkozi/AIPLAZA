@@ -70,8 +70,11 @@ services:
       TENANT_BASE_DOMAIN: lvh.me
       INSTALL_HOST: lvh.me
       TRUSTED_HOSTS: localhost,127.0.0.1,lvh.me,*.lvh.me
+      BILLING_PROVIDER: simulated
     command: sh -c "python3 scripts/init_db.py && uvicorn main:app --reload --host 0.0.0.0 --port 8001"
     working_dir: /app/backend
+    volumes:
+      - ./backend:/app/backend
     ports:
       - "8001:8001"
     healthcheck:
@@ -102,13 +105,18 @@ services:
         soft: 65536
         hard: 65536
     environment:
+      CI: "true"
       VITE_DEV_PROXY_TARGET: http://host.docker.internal:8001
       VITE_TENANT_DOMAIN: lvh.me
       VITE_API_URL: /api
       CHOKIDAR_USEPOLLING: "true"
       BASELINE_BROWSER_MAPPING_IGNORE_OLD_DATA: "true"
-    command: sh -c "pnpm dev --host 0.0.0.0 --port 5173"
+    command: sh -c "pnpm install --frozen-lockfile && pnpm dev --host 0.0.0.0 --port 5173"
     working_dir: /app/frontend
+    volumes:
+      - ./frontend:/app/frontend
+      - frontend_node_modules:/app/frontend/node_modules
+      - ./backend/apps:/app/backend/apps
     ports:
       - "5173:5173"
     depends_on:
@@ -119,3 +127,4 @@ volumes:
   postgres_data:
   qdrant_data:
   minio_data:
+  frontend_node_modules:

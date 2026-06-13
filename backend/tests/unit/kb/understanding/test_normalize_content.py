@@ -18,7 +18,7 @@ def _normalize(ctx, text: str, page_map=None):
     service = NormalizeContentService(repo)
     result = service.run(
         ctx,
-        ExtractedContentDto(text=text, page_map=page_map or [], char_count=len(text)),
+        ExtractedContentDto.from_legacy(text=text, page_map=page_map or [], char_count=len(text)),
     )
     return result, repo
 

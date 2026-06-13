@@ -1,0 +1,28 @@
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Any
+
+
+@dataclass(frozen=True)
+class DiscoveryChunkDto:
+    chunk_id: str
+    text: str
+    chunk_type: str
+    order_index: int
+    section_title: str | None = None
+    page_number: int | None = None
+
+
+@dataclass(frozen=True)
+class DiscoveryStepResult:
+    step: Any
+    status: str
+    duration_ms: int
+    input_summary: dict[str, Any] = field(default_factory=dict)
+    output_summary: dict[str, Any] = field(default_factory=dict)
+    error_code: str | None = None
+    error_message: str | None = None
+
+
+__all__ = ["DiscoveryChunkDto", "DiscoveryStepResult"]

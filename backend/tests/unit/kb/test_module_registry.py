@@ -7,6 +7,7 @@ EXPECTED_MODULE_NAMES = [
     "kb.crud",
     "kb.ingest",
     "kb.understanding",
+    "kb.discovery",
     "kb.indexing",
     "kb.search",
     "kb.services",

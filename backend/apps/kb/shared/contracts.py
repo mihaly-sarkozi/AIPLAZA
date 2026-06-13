@@ -20,6 +20,18 @@ class SearchContextItem:
 
 
 @dataclass(frozen=True)
+class DiscoveryChunkSnapshot:
+    """Chunk olvasási nézet a discovery pipeline számára (modulhatáron átadott contract)."""
+
+    chunk_id: str
+    text: str
+    chunk_type: str
+    order_index: int
+    section_title: str | None = None
+    page_number: int | None = None
+
+
+@dataclass(frozen=True)
 class IngestItemSnapshot:
     """Ingest item olvasási nézet a megértési pipeline számára (modulhatáron átadott contract)."""
 
@@ -35,4 +47,4 @@ class IngestItemSnapshot:
     content_hash: str | None
 
 
-__all__ = ["IngestItemSnapshot", "MaterialRef", "SearchContextItem"]
+__all__ = ["DiscoveryChunkSnapshot", "IngestItemSnapshot", "MaterialRef", "SearchContextItem"]

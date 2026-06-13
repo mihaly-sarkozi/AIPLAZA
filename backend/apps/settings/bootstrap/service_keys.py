@@ -7,5 +7,6 @@ from __future__ import annotations
 from core.kernel.interface.app_keys import module_service_key
 
 SETTINGS_SERVICE = module_service_key("settings")
+TENANT_RESET_SERVICE = module_service_key("settings", "tenant_reset")
 
-__all__ = ["SETTINGS_SERVICE"]
+__all__ = ["SETTINGS_SERVICE", "TENANT_RESET_SERVICE"]

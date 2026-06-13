@@ -1,15 +1,9 @@
 from __future__ import annotations
 
-# backend/apps/kb/kb_understanding/bootstrap/dependencies.py
-# Feladat: Megértési service példányok összeállítása (FastAPI Depends).
-# Sárközi Mihály - 2026.06.11
-
 from fastapi import Request
 
 from apps.kb.kb_understanding.bootstrap.service_keys import (
     KB_UNDERSTANDING_CHUNK_REPOSITORY,
-    KB_UNDERSTANDING_EMBEDDING_REPOSITORY,
-    KB_UNDERSTANDING_ENTITY_REPOSITORY,
     KB_UNDERSTANDING_JOB_REPOSITORY,
     KB_UNDERSTANDING_STEP_RUN_REPOSITORY,
 )
@@ -26,8 +20,6 @@ def get_understanding_status_service(request: Request) -> UnderstandingStatusSer
         job_repository=get_module_repository(KB_UNDERSTANDING_JOB_REPOSITORY, request),
         step_run_repository=get_module_repository(KB_UNDERSTANDING_STEP_RUN_REPOSITORY, request),
         chunk_repository=get_module_repository(KB_UNDERSTANDING_CHUNK_REPOSITORY, request),
-        entity_repository=get_module_repository(KB_UNDERSTANDING_ENTITY_REPOSITORY, request),
-        embedding_repository=get_module_repository(KB_UNDERSTANDING_EMBEDDING_REPOSITORY, request),
     )
 
 

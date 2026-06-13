@@ -1,32 +1,109 @@
 from __future__ import annotations
 
-# backend/apps/kb/kb_understanding/mapper/content_mapper.py
-# Feladat: Extract / normalize DTO → ORM átalakítás.
-# Sárközi Mihály - 2026.06.11
-
+from apps.kb.kb_understanding.dto.ExtractPartDto import ExtractPart
+from apps.kb.kb_understanding.dto.ExtractResultDto import ExtractResult
 from apps.kb.kb_understanding.dto.ExtractedContentDto import ExtractedContentDto
-from apps.kb.kb_understanding.dto.NormalizedContentDto import NormalizedContentDto
 from apps.kb.kb_understanding.dto.UnderstandingJobContext import UnderstandingJobContext
 from apps.kb.kb_understanding.orm.ExtractedContent import ExtractedContent
-from apps.kb.kb_understanding.orm.NormalizedContent import NormalizedContent
+from apps.kb.kb_understanding.orm.ExtractedContentPart import ExtractedContentPart
 from apps.kb.shared.ids import new_id
+
+
+def extracted_result_to_dto(
+    ctx: UnderstandingJobContext,
+    result: ExtractResult,
+    *,
+    extracted_content_id: str,
+    duration_ms: int,
+) -> ExtractedContentDto:
+    trace_summary = {
+        "total_pages": result.total_pages,
+        "processed_pages": result.processed_pages,
+        "failed_pages": result.failed_pages,
+        "text_parts": result.text_parts_count,
+        "table_parts": result.table_parts_count,
+        "ocr_text_parts": result.ocr_text_parts_count,
+        "ocr_empty_parts": result.ocr_empty_parts_count,
+        "ocr_failed_parts": result.ocr_failed_parts_count,
+        "total_chars": result.total_chars,
+        "extractor_name": result.extractor_name,
+        "extractor_version": result.extractor_version,
+        "duration_ms": duration_ms,
+        "warnings": list(result.warnings),
+        "status": result.status,
+    }
+    return ExtractedContentDto(
+        extracted_content_id=extracted_content_id,
+        extractor_name=result.extractor_name,
+        extractor_version=result.extractor_version,
+        total_pages=result.total_pages,
+        total_chars=result.total_chars,
+        text_parts_count=result.text_parts_count,
+        table_parts_count=result.table_parts_count,
+        ocr_text_parts_count=result.ocr_text_parts_count,
+        ocr_empty_parts_count=result.ocr_empty_parts_count,
+        ocr_failed_parts_count=result.ocr_failed_parts_count,
+        status=result.status,
+        source_mime=result.source_mime,
+        raw_ref=ctx.raw_ref,
+        parts=list(result.parts),
+        warnings=list(result.warnings),
+        trace_summary=trace_summary,
+    )
 
 
 def extracted_dto_to_orm(ctx: UnderstandingJobContext, dto: ExtractedContentDto) -> ExtractedContent:
     return ExtractedContent(
-        id=new_id("und_extract"),
+        id=dto.extracted_content_id or new_id("und_extract"),
         job_id=ctx.job_id,
         training_item_id=ctx.training_item_id,
         knowledge_base_id=ctx.knowledge_base_id,
-        text=dto.text,
-        page_map=list(dto.page_map),
-        char_count=dto.char_count,
-        source_mime=dto.source_mime,
-        extractor=dto.extractor,
+        raw_ref=dto.raw_ref or ctx.raw_ref,
+        mime_type=dto.source_mime or ctx.mime_type,
+        extractor_name=dto.extractor_name,
+        extractor_version=dto.extractor_version,
+        total_pages=dto.total_pages,
+        total_chars=dto.total_chars,
+        text_parts_count=dto.text_parts_count,
+        table_parts_count=dto.table_parts_count,
+        ocr_text_parts_count=dto.ocr_text_parts_count,
+        ocr_empty_parts_count=dto.ocr_empty_parts_count,
+        ocr_failed_parts_count=dto.ocr_failed_parts_count,
+        status=dto.status,
+        metadata_json={
+            "warnings": list(dto.warnings),
+            "trace_summary": dict(dto.trace_summary),
+        },
     )
 
 
-def normalized_dto_to_orm(ctx: UnderstandingJobContext, dto: NormalizedContentDto) -> NormalizedContent:
+def part_dto_to_orm(
+    ctx: UnderstandingJobContext,
+    extracted_content_id: str,
+    part: ExtractPart,
+) -> ExtractedContentPart:
+    return ExtractedContentPart(
+        id=new_id("und_part"),
+        extracted_content_id=extracted_content_id,
+        job_id=ctx.job_id,
+        knowledge_base_id=ctx.knowledge_base_id,
+        training_item_id=ctx.training_item_id,
+        part_type=part.part_type,
+        page_number=part.page_number,
+        part_index=part.part_index,
+        text=part.text,
+        raw_payload_json=dict(part.raw_payload),
+        char_count=part.char_count,
+        status=part.status,
+        error_code=part.error_code,
+        error_message=part.error_message,
+        metadata_json=dict(part.metadata),
+    )
+
+
+def normalized_dto_to_orm(ctx: UnderstandingJobContext, dto) -> "NormalizedContent":
+    from apps.kb.kb_understanding.orm.NormalizedContent import NormalizedContent
+
     return NormalizedContent(
         id=new_id("und_norm"),
         job_id=ctx.job_id,
@@ -39,4 +116,9 @@ def normalized_dto_to_orm(ctx: UnderstandingJobContext, dto: NormalizedContentDt
     )
 
 
-__all__ = ["extracted_dto_to_orm", "normalized_dto_to_orm"]
+__all__ = [
+    "extracted_dto_to_orm",
+    "extracted_result_to_dto",
+    "normalized_dto_to_orm",
+    "part_dto_to_orm",
+]

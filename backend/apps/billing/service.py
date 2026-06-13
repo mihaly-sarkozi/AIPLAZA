@@ -1448,6 +1448,70 @@ class BillingService:
         training_initial_fee = int(preview.get("training_initial_fee_cents") or 0)
         total_charge = int(preview["total_charge_cents"])
         paid_until = date.fromisoformat(str(preview["paid_until_iso"]))
+        if self._is_simulated_provider():
+            # Simulated provider: nincs valós webhook, ezért a fizetést helyben
+            # szimuláljuk és a csomagváltást azonnal aktiváljuk. Production-ben
+            # a simulated provider tiltott (settings_production_validators).
+            self._apply_immediate_plan_change(
+                tenant,
+                subscription,
+                normalized_plan,
+                normalized_period,
+                paid_until=datetime.combine(paid_until, datetime.min.time(), tzinfo=UTC),
+            )
+            issued_at = self.clock.now()
+            next_plan = self._plan_map()[normalized_plan]
+            period_key = f"{issued_at:%Y%m%d%H%M%S%f}"[:16]
+            if self._repo.get_invoice(tenant.tenant_id, "plan_upgrade", period_key) is None:
+                lines: list[dict[str, Any]] = [
+                    {
+                        "code": "upgrade_new_period",
+                        "name": f"Új csomag teljes díja ({self._billing_period_label(normalized_period)})",
+                        "target_plan_code": normalized_plan,
+                        "billing_period": normalized_period,
+                        "total_cents": next_period_charge,
+                        "paid_until_iso": paid_until.isoformat(),
+                        "simulated_payment": True,
+                        "payment_provider": self._billing_provider(),
+                        "payment_reference": None,
+                    },
+                    {
+                        "code": "upgrade_old_period_credit",
+                        "name": "Régi díjrész jóváírása",
+                        "total_cents": -old_remaining_credit,
+                    },
+                ]
+                if training_initial_fee > 0:
+                    lines.append(
+                        {
+                            "code": "upgrade_training_initial_fee",
+                            "name": "Egyszeri betanítási költség",
+                            "total_cents": training_initial_fee,
+                        }
+                    )
+                self._repo.create_invoice(
+                    tenant.tenant_id,
+                    invoice_type="plan_upgrade",
+                    period_key=period_key,
+                    currency=self.default_currency,
+                    total_cents=total_charge,
+                    description=f"Szimulált csomagváltás: {next_plan.name}",
+                    lines=lines,
+                    due_at=issued_at,
+                    status=self._invoice_paid_status(),
+                    payment_method=self._invoice_payment_method(),
+                    issued_at=issued_at,
+                )
+            return BillingUpgradeCompleteResponse(
+                status="updated",
+                prorated_charge_cents=0,
+                prorated_charge=0,
+                old_remaining_credit_cents=old_remaining_credit,
+                next_period_charge_cents=next_period_charge,
+                training_initial_fee_cents=training_initial_fee,
+                total_charge_cents=total_charge,
+                paid_until_iso=paid_until.isoformat(),
+            )
         verified_invoice = self._latest_verified_upgrade_invoice(
             tenant_id=tenant.tenant_id,
             target_plan=normalized_plan,

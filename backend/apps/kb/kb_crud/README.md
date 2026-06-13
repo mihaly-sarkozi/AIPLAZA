@@ -29,7 +29,7 @@ végpontok teljes funkcionális utódja.
 - `POST /api/kb` — létrehozás (csak owner, usage limit, induló permissionök)
 - `GET /api/kb/{kb_id}` — lekérés (use/train joggal)
 - `PUT /api/kb/{kb_id}` — módosítás (train joggal; personal_data/pii/public mezők)
-- `DELETE /api/kb/{kb_id}` — törlés (dev/demo kapu, `confirm_name`, tartalom ürítés, soft delete)
+- `DELETE /api/kb/{kb_id}` — törlés (csak owner, `confirm_name`, tartalom ürítés, soft delete)
 - `GET /api/kb/{kb_id}/permissions` — jogosultság lista (train joggal)
 - `PUT /api/kb/{kb_id}/permissions` — jogosultságok beállítása (saját jog nem vonható vissza)
 - `POST /api/kb/permissions/batch` — több tudástár jogosultságai (max 100 uuid)

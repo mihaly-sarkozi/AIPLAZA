@@ -34,7 +34,7 @@ A modul public schema táblákban tartja a billing catalogot, tenant előfizeté
 
 A production billing endpointok tenant contextet és auth dependencyt használnak. A módosító és fizetési jellegű műveletek `owner` szerepet kérnek, az access-status bejelentkezett usernek elérhető. Minden HTTP endpoint kapott rate limitet: olvasásnál magasabb, subscription/addon/settle és debug műveleteknél szigorúbb kerettel.
 
-A fizetési completion webhook-first: a user által hívott `upgrade-complete` csak állapotot kérdez le, nem futtat payment gatewayt és nem módosít subscriptiont. Subscription állapot fizetési oldalon csak verified provider webhookból, idempotensen rögzített payment event után változhat; a webhook endpoint a raw payload HMAC signature-jét ellenőrzi `BILLING_{PROVIDER}_WEBHOOK_SECRET` alapján.
+A fizetési completion webhook-first: a user által hívott `upgrade-complete` valós providernél csak állapotot kérdez le, nem futtat payment gatewayt és nem módosít subscriptiont. Subscription állapot fizetési oldalon csak verified provider webhookból, idempotensen rögzített payment event után változhat; a webhook endpoint a raw payload HMAC signature-jét ellenőrzi `BILLING_{PROVIDER}_WEBHOOK_SECRET` alapján. Kivétel a `simulated` provider (production-ben tiltott): ott nincs valós webhook, ezért az `upgrade-complete` a fizetést helyben szimulálja, azonnal aktiválja a csomagváltást és `simulated_paid` számlát ír.
 
 A debug route-ok csak `local` és `staging` környezetben, `BILLING_DEBUG_ROUTES_ENABLED` kapcsolóval érhetők el, és minden használat strukturált audit eseményt ír. A payment provider defaultja `manual`, a Stripe teszt mód környezeti secretet igényel, a PDF renderer user/tenant szövegeket HTML escape-pel kezeli.
 

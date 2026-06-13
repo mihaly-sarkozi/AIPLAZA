@@ -14,7 +14,8 @@ Training = Ingest + Understanding + Indexing + Validation
 |-------|---------|---------|
 | **kb_crud** | telepítve | tudástár CRUD, jogosultságok, tenant kezelés, státuszok, alapbeállítások |
 | **kb_ingest** | telepítve | input befogadás + bizonyíték mentés (szöveg/PDF/DOCX, checksum, batch/item, feldolgozás indítása) |
-| **kb_understanding** | skeleton | a betöltött anyag megértése: extract → … → validation pipeline |
+| **kb_understanding** | telepítve | technikai előkészítés: extract → normalize → structure → chunk → validate |
+| **kb_discovery** | telepítve | lokális felismerés: person, entity, keyword, topic, time, space, relationship, scoring |
 | **kb_indexing** | skeleton | a feldolgozott tudás kereshetővé tétele (full-text, vector, entity, keyword, metadata, hybrid index) |
 | **kb_search** | skeleton | keresés és kontextusépítés (query parser, hybrid ranking, context/citation builder) |
 | **kb_services** | skeleton | tudásra épülő üzleti szolgáltatások (vázlat, összefoglaló, Q&A, hiánylista, tudástérkép…) |
@@ -41,10 +42,9 @@ A `kb_training` és `kb_reading` technikai modulnevek megszűntek — helyettük
 ## Pipeline szabály
 
 ```text
-INGEST → EXTRACT → NORMALIZE → STRUCTURE DETECTION → CHUNKING
-→ ENTITY EXTRACTION → KNOWLEDGE ENRICHMENT → EMBEDDING
-→ HYBRID INDEXING → RELATIONSHIP BUILD → KNOWLEDGE SCORING
-→ VALIDATION → READY
+INGEST → EXTRACT → NORMALIZE → STRUCTURE DETECTION → CHUNKING → VALIDATION
+→ DISCOVERY (person, entity, temporal, spatial, keyword, topic, …)
+→ EMBEDDING → INDEXING → SEARCH
 ```
 
 Ezt **tilos** egyetlen nagy függvényként vagy service-ként megvalósítani. Minden lépés
@@ -63,7 +63,7 @@ Minden dokumentum, batch és item kapjon státuszt. A kanonikus státuszkészlet
 ```text
 CREATED, QUEUED, EXTRACTING, NORMALIZING, STRUCTURING, CHUNKING,
 EXTRACTING_ENTITIES, ENRICHING, EMBEDDING, BUILDING_RELATIONSHIPS, SCORING,
-VALIDATING, READY_FOR_INDEXING, PARTIAL, FAILED, RETRYABLE
+VALIDATING, READY_FOR_DISCOVERY, PARTIAL, FAILED, RETRYABLE
 ```
 
 ## Bizonyíték szabály

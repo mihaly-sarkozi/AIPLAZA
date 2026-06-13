@@ -12,6 +12,18 @@ class FakeContentRepository:
     def __init__(self) -> None:
         self.extracted: dict[str, Any] = {}
         self.normalized: dict[str, Any] = {}
+        self.parts: dict[str, list] = {}
+
+    def replace_extracted_with_parts(
+        self,
+        training_item_id: str,
+        content,
+        parts: list,
+        *,
+        batch_size: int = 50,
+    ) -> None:
+        self.extracted[training_item_id] = content
+        self.parts[training_item_id] = list(parts)
 
     def replace_extracted(self, training_item_id: str, content) -> None:
         self.extracted[training_item_id] = content
@@ -24,6 +36,15 @@ class FakeContentRepository:
 
     def get_normalized_for_item(self, training_item_id: str):
         return self.normalized.get(training_item_id)
+
+    def list_parts_for_item(self, training_item_id: str, *, part_types=None):
+        rows = list(self.parts.get(training_item_id, []))
+        if part_types:
+            rows = [row for row in rows if getattr(row, "part_type", None) in part_types]
+        return rows
+
+    def count_usable_parts(self, training_item_id: str) -> int:
+        return len(self.parts.get(training_item_id, []))
 
 
 class FakeStructureRepository:

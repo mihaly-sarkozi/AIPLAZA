@@ -51,10 +51,25 @@ class SettingsSectionResponse(BaseModel):
     source: str = "core"
 
 
+class TenantResetRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    confirm_slug: StrictStr
+
+
+class TenantResetResponse(BaseModel):
+    status: str
+    message: str
+    tenant_slug: str
+    owner_user_id: int
+
+
 __all__ = [
     "BillingSettingsUpdateRequest",
     "LocaleSettingsUpdateRequest",
     "SettingsSectionResponse",
     "SettingsUpdateRequest",
+    "TenantResetRequest",
+    "TenantResetResponse",
     "TwoFactorSettingsUpdateRequest",
 ]

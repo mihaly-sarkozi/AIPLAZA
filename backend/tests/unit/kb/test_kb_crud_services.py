@@ -219,24 +219,28 @@ class TestDeleteKnowledgeBaseService:
             audit=KbCrudAuditLogger(None),
         )
 
-    def test_delete_blocked_outside_dev_and_demo(self):
-        # APP_ENV=test, demo_mode=False -> tiltott
+    def test_delete_blocked_for_non_owner(self):
         service = self._service()
         with pytest.raises(CrudPermissionError) as excinfo:
-            _run(service.execute("kb-uuid-1", confirm_name="KB", actor=_user("owner"), demo_mode=False))
+            _run(service.execute("kb-uuid-1", confirm_name="KB", actor=_user("admin")))
         assert excinfo.value.code == CrudErrorCode.KB_DELETE_NOT_ALLOWED.value
+
+    def test_delete_allowed_for_owner(self):
+        service = self._service()
+        _run(service.execute("kb-uuid-1", confirm_name="KB", actor=_user("owner")))
+        assert service._repository.soft_deleted == [("kb-uuid-1", 123)]
 
     def test_confirm_name_mismatch(self):
         service = self._service()
         with pytest.raises(CrudValidationError) as excinfo:
-            _run(service.execute("kb-uuid-1", confirm_name="Rossz", actor=_user("owner"), demo_mode=True))
+            _run(service.execute("kb-uuid-1", confirm_name="Rossz", actor=_user("owner")))
         assert excinfo.value.code == CrudErrorCode.KB_CONFIRM_NAME_MISMATCH.value
 
     def test_delete_clears_contents_and_soft_deletes_with_char_count(self):
         repo = FakeKbRepository([_kb(uuid="kb-uuid-1", name="KB")])
         cleanup = FakeContentCleanup()
         service = self._service(repo=repo, cleanup=cleanup, summary=FakeTrainingSummary(char_count=4567))
-        _run(service.execute("kb-uuid-1", confirm_name="KB", actor=_user("owner"), demo_mode=True))
+        _run(service.execute("kb-uuid-1", confirm_name="KB", actor=_user("owner")))
         assert cleanup.cleared == ["kb-uuid-1"]
         assert repo.soft_deleted == [("kb-uuid-1", 4567)]
 

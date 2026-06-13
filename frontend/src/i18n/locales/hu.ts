@@ -340,7 +340,7 @@ export const hu = {
       errorNameInvalid: "A tudástár neve érvénytelen (üres vagy túl hosszú).",
       errorConfirmNameMismatch: "A megerősítő név nem egyezik a tudástár nevével.",
       errorLimitReached: "Elérted a csomagodban elérhető tudástárak számát.",
-      errorDeleteNotAllowed: "A tudástár törlése csak fejlesztői vagy ingyenes teszt módban érhető el.",
+      errorDeleteNotAllowed: "Csak a tenant tulajdonosa törölhet tudástárat.",
       trainUploadButton: "Feltöltés",
       trainFileUploadButton: "Fájl feltöltése",
       trainUploadModalTitle: "Fájl betöltése a tartalomba",
@@ -672,6 +672,8 @@ export const hu = {
       upgradeCheckoutSuccessPaid:
         "A csomag frissült. Most rögzített fizetés: {{amount}} €. Az időszak eddig érvényes: {{date}}.",
       upgradeCheckoutSuccessZero: "A csomag frissült.",
+      upgradeCheckoutPending:
+        "A fizetés feldolgozása folyamatban van. A csomagváltás a fizetés megerősítése után lép életbe.",
       planNotSelectableBadge: "Nem választható",
       planNotSelectableHint:
         "A felhasznált tárhely vagy a tudástárak száma meghaladja ezt a csomagot. Kattintson a gombra a részletekért.",
@@ -861,6 +863,20 @@ export const hu = {
       sectionPreferences: "Lokalizáció",
       sectionBilling: "Számlázás",
       sectionDomains: "Domain",
+      sectionReset: "Reset",
+      resetTitle: "Tenant alaphelyzet",
+      resetIntro:
+        "A művelet törli az összes tenant adatot (felhasználók, audit napló, számlázási előzmények, csatorna kulcsok) és visszaállítja az ingyenes próba csomagot. Egy üres alapértelmezett tudástár marad (pl. „Teszt tudástár”). A tulajdonos e-mailje, jelszava és authenticator beállítása változatlan marad.",
+      resetWarning:
+        "Ez a művelet nem vonható vissza. Minden más felhasználó, adat és napló véglegesen törlődik.",
+      resetConfirmLabel: "Megerősítés: írd be a tenant slug-ot",
+      resetConfirmPlaceholder: "pl. cegem",
+      resetSlugHint: "A slug: {{slug}}",
+      resetSubmit: "Tenant alaphelyzetbe állítása",
+      resetPending: "Alaphelyzet folyamatban…",
+      resetConfirmDialog:
+        "Biztosan alaphelyzetbe állítod a tenantot? Minden adat törlődik, kivéve a tulajdonos belépési adatait.",
+      resetSuccess: "A tenant alaphelyzetbe állítva.",
       domainTitle: "Domain beállítások",
       domainIntro: "Itt tudsz egyedi domaint rögzíteni és DNS ellenőrzéssel aktiválni.",
       domainHowToTitle: "Teendők röviden",

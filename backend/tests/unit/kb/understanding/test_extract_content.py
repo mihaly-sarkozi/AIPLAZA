@@ -4,10 +4,13 @@ from __future__ import annotations
 import pytest
 
 from apps.kb.kb_understanding.adapters.ManualTextExtractorAdapter import ManualTextExtractorAdapter
+from apps.kb.kb_understanding.dto.ExtractResultDto import ExtractResult
 from apps.kb.kb_understanding.dto.ExtractedContentDto import ExtractedContentDto
+from apps.kb.kb_understanding.enums.ExtractStatus import ExtractStatus
 from apps.kb.kb_understanding.enums.UnderstandingErrorCode import UnderstandingErrorCode
 from apps.kb.kb_understanding.errors.UnderstandingProcessingError import UnderstandingProcessingError
 from apps.kb.kb_understanding.errors.UnderstandingValidationError import UnderstandingValidationError
+from apps.kb.kb_understanding.extract.part_builder import build_text_part
 from apps.kb.kb_understanding.service.ExtractContentService import ExtractContentService
 
 from tests.unit.kb.understanding.conftest import FakeContentRepository
@@ -29,11 +32,23 @@ class _FakeStorage:
 class _MarkerExtractor:
     def __init__(self, name: str) -> None:
         self.name = name
+        self.version = "1.0"
         self.called = False
 
-    def extract(self, data: bytes, *, mime_type: str | None = None) -> ExtractedContentDto:
+    def extract(self, data: bytes, *, mime_type: str | None = None) -> ExtractResult:
         self.called = True
-        return ExtractedContentDto(text=f"{self.name}-text", char_count=10, extractor=self.name)
+        part = build_text_part(page_number=1, part_index=0, text=f"{self.name}-text")
+        return ExtractResult(
+            total_pages=1,
+            parts=[part],
+            total_chars=len(part.text or ""),
+            warnings=[],
+            status=ExtractStatus.COMPLETED.value,
+            extractor_name=self.name,
+            extractor_version=self.version,
+            processed_pages=1,
+            failed_pages=0,
+        )
 
 
 def _service(storage=None):
@@ -58,10 +73,10 @@ def _ctx_with(ctx, **overrides):
 
 
 def test_manual_text_extractor_decodes_utf8():
-    dto = ManualTextExtractorAdapter().extract("árvíztűrő".encode("utf-8"))
-    assert dto.text == "árvíztűrő"
-    assert dto.char_count == len("árvíztűrő")
-    assert dto.extractor == "plain_text_v1"
+    result = ManualTextExtractorAdapter().extract("árvíztűrő".encode("utf-8"))
+    assert result.parts[0].text == "árvíztűrő"
+    assert result.total_chars == len("árvíztűrő")
+    assert result.extractor_name == "plain_text"
 
 
 def test_extract_selects_text_adapter_for_text_mime(ctx):
@@ -70,6 +85,7 @@ def test_extract_selects_text_adapter_for_text_mime(ctx):
     assert text.called and not pdf.called and not docx.called
     assert result.extractor == "text"
     assert repo.extracted[ctx.training_item_id] is not None
+    assert repo.parts[ctx.training_item_id]
 
 
 def test_extract_selects_pdf_adapter_by_mime(ctx):
@@ -102,9 +118,17 @@ def test_extract_storage_error_is_retryable(ctx):
 def test_extract_empty_content_fails_validation(ctx):
     class _EmptyExtractor:
         name = "empty"
+        version = "1.0"
 
         def extract(self, data, *, mime_type=None):
-            return ExtractedContentDto(text="   ", char_count=3, extractor=self.name)
+            return ExtractResult(
+                total_pages=0,
+                parts=[],
+                total_chars=0,
+                warnings=[],
+                status=ExtractStatus.FAILED.value,
+                extractor_name=self.name,
+            )
 
     repo = FakeContentRepository()
     service = ExtractContentService(
