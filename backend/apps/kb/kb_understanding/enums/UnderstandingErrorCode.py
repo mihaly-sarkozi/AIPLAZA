@@ -29,7 +29,6 @@ class UnderstandingErrorCode(str, Enum):
     TOO_MANY_PARTS = "too_many_parts"
     EMPTY_CONTENT = "empty_content"
     NORMALIZATION_FAILED = "normalization_failed"
-    STRUCTURE_DETECTION_FAILED = "structure_detection_failed"
     CHUNKING_FAILED = "chunking_failed"
     NO_CHUNKS = "no_chunks"
     VALIDATION_FAILED = "validation_failed"

@@ -130,11 +130,12 @@ class FakeChunkRepository:
         self.chunks: dict[str, list] = {}
         self.versions: dict[str, int] = {}
 
-    def replace_for_document(self, document_id: str, chunks: list) -> int:
-        self.chunks[document_id] = list(chunks)
-        if chunks:
-            self.versions[document_id] = max(int(getattr(c, "version", 1) or 1) for c in chunks)
-        return len(chunks)
+    def replace_for_document(self, document_id: str, chunks, *, batch_size: int = 100) -> int:
+        rows = list(chunks)
+        self.chunks[document_id] = rows
+        if rows:
+            self.versions[document_id] = max(int(getattr(c, "version", 1) or 1) for c in rows)
+        return len(rows)
 
     def list_for_document(self, document_id: str) -> list:
         return list(self.chunks.get(document_id, []))

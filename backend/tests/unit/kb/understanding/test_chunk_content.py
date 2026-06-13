@@ -62,6 +62,64 @@ def test_chunks_respect_max_char_limit(ctx):
     assert all(len(chunk.text) <= _CONFIG.chunk_max_chars for chunk in chunks)
 
 
+def test_long_split_has_split_metadata(ctx):
+    words = " ".join(f"szo{index}" for index in range(120))
+    chunks, _ = _chunk(ctx, [_norm_part(words)])
+    assert len(chunks) >= 2
+    assert chunks[0].metadata["split_index"] == 1
+    assert chunks[0].metadata["split_count"] == len(chunks)
+    assert chunks[0].metadata["parent_chunk_hash"]
+    assert chunks[0].metadata["parent_chunk_id"]
+    assert chunks[0].metadata["page_numbers_scope"] == "parent_logical_chunk"
+    assert chunks[1].metadata["parent_chunk_hash"] == chunks[0].metadata["parent_chunk_hash"]
+
+
+def test_table_always_own_chunk(ctx):
+    paragraph = "Rövid bekezdés szöveg, elég hosszú chunkhoz. " * 2
+    table_text = "| Név | Ár |\n| --- | --- |\n| Alma | 100 |"
+    parts = [
+        _norm_part(paragraph.strip(), order=0),
+        _norm_part(
+            table_text,
+            order=1,
+            part_type="TABLE",
+            metadata={
+                "block_kind": "table",
+                "headers": ["Név", "Ár"],
+                "rows": [["Alma", "100"]],
+                "row_count": 1,
+                "column_count": 2,
+            },
+        ),
+        _norm_part(paragraph.strip(), order=2),
+    ]
+    content_repo = FakeContentRepository()
+    content_repo.normalized_parts[ctx.training_item_id] = parts
+    chunk_repo = FakeChunkRepository()
+    result = ChunkContentService(chunk_repo, content_repo, config=_CONFIG).run(ctx, _normalized_summary())
+    assert len(result.chunks) == 3
+    assert result.chunks[1].chunk_type == ChunkType.TABLE
+    assert result.chunks[1].metadata["table_refs"]
+    assert result.chunks[1].metadata["headers"] == ["Név", "Ár"]
+    assert result.trace_summary["table_chunks"] == 1
+
+
+def test_uniform_metadata_required_fields(ctx):
+    text = "Tartalom egy, kellően hosszú szöveg a chunkhoz. " * 2
+    chunks, _ = _chunk(ctx, [_norm_part(text, order=0)])
+    metadata = chunks[0].metadata
+    for key in (
+        "source_part_ids",
+        "source_normalized_part_ids",
+        "page_numbers",
+        "document_orders",
+        "heading_path",
+        "heading_levels",
+        "block_kinds",
+    ):
+        assert key in metadata
+
+
 def test_long_split_has_overlap(ctx):
     words = " ".join(f"szo{index}" for index in range(120))
     chunks, _ = _chunk(ctx, [_norm_part(words)])

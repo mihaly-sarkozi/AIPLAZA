@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-# backend/apps/kb/kb_understanding/repository/ChunkRepository.py
-# Feladat: Tudás-chunk perzisztencia, dokumentum-szintű replace szemantikával.
-# Sárközi Mihály - 2026.06.11
+from collections.abc import Iterable, Iterator
 
 from sqlalchemy import delete, func, select
 
@@ -13,15 +11,36 @@ class ChunkRepository:
     def __init__(self, session_factory) -> None:
         self._session_factory = session_factory
 
-    def replace_for_document(self, document_id: str, chunks: list[KnowledgeChunk]) -> int:
+    def replace_for_document(
+        self,
+        document_id: str,
+        chunks: Iterable[KnowledgeChunk],
+        *,
+        batch_size: int = 100,
+    ) -> int:
         with self._session_factory() as session:
-            session.execute(
-                delete(KnowledgeChunk).where(KnowledgeChunk.document_id == document_id)
-            )
-            for chunk in chunks:
-                session.add(chunk)
-            session.commit()
-            return len(chunks)
+            try:
+                session.execute(
+                    delete(KnowledgeChunk).where(KnowledgeChunk.document_id == document_id)
+                )
+                total = 0
+                batch: list[KnowledgeChunk] = []
+                for chunk in chunks:
+                    batch.append(chunk)
+                    if len(batch) >= batch_size:
+                        session.add_all(batch)
+                        session.flush()
+                        total += len(batch)
+                        batch.clear()
+                if batch:
+                    session.add_all(batch)
+                    session.flush()
+                    total += len(batch)
+                session.commit()
+                return total
+            except Exception:
+                session.rollback()
+                raise
 
     def list_for_document(self, document_id: str) -> list[KnowledgeChunk]:
         with self._session_factory() as session:

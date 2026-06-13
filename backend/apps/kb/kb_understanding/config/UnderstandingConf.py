@@ -14,6 +14,7 @@ class UnderstandingConfig:
     chunk_overlap_chars: int = 200
     token_chars_ratio: float = 4.0
     normalize_batch_size: int = 100
+    chunk_insert_batch_size: int = 100
 
 
 DEFAULT_UNDERSTANDING_CONFIG = UnderstandingConfig()

@@ -96,8 +96,7 @@ def test_chunking_from_normalized_parts_carries_provenance(ctx) -> None:
     chunk_repo = FakeChunkRepository()
     result = ChunkContentService(chunk_repo, content_repo).run(ctx, _normalized_summary(part_count=2))
 
-    assert result.trace_summary["input_normalized_parts"] == 2
-    assert result.trace_summary["headings_seen"] == 1
+    assert result.trace_summary["input_parts"] == 2
     assert result.chunks[0].metadata["source_part_ids"] == ["und_part_1", "und_part_2"]
     assert result.chunks[0].metadata["source_normalized_part_ids"] == [
         "und_norm_part_1",
@@ -130,7 +129,7 @@ def test_chunking_marks_ocr_source(ctx) -> None:
     chunk_repo = FakeChunkRepository()
     result = ChunkContentService(chunk_repo, content_repo).run(ctx, _normalized_summary())
 
-    assert result.trace_summary["ocr_parts_seen"] == 1
+    assert result.trace_summary["ocr_chunks"] == 1
     assert result.chunks[0].metadata["is_from_ocr"] is True
     assert result.chunks[0].metadata["ocr_confidence"] == 0.91
     assert result.chunks[0].metadata["source_part_ids"] == ["und_part_ocr"]

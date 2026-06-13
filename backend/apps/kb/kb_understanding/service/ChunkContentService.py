@@ -1,13 +1,19 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import re
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Iterator
 
 from apps.kb.kb_understanding.chunk.NormalizedPartBlockClassifier import (
     LogicalBlockType,
     NormalizedPartBlockClassifier,
+)
+from apps.kb.kb_understanding.chunk.chunk_metadata import build_uniform_chunk_metadata
+from apps.kb.kb_understanding.chunk.parent_chunk_hash import (
+    compute_parent_chunk_hash,
+    parent_chunk_id_from_hash,
 )
 from apps.kb.kb_understanding.config.UnderstandingConf import (
     DEFAULT_UNDERSTANDING_CONFIG,
@@ -27,6 +33,8 @@ from apps.kb.kb_understanding.repository.ChunkRepository import ChunkRepository
 from apps.kb.kb_understanding.repository.ContentRepository import ContentRepository
 from apps.kb.kb_understanding.validation.ValidateChunks import ValidateChunks
 from apps.kb.shared.ids import new_id
+
+logger = logging.getLogger(__name__)
 
 _BLOCK_TO_CHUNK_TYPE = {
     LogicalBlockType.LIST: ChunkType.LIST,
@@ -80,28 +88,26 @@ class _PendingChunk:
     def text(self) -> str:
         return "\n\n".join(self.texts)
 
+    @property
+    def is_table_only(self) -> bool:
+        return bool(self.block_types) and all(
+            block_type == LogicalBlockType.TABLE for block_type in self.block_types
+        )
+
 
 @dataclass
 class _ChunkStats:
-    input_normalized_parts: int = 0
-    headings_seen: int = 0
-    tables_seen: int = 0
-    lists_seen: int = 0
-    ocr_parts_seen: int = 0
+    input_parts: int = 0
+    merged_chunks: int = 0
+    split_chunks: int = 0
+    table_chunks: int = 0
+    ocr_chunks: int = 0
     headers_skipped: int = 0
     footers_skipped: int = 0
 
     def observe(self, block_type: LogicalBlockType) -> None:
-        self.input_normalized_parts += 1
-        if block_type in _HEADING_TYPES:
-            self.headings_seen += 1
-        elif block_type == LogicalBlockType.TABLE:
-            self.tables_seen += 1
-        elif block_type == LogicalBlockType.LIST:
-            self.lists_seen += 1
-        elif block_type == LogicalBlockType.OCR_TEXT:
-            self.ocr_parts_seen += 1
-        elif block_type == LogicalBlockType.HEADER:
+        self.input_parts += 1
+        if block_type == LogicalBlockType.HEADER:
             self.headers_skipped += 1
         elif block_type == LogicalBlockType.FOOTER:
             self.footers_skipped += 1
@@ -124,24 +130,40 @@ class ChunkContentService:
 
     def run(self, ctx: UnderstandingJobContext, normalized: NormalizedContentDto) -> ChunkContentResultDto:
         classified_parts, stats = self._classify_normalized_parts(ctx, normalized)
-        chunks = self._build_chunks(classified_parts)
-        self._validate(chunks)
+        chunks, stats = self._build_chunks(ctx, classified_parts, stats)
+        validation = self._validate(chunks)
+        for warning in validation.warnings:
+            logger.warning("Chunk validation warning (item=%s): %s", ctx.training_item_id, warning)
+
         version = self._chunk_repository.max_version_for_document(ctx.training_item_id) + 1
         self._chunk_repository.replace_for_document(
             ctx.training_item_id,
-            [chunk_dto_to_orm(ctx, chunk, version=version) for chunk in chunks],
+            self._iter_chunk_orms(ctx, chunks, version=version),
+            batch_size=self._config.chunk_insert_batch_size,
         )
         trace_summary = {
-            "input_normalized_parts": stats.input_normalized_parts,
+            "input_parts": stats.input_parts,
             "chunks_created": len(chunks),
-            "headings_seen": stats.headings_seen,
-            "tables_seen": stats.tables_seen,
-            "lists_seen": stats.lists_seen,
-            "ocr_parts_seen": stats.ocr_parts_seen,
+            "table_chunks": stats.table_chunks,
+            "split_chunks": stats.split_chunks,
+            "merged_chunks": stats.merged_chunks,
+            "ocr_chunks": stats.ocr_chunks,
             "headers_skipped": stats.headers_skipped,
             "footers_skipped": stats.footers_skipped,
         }
+        if validation.warnings:
+            trace_summary["validation_warnings"] = list(validation.warnings)
         return ChunkContentResultDto(chunks=chunks, trace_summary=trace_summary)
+
+    @staticmethod
+    def _iter_chunk_orms(
+        ctx: UnderstandingJobContext,
+        chunks: list[KnowledgeChunkDto],
+        *,
+        version: int,
+    ) -> Iterator:
+        for chunk in chunks:
+            yield chunk_dto_to_orm(ctx, chunk, version=version)
 
     def _classify_normalized_parts(
         self,
@@ -315,7 +337,12 @@ class ChunkContentService:
             "current_section_title": path_info.get("current_section_title"),
         }
 
-    def _build_chunks(self, parts: list[_ClassifiedPart]) -> list[KnowledgeChunkDto]:
+    def _build_chunks(
+        self,
+        ctx: UnderstandingJobContext,
+        parts: list[_ClassifiedPart],
+        stats: _ChunkStats,
+    ) -> tuple[list[KnowledgeChunkDto], _ChunkStats]:
         if not parts:
             raise UnderstandingValidationError(UnderstandingErrorCode.CHUNKING_FAILED)
 
@@ -329,6 +356,13 @@ class ChunkContentService:
                     pending_chunks.append(current)
                 current = self._seed_pending(part)
                 current_section = part.metadata.get("current_section_title") or part.text[:512]
+                continue
+
+            if part.block_type == LogicalBlockType.TABLE:
+                if current.texts:
+                    pending_chunks.append(current)
+                    current = _PendingChunk()
+                pending_chunks.append(self._seed_pending(part))
                 continue
 
             section = part.section_title or part.metadata.get("current_section_title") or current_section
@@ -348,8 +382,9 @@ class ChunkContentService:
         if current.texts:
             pending_chunks.append(current)
 
-        merged = self._merge_short(pending_chunks)
-        return self._finalize(merged)
+        merged = self._merge_short(pending_chunks, stats)
+        chunks = self._finalize(ctx, merged, stats)
+        return chunks, stats
 
     @staticmethod
     def _seed_pending(part: _ClassifiedPart) -> _PendingChunk:
@@ -405,15 +440,20 @@ class ChunkContentService:
         return {
             "table_index": metadata.get("table_index"),
             "headers": metadata.get("headers"),
+            "rows": metadata.get("rows"),
             "row_count": metadata.get("row_count"),
             "column_count": metadata.get("column_count"),
         }
 
-    def _merge_short(self, chunks: list[_PendingChunk]) -> list[_PendingChunk]:
+    def _merge_short(self, chunks: list[_PendingChunk], stats: _ChunkStats) -> list[_PendingChunk]:
         merged: list[_PendingChunk] = []
         for chunk in chunks:
+            if chunk.is_table_only:
+                merged.append(chunk)
+                continue
             if (
                 merged
+                and not merged[-1].is_table_only
                 and chunk.length < self._config.chunk_min_chars
                 and merged[-1].length + chunk.length <= self._config.chunk_max_chars
             ):
@@ -434,42 +474,87 @@ class ChunkContentService:
                     previous.heading_path = chunk.heading_path
                 if chunk.heading_levels:
                     previous.heading_levels = chunk.heading_levels
+                stats.merged_chunks += 1
                 continue
             merged.append(chunk)
         return merged
 
-    def _finalize(self, chunks: list[_PendingChunk]) -> list[KnowledgeChunkDto]:
+    def _finalize(
+        self,
+        ctx: UnderstandingJobContext,
+        chunks: list[_PendingChunk],
+        stats: _ChunkStats,
+    ) -> list[KnowledgeChunkDto]:
         result: list[KnowledgeChunkDto] = []
         order_index = 0
         for chunk in chunks:
-            metadata = {
-                "source_normalized_part_ids": [
-                    part_id for part_id in chunk.source_normalized_part_ids if part_id
-                ],
-                "source_part_ids": [part_id for part_id in chunk.source_part_ids if part_id],
-                "page_numbers": sorted({page for page in chunk.page_numbers if page is not None}),
-                "document_orders": sorted({order for order in chunk.document_orders if order is not None}),
-                "section_title": chunk.section_title,
-                "heading_path": chunk.heading_path,
-                "heading_levels": chunk.heading_levels,
-                "block_kinds": [kind for kind in chunk.block_kinds if kind],
-                "table_refs": chunk.table_refs,
-                "bbox_refs": [bbox for bbox in chunk.bbox_refs if bbox],
-                "style_names": [name for name in chunk.style_names if name],
-                "is_from_ocr": chunk.is_from_ocr,
-                "ocr_confidence": round(sum(chunk.ocr_confidences) / len(chunk.ocr_confidences), 4)
+            source_part_ids = [part_id for part_id in chunk.source_part_ids if part_id]
+            source_normalized_part_ids = [
+                part_id for part_id in chunk.source_normalized_part_ids if part_id
+            ]
+            page_numbers = sorted({page for page in chunk.page_numbers if page is not None})
+            document_orders = sorted({order for order in chunk.document_orders if order is not None})
+            block_kinds = [kind for kind in chunk.block_kinds if kind]
+            bbox_refs = [bbox for bbox in chunk.bbox_refs if bbox]
+            style_names = [name for name in chunk.style_names if name]
+            ocr_confidence = (
+                round(sum(chunk.ocr_confidences) / len(chunk.ocr_confidences), 4)
                 if chunk.ocr_confidences
-                else None,
-            }
-            for part in self._split_long(chunk.text):
+                else None
+            )
+
+            parent_hash = compute_parent_chunk_hash(
+                training_item_id=ctx.training_item_id,
+                heading_path=chunk.heading_path,
+                section_title=chunk.section_title,
+                source_part_ids=source_part_ids,
+            )
+            parent_id = parent_chunk_id_from_hash(parent_hash)
+            text_parts = self._split_long(chunk.text)
+            split_count = len(text_parts)
+            if split_count > 1:
+                stats.split_chunks += split_count
+
+            chunk_type = ChunkType.TABLE if chunk.is_table_only else self._chunk_type(chunk.block_types)
+            if chunk_type == ChunkType.TABLE:
+                stats.table_chunks += 1
+            if chunk.is_from_ocr:
+                stats.ocr_chunks += 1
+
+            for split_index, part_text in enumerate(text_parts, start=1):
+                metadata = build_uniform_chunk_metadata(
+                    source_part_ids=source_part_ids,
+                    source_normalized_part_ids=source_normalized_part_ids,
+                    page_numbers=page_numbers,
+                    document_orders=document_orders,
+                    section_title=chunk.section_title,
+                    heading_path=chunk.heading_path,
+                    heading_levels=chunk.heading_levels,
+                    block_kinds=block_kinds,
+                    table_refs=chunk.table_refs,
+                    bbox_refs=bbox_refs,
+                    style_names=style_names,
+                    is_from_ocr=chunk.is_from_ocr,
+                    ocr_confidence=ocr_confidence,
+                    split_index=split_index if split_count > 1 else None,
+                    split_count=split_count if split_count > 1 else None,
+                    parent_chunk_id=parent_id if split_count > 1 else None,
+                    parent_chunk_hash=parent_hash if split_count > 1 else None,
+                )
+                if chunk.is_table_only and chunk.table_refs:
+                    table_ref = chunk.table_refs[0]
+                    metadata["headers"] = table_ref.get("headers")
+                    metadata["row_count"] = table_ref.get("row_count")
+                    metadata["column_count"] = table_ref.get("column_count")
+
                 result.append(
                     KnowledgeChunkDto(
                         chunk_id=new_id("chunk"),
-                        text=part,
-                        chunk_type=self._chunk_type(chunk.block_types),
+                        text=part_text,
+                        chunk_type=chunk_type,
                         order_index=order_index,
-                        token_count=max(1, int(len(part) / self._config.token_chars_ratio)),
-                        checksum=hashlib.sha256(part.encode("utf-8")).hexdigest(),
+                        token_count=max(1, int(len(part_text) / self._config.token_chars_ratio)),
+                        checksum=hashlib.sha256(part_text.encode("utf-8")).hexdigest(),
                         page_number=chunk.page_number,
                         section_title=chunk.section_title,
                         metadata=metadata,
