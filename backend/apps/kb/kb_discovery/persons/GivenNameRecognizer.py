@@ -51,6 +51,10 @@ class GivenNameRecognizer(BaseRecognizer):
                         start_offset=match.start(1),
                         end_offset=match.end(1),
                         confidence=self._scorer.score_given_name_candidate(),
+                        source=self.name,
+                        language_code=chunk.language_code,
+                        subtype="given_name",
+                        metadata=(("signal", "weak"),),
                     )
                 )
         return candidates

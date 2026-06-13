@@ -9,6 +9,7 @@ from apps.kb.kb_discovery.common.EntityCandidate import EntityCandidate
 from apps.kb.kb_discovery.common.TextNormalizer import TextNormalizer
 from apps.kb.kb_discovery.dto.DiscoveryChunkDto import DiscoveryChunkDto
 from apps.kb.kb_discovery.enums.EntityType import EntityType
+from apps.kb.kb_discovery.entities.entity_type_resolver import resolve_entity_type
 from apps.kb.kb_discovery.gazetteers.SystemsGazetteer import SystemsGazetteer
 
 
@@ -41,6 +42,9 @@ class SystemNameRecognizer(BaseRecognizer):
                             start_offset=match.start(),
                             end_offset=match.end(),
                             confidence=0.9,
+                            source=self.name,
+                            language_code=chunk.language_code,
+                            subtype="system_name",
                         )
                     )
         return candidates
@@ -59,11 +63,16 @@ class DictionaryEntityRecognizer(BaseRecognizer):
         candidates: list[EntityCandidate] = []
         for chunk in chunks:
             for entry in context.entity_dictionary:
-                names = [str(entry.get("name") or "").strip()]
+                entry_name = str(entry.get("name") or "").strip()
+                names = [entry_name] if entry_name else []
                 names.extend(
                     str(alias).strip() for alias in (entry.get("aliases") or []) if str(alias).strip()
                 )
-                entity_type = EntityType(str(entry.get("type") or EntityType.OTHER.value))
+                entity_type = resolve_entity_type(
+                    entry.get("type"),
+                    entry_name=entry_name or "unknown",
+                    context=context,
+                )
                 confidence = float(entry.get("confidence") or 0.8)
                 for name in dict.fromkeys(names):
                     if not name:
@@ -81,6 +90,10 @@ class DictionaryEntityRecognizer(BaseRecognizer):
                                 start_offset=match.start(),
                                 end_offset=match.end(),
                                 confidence=confidence,
+                                source=self.name,
+                                language_code=chunk.language_code,
+                                subtype="dictionary",
+                                metadata=(("dictionary_entry", entry_name),),
                             )
                         )
         return candidates
@@ -118,6 +131,9 @@ class ProductRecognizer(BaseRecognizer):
                             start_offset=match.start(),
                             end_offset=match.end(),
                             confidence=float(entry.get("confidence") or 0.85),
+                            source=self.name,
+                            language_code=chunk.language_code,
+                            subtype="product",
                         )
                     )
         return candidates

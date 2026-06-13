@@ -52,6 +52,8 @@ class PersonAliasRecognizer(BaseRecognizer):
                                 ambiguous=entry.normalized_alias in ambiguous_aliases,
                             ),
                             aliases=(entry.raw_alias,),
+                            source=self.name,
+                            subtype="directory_alias",
                         )
                     )
         return candidates

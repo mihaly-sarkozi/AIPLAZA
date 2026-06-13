@@ -44,7 +44,7 @@ class LegalFormGazetteer:
         suffix_group = self.suffix_group_for_language(language_code)
         name_token = rf"[A-ZÁÉÍÓÖŐÚÜŰ0-9][{_WORD_CHAR}\-]*"
         return re.compile(
-            rf"(?<![{_WORD_CHAR}])((?:{name_token}(?:\s+{name_token})*)\s+(?:{suffix_group})){_NOT_AFTER_SUFFIX}",
+            rf"(?<![{_WORD_CHAR}])((?:{name_token}(?:\s+{name_token})*)(?:\s+|,\s+)(?:{suffix_group})){_NOT_AFTER_SUFFIX}",
             re.UNICODE | re.IGNORECASE,
         )
 

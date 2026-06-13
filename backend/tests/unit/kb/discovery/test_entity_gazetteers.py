@@ -66,6 +66,7 @@ def test_legal_form_recognizer_finds_hungarian_company():
         ("Grupo Norte S.A. reportó resultados.", "es", "Norte S.A."),
         ("Acme Solutions Inc. signed the deal.", "en", "Acme Solutions Inc."),
         ("Global Trade Ltd. opened a branch.", "en", "Global Trade Ltd."),
+        ("OpenAI, LLC policy applies.", "en", "OpenAI, LLC"),
     ],
 )
 def test_legal_form_recognizer_handles_dotted_suffixes(text, language_code, expected_fragment):
@@ -98,6 +99,17 @@ def test_systems_gazetteer_loads_tenant_and_kb_overlays():
     assert "HubSpot" in systems
     assert "Belső CRM" in systems
     assert "Projekt Atlas API" in systems
+
+
+def test_person_directory_provider_loads_tenant_file():
+    from apps.kb.kb_discovery.persons.PersonDirectoryProvider import PersonDirectoryProvider
+
+    directory = PersonDirectoryProvider().load(
+        tenant_slug="demo",
+        knowledge_base_id="missing-kb",
+    )
+    names = {entry["name"] for entry in directory}
+    assert "Mihály Sárközi" in names
 
 
 def test_person_alias_entry_import_has_no_circular_dependency():

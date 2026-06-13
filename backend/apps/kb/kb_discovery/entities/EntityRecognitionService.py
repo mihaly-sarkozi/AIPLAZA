@@ -18,7 +18,11 @@ from apps.kb.kb_discovery.entities.providers.EntityDictionaryProvider import (
 )
 from apps.kb.kb_discovery.gazetteers.LegalFormGazetteer import LegalFormGazetteer
 from apps.kb.kb_discovery.gazetteers.SystemsGazetteer import SystemsGazetteer
-from apps.kb.kb_discovery.mapper.discovery_mapper import entity_dto_to_orm, mention_dto_to_orm
+from apps.kb.kb_discovery.mapper.discovery_mapper import (
+    entity_dto_to_orm,
+    mention_dto_from_candidate,
+    mention_dto_to_orm,
+)
 from apps.kb.kb_discovery.repository.EntityRepository import EntityMentionRepository, EntityRepository
 
 
@@ -55,7 +59,7 @@ class EntityRecognitionService:
         *,
         person_entities: list[KnowledgeEntityDto] | None = None,
         person_mentions: list[EntityMentionDto] | None = None,
-    ) -> tuple[list[KnowledgeEntityDto], list[EntityMentionDto]]:
+    ) -> tuple[list[KnowledgeEntityDto], list[EntityMentionDto], list[dict]]:
         context = DiscoveryContext(
             tenant_slug=ctx.tenant_slug,
             knowledge_base_id=ctx.knowledge_base_id,
@@ -65,6 +69,7 @@ class EntityRecognitionService:
                 knowledge_base_id=ctx.knowledge_base_id,
             ),
         )
+        chunk_by_id = {chunk.chunk_id: chunk for chunk in chunks}
         candidates = []
         for recognizer in self._recognizers:
             candidates.extend(recognizer.recognize(chunks, context))
@@ -74,17 +79,8 @@ class EntityRecognitionService:
         mentions: list[EntityMentionDto] = list(person_mentions or [])
 
         for candidate in candidates:
-            mentions.append(
-                EntityMentionDto(
-                    entity_type=candidate.entity_type,
-                    chunk_id=candidate.chunk_id,
-                    raw_text=candidate.name,
-                    normalized_name=candidate.normalized_name,
-                    start_offset=candidate.start_offset,
-                    end_offset=candidate.end_offset,
-                    confidence=candidate.confidence,
-                )
-            )
+            chunk = chunk_by_id.get(candidate.chunk_id)
+            mentions.append(mention_dto_from_candidate(ctx, chunk, candidate))
             key = (candidate.entity_type.value, candidate.normalized_name)
             existing = entity_map.get(key)
             chunk_ids = tuple({*(existing.chunk_ids if existing else ()), candidate.chunk_id})
@@ -119,7 +115,7 @@ class EntityRecognitionService:
         self._mention_repository.replace_for_job(
             ctx.job_id, [mention_dto_to_orm(ctx, mention) for mention in mentions]
         )
-        return entities, mentions
+        return entities, mentions, list(context.dictionary_warnings)
 
 
 __all__ = ["EntityRecognitionService"]

@@ -26,6 +26,9 @@ def _ensure_dirs() -> None:
         "systems/knowledge_bases",
         "legal_forms",
         "person_aliases",
+        "persons",
+        "persons/tenants",
+        "persons/knowledge_bases",
         "names",
     ):
         (DATA_ROOT / sub).mkdir(parents=True, exist_ok=True)
@@ -411,6 +414,27 @@ def _build_example_tenant_kb_files() -> None:
     )
 
 
+def _build_example_person_files() -> None:
+    _write_json(
+        DATA_ROOT / "persons" / "tenants" / "demo.json",
+        [
+            {
+                "name": "Mihály Sárközi",
+                "aliases": ["Mihály", "Misi", "Sarkozi", "Sárközi"],
+            }
+        ],
+    )
+    _write_json(
+        DATA_ROOT / "persons" / "knowledge_bases" / "example-kb.json",
+        [
+            {
+                "name": "Carlos García",
+                "aliases": ["Carlos", "Garcia", "García"],
+            }
+        ],
+    )
+
+
 def _write_fallback_given_names() -> None:
     fallback = {
         "hu": ["Mihály", "István", "László", "Gábor", "József", "Ferenc", "Anna", "Katalin"],
@@ -429,6 +453,7 @@ def main() -> int:
     _build_legal_forms()
     _build_hu_es_aliases()
     _build_example_tenant_kb_files()
+    _build_example_person_files()
     _download_en_nicknames()
     _export_given_names()
     print(f"Entity gazetteer data ready under {DATA_ROOT.relative_to(ROOT)}")

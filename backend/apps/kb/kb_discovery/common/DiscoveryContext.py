@@ -21,6 +21,7 @@ class DiscoveryContext:
     person_directory: list[dict[str, Any]] = field(default_factory=list)
     entity_dictionary: list[dict[str, Any]] = field(default_factory=list)
     site_dictionary: list[dict[str, Any]] = field(default_factory=list)
+    dictionary_warnings: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass

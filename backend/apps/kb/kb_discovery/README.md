@@ -35,3 +35,5 @@ Példa fájlok a `data/` alatt:
 - `dictionaries/knowledge_bases/{knowledge_base_id}.json`
 - `systems/tenants/{tenant_slug}.json`
 - `systems/knowledge_bases/{knowledge_base_id}.json`
+- `persons/tenants/{tenant_slug}.json`
+- `persons/knowledge_bases/{knowledge_base_id}.json`

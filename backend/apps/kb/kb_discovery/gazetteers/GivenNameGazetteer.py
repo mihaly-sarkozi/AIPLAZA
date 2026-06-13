@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING
 
 from apps.kb.kb_discovery.gazetteers.data_paths import data_file
 from apps.kb.kb_discovery.gazetteers.loaders import load_name_lines
+
+if TYPE_CHECKING:
+    from names_dataset import NameDataset
 
 logger = logging.getLogger(__name__)
 
@@ -12,6 +16,30 @@ _COUNTRY_BY_CODE = {
     "en": "United Kingdom",
     "es": "Spain",
 }
+
+_DATASET: NameDataset | None = None
+_DATASET_UNAVAILABLE = False
+
+
+def _shared_name_dataset() -> NameDataset | None:
+    global _DATASET, _DATASET_UNAVAILABLE
+    if _DATASET_UNAVAILABLE:
+        return None
+    if _DATASET is not None:
+        return _DATASET
+    try:
+        from names_dataset import NameDataset
+    except ImportError:
+        logger.debug("names-dataset not available for GivenNameGazetteer")
+        _DATASET_UNAVAILABLE = True
+        return None
+    try:
+        _DATASET = NameDataset()
+    except Exception:
+        logger.warning("names-dataset initialization failed", exc_info=True)
+        _DATASET_UNAVAILABLE = True
+        return None
+    return _DATASET
 
 
 class GivenNameGazetteer:
@@ -40,13 +68,10 @@ class GivenNameGazetteer:
         country = _COUNTRY_BY_CODE.get(code)
         if not country:
             return set()
-        try:
-            from names_dataset import NameDataset
-        except ImportError:
-            logger.debug("names-dataset not available for GivenNameGazetteer")
+        dataset = _shared_name_dataset()
+        if dataset is None:
             return set()
 
-        dataset = NameDataset()
         collected: set[str] = set()
         for gender in ("M", "F"):
             try:

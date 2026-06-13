@@ -63,12 +63,14 @@ def make_discovery_services_provider(session_factory: Any):
                     UnderstandingJobReaderAdapter,
                 )
                 from apps.kb.kb_discovery.bootstrap.discovery_assembly import build_discovery_services
+                from apps.kb.kb_processing.bootstrap.processing_assembly import build_processing_services
                 from apps.kb.kb_understanding.repository.ChunkRepository import ChunkRepository
                 from apps.kb.kb_understanding.repository.UnderstandingJobRepository import (
                     UnderstandingJobRepository,
                 )
 
                 chunk_repository = ChunkRepository(session_factory)
+                processing = build_processing_services(session_factory=session_factory)
                 cache["services"] = build_discovery_services(
                     session_factory=session_factory,
                     chunk_reader=ChunkReaderAdapter(chunk_repository),
@@ -76,6 +78,7 @@ def make_discovery_services_provider(session_factory: Any):
                     understanding_job_reader=UnderstandingJobReaderAdapter(
                         UnderstandingJobRepository(session_factory)
                     ),
+                    flow_recorder=processing.flow_recorder,
                 )
             return cache["services"]
 

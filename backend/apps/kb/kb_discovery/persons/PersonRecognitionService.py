@@ -5,7 +5,9 @@ from apps.kb.kb_discovery.common.DiscoveryContext import DiscoveryContext
 from apps.kb.kb_discovery.dto.DiscoveryChunkDto import DiscoveryChunkDto
 from apps.kb.kb_discovery.dto.DiscoveryJobContext import DiscoveryJobContext
 from apps.kb.kb_discovery.dto.KnowledgeEntityDto import EntityMentionDto, KnowledgeEntityDto
-from apps.kb.kb_discovery.mapper.discovery_mapper import mention_dto_to_orm
+from apps.kb.kb_discovery.gazetteers.GivenNameGazetteer import GivenNameGazetteer
+from apps.kb.kb_discovery.mapper.discovery_mapper import mention_dto_from_candidate, mention_dto_to_orm
+from apps.kb.kb_discovery.persons.FullPersonNameRecognizer import FullPersonNameRecognizer
 from apps.kb.kb_discovery.persons.GivenNameRecognizer import GivenNameRecognizer
 from apps.kb.kb_discovery.persons.PersonAliasRecognizer import PersonAliasRecognizer
 from apps.kb.kb_discovery.persons.PersonConfidenceScorer import PERSON_ENTITY_MIN_CONFIDENCE
@@ -21,12 +23,16 @@ class PersonRecognitionService:
         directory_provider: PersonDirectoryProvider | None = None,
         alias_recognizer: PersonAliasRecognizer | None = None,
         given_name_recognizer: GivenNameRecognizer | None = None,
+        full_name_recognizer: FullPersonNameRecognizer | None = None,
+        given_name_gazetteer: GivenNameGazetteer | None = None,
     ) -> None:
         self._entity_repository = entity_repository
         self._mention_repository = mention_repository
         self._directory_provider = directory_provider or PersonDirectoryProvider()
+        gazetteer = given_name_gazetteer or GivenNameGazetteer()
         self._alias_recognizer = alias_recognizer or PersonAliasRecognizer()
-        self._given_name_recognizer = given_name_recognizer or GivenNameRecognizer()
+        self._given_name_recognizer = given_name_recognizer or GivenNameRecognizer(gazetteer)
+        self._full_name_recognizer = full_name_recognizer or FullPersonNameRecognizer(gazetteer)
         self._merger = CandidateMerger()
 
     def run(
@@ -45,26 +51,19 @@ class PersonRecognitionService:
             training_item_id=ctx.training_item_id,
             person_directory=directory,
         )
+        chunk_by_id = {chunk.chunk_id: chunk for chunk in chunks}
         alias_candidates = self._alias_recognizer.recognize(chunks, context)
         given_candidates = self._given_name_recognizer.recognize(chunks, context)
-        merged = self._merger.merge(alias_candidates + given_candidates)
+        full_name_candidates = self._full_name_recognizer.recognize(chunks, context)
+        merged = self._merger.merge(alias_candidates + given_candidates + full_name_candidates)
 
         mentions: list[EntityMentionDto] = []
         entity_map: dict[tuple[str, str], KnowledgeEntityDto] = {}
         for candidate in merged:
             if candidate.confidence < PERSON_ENTITY_MIN_CONFIDENCE:
                 continue
-            mentions.append(
-                EntityMentionDto(
-                    entity_type=candidate.entity_type,
-                    chunk_id=candidate.chunk_id,
-                    raw_text=candidate.name,
-                    normalized_name=candidate.normalized_name,
-                    start_offset=candidate.start_offset,
-                    end_offset=candidate.end_offset,
-                    confidence=candidate.confidence,
-                )
-            )
+            chunk = chunk_by_id.get(candidate.chunk_id)
+            mentions.append(mention_dto_from_candidate(ctx, chunk, candidate))
             key = (candidate.entity_type.value, candidate.normalized_name)
             existing = entity_map.get(key)
             chunk_ids = tuple({*(existing.chunk_ids if existing else ()), candidate.chunk_id})

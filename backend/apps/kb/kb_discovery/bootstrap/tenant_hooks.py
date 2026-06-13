@@ -43,7 +43,7 @@ def register_kb_discovery_tenant_hooks() -> None:
         [
             TenantSchemaHook(
                 name="kb_discovery",
-                revision="kb.discovery.schema.v2",
+                revision="kb.discovery.schema.v3",
                 install=_install_kb_discovery_schema,
                 table_names=(
                     "kb_discovery_jobs",

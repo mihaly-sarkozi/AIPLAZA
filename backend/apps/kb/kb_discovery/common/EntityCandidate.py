@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Any
 
 from apps.kb.kb_discovery.enums.EntityType import EntityType
 
@@ -15,6 +16,10 @@ class EntityCandidate:
     end_offset: int
     confidence: float
     aliases: tuple[str, ...] = field(default_factory=tuple)
+    source: str = ""
+    language_code: str | None = None
+    subtype: str | None = None
+    metadata: tuple[tuple[str, Any], ...] = ()
 
 
 __all__ = ["EntityCandidate"]

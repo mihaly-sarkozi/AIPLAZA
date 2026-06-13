@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 from apps.kb.kb_discovery.common.BaseRecognizer import BaseRecognizer
 from apps.kb.kb_discovery.common.DiscoveryContext import DiscoveryContext
 from apps.kb.kb_discovery.common.EntityCandidate import EntityCandidate
@@ -11,7 +13,7 @@ from apps.kb.kb_discovery.gazetteers.LegalFormGazetteer import LegalFormGazettee
 
 class LegalFormCompanyRecognizer(BaseRecognizer):
     name = "legal_form_company"
-    version = "1.1"
+    version = "1.2"
 
     def __init__(self, gazetteer: LegalFormGazetteer | None = None) -> None:
         self._gazetteer = gazetteer or LegalFormGazetteer()
@@ -28,6 +30,7 @@ class LegalFormCompanyRecognizer(BaseRecognizer):
                 name = match.group(1).strip(" ,;")
                 if len(name) < 3:
                     continue
+                legal_form = self._extract_legal_form(name, chunk.language_code)
                 candidates.append(
                     EntityCandidate(
                         entity_type=EntityType.COMPANY,
@@ -37,9 +40,24 @@ class LegalFormCompanyRecognizer(BaseRecognizer):
                         start_offset=match.start(1),
                         end_offset=match.end(1),
                         confidence=0.93,
+                        source=self.name,
+                        language_code=chunk.language_code,
+                        subtype="legal_entity",
+                        metadata=(
+                            ("legal_form", legal_form),
+                            ("matched_pattern", "company_legal_suffix"),
+                        ),
                     )
                 )
         return candidates
+
+    def _extract_legal_form(self, company_name: str, language_code: str | None) -> str:
+        forms = self._gazetteer.forms_for_language(language_code)
+        normalized_name = company_name.casefold()
+        for form in sorted(forms, key=len, reverse=True):
+            if normalized_name.endswith(form.casefold()):
+                return form
+        return ""
 
     @staticmethod
     def _longest_non_overlapping(

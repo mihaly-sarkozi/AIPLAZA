@@ -18,7 +18,7 @@ from apps.kb.kb_discovery.topics.TopicDetectionService import TopicDetectionServ
 
 pytestmark = pytest.mark.unit
 
-SAMPLE = "Az ACME Kft. 2026. július 1-től a budapesti irodában HubSpotot használ."
+SAMPLE = "Az ACME Kft. 2026. július 1-től a budapesti irodában HubSpot használatával dolgoznak."
 
 
 class _FakeRepo:
@@ -64,7 +64,14 @@ def test_full_sentence_company_system_temporal_spatial():
     )
 
     companies = CompanyNameRecognizer().recognize(chunks, context)
-    systems = SystemNameRecognizer().recognize(chunks, context)
+    systems = SystemNameRecognizer().recognize(
+        chunks,
+        DiscoveryContext(
+            tenant_slug="tenant",
+            knowledge_base_id="kb1",
+            training_item_id="item1",
+        ),
+    )
     temporal = DateRecognizer().recognize(chunks[0])
     spatial = LocationRecognizer().recognize(SAMPLE)
 
@@ -79,7 +86,7 @@ def test_full_sentence_keywords_topics_relationships():
     chunks = [_chunk()]
 
     entity_service = EntityRecognitionService(_FakeRepo(), _FakeRepo())
-    entities, _ = entity_service.run(ctx, chunks)
+    entities, _ = entity_service.run(ctx, chunks)[:2]
 
     keywords = KeywordExtractionService(_FakeRepo()).run(ctx, chunks)
     topics = TopicDetectionService(_FakeRepo()).run(ctx, chunks)

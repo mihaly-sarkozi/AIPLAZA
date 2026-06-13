@@ -37,6 +37,7 @@ def build_discovery_services(
     understanding_job_reader: UnderstandingJobReaderPort | None = None,
     chunk_language_writer: ChunkLanguageWriterPort | None = None,
     person_directory=None,
+    flow_recorder=None,
 ) -> DiscoveryServices:
     job_repository = DiscoveryJobRepository(session_factory)
     step_run_repository = DiscoveryStepRunRepository(session_factory)
@@ -57,6 +58,7 @@ def build_discovery_services(
             entity_repository,
             mention_repository,
             person_directory=person_directory,
+            flow_recorder=flow_recorder,
         ),
         enrichment_service=LocalKnowledgeEnrichmentService(
             enrichment_repository,
