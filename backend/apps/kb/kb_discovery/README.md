@@ -23,5 +23,15 @@ LANGUAGE_DETECTION → ENTITY_EXTRACTION → LOCAL_KNOWLEDGE_ENRICHMENT
 ## Szabályok
 
 - Nincs LLM — csak regex, dictionary, alias, heurisztika
+- Nincs szintaktikai NLP pipeline (Stanza / spaCy / UDPipe nincs bekötve)
 - Entitás/enrichment/relationship/score tulajdonosa: `kb_discovery`
 - Meglévő táblanevek kompatibilitás miatt megmaradhatnak (`kb_entities`, `kb_enrichments`, stb.)
+
+## Tenant / KB adatfájlok
+
+Példa fájlok a `data/` alatt:
+
+- `dictionaries/tenants/{tenant_slug}.json`
+- `dictionaries/knowledge_bases/{knowledge_base_id}.json`
+- `systems/tenants/{tenant_slug}.json`
+- `systems/knowledge_bases/{knowledge_base_id}.json`

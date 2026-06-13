@@ -19,10 +19,30 @@ class SystemsGazetteer:
         knowledge_base_id: str,
         extra: tuple[str, ...] | None = None,
     ) -> tuple[str, ...]:
-        names = list(self._default)
+        names: list[str] = list(self._default)
+        if tenant_slug:
+            tenant_payload = load_json(
+                data_file("systems", "tenants", f"{tenant_slug}.json"),
+                [],
+            )
+            names.extend(self._names_from_payload(tenant_payload))
+        kb_payload = load_json(
+            data_file("systems", "knowledge_bases", f"{knowledge_base_id}.json"),
+            [],
+        )
+        names.extend(self._names_from_payload(kb_payload))
         if extra:
             names.extend(extra)
         return tuple(dict.fromkeys(name for name in names if name))
+
+    @staticmethod
+    def _names_from_payload(payload: object) -> list[str]:
+        if isinstance(payload, list):
+            return [str(item).strip() for item in payload if str(item).strip()]
+        if isinstance(payload, dict):
+            systems = payload.get("systems") or payload.get("default") or []
+            return [str(item).strip() for item in systems if str(item).strip()]
+        return []
 
 
 __all__ = ["SystemsGazetteer"]

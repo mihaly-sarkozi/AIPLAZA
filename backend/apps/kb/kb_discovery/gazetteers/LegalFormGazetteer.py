@@ -5,6 +5,9 @@ import re
 from apps.kb.kb_discovery.gazetteers.data_paths import data_file
 from apps.kb.kb_discovery.gazetteers.loaders import load_json
 
+_WORD_CHAR = r"\wÁÉÍÓÖŐÚÜŰáéíóöőúüű"
+_NOT_AFTER_SUFFIX = rf"(?![{_WORD_CHAR}.])"
+
 
 class LegalFormGazetteer:
     def __init__(self) -> None:
@@ -21,21 +24,29 @@ class LegalFormGazetteer:
                 for form in forms
             )
         )
-        escaped = sorted({re.escape(form) for form in self._all_forms}, key=len, reverse=True)
-        self._suffix_pattern = re.compile(
-            rf"\b({'|'.join(escaped)})\b",
-            re.IGNORECASE,
-        )
 
     def forms_for_language(self, language_code: str | None) -> tuple[str, ...]:
         code = (language_code or "").strip().lower()
         if code in self._forms_by_language:
-            return self._forms_by_language[code] + self._forms_by_language["global"]
+            return tuple(
+                dict.fromkeys(
+                    list(self._forms_by_language[code]) + list(self._forms_by_language["global"])
+                )
+            )
         return self._all_forms
 
-    @property
-    def suffix_pattern(self) -> re.Pattern[str]:
-        return self._suffix_pattern
+    def suffix_group_for_language(self, language_code: str | None) -> str:
+        forms = self.forms_for_language(language_code)
+        escaped = sorted({re.escape(form) for form in forms}, key=len, reverse=True)
+        return "|".join(escaped)
+
+    def company_pattern_for_language(self, language_code: str | None) -> re.Pattern[str]:
+        suffix_group = self.suffix_group_for_language(language_code)
+        name_token = rf"[A-ZÁÉÍÓÖŐÚÜŰ0-9][{_WORD_CHAR}\-]*"
+        return re.compile(
+            rf"(?<![{_WORD_CHAR}])((?:{name_token}(?:\s+{name_token})*)\s+(?:{suffix_group})){_NOT_AFTER_SUFFIX}",
+            re.UNICODE | re.IGNORECASE,
+        )
 
 
 __all__ = ["LegalFormGazetteer"]

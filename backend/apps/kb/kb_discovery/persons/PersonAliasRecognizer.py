@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
 
 from apps.kb.kb_discovery.common.AccentPatternBuilder import accent_insensitive_pattern
 from apps.kb.kb_discovery.common.BaseRecognizer import BaseRecognizer
@@ -10,20 +9,14 @@ from apps.kb.kb_discovery.common.EntityCandidate import EntityCandidate
 from apps.kb.kb_discovery.common.TextNormalizer import TextNormalizer
 from apps.kb.kb_discovery.dto.DiscoveryChunkDto import DiscoveryChunkDto
 from apps.kb.kb_discovery.enums.EntityType import EntityType
+from apps.kb.kb_discovery.persons.PersonAliasEntry import PersonAliasEntry
 from apps.kb.kb_discovery.persons.PersonConfidenceScorer import PersonConfidenceScorer
 from apps.kb.kb_discovery.persons.PersonDisambiguator import PersonDisambiguator
 
 
-@dataclass(frozen=True)
-class PersonAliasEntry:
-    raw_alias: str
-    normalized_alias: str
-    canonical_name: str
-
-
 class PersonAliasRecognizer(BaseRecognizer):
     name = "person_alias"
-    version = "1.1"
+    version = "1.2"
 
     def __init__(self) -> None:
         self._normalizer = TextNormalizer()
@@ -91,4 +84,4 @@ class PersonAliasRecognizer(BaseRecognizer):
         return entries
 
 
-__all__ = ["PersonAliasEntry", "PersonAliasRecognizer"]
+__all__ = ["PersonAliasRecognizer"]

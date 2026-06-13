@@ -1,0 +1,15 @@
+[
+  {
+    "name": "Zalka 2000",
+    "type": "company",
+    "confidence": 0.9,
+    "aliases": [
+      "Zalka2000"
+    ]
+  },
+  {
+    "name": "Belső CRM",
+    "type": "system",
+    "confidence": 0.85
+  }
+]

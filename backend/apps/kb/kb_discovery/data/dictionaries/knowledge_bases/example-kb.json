@@ -1,0 +1,15 @@
+[
+  {
+    "name": "Projekt Atlas",
+    "type": "product",
+    "confidence": 0.88
+  },
+  {
+    "name": "Tanítási modul",
+    "type": "product",
+    "confidence": 0.82,
+    "aliases": [
+      "Training modul"
+    ]
+  }
+]

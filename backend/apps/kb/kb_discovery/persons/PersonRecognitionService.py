@@ -1,16 +1,14 @@
 from __future__ import annotations
 
-from collections import defaultdict
-
 from apps.kb.kb_discovery.common.CandidateMerger import CandidateMerger
 from apps.kb.kb_discovery.common.DiscoveryContext import DiscoveryContext
 from apps.kb.kb_discovery.dto.DiscoveryChunkDto import DiscoveryChunkDto
 from apps.kb.kb_discovery.dto.DiscoveryJobContext import DiscoveryJobContext
 from apps.kb.kb_discovery.dto.KnowledgeEntityDto import EntityMentionDto, KnowledgeEntityDto
-from apps.kb.kb_discovery.mapper.discovery_mapper import entity_dto_to_orm, mention_dto_to_orm
-from apps.kb.kb_discovery.orm.EntityMention import EntityMention
-from apps.kb.kb_discovery.orm.KnowledgeEntity import KnowledgeEntity
+from apps.kb.kb_discovery.mapper.discovery_mapper import mention_dto_to_orm
+from apps.kb.kb_discovery.persons.GivenNameRecognizer import GivenNameRecognizer
 from apps.kb.kb_discovery.persons.PersonAliasRecognizer import PersonAliasRecognizer
+from apps.kb.kb_discovery.persons.PersonConfidenceScorer import PERSON_ENTITY_MIN_CONFIDENCE
 from apps.kb.kb_discovery.persons.PersonDirectoryProvider import PersonDirectoryProvider
 from apps.kb.kb_discovery.repository.EntityRepository import EntityMentionRepository, EntityRepository
 
@@ -21,12 +19,14 @@ class PersonRecognitionService:
         entity_repository: EntityRepository,
         mention_repository: EntityMentionRepository,
         directory_provider: PersonDirectoryProvider | None = None,
-        recognizer: PersonAliasRecognizer | None = None,
+        alias_recognizer: PersonAliasRecognizer | None = None,
+        given_name_recognizer: GivenNameRecognizer | None = None,
     ) -> None:
         self._entity_repository = entity_repository
         self._mention_repository = mention_repository
         self._directory_provider = directory_provider or PersonDirectoryProvider()
-        self._recognizer = recognizer or PersonAliasRecognizer()
+        self._alias_recognizer = alias_recognizer or PersonAliasRecognizer()
+        self._given_name_recognizer = given_name_recognizer or GivenNameRecognizer()
         self._merger = CandidateMerger()
 
     def run(
@@ -45,10 +45,15 @@ class PersonRecognitionService:
             training_item_id=ctx.training_item_id,
             person_directory=directory,
         )
-        candidates = self._merger.merge(self._recognizer.recognize(chunks, context))
+        alias_candidates = self._alias_recognizer.recognize(chunks, context)
+        given_candidates = self._given_name_recognizer.recognize(chunks, context)
+        merged = self._merger.merge(alias_candidates + given_candidates)
+
         mentions: list[EntityMentionDto] = []
         entity_map: dict[tuple[str, str], KnowledgeEntityDto] = {}
-        for candidate in candidates:
+        for candidate in merged:
+            if candidate.confidence < PERSON_ENTITY_MIN_CONFIDENCE:
+                continue
             mentions.append(
                 EntityMentionDto(
                     entity_type=candidate.entity_type,
@@ -71,16 +76,17 @@ class PersonRecognitionService:
                 aliases=candidate.aliases,
                 chunk_ids=chunk_ids,
             )
+
         entities = list(entity_map.values())
         if existing_entities:
-            merged: dict[tuple[str, str], KnowledgeEntityDto] = {
+            merged_entities: dict[tuple[str, str], KnowledgeEntityDto] = {
                 (e.entity_type.value, e.normalized_name): e for e in existing_entities
             }
             for entity in entities:
                 key = (entity.entity_type.value, entity.normalized_name)
-                if key in merged:
-                    old = merged[key]
-                    merged[key] = KnowledgeEntityDto(
+                if key in merged_entities:
+                    old = merged_entities[key]
+                    merged_entities[key] = KnowledgeEntityDto(
                         entity_type=old.entity_type,
                         name=old.name,
                         normalized_name=old.normalized_name,
@@ -89,8 +95,9 @@ class PersonRecognitionService:
                         chunk_ids=tuple(dict.fromkeys(old.chunk_ids + entity.chunk_ids)),
                     )
                 else:
-                    merged[key] = entity
-            entities = list(merged.values())
+                    merged_entities[key] = entity
+            entities = list(merged_entities.values())
+
         orm_mentions = [mention_dto_to_orm(ctx, mention) for mention in mentions]
         self._mention_repository.replace_for_job(ctx.job_id, orm_mentions)
         return entities, mentions

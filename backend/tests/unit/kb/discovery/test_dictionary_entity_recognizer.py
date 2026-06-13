@@ -15,7 +15,7 @@ def test_hubspot_system_entity():
     chunks = [
         DiscoveryChunkDto(
             chunk_id="c1",
-            text="HubSpotot használ.",
+            text="A HubSpot használata kötelező.",
             chunk_type="paragraph",
             order_index=0,
         )

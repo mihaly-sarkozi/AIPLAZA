@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import re
-
 from apps.kb.kb_discovery.common.BaseRecognizer import BaseRecognizer
 from apps.kb.kb_discovery.common.DiscoveryContext import DiscoveryContext
 from apps.kb.kb_discovery.common.EntityCandidate import EntityCandidate
@@ -13,7 +11,7 @@ from apps.kb.kb_discovery.gazetteers.LegalFormGazetteer import LegalFormGazettee
 
 class LegalFormCompanyRecognizer(BaseRecognizer):
     name = "legal_form_company"
-    version = "1.0"
+    version = "1.1"
 
     def __init__(self, gazetteer: LegalFormGazetteer | None = None) -> None:
         self._gazetteer = gazetteer or LegalFormGazetteer()
@@ -24,8 +22,9 @@ class LegalFormCompanyRecognizer(BaseRecognizer):
     ) -> list[EntityCandidate]:
         candidates: list[EntityCandidate] = []
         for chunk in chunks:
-            pattern = self._pattern_for_language(chunk.language_code)
-            for match in pattern.finditer(chunk.text):
+            pattern = self._gazetteer.company_pattern_for_language(chunk.language_code)
+            matches = self._longest_non_overlapping(pattern.finditer(chunk.text))
+            for match in matches:
                 name = match.group(1).strip(" ,;")
                 if len(name) < 3:
                     continue
@@ -42,14 +41,21 @@ class LegalFormCompanyRecognizer(BaseRecognizer):
                 )
         return candidates
 
-    def _pattern_for_language(self, language_code: str | None) -> re.Pattern[str]:
-        suffixes = self._gazetteer.forms_for_language(language_code)
-        escaped = sorted({re.escape(form) for form in suffixes}, key=len, reverse=True)
-        suffix_group = "|".join(escaped)
-        return re.compile(
-            rf"\b([A-ZÁÉÍÓÖŐÚÜŰ0-9][\wÁÉÍÓÖŐÚÜŰáéíóöőúüű.\-]{{0,100}}?\s(?:{suffix_group}))\b",
-            re.UNICODE | re.IGNORECASE,
+    @staticmethod
+    def _longest_non_overlapping(
+        matches: object,
+    ) -> list[re.Match[str]]:
+        ordered = sorted(
+            list(matches),
+            key=lambda match: (match.start(1), -(match.end(1) - match.start(1))),
         )
+        kept: list[re.Match[str]] = []
+        for match in ordered:
+            start, end = match.start(1), match.end(1)
+            if any(not (end <= other.start(1) or start >= other.end(1)) for other in kept):
+                continue
+            kept.append(match)
+        return sorted(kept, key=lambda match: match.start(1))
 
 
 __all__ = ["LegalFormCompanyRecognizer"]

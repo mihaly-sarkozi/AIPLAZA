@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from apps.kb.kb_discovery.persons.PersonAliasRecognizer import PersonAliasEntry
+from apps.kb.kb_discovery.persons.PersonAliasEntry import PersonAliasEntry
 
 
 class PersonDisambiguator:

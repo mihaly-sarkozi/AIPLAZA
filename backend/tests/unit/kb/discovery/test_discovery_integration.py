@@ -1,4 +1,4 @@
-"""Integrációs teszt: teljes mondat felismerése discovery recognizer-ekkel."""
+"""Integrációs teszt: mintamondat felismerése regex/dictionary recognizer-ekkel."""
 from __future__ import annotations
 
 import pytest

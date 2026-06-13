@@ -57,3 +57,51 @@ def test_legal_form_recognizer_finds_hungarian_company():
     result = recognizer.recognize(chunks, context)
     assert any("Zalka 2000 Kft." in item.name for item in result)
     assert all(item.entity_type == EntityType.COMPANY for item in result)
+
+
+@pytest.mark.parametrize(
+    ("text", "language_code", "expected_fragment"),
+    [
+        ("La Empresa Demo S.L. opera en Madrid.", "es", "Demo S.L."),
+        ("Grupo Norte S.A. reportó resultados.", "es", "Norte S.A."),
+        ("Acme Solutions Inc. signed the deal.", "en", "Acme Solutions Inc."),
+        ("Global Trade Ltd. opened a branch.", "en", "Global Trade Ltd."),
+    ],
+)
+def test_legal_form_recognizer_handles_dotted_suffixes(text, language_code, expected_fragment):
+    recognizer = LegalFormCompanyRecognizer()
+    chunks = [
+        DiscoveryChunkDto(
+            chunk_id="c1",
+            text=text,
+            chunk_type="paragraph",
+            order_index=0,
+            language_code=language_code,
+        )
+    ]
+    context = DiscoveryContext(
+        tenant_slug="tenant",
+        knowledge_base_id="kb1",
+        training_item_id="item1",
+    )
+    result = recognizer.recognize(chunks, context)
+    assert any(expected_fragment in item.name for item in result)
+
+
+def test_systems_gazetteer_loads_tenant_and_kb_overlays():
+    from apps.kb.kb_discovery.gazetteers.SystemsGazetteer import SystemsGazetteer
+
+    systems = SystemsGazetteer().systems_for(
+        tenant_slug="demo",
+        knowledge_base_id="example-kb",
+    )
+    assert "HubSpot" in systems
+    assert "Belső CRM" in systems
+    assert "Projekt Atlas API" in systems
+
+
+def test_person_alias_entry_import_has_no_circular_dependency():
+    import importlib
+
+    importlib.import_module("apps.kb.kb_discovery.persons.PersonAliasRecognizer")
+    importlib.import_module("apps.kb.kb_discovery.persons.PersonDisambiguator")
