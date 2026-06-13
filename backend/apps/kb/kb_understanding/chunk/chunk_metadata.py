@@ -23,6 +23,9 @@ def build_uniform_chunk_metadata(
     parent_chunk_id: str | None = None,
     parent_chunk_hash: str | None = None,
     page_numbers_scope: str | None = None,
+    language_hints: list[str] | None = None,
+    language_sources: list[str] | None = None,
+    ocr_languages: list[str] | None = None,
 ) -> dict[str, Any]:
     metadata: dict[str, Any] = {
         "source_part_ids": list(source_part_ids),
@@ -45,6 +48,12 @@ def build_uniform_chunk_metadata(
         metadata["parent_chunk_id"] = parent_chunk_id
         metadata["parent_chunk_hash"] = parent_chunk_hash
         metadata["page_numbers_scope"] = page_numbers_scope or "parent_logical_chunk"
+    if language_hints:
+        metadata["language_hints"] = list(dict.fromkeys(language_hints))
+    if language_sources:
+        metadata["language_sources"] = list(dict.fromkeys(language_sources))
+    if ocr_languages:
+        metadata["ocr_languages"] = list(dict.fromkeys(ocr_languages))
     return metadata
 
 

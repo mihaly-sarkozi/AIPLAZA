@@ -5,7 +5,9 @@ import time
 from dataclasses import replace
 from typing import Any, Callable
 
+from apps.kb.kb_discovery.dto.DiscoveryChunkDto import DiscoveryChunkDto
 from apps.kb.kb_discovery.dto.DiscoveryJobContext import DiscoveryJobContext
+from apps.kb.kb_discovery.dto.LanguageDetectionResult import LanguageDetectionResult
 from apps.kb.kb_discovery.enums.DiscoveryErrorCode import DiscoveryErrorCode
 from apps.kb.kb_discovery.enums.DiscoveryStatus import DiscoveryStatus
 from apps.kb.kb_discovery.enums.DiscoveryStep import DiscoveryStep
@@ -80,10 +82,13 @@ class DiscoveryPipelineService:
                 lambda: self._language.run(ctx, chunks),
                 input_summary={"chunk_count": len(chunks)},
                 output_summary=lambda r: {
-                    "language_code": r.language_code,
-                    "language_confidence": r.language_confidence,
+                    "chunks_checked": r.chunks_checked,
+                    "document_language_code": r.language_code,
+                    "document_language_confidence": r.language_confidence,
+                    "language_distribution": dict(r.language_distribution),
                 },
             )
+            chunks = self._apply_language_results(chunks, language)
             ctx = replace(
                 ctx,
                 language_code=language.language_code,
@@ -140,7 +145,12 @@ class DiscoveryPipelineService:
             status, checklist = self._run_step(
                 ctx,
                 DiscoveryStep.VALIDATION,
-                lambda: self._validate.run(ctx, chunk_count=len(chunks), had_optional_failures=had_optional_failures),
+                lambda: self._validate.run(
+                    ctx,
+                    chunks=chunks,
+                    chunk_count=len(chunks),
+                    had_optional_failures=had_optional_failures,
+                ),
                 input_summary={"had_optional_failures": had_optional_failures},
                 output_summary=lambda r: {"status": r[0].value},
             )
@@ -242,6 +252,31 @@ class DiscoveryPipelineService:
             error_code=error_code,
         )
         return status
+
+    @staticmethod
+    def _apply_language_results(
+        chunks: list[DiscoveryChunkDto],
+        language: LanguageDetectionResult,
+    ) -> list[DiscoveryChunkDto]:
+        by_id = {item.chunk_id: item for item in language.chunk_results}
+        updated: list[DiscoveryChunkDto] = []
+        for chunk in chunks:
+            result = by_id.get(chunk.chunk_id)
+            if result is None:
+                updated.append(chunk)
+                continue
+            metadata = dict(chunk.metadata or {})
+            metadata["language"] = dict(result.language_metadata)
+            updated.append(
+                replace(
+                    chunk,
+                    language_code=result.language_code,
+                    language_confidence=result.language_confidence,
+                    language_detected_by=result.language_detected_by,
+                    metadata=metadata,
+                )
+            )
+        return updated
 
     @staticmethod
     def _safe_emit(emit: Callable[..., None], **kwargs: Any) -> None:

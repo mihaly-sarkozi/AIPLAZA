@@ -7,6 +7,7 @@ class SupportedLanguage(str, Enum):
     HU = "hu"
     EN = "en"
     ES = "es"
+    MIXED = "mixed"
     UNKNOWN = "unknown"
 
 

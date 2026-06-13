@@ -12,6 +12,10 @@ class DiscoveryChunkDto:
     order_index: int
     section_title: str | None = None
     page_number: int | None = None
+    language_code: str | None = None
+    language_confidence: float | None = None
+    language_detected_by: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

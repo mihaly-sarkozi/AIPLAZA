@@ -58,6 +58,7 @@ def make_discovery_services_provider(session_factory: Any):
         with lock:
             if "services" not in cache:
                 from apps.kb.bootstrap.discovery_wiring import (
+                    ChunkLanguageWriterAdapter,
                     ChunkReaderAdapter,
                     UnderstandingJobReaderAdapter,
                 )
@@ -67,9 +68,11 @@ def make_discovery_services_provider(session_factory: Any):
                     UnderstandingJobRepository,
                 )
 
+                chunk_repository = ChunkRepository(session_factory)
                 cache["services"] = build_discovery_services(
                     session_factory=session_factory,
-                    chunk_reader=ChunkReaderAdapter(ChunkRepository(session_factory)),
+                    chunk_reader=ChunkReaderAdapter(chunk_repository),
+                    chunk_language_writer=ChunkLanguageWriterAdapter(chunk_repository),
                     understanding_job_reader=UnderstandingJobReaderAdapter(
                         UnderstandingJobRepository(session_factory)
                     ),

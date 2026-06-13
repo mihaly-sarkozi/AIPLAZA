@@ -19,6 +19,7 @@ from apps.kb.kb_discovery.service.DiscoveryTraceService import DiscoveryTraceSer
 from apps.kb.kb_discovery.service.LanguageDetectionService import LanguageDetectionService
 from apps.kb.kb_discovery.service.StartDiscoveryService import StartDiscoveryService
 from apps.kb.kb_discovery.service.ValidateDiscoveryService import ValidateDiscoveryService
+from apps.kb.kb_discovery.ports.ChunkLanguageWriterPort import ChunkLanguageWriterPort
 from apps.kb.kb_discovery.ports.ChunkReaderPort import ChunkReaderPort, UnderstandingJobReaderPort
 
 
@@ -34,6 +35,7 @@ def build_discovery_services(
     session_factory,
     chunk_reader: ChunkReaderPort,
     understanding_job_reader: UnderstandingJobReaderPort | None = None,
+    chunk_language_writer: ChunkLanguageWriterPort | None = None,
     person_directory=None,
 ) -> DiscoveryServices:
     job_repository = DiscoveryJobRepository(session_factory)
@@ -50,7 +52,7 @@ def build_discovery_services(
     pipeline = DiscoveryPipelineService(
         job_repository,
         trace,
-        language_service=LanguageDetectionService(job_repository),
+        language_service=LanguageDetectionService(job_repository, chunk_language_writer),
         entity_service=ExtractEntitiesService(
             entity_repository,
             mention_repository,

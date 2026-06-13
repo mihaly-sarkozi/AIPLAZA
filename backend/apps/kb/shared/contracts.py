@@ -29,6 +29,19 @@ class DiscoveryChunkSnapshot:
     order_index: int
     section_title: str | None = None
     page_number: int | None = None
+    language_code: str | None = None
+    language_confidence: float | None = None
+    language_detected_by: str | None = None
+    metadata_json: dict | None = None
+
+
+@dataclass(frozen=True)
+class ChunkLanguageUpdate:
+    chunk_id: str
+    language_code: str | None
+    language_confidence: float | None
+    language_detected_by: str | None
+    language_metadata: dict
 
 
 @dataclass(frozen=True)
@@ -47,4 +60,10 @@ class IngestItemSnapshot:
     content_hash: str | None
 
 
-__all__ = ["DiscoveryChunkSnapshot", "IngestItemSnapshot", "MaterialRef", "SearchContextItem"]
+__all__ = [
+    "ChunkLanguageUpdate",
+    "DiscoveryChunkSnapshot",
+    "IngestItemSnapshot",
+    "MaterialRef",
+    "SearchContextItem",
+]

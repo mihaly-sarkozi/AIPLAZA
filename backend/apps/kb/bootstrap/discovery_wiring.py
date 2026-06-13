@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from apps.kb.shared.contracts import DiscoveryChunkSnapshot
+from apps.kb.shared.contracts import ChunkLanguageUpdate, DiscoveryChunkSnapshot
 
 
 class ChunkReaderAdapter:
@@ -17,9 +17,21 @@ class ChunkReaderAdapter:
                 order_index=int(chunk.order_index or 0),
                 section_title=chunk.section_title,
                 page_number=chunk.page_number,
+                language_code=chunk.language_code,
+                language_confidence=chunk.language_confidence,
+                language_detected_by=chunk.language_detected_by,
+                metadata_json=dict(chunk.metadata_json or {}),
             )
             for chunk in chunks
         ]
+
+
+class ChunkLanguageWriterAdapter:
+    def __init__(self, chunk_repository) -> None:
+        self._chunk_repository = chunk_repository
+
+    def bulk_update_chunk_language(self, results: list[ChunkLanguageUpdate]) -> int:
+        return self._chunk_repository.bulk_update_chunk_language(results)
 
 
 class UnderstandingJobReaderAdapter:
@@ -42,4 +54,4 @@ class UnderstandingJobReaderAdapter:
         }
 
 
-__all__ = ["ChunkReaderAdapter", "UnderstandingJobReaderAdapter"]
+__all__ = ["ChunkLanguageWriterAdapter", "ChunkReaderAdapter", "UnderstandingJobReaderAdapter"]

@@ -8,12 +8,12 @@ from apps.kb.kb_discovery.content_types.FaqDetector import FaqDetector
 from apps.kb.kb_discovery.content_types.ProcessDetector import ProcessDetector
 from apps.kb.kb_discovery.dto.DiscoveryChunkDto import DiscoveryChunkDto
 from apps.kb.kb_discovery.dto.DiscoveryJobContext import DiscoveryJobContext
+from apps.kb.kb_discovery.dto.DiscoveryResultDtos import KnowledgeKeywordDto, KnowledgeTopicDto
 from apps.kb.kb_discovery.dto.KnowledgeEnrichmentDto import KnowledgeEnrichmentDto
 from apps.kb.kb_discovery.enums.SupportedLanguage import SupportedLanguage
 from apps.kb.kb_discovery.languages.language_profiles import keyword_hints_for, stopwords_for, topic_rules_for
 from apps.kb.kb_discovery.mapper.discovery_mapper import keyword_dto_to_orm, topic_dto_to_orm
 from apps.kb.kb_discovery.mapper.enrichment_mapper import enrichment_dto_to_orm
-from apps.kb.kb_discovery.dto.DiscoveryResultDtos import KnowledgeKeywordDto, KnowledgeTopicDto
 from apps.kb.kb_discovery.repository.EnrichmentRepository import EnrichmentRepository
 from apps.kb.kb_discovery.repository.KeywordRepository import KeywordRepository
 from apps.kb.kb_discovery.repository.TopicRepository import TopicRepository
@@ -41,21 +41,25 @@ class LocalKnowledgeEnrichmentService:
         ctx: DiscoveryJobContext,
         chunks: list[DiscoveryChunkDto],
     ) -> list[KnowledgeEnrichmentDto]:
-        language = SupportedLanguage(ctx.language_code) if ctx.language_code in SupportedLanguage._value2member_map_ else SupportedLanguage.UNKNOWN
-        stopwords = stopwords_for(language)
-        topic_rules = topic_rules_for(language)
-        hints = keyword_hints_for(language)
-
         enrichments: list[KnowledgeEnrichmentDto] = []
         keywords: list[KnowledgeKeywordDto] = []
         topics: list[KnowledgeTopicDto] = []
 
         for chunk in chunks:
+            language = self._resolve_chunk_language(chunk)
+            stopwords = stopwords_for(language)
+            topic_rules = topic_rules_for(language)
+            hints = keyword_hints_for(language)
             lead = self._lead_sentence(chunk.text)
             terms = self._extract_keywords(chunk.text, stopwords, hints)
             matched_topics = self._match_topics(chunk.text, topic_rules)
             content_type = self._detect_content_type(chunk)
-            confidence = self._confidence(terms, matched_topics, ctx.language_confidence)
+            language_confidence = (
+                chunk.language_confidence
+                if chunk.language_confidence is not None
+                else ctx.language_confidence
+            )
+            confidence = self._confidence(terms, matched_topics, language_confidence)
 
             enrichment = KnowledgeEnrichmentDto(
                 chunk_id=chunk.chunk_id,
@@ -63,8 +67,8 @@ class LocalKnowledgeEnrichmentService:
                 keywords=tuple(terms),
                 topics=tuple(matched_topics),
                 content_type=content_type,
-                language_code=ctx.language_code,
-                language_confidence=ctx.language_confidence,
+                language_code=chunk.language_code or SupportedLanguage.UNKNOWN.value,
+                language_confidence=language_confidence,
                 possible_questions=(),
                 confidence=confidence,
             )
@@ -89,6 +93,14 @@ class LocalKnowledgeEnrichmentService:
             ctx.job_id, [topic_dto_to_orm(ctx, topic) for topic in topics]
         )
         return enrichments
+
+    def _resolve_chunk_language(self, chunk: DiscoveryChunkDto) -> SupportedLanguage:
+        code = (chunk.language_code or "").strip().lower()
+        if not code or code in {SupportedLanguage.MIXED.value, SupportedLanguage.UNKNOWN.value}:
+            return SupportedLanguage.UNKNOWN
+        if code in SupportedLanguage._value2member_map_:
+            return SupportedLanguage(code)
+        return SupportedLanguage.UNKNOWN
 
     def _lead_sentence(self, text: str) -> str:
         match = self._SENTENCE.search(text.strip())

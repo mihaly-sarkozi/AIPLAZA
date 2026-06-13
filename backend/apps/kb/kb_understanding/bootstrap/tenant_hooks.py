@@ -55,6 +55,9 @@ def _install_kb_understanding_schema(engine, slug: str) -> None:
             'ALTER TABLE "{schema}".kb_normalized_content ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP NOT NULL DEFAULT NOW()',
             # v9: structure layer removed — drop deprecated table if present
             'DROP TABLE IF EXISTS "{schema}".kb_structured_blocks',
+            'ALTER TABLE "{schema}".kb_chunks ADD COLUMN IF NOT EXISTS language_code VARCHAR(16)',
+            'ALTER TABLE "{schema}".kb_chunks ADD COLUMN IF NOT EXISTS language_confidence DOUBLE PRECISION',
+            'ALTER TABLE "{schema}".kb_chunks ADD COLUMN IF NOT EXISTS language_detected_by VARCHAR(64)',
         ),
     )
 
@@ -64,7 +67,7 @@ def register_kb_understanding_tenant_hooks() -> None:
         [
             TenantSchemaHook(
                 name="kb_understanding",
-                revision="kb.understanding.schema.v9",
+                revision="kb.understanding.schema.v10",
                 install=_install_kb_understanding_schema,
                 table_names=(
                     "kb_understanding_jobs",

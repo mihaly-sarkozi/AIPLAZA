@@ -92,6 +92,10 @@ class StartDiscoveryService:
                 order_index=snapshot.order_index,
                 section_title=snapshot.section_title,
                 page_number=snapshot.page_number,
+                language_code=snapshot.language_code,
+                language_confidence=snapshot.language_confidence,
+                language_detected_by=snapshot.language_detected_by,
+                metadata=dict(snapshot.metadata_json or {}),
             )
             for snapshot in snapshots
         ]

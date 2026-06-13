@@ -11,6 +11,7 @@ from apps.kb.kb_understanding.chunk.NormalizedPartBlockClassifier import (
     NormalizedPartBlockClassifier,
 )
 from apps.kb.kb_understanding.chunk.chunk_metadata import build_uniform_chunk_metadata
+from apps.kb.kb_understanding.chunk.language_hints import collect_language_hint_fields
 from apps.kb.kb_understanding.chunk.parent_chunk_hash import (
     compute_parent_chunk_hash,
     parent_chunk_id_from_hash,
@@ -78,7 +79,9 @@ class _PendingChunk:
     table_refs: list[dict[str, Any]] = field(default_factory=list)
     bbox_refs: list[dict[str, Any] | None] = field(default_factory=list)
     ocr_confidences: list[float] = field(default_factory=list)
+    ocr_language_values: list[str | None] = field(default_factory=list)
     is_from_ocr: bool = False
+    has_extractor_parts: bool = False
 
     @property
     def length(self) -> int:
@@ -408,6 +411,9 @@ class ChunkContentService:
             pending.is_from_ocr = True
             if part.metadata.get("ocr_confidence") is not None:
                 pending.ocr_confidences.append(float(part.metadata["ocr_confidence"]))
+            pending.ocr_language_values.append(part.metadata.get("ocr_language"))
+        else:
+            pending.has_extractor_parts = True
         return pending
 
     @staticmethod
@@ -428,6 +434,9 @@ class ChunkContentService:
             pending.is_from_ocr = True
             if part.metadata.get("ocr_confidence") is not None:
                 pending.ocr_confidences.append(float(part.metadata["ocr_confidence"]))
+            pending.ocr_language_values.append(part.metadata.get("ocr_language"))
+        else:
+            pending.has_extractor_parts = True
         if part.metadata.get("heading_path"):
             pending.heading_path = list(part.metadata.get("heading_path") or [])
         if part.metadata.get("heading_levels"):
@@ -469,7 +478,9 @@ class ChunkContentService:
                 previous.table_refs.extend(chunk.table_refs)
                 previous.bbox_refs.extend(chunk.bbox_refs)
                 previous.ocr_confidences.extend(chunk.ocr_confidences)
+                previous.ocr_language_values.extend(chunk.ocr_language_values)
                 previous.is_from_ocr = previous.is_from_ocr or chunk.is_from_ocr
+                previous.has_extractor_parts = previous.has_extractor_parts or chunk.has_extractor_parts
                 if chunk.heading_path:
                     previous.heading_path = chunk.heading_path
                 if chunk.heading_levels:
@@ -501,6 +512,11 @@ class ChunkContentService:
                 round(sum(chunk.ocr_confidences) / len(chunk.ocr_confidences), 4)
                 if chunk.ocr_confidences
                 else None
+            )
+            language_hints, language_sources, ocr_languages = collect_language_hint_fields(
+                is_from_ocr=chunk.is_from_ocr,
+                ocr_language_values=chunk.ocr_language_values,
+                has_extractor_parts=chunk.has_extractor_parts or not chunk.is_from_ocr,
             )
 
             parent_hash = compute_parent_chunk_hash(
@@ -540,6 +556,9 @@ class ChunkContentService:
                     split_count=split_count if split_count > 1 else None,
                     parent_chunk_id=parent_id if split_count > 1 else None,
                     parent_chunk_hash=parent_hash if split_count > 1 else None,
+                    language_hints=language_hints or None,
+                    language_sources=language_sources or None,
+                    ocr_languages=ocr_languages or None,
                 )
                 if chunk.is_table_only and chunk.table_refs:
                     table_ref = chunk.table_refs[0]

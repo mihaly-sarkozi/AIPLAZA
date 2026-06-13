@@ -57,6 +57,8 @@ LANGUAGE_MARKERS: dict[SupportedLanguage, frozenset[str]] = {
 
 
 def stopwords_for(language: SupportedLanguage) -> frozenset[str]:
+    if language in (SupportedLanguage.UNKNOWN, SupportedLanguage.MIXED):
+        return STOPWORDS_HU | STOPWORDS_EN | STOPWORDS_ES
     if language == SupportedLanguage.HU:
         return STOPWORDS_HU
     if language == SupportedLanguage.EN:
@@ -67,6 +69,8 @@ def stopwords_for(language: SupportedLanguage) -> frozenset[str]:
 
 
 def keyword_hints_for(language: SupportedLanguage) -> frozenset[str]:
+    if language in (SupportedLanguage.UNKNOWN, SupportedLanguage.MIXED):
+        return KEYWORD_HINTS_HU | KEYWORD_HINTS_EN | KEYWORD_HINTS_ES
     if language == SupportedLanguage.HU:
         return KEYWORD_HINTS_HU
     if language == SupportedLanguage.EN:
@@ -77,6 +81,8 @@ def keyword_hints_for(language: SupportedLanguage) -> frozenset[str]:
 
 
 def topic_rules_for(language: SupportedLanguage) -> dict[str, tuple[str, ...]]:
+    if language in (SupportedLanguage.UNKNOWN, SupportedLanguage.MIXED):
+        return {**TOPIC_RULES_HU, **TOPIC_RULES_EN, **TOPIC_RULES_ES}
     if language == SupportedLanguage.HU:
         return TOPIC_RULES_HU
     if language == SupportedLanguage.EN:

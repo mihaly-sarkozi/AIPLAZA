@@ -4,7 +4,7 @@ from __future__ import annotations
 # Feladat: Kereshető tudás-chunk a kötelező bizonyíték-metaadatokkal (chunking kimenete).
 # Sárközi Mihály - 2026.06.11
 
-from sqlalchemy import Column, DateTime, Integer, String, Text
+from sqlalchemy import Column, DateTime, Float, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB
 
 from core.kernel.db.model_bases import TenantSchemaBase
@@ -42,6 +42,10 @@ class KnowledgeChunk(TenantSchemaBase):
     text = Column(Text, nullable=False, default="")
     # Becsült token szám.
     token_count = Column(Integer, nullable=False, default=0)
+    # Chunk szintű nyelvdetektálás (discovery állítja be).
+    language_code = Column(String(16), nullable=True, index=True)
+    language_confidence = Column(Float, nullable=True)
+    language_detected_by = Column(String(64), nullable=True)
     created_by = Column(Integer, nullable=True)
     created_at = Column(DateTime, default=utc_now_naive, nullable=False, index=True)
     last_processed_at = Column(DateTime, default=utc_now_naive, onupdate=utc_now_naive, nullable=False)
