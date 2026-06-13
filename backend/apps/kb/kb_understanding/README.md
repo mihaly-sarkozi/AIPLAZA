@@ -5,16 +5,17 @@ A betöltött anyag technikai előkészítése. A `kb_ingest`-től eseményen
 `DISCOVERY_REQUESTED` eseménnyel indítja a `kb_discovery` feldolgozást.
 Nem végez entitás/topic/embedding felismerést és nem ír keresőindexet.
 
-## Extract réteg (part-alapú)
+## Extract réteg (part-alapú, nagy fájl támogatás)
 
 ```text
-INPUT → adapter → ExtractResult → ExtractedContent + ExtractedContentPart → trace
+stat → stratégia → IN_MEMORY | TEMP_FILE | STREAMING
+  → adapter (path/bytes) → batch part mentés → trace
 ```
 
-- Part típusok: `TEXT`, `TABLE`, `OCR_TEXT`, `OCR_EMPTY`, `OCR_FAILED`
-- PDF: oldalankénti feldolgozás, táblázatok külön part, OCR fallback kevés szövegnél
-- Konfiguráció: `config/ExtractConfig.py` (`MAX_FILE_SIZE_MB`, `MAX_PAGE_COUNT`, stb.)
-- Normalize csak `TEXT` / `TABLE` / `OCR_TEXT` partokon dolgozik
+- Stratégiák: `IN_MEMORY` (≤20MB), `TEMP_FILE` (≤200MB), `STREAMING` (>200MB)
+- Elutasítás: `> MAX_EXTRACT_FILE_SIZE_MB` → `FILE_REJECTED`
+- FileStorage: `stat_bytes`, `materialize_to_temp_file`, `open_stream`
+- Progress: job metadata `extract_progress` (25 oldalenként)
 
 ## Pipeline (kötelezően külön lépések)
 

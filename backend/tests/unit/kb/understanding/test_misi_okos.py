@@ -30,6 +30,9 @@ class _FakeStorage:
     def read_bytes(self, *, raw_ref: str) -> bytes:
         return self._payload
 
+    def stat_bytes(self, *, raw_ref: str) -> int:
+        return len(self._payload)
+
 
 def test_misi_okos_understanding_pipeline_creates_artifacts_and_emits_discovery(ctx):
     events: list[str] = []

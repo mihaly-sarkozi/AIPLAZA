@@ -5,21 +5,41 @@ from apps.kb.kb_understanding.dto.ExtractPartDto import ExtractPart
 from apps.kb.kb_understanding.dto.ExtractResultDto import ExtractResult
 from apps.kb.kb_understanding.enums.UnderstandingErrorCode import UnderstandingErrorCode
 from apps.kb.kb_understanding.errors.UnderstandingProcessingError import UnderstandingProcessingError
+from apps.kb.kb_understanding.extract.extract_context import ExtractContext
 from apps.kb.kb_understanding.extract.extract_limits import ExtractLimits, finalize_extract_status
 from apps.kb.kb_understanding.extract.part_builder import build_table_part, build_text_part, summarize_parts
 
 
 class DocxExtractorAdapter:
     name = "python_docx"
-    version = "2.0"
+    version = "2.1"
 
     def __init__(self, *, config: ExtractConfig | None = None) -> None:
         self._config = config or DEFAULT_EXTRACT_CONFIG
 
     def extract(self, data: bytes, *, mime_type: str | None = None) -> ExtractResult:
+        return self.extract_from_bytes(data, mime_type=mime_type)
+
+    def extract_from_path(
+        self,
+        path: str,
+        *,
+        mime_type: str | None = None,
+        extract_ctx: ExtractContext | None = None,
+    ) -> ExtractResult:
+        with open(path, "rb") as handle:
+            return self.extract_from_bytes(handle.read(), mime_type=mime_type, extract_ctx=extract_ctx)
+
+    def extract_from_bytes(
+        self,
+        data: bytes,
+        *,
+        mime_type: str | None = None,
+        extract_ctx: ExtractContext | None = None,
+    ) -> ExtractResult:
         from shared.documents.text_extraction import extract_document_from_upload
 
-        limits = ExtractLimits(self._config)
+        limits = extract_ctx.limits if extract_ctx and extract_ctx.limits else ExtractLimits(self._config)
         limits.check_file_size(data)
 
         try:
@@ -33,29 +53,33 @@ class DocxExtractorAdapter:
         section_index = 0
         table_buffer: list[list[str]] = []
         table_headers: list[str] = []
-        table_page = None
 
         def flush_table() -> None:
-            nonlocal part_index, table_buffer, table_headers, table_page
+            nonlocal part_index, table_buffer, table_headers
             if not table_buffer and not table_headers:
                 return
             rows = table_buffer
             headers = table_headers
             if headers and rows and rows[0] == headers:
                 rows = rows[1:]
-            parts.append(
-                build_table_part(
-                    page_number=table_page,
-                    part_index=part_index,
-                    headers=headers,
-                    rows=rows,
-                    source="docx_table",
-                    metadata={"section_index": section_index},
-                )
+            part = build_table_part(
+                page_number=section_index,
+                part_index=part_index,
+                headers=headers,
+                rows=rows,
+                source="docx_table",
+                metadata={"section_index": section_index},
             )
+            _emit([part])
             part_index += 1
             table_buffer = []
             table_headers = []
+
+        def _emit(batch: list[ExtractPart]) -> None:
+            if extract_ctx is not None:
+                extract_ctx.emit_parts(batch, batch_size=self._config.extract_batch_size)
+            else:
+                parts.extend(batch)
 
         for paragraph in document.paragraphs:
             limits.check_duration()
@@ -78,24 +102,46 @@ class DocxExtractorAdapter:
 
             flush_table()
             section_index += 1
-            page_number = paragraph.page_number or section_index
             limits.check_part_size(text)
-            parts.append(
-                build_text_part(
-                    page_number=page_number,
-                    part_index=part_index,
-                    text=text,
-                    metadata={
-                        "block_type": paragraph.block_type,
-                        "source": "docx_paragraph",
-                    },
-                )
+            _emit(
+                [
+                    build_text_part(
+                        page_number=paragraph.page_number or section_index,
+                        part_index=part_index,
+                        text=text,
+                        metadata={
+                            "block_type": paragraph.block_type,
+                            "source": "docx_paragraph",
+                        },
+                    )
+                ]
             )
             part_index += 1
 
         flush_table()
+        if extract_ctx is not None:
+            extract_ctx.flush()
 
-        status = finalize_extract_status(parts=parts, failed_pages=0, warnings=warnings)
+        status = finalize_extract_status(
+            parts=parts,
+            failed_pages=0,
+            warnings=warnings,
+            counters=extract_ctx.counters if extract_ctx is not None else None,
+        )
+        if extract_ctx is not None and extract_ctx.streaming:
+            return ExtractResult.from_counters(
+                counters=extract_ctx.counters,
+                total_pages=max(section_index, 1),
+                processed_pages=max(section_index, 1),
+                failed_pages=0,
+                warnings=warnings,
+                status=status,
+                extractor_name=self.name,
+                extractor_version=self.version,
+                source_mime=mime_type
+                or "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            )
+
         return ExtractResult(
             total_pages=max(section_index, 1),
             parts=parts,
@@ -108,6 +154,8 @@ class DocxExtractorAdapter:
             failed_pages=0,
             source_mime=mime_type
             or "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            text_parts_count=sum(1 for part in parts if part.part_type == "TEXT"),
+            table_parts_count=sum(1 for part in parts if part.part_type == "TABLE"),
         )
 
 

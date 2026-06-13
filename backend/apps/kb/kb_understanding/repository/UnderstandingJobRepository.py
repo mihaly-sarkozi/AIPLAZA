@@ -133,5 +133,15 @@ class UnderstandingJobRepository:
             job.completed_at = None
             session.commit()
 
+    def update_extract_progress(self, job_id: str, progress: dict) -> None:
+        with self._session_factory() as session:
+            job = session.get(UnderstandingJob, job_id)
+            if job is None:
+                return
+            metadata = dict(job.metadata_json or {})
+            metadata["extract_progress"] = dict(progress)
+            job.metadata_json = metadata
+            session.commit()
+
 
 __all__ = ["UnderstandingJobRepository"]

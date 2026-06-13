@@ -27,7 +27,11 @@ class NormalizeContentService:
 
     def run(self, ctx: UnderstandingJobContext, extracted: ExtractedContentDto) -> NormalizedContentDto:
         part_types = {item.value for item in NORMALIZABLE_PART_TYPES}
-        stored_parts = self._content_repository.list_parts_for_item(ctx.training_item_id, part_types=part_types)
+        stored_parts = self._content_repository.list_parts_for_item(
+            ctx.training_item_id,
+            part_types=part_types,
+            completed_only=True,
+        )
         source_parts = stored_parts or [
             type(
                 "Part",

@@ -151,6 +151,17 @@ class S3CompatibleObjectStorage(ObjectStoragePort):
             body=body,
         )
 
+    def download_to_file(self, *, key: str, path: str, bucket: str | None = None) -> StoredObjectRef:
+        resolved_bucket = self._resolve_bucket(bucket)
+        result = self._client.get_object(Bucket=resolved_bucket, Key=key)
+        try:
+            with open(path, "wb") as handle:
+                for chunk in iter(lambda: result["Body"].read(1024 * 1024), b""):
+                    handle.write(chunk)
+        finally:
+            result["Body"].close()
+        return self.stat_object(key=key, bucket=bucket)
+
     def stat_object(self, *, key: str, bucket: str | None = None) -> StoredObjectRef:
         resolved_bucket = self._resolve_bucket(bucket)
         head = self._client.head_object(Bucket=resolved_bucket, Key=key)

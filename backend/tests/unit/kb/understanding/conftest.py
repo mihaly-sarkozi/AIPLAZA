@@ -14,6 +14,22 @@ class FakeContentRepository:
         self.normalized: dict[str, Any] = {}
         self.parts: dict[str, list] = {}
 
+    def begin_extract(self, training_item_id: str, content) -> None:
+        self.extracted[training_item_id] = content
+        self.parts[training_item_id] = []
+
+    def bulk_insert_parts(self, parts: list) -> None:
+        if parts:
+            item_id = parts[0].training_item_id
+            self.parts.setdefault(item_id, []).extend(parts)
+
+    def finalize_extract(self, extracted_content_id: str, *, patch: dict) -> None:
+        for content in self.extracted.values():
+            if getattr(content, "id", None) == extracted_content_id:
+                for key, value in patch.items():
+                    if hasattr(content, key):
+                        setattr(content, key, value)
+
     def replace_extracted_with_parts(
         self,
         training_item_id: str,
@@ -37,10 +53,12 @@ class FakeContentRepository:
     def get_normalized_for_item(self, training_item_id: str):
         return self.normalized.get(training_item_id)
 
-    def list_parts_for_item(self, training_item_id: str, *, part_types=None):
+    def list_parts_for_item(self, training_item_id: str, *, part_types=None, completed_only=True):
         rows = list(self.parts.get(training_item_id, []))
         if part_types:
             rows = [row for row in rows if getattr(row, "part_type", None) in part_types]
+        if completed_only:
+            rows = [row for row in rows if getattr(row, "status", "completed") == "completed"]
         return rows
 
     def count_usable_parts(self, training_item_id: str) -> int:

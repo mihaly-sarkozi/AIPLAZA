@@ -15,8 +15,12 @@ def extracted_result_to_dto(
     *,
     extracted_content_id: str,
     duration_ms: int,
+    extract_strategy: str | None = None,
+    file_size_mb: float | None = None,
 ) -> ExtractedContentDto:
     trace_summary = {
+        "extract_strategy": extract_strategy,
+        "file_size_mb": file_size_mb,
         "total_pages": result.total_pages,
         "processed_pages": result.processed_pages,
         "failed_pages": result.failed_pages,
@@ -73,6 +77,8 @@ def extracted_dto_to_orm(ctx: UnderstandingJobContext, dto: ExtractedContentDto)
         metadata_json={
             "warnings": list(dto.warnings),
             "trace_summary": dict(dto.trace_summary),
+            "extract_strategy": dto.trace_summary.get("extract_strategy"),
+            "file_size_mb": dto.trace_summary.get("file_size_mb"),
         },
     )
 

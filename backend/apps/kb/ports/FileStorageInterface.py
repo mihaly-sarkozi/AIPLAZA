@@ -1,14 +1,13 @@
 from __future__ import annotations
 
-from typing import Protocol
+import os
+import tempfile
+from typing import BinaryIO, Protocol
+
+from apps.kb.shared.errors import KbStorageError
 
 
 class FileStorageInterface(Protocol):
-    """KB nyers anyag tárolása — egyetlen szerződés szöveghez és fájlhoz.
-
-    Implementáció: ``infra.kb.MinioFileStorage`` (vagy más infra adapter).
-    """
-
     def store_text(
         self,
         *,
@@ -18,9 +17,7 @@ class FileStorageInterface(Protocol):
         training_item_id: str,
         content: str,
         content_type: str = "text/plain",
-    ) -> str:
-        """Szöveg mentése; visszaadja a raw_ref kulcsot."""
-        ...
+    ) -> str: ...
 
     def store_file(
         self,
@@ -32,13 +29,15 @@ class FileStorageInterface(Protocol):
         data: bytes,
         filename: str,
         content_type: str | None = None,
-    ) -> str:
-        """Fájl mentése; visszaadja a raw_ref kulcsot."""
-        ...
+    ) -> str: ...
 
-    def read_bytes(self, *, raw_ref: str) -> bytes:
-        """Nyers anyag betöltése a raw_ref kulcs alapján (understanding pipeline)."""
-        ...
+    def read_bytes(self, *, raw_ref: str) -> bytes: ...
+
+    def stat_bytes(self, *, raw_ref: str) -> int: ...
+
+    def open_stream(self, *, raw_ref: str) -> BinaryIO: ...
+
+    def materialize_to_temp_file(self, *, raw_ref: str) -> str: ...
 
 
 __all__ = ["FileStorageInterface"]

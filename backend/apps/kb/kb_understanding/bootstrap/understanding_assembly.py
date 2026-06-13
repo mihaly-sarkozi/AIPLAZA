@@ -64,6 +64,7 @@ def build_understanding_services(
             pdf_extractor=PdfExtractorAdapter(config=extract_config, ocr_extractor=ocr_extractor),
             docx_extractor=DocxExtractorAdapter(config=extract_config),
             text_extractor=ManualTextExtractorAdapter(config=extract_config),
+            job_repository=job_repository,
             config=extract_config,
         ),
         normalize_service=NormalizeContentService(content_repository),

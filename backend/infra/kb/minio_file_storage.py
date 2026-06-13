@@ -4,9 +4,12 @@ from __future__ import annotations
 # Feladat: FileStorageInterface MinIO/S3 implementáció.
 # Sárközi Mihály - 2026.06.07
 
+import os
 import re
+import tempfile
 from typing import Any
 
+from apps.kb.kb_understanding.extract.temp_file_utils import safe_delete_temp_file
 from apps.kb.shared.errors import KbStorageError
 from shared.object_storage.service import get_object_storage
 
@@ -109,6 +112,36 @@ class MinioFileStorage:
         except Exception as exc:
             raise KbStorageError("raw_ref_read_failed") from exc
         return stored.body
+
+    def stat_bytes(self, *, raw_ref: str) -> int:
+        key = str(raw_ref or "").strip()
+        if not key:
+            raise KbStorageError("raw_ref_required")
+        try:
+            return int(self._minio.stat_object(key=key).size_bytes or 0)
+        except Exception as exc:
+            raise KbStorageError("raw_ref_stat_failed") from exc
+
+    def open_stream(self, *, raw_ref: str):
+        key = str(raw_ref or "").strip()
+        if not key:
+            raise KbStorageError("raw_ref_required")
+        temp_path = self.materialize_to_temp_file(raw_ref=key)
+        return open(temp_path, "rb")
+
+    def materialize_to_temp_file(self, *, raw_ref: str) -> str:
+        key = str(raw_ref or "").strip()
+        if not key:
+            raise KbStorageError("raw_ref_required")
+        suffix = os.path.splitext(key)[1] or ".bin"
+        fd, path = tempfile.mkstemp(suffix=suffix)
+        os.close(fd)
+        try:
+            self._minio.download_to_file(key=key, path=path)
+        except Exception as exc:
+            safe_delete_temp_file(path)
+            raise KbStorageError("raw_ref_materialize_failed") from exc
+        return path
 
     @staticmethod
     def _build_training_text_ref(

@@ -28,6 +28,11 @@ class _FakeStorage:
             raise self._error
         return self._data
 
+    def stat_bytes(self, *, raw_ref: str) -> int:
+        if self._error is not None:
+            raise self._error
+        return len(self._data)
+
 
 class _MarkerExtractor:
     def __init__(self, name: str) -> None:
@@ -36,6 +41,9 @@ class _MarkerExtractor:
         self.called = False
 
     def extract(self, data: bytes, *, mime_type: str | None = None) -> ExtractResult:
+        return self.extract_from_bytes(data, mime_type=mime_type)
+
+    def extract_from_bytes(self, data: bytes, *, mime_type: str | None = None, extract_ctx=None) -> ExtractResult:
         self.called = True
         part = build_text_part(page_number=1, part_index=0, text=f"{self.name}-text")
         return ExtractResult(
@@ -48,6 +56,7 @@ class _MarkerExtractor:
             extractor_version=self.version,
             processed_pages=1,
             failed_pages=0,
+            text_parts_count=1,
         )
 
 

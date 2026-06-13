@@ -12,6 +12,40 @@ class ContentRepository:
     def __init__(self, session_factory) -> None:
         self._session_factory = session_factory
 
+    def begin_extract(self, training_item_id: str, content: ExtractedContent) -> None:
+        with self._session_factory() as session:
+            session.execute(
+                delete(ExtractedContentPart).where(
+                    ExtractedContentPart.training_item_id == training_item_id
+                )
+            )
+            session.execute(
+                delete(ExtractedContent).where(ExtractedContent.training_item_id == training_item_id)
+            )
+            session.add(content)
+            session.commit()
+
+    def bulk_insert_parts(self, parts: list[ExtractedContentPart]) -> None:
+        if not parts:
+            return
+        with self._session_factory() as session:
+            session.add_all(parts)
+            session.commit()
+
+    def finalize_extract(self, extracted_content_id: str, *, patch: dict) -> None:
+        with self._session_factory() as session:
+            row = session.get(ExtractedContent, extracted_content_id)
+            if row is None:
+                return
+            for key, value in patch.items():
+                if key == "metadata_json":
+                    metadata = dict(row.metadata_json or {})
+                    metadata.update(value)
+                    row.metadata_json = metadata
+                elif hasattr(row, key):
+                    setattr(row, key, value)
+            session.commit()
+
     def replace_extracted_with_parts(
         self,
         training_item_id: str,
@@ -62,6 +96,7 @@ class ContentRepository:
         training_item_id: str,
         *,
         part_types: set[str] | None = None,
+        completed_only: bool = True,
     ) -> list[ExtractedContentPart]:
         with self._session_factory() as session:
             query = select(ExtractedContentPart).where(
@@ -69,6 +104,8 @@ class ContentRepository:
             )
             if part_types:
                 query = query.where(ExtractedContentPart.part_type.in_(sorted(part_types)))
+            if completed_only:
+                query = query.where(ExtractedContentPart.status == "completed")
             query = query.order_by(
                 ExtractedContentPart.page_number.asc().nullsfirst(),
                 ExtractedContentPart.part_index.asc(),
@@ -87,6 +124,9 @@ class ContentRepository:
                 .where(
                     ExtractedContentPart.training_item_id == training_item_id,
                     ExtractedContentPart.part_type.in_(sorted(usable)),
+                    ExtractedContentPart.status == "completed",
+                    ExtractedContentPart.text.isnot(None),
+                    ExtractedContentPart.text != "",
                 )
             ).scalar_one()
             return int(count or 0)

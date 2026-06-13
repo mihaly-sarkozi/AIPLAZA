@@ -22,6 +22,8 @@ class UnderstandingErrorCode(str, Enum):
     PART_TOO_LARGE = "part_too_large"
     OCR_UNAVAILABLE = "ocr_unavailable"
     OCR_FAILED = "ocr_failed"
+    FILE_REJECTED = "file_rejected"
+    TOO_MANY_PARTS = "too_many_parts"
     EMPTY_CONTENT = "empty_content"
     NORMALIZATION_FAILED = "normalization_failed"
     STRUCTURE_DETECTION_FAILED = "structure_detection_failed"
