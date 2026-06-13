@@ -1,19 +1,16 @@
 from __future__ import annotations
 
-# backend/apps/kb/kb_understanding/service/DetectStructureService.py
-# Feladat: A normalizált szöveg szerkezetének felismerése — extract metadata elsődleges,
-# heurisztika fallback.
-# Sárközi Mihály - 2026.06.11
-
 import re
 from typing import Any
 
+from apps.kb.kb_understanding.config.UnderstandingConf import DEFAULT_UNDERSTANDING_CONFIG, UnderstandingConfig
 from apps.kb.kb_understanding.dto.NormalizedContentDto import NormalizedContentDto
 from apps.kb.kb_understanding.dto.StructuredBlockDto import StructuredBlockDto
 from apps.kb.kb_understanding.dto.UnderstandingJobContext import UnderstandingJobContext
 from apps.kb.kb_understanding.enums.StructuredBlockType import StructuredBlockType
 from apps.kb.kb_understanding.extract.heading_path import HeadingPathTracker
 from apps.kb.kb_understanding.mapper.structure_mapper import block_dto_to_orm
+from apps.kb.kb_understanding.repository.ContentRepository import ContentRepository
 from apps.kb.kb_understanding.repository.StructureRepository import StructureRepository
 from apps.kb.kb_understanding.validation.ValidateStructuredBlocks import ValidateStructuredBlocks
 
@@ -29,15 +26,22 @@ _MAX_HEADING_LENGTH = 120
 
 
 class DetectStructureService:
-    def __init__(self, structure_repository: StructureRepository) -> None:
+    def __init__(
+        self,
+        structure_repository: StructureRepository,
+        content_repository: ContentRepository,
+        *,
+        config: UnderstandingConfig | None = None,
+    ) -> None:
         self._structure_repository = structure_repository
+        self._content_repository = content_repository
+        self._config = config or DEFAULT_UNDERSTANDING_CONFIG
         self._validate = ValidateStructuredBlocks()
 
     def run(self, ctx: UnderstandingJobContext, normalized: NormalizedContentDto) -> list[StructuredBlockDto]:
-        if normalized.part_map:
-            blocks = self._blocks_from_part_map(normalized)
-        else:
-            blocks = self._blocks_from_text(normalized)
+        blocks = self._blocks_from_normalized_parts(ctx)
+        if not blocks and normalized.text.strip():
+            blocks = self._blocks_from_legacy_text(normalized)
 
         self._validate(blocks)
         self._structure_repository.replace_for_item(
@@ -46,43 +50,56 @@ class DetectStructureService:
         )
         return blocks
 
-    def _blocks_from_part_map(self, normalized: NormalizedContentDto) -> list[StructuredBlockDto]:
+    def _blocks_from_normalized_parts(self, ctx: UnderstandingJobContext) -> list[StructuredBlockDto]:
         blocks: list[StructuredBlockDto] = []
         heading_tracker = HeadingPathTracker()
         order_index = 0
 
-        for entry in normalized.part_map:
-            start = int(entry.get("start", 0))
-            end = int(entry.get("end", start))
-            block_text = normalized.text[start:end].strip()
-            if not block_text:
-                continue
+        for batch in self._content_repository.iter_normalized_parts_for_item(
+            ctx.training_item_id,
+            batch_size=self._config.normalize_batch_size,
+        ):
+            for part in batch:
+                block_text = (part.normalized_text or "").strip()
+                if not block_text:
+                    continue
 
-            metadata = dict(entry)
-            block_type = self._classify_from_metadata(metadata, block_text, is_first=order_index == 0)
-            path_info = self._resolve_heading_path(
-                heading_tracker,
-                metadata=metadata,
-                block_text=block_text,
-                block_type=block_type,
-            )
-            section_title = path_info.get("current_section_title")
+                metadata = dict(part.metadata_json or {})
+                metadata.setdefault("source_part_id", part.source_part_id)
+                metadata.setdefault("part_type", part.part_type)
+                metadata.setdefault("page_number", part.page_number)
+                metadata.setdefault("part_index", part.part_index)
+                metadata.setdefault("document_order", part.document_order)
 
-            block_metadata = self._build_block_metadata(entry, path_info)
-            blocks.append(
-                StructuredBlockDto(
+                block_type = self._classify_from_metadata(metadata, block_text, is_first=order_index == 0)
+                path_info = self._resolve_heading_path(
+                    heading_tracker,
+                    metadata=metadata,
+                    block_text=block_text,
                     block_type=block_type,
-                    text=block_text,
-                    order_index=order_index,
-                    page_number=entry.get("page") or entry.get("page_number"),
-                    section_title=section_title
-                    if block_type
-                    not in (StructuredBlockType.TITLE, StructuredBlockType.HEADING, StructuredBlockType.HEADER, StructuredBlockType.FOOTER)
-                    else None,
-                    metadata=block_metadata,
                 )
-            )
-            order_index += 1
+                section_title = path_info.get("current_section_title")
+
+                block_metadata = self._build_block_metadata(metadata, path_info)
+                blocks.append(
+                    StructuredBlockDto(
+                        block_type=block_type,
+                        text=block_text,
+                        order_index=order_index,
+                        page_number=part.page_number,
+                        section_title=section_title
+                        if block_type
+                        not in (
+                            StructuredBlockType.TITLE,
+                            StructuredBlockType.HEADING,
+                            StructuredBlockType.HEADER,
+                            StructuredBlockType.FOOTER,
+                        )
+                        else None,
+                        metadata=block_metadata,
+                    )
+                )
+                order_index += 1
         return blocks
 
     @staticmethod
@@ -148,7 +165,7 @@ class DetectStructureService:
             "current_section_title": path_info.get("current_section_title"),
         }
 
-    def _blocks_from_text(self, normalized: NormalizedContentDto) -> list[StructuredBlockDto]:
+    def _blocks_from_legacy_text(self, normalized: NormalizedContentDto) -> list[StructuredBlockDto]:
         blocks: list[StructuredBlockDto] = []
         section_title: str | None = None
         order_index = 0

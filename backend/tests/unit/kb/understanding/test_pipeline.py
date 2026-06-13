@@ -67,7 +67,10 @@ def _build(recorder: _Recorder, *, failing: dict[str, Exception] | None = None):
         job_repo,
         ProcessingTraceService(step_runs),
         extract_service=step("extract", ExtractedContentDto.from_legacy(text="t", char_count=1)),
-        normalize_service=step("normalize", NormalizedContentDto(text="t", char_count=1)),
+        normalize_service=step(
+            "normalize",
+            NormalizedContentDto(normalized_content_id="und_norm_1", status="completed", char_count=1),
+        ),
         structure_service=step("structure", ["block"]),
         chunk_service=step("chunk", ["chunk"]),
         validate_service=_ValidateStep(recorder, "validate", error=failing.get("validate")),

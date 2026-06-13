@@ -111,19 +111,78 @@ def part_dto_to_orm(
     )
 
 
-def normalized_dto_to_orm(ctx: UnderstandingJobContext, dto) -> "NormalizedContent":
+def normalized_summary_to_orm(
+    ctx: UnderstandingJobContext,
+    *,
+    normalized_content_id: str,
+    status: str,
+    part_count: int = 0,
+    total_chars: int = 0,
+    metadata_json: dict | None = None,
+) -> "NormalizedContent":
     from apps.kb.kb_understanding.orm.NormalizedContent import NormalizedContent
 
     return NormalizedContent(
-        id=new_id("und_norm"),
+        id=normalized_content_id,
         job_id=ctx.job_id,
         training_item_id=ctx.training_item_id,
         knowledge_base_id=ctx.knowledge_base_id,
-        text=dto.text,
-        page_map=list(dto.page_map),
-        part_map=list(getattr(dto, "part_map", []) or []),
-        char_count=dto.char_count,
-        applied_rules=dict(dto.applied_rules),
+        status=status,
+        part_count=part_count,
+        total_chars=total_chars,
+        char_count=total_chars,
+        metadata_json=dict(metadata_json or {}),
+    )
+
+
+def normalized_part_from_extracted(
+    ctx: UnderstandingJobContext,
+    *,
+    normalized_content_id: str,
+    extracted_part,
+    normalized_text: str,
+    metadata_json: dict,
+    status: str = "completed",
+    error_code: str | None = None,
+    error_message: str | None = None,
+) -> "NormalizedContentPart":
+    from apps.kb.kb_understanding.orm.NormalizedContentPart import NormalizedContentPart
+
+    raw_metadata = dict(getattr(extracted_part, "metadata_json", None) or {})
+    document_order = raw_metadata.get("document_order")
+    if document_order is None:
+        document_order = getattr(extracted_part, "part_index", None)
+
+    return NormalizedContentPart(
+        id=new_id("und_norm_part"),
+        normalized_content_id=normalized_content_id,
+        source_part_id=getattr(extracted_part, "id", None),
+        job_id=ctx.job_id,
+        training_item_id=ctx.training_item_id,
+        knowledge_base_id=ctx.knowledge_base_id,
+        part_type=getattr(extracted_part, "part_type", ""),
+        normalized_text=normalized_text,
+        page_number=getattr(extracted_part, "page_number", None),
+        part_index=int(getattr(extracted_part, "part_index", 0) or 0),
+        document_order=document_order,
+        metadata_json=dict(metadata_json),
+        status=status,
+        error_code=error_code,
+        error_message=error_message,
+    )
+
+
+def normalized_dto_to_orm(ctx: UnderstandingJobContext, dto) -> "NormalizedContent":
+    return normalized_summary_to_orm(
+        ctx,
+        normalized_content_id=dto.normalized_content_id,
+        status=dto.status,
+        part_count=dto.part_count,
+        total_chars=dto.total_chars,
+        metadata_json={
+            "applied_rules": dict(getattr(dto, "applied_rules", {}) or {}),
+            "trace_summary": dict(getattr(dto, "trace_summary", {}) or {}),
+        },
     )
 
 
@@ -131,5 +190,7 @@ __all__ = [
     "extracted_dto_to_orm",
     "extracted_result_to_dto",
     "normalized_dto_to_orm",
+    "normalized_part_from_extracted",
+    "normalized_summary_to_orm",
     "part_dto_to_orm",
 ]

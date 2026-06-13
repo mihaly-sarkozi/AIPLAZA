@@ -3,8 +3,8 @@ from __future__ import annotations
 from apps.kb.kb_understanding.orm.ExtractedContent import ExtractedContent
 from apps.kb.kb_understanding.orm.ExtractedContentPart import ExtractedContentPart
 from apps.kb.kb_understanding.orm.KnowledgeChunk import KnowledgeChunk
-from apps.kb.kb_understanding.orm.KnowledgeEmbedding import KnowledgeEmbedding
 from apps.kb.kb_understanding.orm.NormalizedContent import NormalizedContent
+from apps.kb.kb_understanding.orm.NormalizedContentPart import NormalizedContentPart
 from apps.kb.kb_understanding.orm.StructuredBlock import StructuredBlock
 from apps.kb.kb_understanding.orm.UnderstandingJob import UnderstandingJob
 from apps.kb.kb_understanding.orm.UnderstandingStepRun import UnderstandingStepRun
@@ -26,19 +26,17 @@ def _install_kb_understanding_schema(engine, slug: str) -> None:
             ExtractedContent.__table__,
             ExtractedContentPart.__table__,
             NormalizedContent.__table__,
+            NormalizedContentPart.__table__,
             StructuredBlock.__table__,
             KnowledgeChunk.__table__,
-            KnowledgeEmbedding.__table__,
         ),
     )
     run_schema_statements(
         engine,
         slug,
         (
-            # v4: downstream metadata columns
             'ALTER TABLE "{schema}".kb_normalized_content ADD COLUMN IF NOT EXISTS part_map JSONB NOT NULL DEFAULT \'[]\'::jsonb',
             'ALTER TABLE "{schema}".kb_structured_blocks ADD COLUMN IF NOT EXISTS metadata_json JSONB NOT NULL DEFAULT \'{{}}\'::jsonb',
-            # v5: kb_extracted_content part-based extract schema (legacy v1 had text/page_map only)
             'ALTER TABLE "{schema}".kb_extracted_content ADD COLUMN IF NOT EXISTS raw_ref VARCHAR(1024)',
             'ALTER TABLE "{schema}".kb_extracted_content ADD COLUMN IF NOT EXISTS mime_type VARCHAR(255)',
             'ALTER TABLE "{schema}".kb_extracted_content ADD COLUMN IF NOT EXISTS extractor_name VARCHAR(64) NOT NULL DEFAULT \'\'',
@@ -53,6 +51,12 @@ def _install_kb_understanding_schema(engine, slug: str) -> None:
             'ALTER TABLE "{schema}".kb_extracted_content ADD COLUMN IF NOT EXISTS status VARCHAR(32) NOT NULL DEFAULT \'completed\'',
             'ALTER TABLE "{schema}".kb_extracted_content ADD COLUMN IF NOT EXISTS metadata JSONB NOT NULL DEFAULT \'{{}}\'::jsonb',
             'ALTER TABLE "{schema}".kb_extracted_content ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP NOT NULL DEFAULT NOW()',
+            # v6: part-based normalize summary + normalized parts table
+            'ALTER TABLE "{schema}".kb_normalized_content ADD COLUMN IF NOT EXISTS status VARCHAR(32) NOT NULL DEFAULT \'processing\'',
+            'ALTER TABLE "{schema}".kb_normalized_content ADD COLUMN IF NOT EXISTS part_count INTEGER NOT NULL DEFAULT 0',
+            'ALTER TABLE "{schema}".kb_normalized_content ADD COLUMN IF NOT EXISTS total_chars INTEGER NOT NULL DEFAULT 0',
+            'ALTER TABLE "{schema}".kb_normalized_content ADD COLUMN IF NOT EXISTS metadata JSONB NOT NULL DEFAULT \'{{}}\'::jsonb',
+            'ALTER TABLE "{schema}".kb_normalized_content ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP NOT NULL DEFAULT NOW()',
         ),
     )
 
@@ -62,7 +66,7 @@ def register_kb_understanding_tenant_hooks() -> None:
         [
             TenantSchemaHook(
                 name="kb_understanding",
-                revision="kb.understanding.schema.v5",
+                revision="kb.understanding.schema.v6",
                 install=_install_kb_understanding_schema,
                 table_names=(
                     "kb_understanding_jobs",
@@ -70,9 +74,9 @@ def register_kb_understanding_tenant_hooks() -> None:
                     "kb_extracted_content",
                     "kb_extracted_content_parts",
                     "kb_normalized_content",
+                    "kb_normalized_content_parts",
                     "kb_structured_blocks",
                     "kb_chunks",
-                    "kb_embeddings",
                 ),
             )
         ]

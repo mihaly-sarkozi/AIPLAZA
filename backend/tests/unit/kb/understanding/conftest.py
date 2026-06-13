@@ -12,6 +12,7 @@ class FakeContentRepository:
     def __init__(self) -> None:
         self.extracted: dict[str, Any] = {}
         self.normalized: dict[str, Any] = {}
+        self.normalized_parts: dict[str, list] = {}
         self.parts: dict[str, list] = {}
 
     def begin_extract(self, training_item_id: str, content) -> None:
@@ -44,8 +45,63 @@ class FakeContentRepository:
     def replace_extracted(self, training_item_id: str, content) -> None:
         self.extracted[training_item_id] = content
 
-    def replace_normalized(self, training_item_id: str, content) -> None:
-        self.normalized[training_item_id] = content
+    def delete_normalized_by_training_item(self, training_item_id: str) -> None:
+        self.normalized.pop(training_item_id, None)
+        self.normalized_parts.pop(training_item_id, None)
+
+    def create_normalized_summary(self, content) -> None:
+        self.normalized[content.training_item_id] = content
+
+    def bulk_insert_normalized_parts(self, parts: list) -> None:
+        if not parts:
+            return
+        item_id = parts[0].training_item_id
+        self.normalized_parts.setdefault(item_id, []).extend(parts)
+
+    def finalize_normalized_summary(self, normalized_content_id: str, *, patch: dict) -> None:
+        for content in self.normalized.values():
+            if getattr(content, "id", None) == normalized_content_id:
+                for key, value in patch.items():
+                    if key == "metadata_json":
+                        metadata = dict(getattr(content, "metadata_json", None) or {})
+                        metadata.update(value)
+                        content.metadata_json = metadata
+                    elif hasattr(content, key):
+                        setattr(content, key, value)
+
+    def iter_normalizable_extracted_parts(
+        self,
+        training_item_id: str,
+        *,
+        batch_size: int = 100,
+        part_types=None,
+    ):
+        rows = self.list_parts_for_item(training_item_id, part_types=part_types, completed_only=True)
+        for index in range(0, len(rows), batch_size):
+            yield rows[index : index + batch_size]
+
+    def iter_normalized_parts_for_item(self, training_item_id: str, *, batch_size: int = 100):
+        rows = sorted(
+            self.normalized_parts.get(training_item_id, []),
+            key=lambda row: (
+                getattr(row, "document_order", None),
+                getattr(row, "page_number", None),
+                getattr(row, "part_index", 0),
+            ),
+        )
+        for index in range(0, len(rows), batch_size):
+            yield rows[index : index + batch_size]
+
+    def count_normalizable_extracted_parts(self, training_item_id: str) -> int:
+        return len(self.list_parts_for_item(training_item_id, completed_only=True))
+
+    def count_normalized_parts(self, training_item_id: str) -> int:
+        return sum(
+            1
+            for row in self.normalized_parts.get(training_item_id, [])
+            if getattr(row, "status", "completed") == "completed"
+            and (getattr(row, "normalized_text", "") or "").strip()
+        )
 
     def get_extracted_for_item(self, training_item_id: str):
         return self.extracted.get(training_item_id)
@@ -62,7 +118,13 @@ class FakeContentRepository:
         return rows
 
     def count_usable_parts(self, training_item_id: str) -> int:
-        return len(self.parts.get(training_item_id, []))
+        return len(
+            [
+                row
+                for row in self.parts.get(training_item_id, [])
+                if (getattr(row, "text", "") or "").strip()
+            ]
+        )
 
 
 class FakeStructureRepository:

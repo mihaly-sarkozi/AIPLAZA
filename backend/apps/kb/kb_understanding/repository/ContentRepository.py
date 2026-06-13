@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+from collections.abc import Iterator
+
 from sqlalchemy import delete, func, select
 
 from apps.kb.kb_understanding.enums.ExtractPartType import NORMALIZABLE_PART_TYPES
 from apps.kb.kb_understanding.orm.ExtractedContent import ExtractedContent
 from apps.kb.kb_understanding.orm.ExtractedContentPart import ExtractedContentPart
 from apps.kb.kb_understanding.orm.NormalizedContent import NormalizedContent
+from apps.kb.kb_understanding.orm.NormalizedContentPart import NormalizedContentPart
 
 
 class ContentRepository:
@@ -70,13 +73,135 @@ class ContentRepository:
                 session.flush()
             session.commit()
 
-    def replace_normalized(self, training_item_id: str, content: NormalizedContent) -> None:
+    def delete_normalized_by_training_item(self, training_item_id: str) -> None:
         with self._session_factory() as session:
+            session.execute(
+                delete(NormalizedContentPart).where(
+                    NormalizedContentPart.training_item_id == training_item_id
+                )
+            )
             session.execute(
                 delete(NormalizedContent).where(NormalizedContent.training_item_id == training_item_id)
             )
+            session.commit()
+
+    def create_normalized_summary(self, content: NormalizedContent) -> None:
+        with self._session_factory() as session:
             session.add(content)
             session.commit()
+
+    def bulk_insert_normalized_parts(self, parts: list[NormalizedContentPart]) -> None:
+        if not parts:
+            return
+        with self._session_factory() as session:
+            session.add_all(parts)
+            session.commit()
+
+    def finalize_normalized_summary(self, normalized_content_id: str, *, patch: dict) -> None:
+        with self._session_factory() as session:
+            row = session.get(NormalizedContent, normalized_content_id)
+            if row is None:
+                return
+            for key, value in patch.items():
+                if key == "metadata_json":
+                    metadata = dict(row.metadata_json or {})
+                    metadata.update(value)
+                    row.metadata_json = metadata
+                elif hasattr(row, key):
+                    setattr(row, key, value)
+            session.commit()
+
+    def iter_normalizable_extracted_parts(
+        self,
+        training_item_id: str,
+        *,
+        batch_size: int = 100,
+        part_types: set[str] | None = None,
+    ) -> Iterator[list[ExtractedContentPart]]:
+        usable = part_types or {part_type.value for part_type in NORMALIZABLE_PART_TYPES}
+        offset = 0
+        while True:
+            with self._session_factory() as session:
+                query = (
+                    select(ExtractedContentPart)
+                    .where(
+                        ExtractedContentPart.training_item_id == training_item_id,
+                        ExtractedContentPart.part_type.in_(sorted(usable)),
+                        ExtractedContentPart.status == "completed",
+                    )
+                    .order_by(
+                        ExtractedContentPart.part_index.asc(),
+                        ExtractedContentPart.page_number.asc().nullsfirst(),
+                    )
+                    .offset(offset)
+                    .limit(batch_size)
+                )
+                rows = list(session.execute(query).scalars().all())
+                for row in rows:
+                    session.expunge(row)
+            if not rows:
+                break
+            yield rows
+            offset += len(rows)
+
+    def iter_normalized_parts_for_item(
+        self,
+        training_item_id: str,
+        *,
+        batch_size: int = 100,
+    ) -> Iterator[list[NormalizedContentPart]]:
+        offset = 0
+        while True:
+            with self._session_factory() as session:
+                query = (
+                    select(NormalizedContentPart)
+                    .where(
+                        NormalizedContentPart.training_item_id == training_item_id,
+                        NormalizedContentPart.status == "completed",
+                    )
+                    .order_by(
+                        NormalizedContentPart.document_order.asc().nullsfirst(),
+                        NormalizedContentPart.page_number.asc().nullsfirst(),
+                        NormalizedContentPart.part_index.asc(),
+                    )
+                    .offset(offset)
+                    .limit(batch_size)
+                )
+                rows = list(session.execute(query).scalars().all())
+                for row in rows:
+                    session.expunge(row)
+            if not rows:
+                break
+            yield rows
+            offset += len(rows)
+
+    def count_normalizable_extracted_parts(self, training_item_id: str) -> int:
+        usable = {part_type.value for part_type in NORMALIZABLE_PART_TYPES}
+        with self._session_factory() as session:
+            count = session.execute(
+                select(func.count())
+                .select_from(ExtractedContentPart)
+                .where(
+                    ExtractedContentPart.training_item_id == training_item_id,
+                    ExtractedContentPart.part_type.in_(sorted(usable)),
+                    ExtractedContentPart.status == "completed",
+                )
+            ).scalar_one()
+            return int(count or 0)
+
+    def count_normalized_parts(self, training_item_id: str) -> int:
+        with self._session_factory() as session:
+            count = session.execute(
+                select(func.count())
+                .select_from(NormalizedContentPart)
+                .where(
+                    NormalizedContentPart.training_item_id == training_item_id,
+                    NormalizedContentPart.status == "completed",
+                    NormalizedContentPart.normalized_text.isnot(None),
+                    NormalizedContentPart.normalized_text != "",
+                )
+            ).scalar_one()
+            return int(count or 0)
 
     def get_extracted_for_item(self, training_item_id: str) -> ExtractedContent | None:
         with self._session_factory() as session:

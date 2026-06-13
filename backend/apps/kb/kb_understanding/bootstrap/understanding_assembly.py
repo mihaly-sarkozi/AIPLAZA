@@ -68,9 +68,13 @@ def build_understanding_services(
             config=extract_config,
         ),
         normalize_service=NormalizeContentService(content_repository),
-        structure_service=DetectStructureService(structure_repository),
+        structure_service=DetectStructureService(structure_repository, content_repository),
         chunk_service=ChunkContentService(chunk_repository),
-        validate_service=ValidateUnderstandingService(content_repository, chunk_repository),
+        validate_service=ValidateUnderstandingService(
+            content_repository,
+            chunk_repository,
+            structure_repository,
+        ),
     )
     return UnderstandingServices(
         job_repository=job_repository,

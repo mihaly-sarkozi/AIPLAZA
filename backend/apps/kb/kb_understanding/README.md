@@ -1,9 +1,25 @@
-# kb_understanding — technikai tartalom-előkészítés
+# kb_understanding — dokumentumtechnikai feldolgozás
 
 A betöltött anyag technikai előkészítése. A `kb_ingest`-től eseményen
 (`UNDERSTANDING_REQUESTED`) kapja a nyers anyag referenciáját; siker esetén
 `DISCOVERY_REQUESTED` eseménnyel indítja a `kb_discovery` feldolgozást.
-Nem végez entitás/topic/embedding felismerést és nem ír keresőindexet.
+
+Ez a modul **nem** vég el entitásfelismerést, enrichmentet, embeddinget,
+relationship építést, scoringot vagy keresőindexelést — azok a
+`kb_discovery`, `kb_embedding`, `kb_indexing` modulok feladatai.
+
+## Flow
+
+```text
+raw input
+  → EXTRACT
+  → NORMALIZE
+  → STRUCTURE_DETECTION
+  → CHUNKING
+  → VALIDATION
+  → READY_FOR_DISCOVERY
+  → kb.discovery_requested
+```
 
 ## Extract réteg (part-alapú, nagy fájl támogatás)
 
@@ -100,8 +116,8 @@ kb_understanding/
 - Bizonyíték: minden chunk hordozza a kötelező forrás-metaadatokat.
 - Idempotencia: ugyanarra az inputra ugyanazt vagy kompatibilis eredményt adja.
 - Új extractor = új adapter, a pipeline nem módosul.
-- Nincs LLM, nincs entitás/topic felismerés — az a `kb_discovery` feladata.
+- A modul zárt: csak extract → normalize → structure → chunk → validation.
 
 ## Fejlesztési sorrend
 
-extract → normalize → structure detection → chunking → validation → discovery
+extract → normalize → structure detection → chunking → validation → discovery (külön modul)

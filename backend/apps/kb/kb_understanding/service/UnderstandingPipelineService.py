@@ -63,7 +63,7 @@ class UnderstandingPipelineService:
                 UnderstandingStatus.NORMALIZING,
                 lambda: self._normalize.run(ctx, extracted),
                 input_summary={"char_count": extracted.char_count},
-                output_summary=lambda result: {"char_count": result.char_count, "applied_rules": result.applied_rules},
+                output_summary=lambda result: dict(result.trace_summary),
             )
             blocks = self._run_step(
                 ctx,

@@ -7,18 +7,26 @@ from apps.kb.kb_understanding.dto.NormalizedContentDto import NormalizedContentD
 from apps.kb.kb_understanding.enums.StructuredBlockType import StructuredBlockType
 from apps.kb.kb_understanding.service.DetectStructureService import DetectStructureService
 
-from tests.unit.kb.understanding.conftest import FakeStructureRepository
+from tests.unit.kb.understanding.conftest import FakeContentRepository, FakeStructureRepository
 
 pytestmark = pytest.mark.unit
 
 
 def _detect(ctx, text: str, page_map=None):
-    repo = FakeStructureRepository()
-    service = DetectStructureService(repo)
+    structure_repo = FakeStructureRepository()
+    content_repo = FakeContentRepository()
+    service = DetectStructureService(structure_repo, content_repo)
     blocks = service.run(
-        ctx, NormalizedContentDto(text=text, page_map=page_map or [], char_count=len(text))
+        ctx,
+        NormalizedContentDto(
+            normalized_content_id="und_norm_test",
+            status="completed",
+            text=text,
+            page_map=page_map or [],
+            char_count=len(text),
+        ),
     )
-    return blocks, repo
+    return blocks, structure_repo
 
 
 def test_detects_title_heading_and_paragraph(ctx):

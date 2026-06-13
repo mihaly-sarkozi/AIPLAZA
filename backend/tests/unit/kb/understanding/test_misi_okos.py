@@ -56,9 +56,9 @@ def test_misi_okos_understanding_pipeline_creates_artifacts_and_emits_discovery(
             text_extractor=ManualTextExtractorAdapter(),
         ),
         normalize_service=NormalizeContentService(content_repo),
-        structure_service=DetectStructureService(structure_repo),
+        structure_service=DetectStructureService(structure_repo, content_repo),
         chunk_service=ChunkContentService(chunk_repo),
-        validate_service=ValidateUnderstandingService(content_repo, chunk_repo),
+        validate_service=ValidateUnderstandingService(content_repo, chunk_repo, structure_repo),
         emit_discovery_requested=emit_discovery_requested,
     )
 
@@ -66,6 +66,7 @@ def test_misi_okos_understanding_pipeline_creates_artifacts_and_emits_discovery(
     assert status == UnderstandingStatus.READY_FOR_DISCOVERY
     assert ctx.training_item_id in content_repo.extracted
     assert ctx.training_item_id in content_repo.normalized
+    assert len(content_repo.normalized_parts.get(ctx.training_item_id, [])) >= 1
     assert len(structure_repo.blocks.get(ctx.training_item_id, [])) >= 1
     assert len(chunk_repo.chunks.get(ctx.training_item_id, [])) >= 1
     assert events == ["discovery_requested"]

@@ -4,14 +4,22 @@ import re
 from collections import Counter
 from typing import Any
 
+from apps.kb.kb_understanding.config.UnderstandingConf import DEFAULT_UNDERSTANDING_CONFIG, UnderstandingConfig
 from apps.kb.kb_understanding.dto.ExtractedContentDto import ExtractedContentDto
 from apps.kb.kb_understanding.dto.NormalizedContentDto import NormalizedContentDto
 from apps.kb.kb_understanding.dto.UnderstandingJobContext import UnderstandingJobContext
 from apps.kb.kb_understanding.enums.ExtractPartType import NORMALIZABLE_PART_TYPES
+from apps.kb.kb_understanding.enums.NormalizeStatus import NormalizeStatus
+from apps.kb.kb_understanding.enums.UnderstandingErrorCode import UnderstandingErrorCode
+from apps.kb.kb_understanding.errors.UnderstandingProcessingError import UnderstandingProcessingError
 from apps.kb.kb_understanding.extract.extract_metadata import slim_metadata_for_downstream
-from apps.kb.kb_understanding.mapper.content_mapper import normalized_dto_to_orm
+from apps.kb.kb_understanding.mapper.content_mapper import (
+    normalized_part_from_extracted,
+    normalized_summary_to_orm,
+)
 from apps.kb.kb_understanding.repository.ContentRepository import ContentRepository
 from apps.kb.kb_understanding.validation.ValidateNormalizedContent import ValidateNormalizedContent
+from apps.kb.shared.ids import new_id
 
 _PAGE_NUMBER_LINE = re.compile(
     r"^\s*(?:-\s*)?(?:page\s+)?\d{1,4}(?:\s*[./]\s*\d{1,4})?(?:\s*-)?(?:\s*\.?\s*oldal)?\s*$",
@@ -22,87 +30,143 @@ _HEADER_FOOTER_MAX_LENGTH = 80
 
 
 class NormalizeContentService:
-    def __init__(self, content_repository: ContentRepository) -> None:
+    def __init__(
+        self,
+        content_repository: ContentRepository,
+        *,
+        config: UnderstandingConfig | None = None,
+    ) -> None:
         self._content_repository = content_repository
+        self._config = config or DEFAULT_UNDERSTANDING_CONFIG
         self._validate = ValidateNormalizedContent()
 
     def run(self, ctx: UnderstandingJobContext, extracted: ExtractedContentDto) -> NormalizedContentDto:
+        batch_size = self._config.normalize_batch_size
         part_types = {item.value for item in NORMALIZABLE_PART_TYPES}
-        stored_parts = self._content_repository.list_parts_for_item(
-            ctx.training_item_id,
-            part_types=part_types,
-            completed_only=True,
-        )
-        source_parts = stored_parts or [
-            type(
-                "Part",
-                (),
-                {
-                    "id": None,
-                    "text": part.text,
-                    "page_number": part.page_number,
-                    "part_type": part.part_type,
-                    "part_index": part.part_index,
-                    "metadata_json": dict(part.metadata),
-                },
-            )()
-            for part in extracted.parts
-            if part.part_type in part_types
-        ]
-
-        applied: dict[str, Any] = {"normalized_part_types": sorted(part_types)}
-        normalized_chunks: list[str] = []
-        page_map: list[dict[str, Any]] = []
-        part_map: list[dict[str, Any]] = []
-        offset = 0
-        current_page: int | None = None
-        page_start = 0
-
-        for part in source_parts:
-            text, part_applied = self._normalize_part_text(part.text or "")
-            for key, value in part_applied.items():
-                applied[key] = applied.get(key, 0) + value
-            if not text:
-                continue
-            start = offset
-            normalized_chunks.append(text)
-            page = getattr(part, "page_number", None)
-            if page != current_page:
-                if current_page is not None:
-                    page_map.append({"page": current_page, "start": page_start, "end": offset})
-                current_page = page
-                page_start = offset
-            offset += len(text) + 2
-
-            raw_metadata = getattr(part, "metadata_json", None) or {}
-            part_map.append(
-                {
-                    "start": start,
-                    "end": offset - 2,
-                    "page": page,
-                    "part_index": getattr(part, "part_index", None),
-                    "part_type": getattr(part, "part_type", None),
-                    "source_part_id": getattr(part, "id", None),
-                    **slim_metadata_for_downstream(dict(raw_metadata)),
-                }
+        input_parts = self._content_repository.count_normalizable_extracted_parts(ctx.training_item_id)
+        if input_parts <= 0 and not extracted.parts:
+            input_parts = sum(
+                1 for part in extracted.parts if part.part_type in part_types and (part.text or "").strip()
             )
 
-        if current_page is not None:
-            page_map.append({"page": current_page, "start": page_start, "end": offset})
+        self._content_repository.delete_normalized_by_training_item(ctx.training_item_id)
+        summary_id = new_id("und_norm")
+        self._content_repository.create_normalized_summary(
+            normalized_summary_to_orm(
+                ctx,
+                normalized_content_id=summary_id,
+                status=NormalizeStatus.PROCESSING.value,
+            )
+        )
 
-        text = "\n\n".join(normalized_chunks)
-        normalized = NormalizedContentDto(
-            text=text,
-            page_map=page_map,
-            part_map=part_map,
-            char_count=len(text),
+        applied: dict[str, Any] = {"normalized_part_types": sorted(part_types)}
+        normalized_parts = 0
+        skipped_parts = 0
+        failed_parts = 0
+        total_chars = 0
+
+        try:
+            for batch in self._content_repository.iter_normalizable_extracted_parts(
+                ctx.training_item_id,
+                batch_size=batch_size,
+                part_types=part_types,
+            ):
+                normalized_batch = []
+                for extracted_part in batch:
+                    try:
+                        normalized_text, part_applied = self._normalize_part_text(extracted_part.text or "")
+                        for key, value in part_applied.items():
+                            applied[key] = applied.get(key, 0) + value
+                        if not normalized_text.strip():
+                            skipped_parts += 1
+                            continue
+                        raw_metadata = dict(getattr(extracted_part, "metadata_json", None) or {})
+                        metadata = slim_metadata_for_downstream(raw_metadata)
+                        metadata["source_part_id"] = getattr(extracted_part, "id", None)
+                        metadata["part_type"] = getattr(extracted_part, "part_type", None)
+                        metadata["page_number"] = getattr(extracted_part, "page_number", None)
+                        metadata["part_index"] = getattr(extracted_part, "part_index", None)
+                        normalized_batch.append(
+                            normalized_part_from_extracted(
+                                ctx,
+                                normalized_content_id=summary_id,
+                                extracted_part=extracted_part,
+                                normalized_text=normalized_text,
+                                metadata_json=metadata,
+                            )
+                        )
+                        normalized_parts += 1
+                        total_chars += len(normalized_text)
+                    except Exception as exc:
+                        failed_parts += 1
+                        normalized_batch.append(
+                            normalized_part_from_extracted(
+                                ctx,
+                                normalized_content_id=summary_id,
+                                extracted_part=extracted_part,
+                                normalized_text="",
+                                metadata_json=slim_metadata_for_downstream(
+                                    dict(getattr(extracted_part, "metadata_json", None) or {})
+                                ),
+                                status="failed",
+                                error_code=UnderstandingErrorCode.NORMALIZATION_FAILED.value,
+                                error_message=str(exc)[:1000],
+                            )
+                        )
+                self._content_repository.bulk_insert_normalized_parts(normalized_batch)
+        except Exception as exc:
+            self._content_repository.finalize_normalized_summary(
+                summary_id,
+                patch={
+                    "status": NormalizeStatus.FAILED.value,
+                    "part_count": normalized_parts,
+                    "total_chars": total_chars,
+                    "char_count": total_chars,
+                    "metadata_json": {"applied_rules": applied, "error": str(exc)[:1000]},
+                },
+            )
+            raise UnderstandingProcessingError(UnderstandingErrorCode.NORMALIZATION_FAILED) from exc
+
+        if normalized_parts <= 0:
+            status = NormalizeStatus.FAILED
+        elif failed_parts > 0:
+            status = NormalizeStatus.PARTIAL
+        else:
+            status = NormalizeStatus.COMPLETED
+
+        trace_summary = {
+            "input_parts": input_parts,
+            "normalized_parts": normalized_parts,
+            "skipped_parts": skipped_parts,
+            "total_chars": total_chars,
+            "batch_size": batch_size,
+            "status": status.value.upper(),
+        }
+        if failed_parts:
+            trace_summary["failed_parts"] = failed_parts
+
+        self._content_repository.finalize_normalized_summary(
+            summary_id,
+            patch={
+                "status": status.value,
+                "part_count": normalized_parts,
+                "total_chars": total_chars,
+                "char_count": total_chars,
+                "metadata_json": {"applied_rules": applied, "trace_summary": trace_summary},
+            },
+        )
+
+        result = NormalizedContentDto(
+            normalized_content_id=summary_id,
+            status=status.value,
+            part_count=normalized_parts,
+            total_chars=total_chars,
+            char_count=total_chars,
             applied_rules=applied,
+            trace_summary=trace_summary,
         )
-        self._validate(normalized)
-        self._content_repository.replace_normalized(
-            ctx.training_item_id, normalized_dto_to_orm(ctx, normalized)
-        )
-        return normalized
+        self._validate(result)
+        return result
 
     def _normalize_part_text(self, text: str) -> tuple[str, dict[str, int]]:
         applied: dict[str, int] = {}
@@ -146,11 +210,11 @@ class NormalizeContentService:
     @staticmethod
     def _remove_repeated_lines(lines: list[str]) -> tuple[list[str], int]:
         stripped = [line.strip() for line in lines]
-        counts = Counter(line for line in stripped if line and len(line) <= _HEADER_FOOTER_MAX_LENGTH)
+        counts = Counter(
+            line for line in stripped if line and len(line) <= _HEADER_FOOTER_MAX_LENGTH
+        )
         repeated = {
-            line
-            for line, occurrences in counts.items()
-            if occurrences >= _HEADER_FOOTER_MIN_OCCURRENCES
+            line for line, occurrences in counts.items() if occurrences >= _HEADER_FOOTER_MIN_OCCURRENCES
         }
         if not repeated:
             return lines, 0

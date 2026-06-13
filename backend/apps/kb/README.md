@@ -62,9 +62,10 @@ Minden dokumentum, batch és item kapjon státuszt. A kanonikus státuszkészlet
 
 ```text
 CREATED, QUEUED, EXTRACTING, NORMALIZING, STRUCTURING, CHUNKING,
-EXTRACTING_ENTITIES, ENRICHING, EMBEDDING, BUILDING_RELATIONSHIPS, SCORING,
 VALIDATING, READY_FOR_DISCOVERY, PARTIAL, FAILED, RETRYABLE
 ```
+
+A discovery / embedding / scoring státuszok a `kb_discovery` modulban vannak.
 
 ## Bizonyíték szabály
 
@@ -189,16 +190,15 @@ maintenance   → understanding (esemény / újrafuttatás)
  4. kb_understanding / normalize
  5. kb_understanding / structure detection
  6. kb_understanding / chunking
- 7. kb_indexing / full-text
- 8. kb_understanding / embedding
- 9. kb_indexing / vector
-10. kb_search / hybrid search
-11. kb_understanding / entity extraction
-12. kb_understanding / enrichment
-13. kb_services / question-answer
-14. kb_feedback
-15. kb_testing
-16. kb_maintenance
+ 7. kb_understanding / validation
+ 8. kb_discovery / entity + enrichment + scoring
+ 9. kb_embedding / vector
+10. kb_indexing / full-text + vector index
+11. kb_search / hybrid search
+12. kb_services / question-answer
+13. kb_feedback
+14. kb_testing
+15. kb_maintenance
 ```
 
 ## Gyökér fa

@@ -36,8 +36,6 @@ class UnderstandingStatusService:
             job=job_to_response(job),
             steps=[step_run_to_response(run) for run in steps],
             chunk_count=len(chunks),
-            entity_count=0,
-            embedding_count=0,
         )
 
 

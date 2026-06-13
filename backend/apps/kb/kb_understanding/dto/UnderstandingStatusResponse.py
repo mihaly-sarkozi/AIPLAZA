@@ -14,8 +14,6 @@ class UnderstandingStatusResponse(BaseModel):
     job: UnderstandingJobResponse | None = None
     steps: list[UnderstandingStepRunResponse] = Field(default_factory=list)
     chunk_count: int = 0
-    entity_count: int = 0
-    embedding_count: int = 0
 
 
 __all__ = ["UnderstandingStatusResponse"]
