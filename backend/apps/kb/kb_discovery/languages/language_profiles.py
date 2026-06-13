@@ -11,48 +11,45 @@ from apps.kb.kb_discovery.languages.topics_en import TOPIC_RULES_EN
 from apps.kb.kb_discovery.languages.topics_es import TOPIC_RULES_ES
 from apps.kb.kb_discovery.languages.topics_hu import TOPIC_RULES_HU
 
+# Detektálási markerek: stopword alap + domain-specifikus gyakori szavak.
+# A stopword listák bővítése automatikusan javítja a detektálást is.
+_HU_MARKER_EXTRA = frozenset(
+    {
+        "ügyfél",
+        "számlázás",
+        "budapesten",
+        "történik",
+        "július",
+        "irodában",
+        "kft",
+        "használ",
+        "használja",
+        "használják",
+    }
+)
+_EN_MARKER_EXTRA = frozenset(
+    {
+        "customer",
+        "onboarding",
+        "london",
+        "office",
+        "invoice",
+    }
+)
+_ES_MARKER_EXTRA = frozenset(
+    {
+        "factura",
+        "madrid",
+        "cliente",
+        "oficina",
+        "crea",
+    }
+)
 
 LANGUAGE_MARKERS: dict[SupportedLanguage, frozenset[str]] = {
-    SupportedLanguage.HU: frozenset(
-        {
-            "az",
-            "és",
-            "hogy",
-            "van",
-            "egy",
-            "ügyfél",
-            "számlázás",
-            "budapesten",
-            "történik",
-            "július",
-            "irodában",
-        }
-    ),
-    SupportedLanguage.EN: frozenset(
-        {
-            "the",
-            "customer",
-            "onboarding",
-            "starts",
-            "in",
-            "london",
-            "office",
-            "invoice",
-        }
-    ),
-    SupportedLanguage.ES: frozenset(
-        {
-            "la",
-            "el",
-            "de",
-            "factura",
-            "madrid",
-            "cliente",
-            "se",
-            "crea",
-            "oficina",
-        }
-    ),
+    SupportedLanguage.HU: STOPWORDS_HU | _HU_MARKER_EXTRA,
+    SupportedLanguage.EN: STOPWORDS_EN | _EN_MARKER_EXTRA,
+    SupportedLanguage.ES: STOPWORDS_ES | _ES_MARKER_EXTRA,
 }
 
 

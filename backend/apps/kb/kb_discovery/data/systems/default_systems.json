@@ -1,0 +1,19 @@
+{
+  "default": [
+    "HubSpot",
+    "Salesforce",
+    "SAP",
+    "Jira",
+    "Confluence",
+    "Google Workspace",
+    "Microsoft 365",
+    "CRM",
+    "Slack",
+    "Notion"
+  ],
+  "products": [
+    "HubSpot",
+    "Salesforce",
+    "SAP"
+  ]
+}

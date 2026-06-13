@@ -1,18 +1,24 @@
 from __future__ import annotations
 
-from apps.kb.kb_discovery.dto.DiscoveryJobContext import DiscoveryJobContext
-from apps.kb.kb_discovery.dto.KnowledgeEntityDto import EntityMentionDto, KnowledgeEntityDto
-from apps.kb.kb_discovery.mapper.discovery_mapper import entity_dto_to_orm, mention_dto_to_orm
 from apps.kb.kb_discovery.common.CandidateMerger import CandidateMerger
 from apps.kb.kb_discovery.common.DiscoveryContext import DiscoveryContext
 from apps.kb.kb_discovery.dto.DiscoveryChunkDto import DiscoveryChunkDto
-from apps.kb.kb_discovery.entities.CompanyNameRecognizer import CompanyNameRecognizer
+from apps.kb.kb_discovery.dto.DiscoveryJobContext import DiscoveryJobContext
+from apps.kb.kb_discovery.dto.KnowledgeEntityDto import EntityMentionDto, KnowledgeEntityDto
 from apps.kb.kb_discovery.entities.DictionaryEntityRecognizer import (
     DictionaryEntityRecognizer,
     ProductRecognizer,
     SystemNameRecognizer,
 )
 from apps.kb.kb_discovery.entities.IdentifierRecognizer import IdentifierRecognizer
+from apps.kb.kb_discovery.entities.LegalFormCompanyRecognizer import LegalFormCompanyRecognizer
+from apps.kb.kb_discovery.entities.providers.EntityDictionaryProvider import (
+    CompositeEntityDictionaryProvider,
+    build_default_entity_dictionary_provider,
+)
+from apps.kb.kb_discovery.gazetteers.LegalFormGazetteer import LegalFormGazetteer
+from apps.kb.kb_discovery.gazetteers.SystemsGazetteer import SystemsGazetteer
+from apps.kb.kb_discovery.mapper.discovery_mapper import entity_dto_to_orm, mention_dto_to_orm
 from apps.kb.kb_discovery.repository.EntityRepository import EntityMentionRepository, EntityRepository
 
 
@@ -21,13 +27,22 @@ class EntityRecognitionService:
         self,
         entity_repository: EntityRepository,
         mention_repository: EntityMentionRepository,
+        *,
+        entity_dictionary_provider: CompositeEntityDictionaryProvider | None = None,
+        systems_gazetteer: SystemsGazetteer | None = None,
+        legal_form_gazetteer: LegalFormGazetteer | None = None,
     ) -> None:
         self._entity_repository = entity_repository
         self._mention_repository = mention_repository
+        self._entity_dictionary_provider = (
+            entity_dictionary_provider or build_default_entity_dictionary_provider()
+        )
+        systems = systems_gazetteer or SystemsGazetteer()
+        legal_forms = legal_form_gazetteer or LegalFormGazetteer()
         self._merger = CandidateMerger()
         self._recognizers = [
-            CompanyNameRecognizer(),
-            SystemNameRecognizer(),
+            LegalFormCompanyRecognizer(legal_forms),
+            SystemNameRecognizer(systems),
             DictionaryEntityRecognizer(),
             ProductRecognizer(),
             IdentifierRecognizer(),
@@ -45,6 +60,10 @@ class EntityRecognitionService:
             tenant_slug=ctx.tenant_slug,
             knowledge_base_id=ctx.knowledge_base_id,
             training_item_id=ctx.training_item_id,
+            entity_dictionary=self._entity_dictionary_provider.load(
+                tenant_slug=ctx.tenant_slug,
+                knowledge_base_id=ctx.knowledge_base_id,
+            ),
         )
         candidates = []
         for recognizer in self._recognizers:

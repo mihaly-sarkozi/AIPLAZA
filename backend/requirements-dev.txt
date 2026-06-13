@@ -18,5 +18,8 @@ fakeredis
 ruff>=0.7.0
 mypy>=1.11.0
 
+# Entity gazetteer build (scripts/build_entity_gazetteers.py)
+names-dataset>=3.0.0
+
 # IDE remote debug (Docker / attach)
 debugpy~=1.8.0

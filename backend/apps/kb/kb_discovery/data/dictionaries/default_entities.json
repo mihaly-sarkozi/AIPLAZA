@@ -1,0 +1,25 @@
+[
+  {
+    "name": "AI Plaza",
+    "type": "product",
+    "confidence": 0.92
+  },
+  {
+    "name": "AIPLAZA",
+    "type": "product",
+    "confidence": 0.9,
+    "aliases": [
+      "AI Plaza"
+    ]
+  },
+  {
+    "name": "Zalka 2000",
+    "type": "company",
+    "confidence": 0.88
+  },
+  {
+    "name": "HubSpot",
+    "type": "system",
+    "confidence": 0.9
+  }
+]
