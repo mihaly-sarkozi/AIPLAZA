@@ -63,5 +63,3 @@ dnspython
 langdetect>=1.0.0
 # Lokális embedding modell (kb_understanding — BAAI/bge-m3)
 sentence-transformers>=3.0.0
-# Keresztnevek gazetteer (kb_discovery GivenNameGazetteer)
-names-dataset>=3.0.0

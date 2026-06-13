@@ -24,6 +24,7 @@ class LegalFormGazetteer:
                 for form in forms
             )
         )
+        self._compiled_patterns: dict[str | None, re.Pattern[str]] = {}
 
     def forms_for_language(self, language_code: str | None) -> tuple[str, ...]:
         code = (language_code or "").strip().lower()
@@ -41,12 +42,18 @@ class LegalFormGazetteer:
         return "|".join(escaped)
 
     def company_pattern_for_language(self, language_code: str | None) -> re.Pattern[str]:
+        cache_key = (language_code or "").strip().lower() or None
+        cached = self._compiled_patterns.get(cache_key)
+        if cached is not None:
+            return cached
         suffix_group = self.suffix_group_for_language(language_code)
         name_token = rf"[A-ZÁÉÍÓÖŐÚÜŰ0-9][{_WORD_CHAR}\-]*"
-        return re.compile(
+        pattern = re.compile(
             rf"(?<![{_WORD_CHAR}])((?:{name_token}(?:\s+{name_token})*)(?:\s+|,\s+)(?:{suffix_group})){_NOT_AFTER_SUFFIX}",
             re.UNICODE | re.IGNORECASE,
         )
+        self._compiled_patterns[cache_key] = pattern
+        return pattern
 
 
 __all__ = ["LegalFormGazetteer"]

@@ -2,15 +2,20 @@
 """Entity gazetteer adatfájlok letöltése / generálása kb_discovery-hez."""
 from __future__ import annotations
 
+import argparse
 import csv
 import json
 import re
 import sys
 import urllib.request
+from dataclasses import dataclass, field
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 DATA_ROOT = ROOT / "backend" / "apps" / "kb" / "kb_discovery" / "data"
+sys.path.insert(0, str(ROOT / "backend"))
+
+from apps.kb.kb_discovery.gazetteers.loaders import load_name_lines, normalize_given_name_line
 
 NICKNAMES_URL = (
     "https://raw.githubusercontent.com/carltonnorthern/nicknames/master/names.csv"
@@ -26,10 +31,6 @@ HUN_FIRSTNAMES_URL = (
 HU_NAMEDAYS_URL = (
     "https://raw.githubusercontent.com/harkalygergo/hu_namedays/master/"
     "hu-HU_magyar-nevnapok-abc-sorrendben.csv"
-)
-ES_GIVEN_NAMES_URL = (
-    "https://raw.githubusercontent.com/Rigonz/60k-Spanish-Given-Names/master/"
-    "03%20Names%20R3.csv"
 )
 ES_MALE_NAMES_URL = (
     "https://raw.githubusercontent.com/jvalhondo/spanish-names-surnames/master/"
@@ -66,6 +67,51 @@ _GLEIF_COUNTRY_TO_LANG = {
     "MX": "es",
     "AR": "es",
 }
+
+_HU_SURNAME_CANONICALS = frozenset(
+    {
+        "Sárközi",
+        "Nagy",
+        "Kovács",
+        "Szabó",
+        "Tóth",
+        "Horváth",
+        "Varga",
+    }
+)
+_ES_SURNAME_CANONICALS = frozenset(
+    {
+        "García",
+        "González",
+        "Rodríguez",
+        "Fernández",
+        "López",
+        "Martínez",
+        "Sánchez",
+        "Pérez",
+    }
+)
+_SURNAME_CANONICALS_BY_LANG = {
+    "hu": _HU_SURNAME_CANONICALS,
+    "es": _ES_SURNAME_CANONICALS,
+    "en": frozenset(),
+}
+
+
+@dataclass
+class GivenNameBuildResult:
+    names: set[str] = field(default_factory=set)
+    sources: dict[str, set[str]] = field(default_factory=dict)
+
+
+@dataclass
+class AliasFilterStats:
+    kept: int = 0
+    dropped_missing_canonical: int = 0
+    dropped_samples: list[tuple[str, str]] = field(default_factory=list)
+
+
+_BUILD_STATS: dict[str, object] = {}
 
 
 def _download_text(url: str, *, timeout: int = 60) -> str | None:
@@ -143,20 +189,21 @@ def _build_default_systems() -> None:
 def _build_legal_forms() -> None:
     if _download_gleif_legal_forms():
         return
+    archive = DATA_ROOT / "legal_forms" / "gleif_elf_v1.6.csv"
+    if archive.is_file():
+        raw = archive.read_text(encoding="utf-8")
+        if _write_gleif_legal_forms_from_csv(raw, source_label="local archive"):
+            return
     print("WARN: GLEIF download failed; using fallback legal forms", file=sys.stderr)
     _build_fallback_legal_forms()
 
 
-def _download_gleif_legal_forms() -> bool:
-    raw = _download_text(GLEIF_ELF_CSV_URL, timeout=120)
-    if not raw:
-        return False
-
-    archive = DATA_ROOT / "legal_forms" / "gleif_elf_v1.6.csv"
-    archive.write_text(raw, encoding="utf-8")
-
+def _write_gleif_legal_forms_from_csv(raw: str, *, source_label: str) -> bool:
     forms_by_lang: dict[str, set[str]] = {key: set() for key in ("hu", "en", "es", "global")}
     reader = csv.DictReader(raw.splitlines())
+    if not reader.fieldnames:
+        return False
+
     for row in reader:
         if (row.get("ELF Status ACTV/INAC") or "").strip().upper() != "ACTV":
             continue
@@ -173,15 +220,28 @@ def _download_gleif_legal_forms() -> bool:
                     if bucket != "global":
                         forms_by_lang["global"].update(_common_global_forms(token))
 
+    if not any(forms_by_lang.values()):
+        return False
+
     for key, values in forms_by_lang.items():
         merged = sorted(values, key=lambda item: (-len(item), item.casefold()))
         _write_json(DATA_ROOT / "legal_forms" / f"legal_forms_{key}.json", merged)
     print(
-        "OK: GLEIF legal forms -> "
+        f"OK: GLEIF legal forms ({source_label}) -> "
         f"hu={len(forms_by_lang['hu'])}, en={len(forms_by_lang['en'])}, "
         f"es={len(forms_by_lang['es'])}, global={len(forms_by_lang['global'])}"
     )
     return True
+
+
+def _download_gleif_legal_forms() -> bool:
+    raw = _download_text(GLEIF_ELF_CSV_URL, timeout=120)
+    if not raw:
+        return False
+
+    archive = DATA_ROOT / "legal_forms" / "gleif_elf_v1.6.csv"
+    archive.write_text(raw, encoding="utf-8")
+    return _write_gleif_legal_forms_from_csv(raw, source_label="download")
 
 
 def _split_gleif_tokens(value: str) -> list[str]:
@@ -633,84 +693,62 @@ def _write_fallback_en_nicknames(target: Path) -> None:
         writer.writerows(rows)
 
 
-def _export_given_names() -> None:
-    generated = _download_given_names_from_sources()
-    if generated:
-        return
-
-    try:
-        from names_dataset import NameDataset  # type: ignore
-    except ImportError:
-        print("WARN: names-dataset not installed; skipping given name export", file=sys.stderr)
-        _write_fallback_given_names()
-        return
-
-    dataset = NameDataset()
-    country_map = {"hu": "Hungary", "en": "United Kingdom", "es": "Spain"}
-    for code, country in country_map.items():
-        names: set[str] = set()
-        for gender in ("M", "F"):
-            try:
-                top = dataset.get_top_names(n=2000, gender=gender, country=country)
-            except Exception:
-                continue
-            for item in top or []:
-                if isinstance(item, (list, tuple)) and item:
-                    names.add(str(item[0]).strip())
-                elif isinstance(item, str):
-                    names.add(item.strip())
-        if not names:
-            continue
-        path = DATA_ROOT / "names" / f"given_names_{code}.txt"
-        path.write_text("\n".join(sorted(names)) + "\n", encoding="utf-8")
-        print(f"OK: {len(names)} given names -> {path.relative_to(ROOT)}")
+def _normalize_name_set(raw_names: set[str]) -> set[str]:
+    normalized: set[str] = set()
+    for raw in raw_names:
+        name = normalize_given_name_line(raw)
+        if name:
+            normalized.add(name)
+    return normalized
 
 
-def _download_given_names_from_sources() -> bool:
-    hu_names = _load_hu_given_names()
-    es_names = _load_es_given_names()
-    en_names = _load_en_given_names()
-    if not any((hu_names, es_names, en_names)):
-        return False
-
-    for code, names in (("hu", hu_names), ("en", en_names), ("es", es_names)):
-        if not names:
-            continue
-        path = DATA_ROOT / "names" / f"given_names_{code}.txt"
-        path.write_text("\n".join(sorted(names)) + "\n", encoding="utf-8")
-        print(f"OK: {len(names)} given names -> {path.relative_to(ROOT)}")
-    return True
+def _merge_core_with_filtered_extension(core: set[str], extension: set[str]) -> set[str]:
+    return core | (extension & core)
 
 
-def _load_hu_given_names() -> set[str]:
+def _names_in_at_least_n_sources(sources: dict[str, set[str]], min_sources: int) -> set[str]:
+    if min_sources <= 1:
+        combined: set[str] = set()
+        for values in sources.values():
+            combined.update(values)
+        return combined
+
+    all_names = set().union(*sources.values())
+    confirmed: set[str] = set()
+    for name in all_names:
+        if sum(1 for values in sources.values() if name in values) >= min_sources:
+            confirmed.add(name)
+    return confirmed
+
+
+def _read_given_names_file(code: str) -> set[str]:
+    path = DATA_ROOT / "names" / f"given_names_{code}.txt"
+    return set(load_name_lines(path))
+
+
+def _parse_es_hypo_canonical_names(raw: str) -> set[str]:
     names: set[str] = set()
-    raw = _download_text(HUN_FIRSTNAMES_URL)
-    if raw:
-        for line in raw.splitlines():
-            line = line.strip()
-            if line and not line.startswith("#"):
-                names.add(line)
-    raw = _download_text(HU_NAMEDAYS_URL)
-    if raw:
-        reader = csv.reader(raw.splitlines())
-        for row in reader:
-            if row:
-                names.add(str(row[0]).strip())
-    names.update(_names_from_dataset("Hungary"))
-    return {name for name in names if len(name) >= 2}
+    for line in raw.splitlines():
+        line = line.strip()
+        if not line.startswith("*"):
+            continue
+        body = line.lstrip("*").strip()
+        if ":" not in body:
+            continue
+        canonical_raw = body.split(":", 1)[0].strip()
+        link_match = _WIKI_LINK.search(canonical_raw)
+        if link_match:
+            canonical_raw = link_match.group(2) or link_match.group(1)
+        else:
+            canonical_raw = canonical_raw.replace("[[", "").replace("]]", "")
+        name = normalize_given_name_line(_clean_wiki_name(canonical_raw))
+        if name:
+            names.add(name)
+    return names
 
 
-def _load_es_given_names() -> set[str]:
+def _load_jvalhondo_es_names() -> set[str]:
     names: set[str] = set()
-    raw = _download_text(ES_GIVEN_NAMES_URL)
-    if raw:
-        reader = csv.reader(raw.splitlines())
-        next(reader, None)
-        for row in reader:
-            if row:
-                first = str(row[0]).strip().split()[0]
-                if first:
-                    names.add(first.title())
     for url in (ES_MALE_NAMES_URL, ES_FEMALE_NAMES_URL):
         raw = _download_text(url)
         if not raw:
@@ -721,14 +759,214 @@ def _load_es_given_names() -> set[str]:
             if not row:
                 continue
             first = str(row[0]).strip().split()[0]
-            if first:
-                names.add(first.title())
-    names.update(_names_from_dataset("Spain"))
-    return {name for name in names if len(name) >= 2}
+            name = normalize_given_name_line(first.title())
+            if name:
+                names.add(name)
+    return names
 
 
-def _load_en_given_names() -> set[str]:
-    names: set[str] = set()
+def _filter_alias_csv(
+    target: Path,
+    language_code: str,
+    given_names: set[str],
+) -> AliasFilterStats:
+    if not target.is_file():
+        return AliasFilterStats()
+
+    allowlist = _SURNAME_CANONICALS_BY_LANG.get(language_code, frozenset())
+    stats = AliasFilterStats()
+    kept_rows: list[tuple[str, str, str]] = []
+
+    with target.open(encoding="utf-8", newline="") as handle:
+        reader = csv.DictReader(handle)
+        for row in reader:
+            canonical = str(row.get("canonical_name") or "").strip()
+            alias = str(row.get("alias") or "").strip()
+            language = str(row.get("language") or language_code).strip().lower()
+            if not canonical or not alias:
+                continue
+            if canonical in given_names or canonical in allowlist:
+                kept_rows.append((canonical, alias, language))
+                stats.kept += 1
+                continue
+            stats.dropped_missing_canonical += 1
+            if len(stats.dropped_samples) < 8:
+                stats.dropped_samples.append((canonical, alias))
+
+    with target.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(["canonical_name", "alias", "language"])
+        writer.writerows(sorted(set(kept_rows)))
+
+    return stats
+
+
+def _filter_all_aliases() -> None:
+    alias_stats: dict[str, AliasFilterStats] = {}
+    for code in ("hu", "es", "en"):
+        given_names = _read_given_names_file(code)
+        if not given_names:
+            continue
+        target = DATA_ROOT / "person_aliases" / f"person_aliases_{code}.csv"
+        alias_stats[code] = _filter_alias_csv(target, code, given_names)
+        stats = alias_stats[code]
+        print(
+            f"OK: filtered {code} aliases -> kept={stats.kept}, "
+            f"dropped_missing_canonical={stats.dropped_missing_canonical} "
+            f"({target.relative_to(ROOT)})"
+        )
+    _BUILD_STATS["alias_filter"] = alias_stats
+
+
+def _print_validation_report() -> None:
+    print("\n=== Gazetteer validation report ===")
+    given_stats = _BUILD_STATS.get("given_names")
+    if isinstance(given_stats, dict):
+        for code, result in given_stats.items():
+            if not isinstance(result, GivenNameBuildResult):
+                continue
+            sources = result.sources
+            source_names = ", ".join(f"{key}={len(values)}" for key, values in sorted(sources.items()))
+            print(f"\ngiven_names_{code}: final={len(result.names)} ({source_names})")
+            if len(sources) >= 2:
+                keys = list(sources)
+                for index, left in enumerate(keys):
+                    for right in keys[index + 1 :]:
+                        overlap = sources[left] & sources[right]
+                        if overlap:
+                            print(f"  overlap {left}∩{right}: {len(overlap)}")
+            for key, values in sorted(sources.items()):
+                only_here = values - set().union(
+                    *(other for other_key, other in sources.items() if other_key != key)
+                )
+                dropped = values - result.names
+                if only_here:
+                    print(f"  only_{key}: {len(only_here)}")
+                if dropped:
+                    print(f"  dropped_from_{key}: {len(dropped)}")
+
+    alias_stats = _BUILD_STATS.get("alias_filter")
+    if isinstance(alias_stats, dict):
+        print("\nperson_aliases:")
+        for code, stats in alias_stats.items():
+            if not isinstance(stats, AliasFilterStats):
+                continue
+            print(
+                f"  {code}: kept={stats.kept}, "
+                f"dropped_missing_canonical={stats.dropped_missing_canonical}"
+            )
+            if stats.dropped_samples:
+                sample = ", ".join(f"{canonical}->{alias}" for canonical, alias in stats.dropped_samples[:5])
+                print(f"    samples: {sample}")
+
+    for code in ("hu", "en", "es", "global"):
+        path = DATA_ROOT / "legal_forms" / f"legal_forms_{code}.json"
+        if path.is_file():
+            values = json.loads(path.read_text(encoding="utf-8"))
+            print(f"legal_forms_{code}: {len(values)}")
+
+
+def _export_given_names() -> None:
+    results = {
+        "hu": _load_hu_given_names(),
+        "en": _load_en_given_names(),
+        "es": _load_es_given_names(),
+    }
+    _BUILD_STATS["given_names"] = results
+
+    if not any(result.names for result in results.values()):
+        try:
+            from names_dataset import NameDataset  # type: ignore
+        except ImportError:
+            print("WARN: names-dataset not installed; skipping given name export", file=sys.stderr)
+            _write_fallback_given_names()
+            return
+        _export_given_names_from_dataset_only()
+        return
+
+    for code, result in results.items():
+        if not result.names:
+            continue
+        path = DATA_ROOT / "names" / f"given_names_{code}.txt"
+        path.write_text("\n".join(sorted(result.names)) + "\n", encoding="utf-8")
+        print(f"OK: {len(result.names)} given names -> {path.relative_to(ROOT)}")
+
+
+def _export_given_names_from_dataset_only() -> None:
+    try:
+        from names_dataset import NameDataset  # type: ignore
+    except ImportError:
+        _write_fallback_given_names()
+        return
+
+    dataset = NameDataset()
+    country_map = {"hu": "Hungary", "en": "United Kingdom", "es": "Spain"}
+    for code, country in country_map.items():
+        names = _normalize_name_set(_names_from_dataset(country))
+        if not names:
+            continue
+        path = DATA_ROOT / "names" / f"given_names_{code}.txt"
+        path.write_text("\n".join(sorted(names)) + "\n", encoding="utf-8")
+        print(f"OK: {len(names)} given names -> {path.relative_to(ROOT)}")
+
+
+def _load_hu_given_names() -> GivenNameBuildResult:
+    parldata: set[str] = set()
+    namedays: set[str] = set()
+
+    raw = _download_text(HUN_FIRSTNAMES_URL)
+    if raw:
+        for line in raw.splitlines():
+            name = normalize_given_name_line(line)
+            if name:
+                parldata.add(name)
+
+    raw = _download_text(HU_NAMEDAYS_URL)
+    if raw:
+        reader = csv.reader(raw.splitlines())
+        for row in reader:
+            if not row:
+                continue
+            name = normalize_given_name_line(str(row[0]))
+            if name:
+                namedays.add(name)
+
+    dataset = _normalize_name_set(_names_from_dataset("Hungary"))
+    core = parldata | namedays
+    names = _merge_core_with_filtered_extension(core, dataset)
+    return GivenNameBuildResult(
+        names={name for name in names if len(name) >= 2},
+        sources={
+            "parldata": parldata,
+            "namedays": namedays,
+            "dataset": dataset,
+        },
+    )
+
+
+def _load_es_given_names() -> GivenNameBuildResult:
+    jvalhondo = _load_jvalhondo_es_names()
+    hypo_core: set[str] = set()
+    raw = _download_text(WIKI_ES_HYPO_URL, timeout=60)
+    if raw:
+        hypo_core = _parse_es_hypo_canonical_names(raw)
+
+    dataset = _normalize_name_set(_names_from_dataset("Spain"))
+    sources = {
+        "jvalhondo": jvalhondo,
+        "hypo_es": hypo_core,
+        "dataset": dataset,
+    }
+    confirmed = _names_in_at_least_n_sources(sources, 2)
+    names = hypo_core | confirmed
+    return GivenNameBuildResult(
+        names={name for name in names if len(name) >= 2},
+        sources=sources,
+    )
+
+
+def _load_en_given_names() -> GivenNameBuildResult:
+    baby_names: set[str] = set()
     raw = _download_text(EN_BABY_NAMES_URL)
     if raw:
         reader = csv.reader(raw.splitlines())
@@ -737,16 +975,26 @@ def _load_en_given_names() -> set[str]:
         for row in reader:
             if len(row) < 3:
                 continue
-            name = str(row[1]).strip().title()
+            name = normalize_given_name_line(str(row[1]).strip().title())
+            if not name:
+                continue
             try:
                 weight = float(row[2])
             except ValueError:
                 continue
             counts[name] = counts.get(name, 0.0) + weight
         for name, _weight in sorted(counts.items(), key=lambda item: item[1], reverse=True)[:2500]:
-            names.add(name)
-    names.update(_names_from_dataset("United Kingdom"))
-    return {name for name in names if len(name) >= 2}
+            baby_names.add(name)
+
+    dataset = _normalize_name_set(_names_from_dataset("United Kingdom"))
+    names = _merge_core_with_filtered_extension(baby_names, dataset)
+    return GivenNameBuildResult(
+        names={name for name in names if len(name) >= 2},
+        sources={
+            "baby_names": baby_names,
+            "dataset": dataset,
+        },
+    )
 
 
 def _names_from_dataset(country: str) -> set[str]:
@@ -767,6 +1015,12 @@ def _names_from_dataset(country: str) -> set[str]:
             elif isinstance(item, str):
                 collected.add(item.strip())
     return collected
+
+
+def _build_aliases() -> None:
+    _build_hu_es_aliases()
+    _download_en_nicknames()
+    _filter_all_aliases()
 
 
 def _build_example_tenant_kb_files() -> None:
@@ -849,15 +1103,40 @@ def _write_fallback_given_names() -> None:
 
 
 def main() -> int:
+    parser = argparse.ArgumentParser(description="Entity gazetteer adatfájlok generálása.")
+    parser.add_argument(
+        "--only",
+        choices=("legal-forms", "given-names", "aliases", "defaults"),
+        help="Csak egy adatrész generálása.",
+    )
+    parser.add_argument(
+        "--validate",
+        action="store_true",
+        help="Validációs riport kiírása a generálás után.",
+    )
+    args = parser.parse_args()
+
     _ensure_dirs()
-    _build_default_entities()
-    _build_default_systems()
-    _build_legal_forms()
-    _build_hu_es_aliases()
-    _build_example_tenant_kb_files()
-    _build_example_person_files()
-    _download_en_nicknames()
-    _export_given_names()
+    run_all = args.only is None
+
+    if run_all or args.only == "defaults":
+        _build_default_entities()
+        _build_default_systems()
+        _build_example_tenant_kb_files()
+        _build_example_person_files()
+
+    if run_all or args.only == "legal-forms":
+        _build_legal_forms()
+
+    if run_all or args.only in {"given-names", "aliases"}:
+        _export_given_names()
+
+    if run_all or args.only == "aliases":
+        _build_aliases()
+
+    if args.validate or run_all:
+        _print_validation_report()
+
     print(f"Entity gazetteer data ready under {DATA_ROOT.relative_to(ROOT)}")
     return 0
 
