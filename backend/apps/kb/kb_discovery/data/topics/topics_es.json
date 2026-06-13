@@ -1,0 +1,42 @@
+{
+  "billing": {
+    "markers": ["factura", "facturación", "pago", "tarifa", "cobro"],
+    "weight": 1.0
+  },
+  "customer_onboarding": {
+    "markers": ["cliente", "incorporación", "registro", "activación"],
+    "weight": 1.0
+  },
+  "sales": {
+    "markers": ["crm", "hubspot", "lead", "ventas", "oferta"],
+    "weight": 1.0
+  },
+  "support": {
+    "markers": ["ticket", "soporte", "incidencia", "ayuda"],
+    "weight": 1.0
+  },
+  "operations": {
+    "markers": ["oficina", "madrid", "ubicación", "operaciones"],
+    "weight": 1.0
+  },
+  "integration": {
+    "markers": ["integración", "api", "conector"],
+    "weight": 1.0
+  },
+  "document_management": {
+    "markers": ["documento", "contrato", "carga", "archivo"],
+    "weight": 1.0
+  },
+  "legal": {
+    "markers": ["contrato", "legal", "cumplimiento", "rgpd"],
+    "weight": 1.0
+  },
+  "security": {
+    "markers": ["seguridad", "contraseña", "autenticación", "2fa"],
+    "weight": 1.0
+  },
+  "reporting": {
+    "markers": ["informe", "reporte", "dashboard", "métricas"],
+    "weight": 1.0
+  }
+}

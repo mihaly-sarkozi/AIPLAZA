@@ -1,144 +1,212 @@
 from __future__ import annotations
 
-import re
 from collections import Counter
 
-from apps.kb.kb_discovery.common.TextNormalizer import TextNormalizer
-from apps.kb.kb_discovery.content_types.FaqDetector import FaqDetector
-from apps.kb.kb_discovery.content_types.ProcessDetector import ProcessDetector
+from apps.kb.kb_discovery.content_types.ContentTypeDetectionService import ContentTypeDetectionService
 from apps.kb.kb_discovery.dto.DiscoveryChunkDto import DiscoveryChunkDto
 from apps.kb.kb_discovery.dto.DiscoveryJobContext import DiscoveryJobContext
-from apps.kb.kb_discovery.dto.DiscoveryResultDtos import KnowledgeKeywordDto, KnowledgeTopicDto
-from apps.kb.kb_discovery.dto.KnowledgeEnrichmentDto import KnowledgeEnrichmentDto
+from apps.kb.kb_discovery.dto.KnowledgeEnrichmentDto import EnrichmentRunResult, KnowledgeEnrichmentDto
+from apps.kb.kb_discovery.enrichment.chunk_metadata_boost import chunk_metadata_boost
+from apps.kb.kb_discovery.enrichment.chunk_profile import lead_sentence, preview_text
+from apps.kb.kb_discovery.enrichment.entity_signals import entity_signals
+from apps.kb.kb_discovery.enrichment.language_resolver import resolve_chunk_language
 from apps.kb.kb_discovery.enums.SupportedLanguage import SupportedLanguage
-from apps.kb.kb_discovery.languages.language_profiles import keyword_hints_for, stopwords_for, topic_rules_for
+from apps.kb.kb_discovery.keywords.KeywordExtractionService import KeywordExtractionService
 from apps.kb.kb_discovery.mapper.discovery_mapper import keyword_dto_to_orm, topic_dto_to_orm
 from apps.kb.kb_discovery.mapper.enrichment_mapper import enrichment_dto_to_orm
 from apps.kb.kb_discovery.repository.EnrichmentRepository import EnrichmentRepository
+from apps.kb.kb_discovery.repository.EntityRepository import EntityMentionRepository
 from apps.kb.kb_discovery.repository.KeywordRepository import KeywordRepository
 from apps.kb.kb_discovery.repository.TopicRepository import TopicRepository
+from apps.kb.kb_discovery.topics.TopicDetectionService import TopicDetectionService
+from apps.kb.kb_processing.enums.ProcessingIssueCode import ProcessingIssueCode
+from apps.kb.kb_processing.enums.ProcessingIssueSeverity import ProcessingIssueSeverity
+from apps.kb.shared.ports.processing_flow_recorder import (
+    NoOpProcessingFlowRecorder,
+    ProcessingFlowContext,
+    ProcessingFlowRecorder,
+)
 
 
 class LocalKnowledgeEnrichmentService:
-    _TOKEN = re.compile(r"[\wÁÉÍÓÖŐÚÜŰáéíóöőúüű-]+", re.UNICODE)
-    _SENTENCE = re.compile(r"[^.!?]+[.!?]?")
+    _MIN_TEXT_FOR_KEYWORDS = 100
 
     def __init__(
         self,
         enrichment_repository: EnrichmentRepository,
         keyword_repository: KeywordRepository,
         topic_repository: TopicRepository,
+        mention_repository: EntityMentionRepository | None = None,
+        *,
+        keyword_service: KeywordExtractionService | None = None,
+        topic_service: TopicDetectionService | None = None,
+        content_type_service: ContentTypeDetectionService | None = None,
+        flow_recorder: ProcessingFlowRecorder | None = None,
     ) -> None:
         self._enrichment_repository = enrichment_repository
         self._keyword_repository = keyword_repository
         self._topic_repository = topic_repository
-        self._normalizer = TextNormalizer()
-        self._faq = FaqDetector()
-        self._process = ProcessDetector()
+        self._mention_repository = mention_repository
+        self._keywords = keyword_service or KeywordExtractionService()
+        self._topics = topic_service or TopicDetectionService()
+        self._content_types = content_type_service or ContentTypeDetectionService()
+        self._flow_recorder = flow_recorder or NoOpProcessingFlowRecorder()
 
-    def run(
-        self,
-        ctx: DiscoveryJobContext,
-        chunks: list[DiscoveryChunkDto],
-    ) -> list[KnowledgeEnrichmentDto]:
+    def run(self, ctx: DiscoveryJobContext, chunks: list[DiscoveryChunkDto]) -> EnrichmentRunResult:
+        mentions_by_chunk = self._load_mentions(ctx.job_id)
         enrichments: list[KnowledgeEnrichmentDto] = []
-        keywords: list[KnowledgeKeywordDto] = []
-        topics: list[KnowledgeTopicDto] = []
+        keyword_rows = []
+        topic_rows = []
+        content_type_distribution: Counter[str] = Counter()
+        language_distribution: Counter[str] = Counter()
+        fallback_language_chunks = 0
+        low_confidence_chunks = 0
 
         for chunk in chunks:
-            language = self._resolve_chunk_language(chunk)
-            stopwords = stopwords_for(language)
-            topic_rules = topic_rules_for(language)
-            hints = keyword_hints_for(language)
-            lead = self._lead_sentence(chunk.text)
-            terms = self._extract_keywords(chunk.text, stopwords, hints)
-            matched_topics = self._match_topics(chunk.text, topic_rules)
-            content_type = self._detect_content_type(chunk)
-            language_confidence = (
-                chunk.language_confidence
-                if chunk.language_confidence is not None
-                else ctx.language_confidence
-            )
-            confidence = self._confidence(terms, matched_topics, language_confidence)
+            language_code, used_fallback = self._resolve_language(chunk, ctx)
+            if used_fallback:
+                fallback_language_chunks += 1
+                self._open_issue(
+                    ctx,
+                    chunk,
+                    ProcessingIssueCode.MISSING_CHUNK_LANGUAGE_FOR_ENRICHMENT.value,
+                )
 
+            mentions = mentions_by_chunk.get(chunk.chunk_id, [])
+            chunk_keywords = self._keywords.extract_for_chunk(
+                chunk,
+                language_code=language_code,
+                mentions=mentions,
+            )
+            keyword_rows.extend(keyword_dto_to_orm(ctx, item) for item in chunk_keywords)
+
+            if len(chunk.text.strip()) > self._MIN_TEXT_FOR_KEYWORDS and not chunk_keywords:
+                self._open_issue(ctx, chunk, ProcessingIssueCode.NO_KEYWORDS_EXTRACTED.value)
+
+            chunk_topics = self._topics.detect_for_chunk(
+                chunk,
+                language_code=language_code,
+                keyword_terms=[item.normalized_term for item in chunk_keywords[:10]],
+                mentions=mentions,
+            )
+            topic_rows.extend(topic_dto_to_orm(ctx, item) for item in chunk_topics)
+            if not chunk_topics and len(chunk.text.strip()) > 200:
+                self._open_issue(ctx, chunk, ProcessingIssueCode.NO_TOPICS_DETECTED.value)
+
+            content_type_result = self._content_types.detect_for_chunk(chunk)
+            if content_type_result.content_type == "unknown":
+                self._open_issue(ctx, chunk, ProcessingIssueCode.CONTENT_TYPE_UNKNOWN.value)
+
+            profile_confidence = self._profile_confidence(
+                chunk,
+                chunk_keywords,
+                chunk_topics,
+                content_type_result.confidence,
+                chunk.language_confidence if chunk.language_confidence is not None else ctx.language_confidence,
+            )
+            if profile_confidence < 0.45:
+                low_confidence_chunks += 1
+                self._open_issue(ctx, chunk, ProcessingIssueCode.LOW_ENRICHMENT_CONFIDENCE.value)
+
+            metadata = {
+                "keyword_count": len(chunk_keywords),
+                "topic_count": len(chunk_topics),
+                "entity_count": len(mentions),
+                "top_keywords": [item.display_term for item in chunk_keywords[:5]],
+                "top_topics": [item.topic_key for item in chunk_topics[:5]],
+                "entity_signals": entity_signals(mentions),
+                **content_type_result.metadata,
+            }
             enrichment = KnowledgeEnrichmentDto(
                 chunk_id=chunk.chunk_id,
-                lead_sentence=lead,
-                keywords=tuple(terms),
-                topics=tuple(matched_topics),
-                content_type=content_type,
-                language_code=chunk.language_code or SupportedLanguage.UNKNOWN.value,
-                language_confidence=language_confidence,
-                possible_questions=(),
-                confidence=confidence,
+                lead_sentence=lead_sentence(chunk.text),
+                preview_text=preview_text(chunk.text),
+                content_type=content_type_result.content_type,
+                content_type_confidence=content_type_result.confidence,
+                language_code=language_code,
+                language_confidence=(
+                    chunk.language_confidence
+                    if chunk.language_confidence is not None
+                    else ctx.language_confidence
+                ),
+                profile_confidence=profile_confidence,
+                metadata=metadata,
             )
             enrichments.append(enrichment)
+            content_type_distribution[content_type_result.content_type] += 1
+            language_distribution[language_code] += 1
 
-            for rank, term in enumerate(terms[:20], start=1):
-                keywords.append(
-                    KnowledgeKeywordDto(chunk_id=chunk.chunk_id, term=term, rank=rank, score=1.0 / rank)
-                )
-            for topic_key in matched_topics:
-                topics.append(
-                    KnowledgeTopicDto(chunk_id=chunk.chunk_id, topic_key=topic_key, confidence=0.7)
-                )
+        enrichment_rows = [enrichment_dto_to_orm(ctx, dto) for dto in enrichments]
+        self._enrichment_repository.replace_for_job(ctx.job_id, enrichment_rows)
+        self._keyword_repository.replace_for_job(ctx.job_id, keyword_rows)
+        self._topic_repository.replace_for_job(ctx.job_id, topic_rows)
 
-        self._enrichment_repository.replace_for_job(
-            ctx.job_id, [enrichment_dto_to_orm(ctx, dto) for dto in enrichments]
+        trace = {
+            "chunks_processed": len(chunks),
+            "enrichments_created": len(enrichments),
+            "keywords_created": len(keyword_rows),
+            "topics_created": len(topic_rows),
+            "content_type_distribution": dict(content_type_distribution),
+            "language_distribution": dict(language_distribution),
+            "fallback_language_chunks": fallback_language_chunks,
+            "low_confidence_chunks": low_confidence_chunks,
+        }
+        return EnrichmentRunResult(enrichments=tuple(enrichments), trace=trace)
+
+    def _load_mentions(self, job_id: str) -> dict[str, list]:
+        if self._mention_repository is None:
+            return {}
+        return self._mention_repository.list_by_job_grouped_by_chunk(job_id)
+
+    def _resolve_language(
+        self,
+        chunk: DiscoveryChunkDto,
+        ctx: DiscoveryJobContext,
+    ) -> tuple[str, bool]:
+        code, used_fallback = resolve_chunk_language(chunk)
+        if used_fallback and ctx.language_code not in {
+            SupportedLanguage.UNKNOWN.value,
+            SupportedLanguage.MIXED.value,
+            "",
+        }:
+            return ctx.language_code, True
+        return code, used_fallback
+
+    def _profile_confidence(
+        self,
+        chunk: DiscoveryChunkDto,
+        keywords: list,
+        topics: list,
+        content_type_confidence: float,
+        language_confidence: float,
+    ) -> float:
+        base = 0.25
+        base += min(0.25, len(keywords) * 0.02)
+        base += min(0.15, len(topics) * 0.05)
+        base += content_type_confidence * 0.2
+        base += language_confidence * 0.1
+        base += chunk_metadata_boost(chunk)
+        return round(max(0.0, min(1.0, base)), 4)
+
+    def _open_issue(self, ctx: DiscoveryJobContext, chunk: DiscoveryChunkDto, issue_code: str) -> None:
+        flow_ctx = ProcessingFlowContext(
+            tenant_slug=ctx.tenant_slug or "",
+            knowledge_base_id=ctx.knowledge_base_id,
+            training_batch_id=ctx.training_batch_id,
+            training_item_id=ctx.training_item_id,
+            job_id=ctx.job_id,
+            created_by=ctx.created_by,
         )
-        self._keyword_repository.replace_for_job(
-            ctx.job_id, [keyword_dto_to_orm(ctx, keyword) for keyword in keywords]
+        self._flow_recorder.open_issue(
+            flow_ctx,
+            module="kb_discovery",
+            stage="local_knowledge_enrichment",
+            step="enrichment",
+            severity=ProcessingIssueSeverity.WARNING.value,
+            issue_code=issue_code,
+            issue_message=f"{issue_code} chunk={chunk.chunk_id}",
+            metadata_json={"chunk_id": chunk.chunk_id},
         )
-        self._topic_repository.replace_for_job(
-            ctx.job_id, [topic_dto_to_orm(ctx, topic) for topic in topics]
-        )
-        return enrichments
-
-    def _resolve_chunk_language(self, chunk: DiscoveryChunkDto) -> SupportedLanguage:
-        code = (chunk.language_code or "").strip().lower()
-        if not code or code in {SupportedLanguage.MIXED.value, SupportedLanguage.UNKNOWN.value}:
-            return SupportedLanguage.UNKNOWN
-        if code in SupportedLanguage._value2member_map_:
-            return SupportedLanguage(code)
-        return SupportedLanguage.UNKNOWN
-
-    def _lead_sentence(self, text: str) -> str:
-        match = self._SENTENCE.search(text.strip())
-        return (match.group(0).strip() if match else text.strip())[:500]
-
-    def _extract_keywords(self, text: str, stopwords: frozenset[str], hints: frozenset[str]) -> list[str]:
-        counter: Counter[str] = Counter()
-        for match in self._TOKEN.finditer(text):
-            token = self._normalizer.normalize_token(match.group(0))
-            if len(token) < 2 or token in stopwords:
-                continue
-            counter[token] += 1
-        ranked = [term for term, _ in counter.most_common()]
-        for hint in hints:
-            if hint in text.lower() and hint not in ranked:
-                ranked.insert(0, hint)
-        return ranked[:20]
-
-    def _match_topics(self, text: str, rules: dict[str, tuple[str, ...]]) -> list[str]:
-        lowered = text.lower()
-        matched: list[str] = []
-        for topic_key, markers in rules.items():
-            if any(marker in lowered for marker in markers):
-                matched.append(topic_key)
-        return matched
-
-    def _detect_content_type(self, chunk: DiscoveryChunkDto) -> str:
-        if self._faq.detect(chunk.text):
-            return "faq"
-        if self._process.detect(chunk.text):
-            return "process"
-        if chunk.chunk_type in {"table", "list", "step"}:
-            return chunk.chunk_type
-        return "note"
-
-    def _confidence(self, keywords: list[str], topics: list[str], language_confidence: float) -> float:
-        base = 0.3 + min(0.4, len(keywords) * 0.05) + min(0.2, len(topics) * 0.1)
-        return round(min(1.0, base + language_confidence * 0.1), 4)
 
 
 __all__ = ["LocalKnowledgeEnrichmentService"]

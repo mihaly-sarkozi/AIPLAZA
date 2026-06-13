@@ -10,7 +10,8 @@ from apps.kb.kb_discovery.entities.DictionaryEntityRecognizer import SystemNameR
 from apps.kb.kb_discovery.entities.LegalFormCompanyRecognizer import LegalFormCompanyRecognizer
 from apps.kb.kb_discovery.enums.EntityType import EntityType
 from apps.kb.kb_discovery.keywords.KeywordExtractionService import KeywordExtractionService
-from apps.kb.kb_discovery.relationships.RelationshipBuildService import RelationshipBuildService
+from apps.kb.kb_discovery.dto.KnowledgeEnrichmentDto import KnowledgeEnrichmentDto
+from apps.kb.kb_discovery.relationships.BuildRelationshipsService import BuildRelationshipsService
 from apps.kb.kb_discovery.entities.EntityRecognitionService import EntityRecognitionService
 from apps.kb.kb_discovery.spatial.LocationRecognizer import LocationRecognizer
 from apps.kb.kb_discovery.temporal.DateRecognizer import DateRecognizer
@@ -88,33 +89,34 @@ def test_full_sentence_keywords_topics_relationships():
     entity_service = EntityRecognitionService(_FakeRepo(), _FakeRepo())
     entities, _ = entity_service.run(ctx, chunks)[:2]
 
-    keywords = KeywordExtractionService(_FakeRepo()).run(ctx, chunks)
-    topics = TopicDetectionService(_FakeRepo()).run(ctx, chunks)
-
-    from apps.kb.kb_discovery.spatial.SpatialExtractionService import SpatialExtractionService
-    from apps.kb.kb_discovery.temporal.TemporalExtractionService import TemporalExtractionService
-
-    temporal = TemporalExtractionService(_FakeRepo()).run(ctx, chunks)
-    spatial = SpatialExtractionService(_FakeRepo()).run(ctx, chunks)
-
-    rel_repo = _FakeRepo()
-    rel_repo.rows = []
+    chunk = chunks[0]
+    keywords = KeywordExtractionService().extract_for_chunk(chunk, language_code="hu")
+    topics = TopicDetectionService().detect_for_chunk(
+        chunk,
+        language_code="hu",
+        keyword_terms=[item.normalized_term for item in keywords[:5]],
+    )
+    enrichment = KnowledgeEnrichmentDto(
+        chunk_id=chunk.chunk_id,
+        language_code="hu",
+        metadata={
+            "top_topics": [item.topic_key for item in topics],
+            "keyword_count": len(keywords),
+        },
+    )
 
     class _RelRepo(_FakeRepo):
+        def __init__(self) -> None:
+            self.rows = []
+
         def replace_for_job(self, job_id, rows):
             self.rows = rows
             return len(rows)
 
     repo = _RelRepo()
-    RelationshipBuildService(repo).run(
-        ctx,
-        entities=entities,
-        topics=topics,
-        temporal=temporal,
-        spatial=spatial,
-    )
+    RelationshipBuildService(repo).run(ctx, entities=entities, enrichments=[enrichment])
 
-    terms = {k.term.lower() for k in keywords}
+    terms = {k.normalized_term.lower() for k in keywords}
     assert any("acme" in t or "hubspot" in t for t in terms)
     assert any(t.topic_key == "sales" for t in topics)
     assert len(repo.rows) > 0

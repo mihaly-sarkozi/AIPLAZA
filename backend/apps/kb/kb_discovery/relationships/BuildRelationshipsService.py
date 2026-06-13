@@ -33,9 +33,19 @@ class BuildRelationshipsService:
         enrichments: list[KnowledgeEnrichmentDto],
     ) -> int:
         topics = [
-            KnowledgeTopicDto(chunk_id=enrichment.chunk_id, topic_key=topic_key, confidence=0.7)
+            KnowledgeTopicDto(
+                chunk_id=enrichment.chunk_id,
+                topic_key=topic_key,
+                display_name=topic_key,
+                normalized_topic=topic_key,
+                language_code=enrichment.language_code,
+                confidence=0.7,
+                score=0.7,
+                source="enrichment_metadata",
+                taxonomy_version="topics_v1",
+            )
             for enrichment in enrichments
-            for topic_key in enrichment.topics
+            for topic_key in enrichment.metadata.get("top_topics", [])
         ]
         rows: list[KnowledgeRelationship] = []
         for builder in self._builders:

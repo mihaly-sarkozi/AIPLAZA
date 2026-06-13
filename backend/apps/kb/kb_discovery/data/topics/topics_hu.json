@@ -1,0 +1,42 @@
+{
+  "billing": {
+    "markers": ["számla", "számlázás", "fizetés", "díj", "díjbekérő", "áfa", "utalás", "factura"],
+    "weight": 1.0
+  },
+  "customer_onboarding": {
+    "markers": ["ügyfél", "onboarding", "beléptetés", "regisztráció", "aktiválás"],
+    "weight": 1.0
+  },
+  "sales": {
+    "markers": ["crm", "hubspot", "lead", "értékesítés", "ajánlat", "pipeline"],
+    "weight": 1.0
+  },
+  "support": {
+    "markers": ["hiba", "ticket", "support", "panasz", "ügyfélszolgálat"],
+    "weight": 1.0
+  },
+  "operations": {
+    "markers": ["iroda", "budapest", "helyszín", "telephely", "működés"],
+    "weight": 1.0
+  },
+  "integration": {
+    "markers": ["integráció", "api", "kapcsolódás", "összekötés"],
+    "weight": 1.0
+  },
+  "document_management": {
+    "markers": ["dokumentum", "szerződés", "pdf", "feltöltés", "archívum"],
+    "weight": 1.0
+  },
+  "legal": {
+    "markers": ["szerződés", "jogi", "compliance", "gdpr", "adatkezelés"],
+    "weight": 1.0
+  },
+  "security": {
+    "markers": ["biztonság", "jelszó", "autentikáció", "two factor", "2fa"],
+    "weight": 1.0
+  },
+  "reporting": {
+    "markers": ["riport", "jelentés", "statisztika", "dashboard"],
+    "weight": 1.0
+  }
+}

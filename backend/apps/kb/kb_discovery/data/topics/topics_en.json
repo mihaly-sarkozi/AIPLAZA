@@ -1,0 +1,42 @@
+{
+  "billing": {
+    "markers": ["invoice", "billing", "payment", "fee", "charge"],
+    "weight": 1.0
+  },
+  "customer_onboarding": {
+    "markers": ["customer", "onboarding", "signup", "activation", "welcome"],
+    "weight": 1.0
+  },
+  "sales": {
+    "markers": ["crm", "hubspot", "lead", "sales", "pipeline", "deal"],
+    "weight": 1.0
+  },
+  "support": {
+    "markers": ["ticket", "support", "issue", "helpdesk"],
+    "weight": 1.0
+  },
+  "operations": {
+    "markers": ["office", "location", "site", "operations"],
+    "weight": 1.0
+  },
+  "integration": {
+    "markers": ["integration", "api", "connector", "webhook"],
+    "weight": 1.0
+  },
+  "document_management": {
+    "markers": ["document", "contract", "upload", "archive"],
+    "weight": 1.0
+  },
+  "legal": {
+    "markers": ["contract", "legal", "compliance", "gdpr", "policy"],
+    "weight": 1.0
+  },
+  "security": {
+    "markers": ["security", "password", "authentication", "two factor", "2fa"],
+    "weight": 1.0
+  },
+  "reporting": {
+    "markers": ["report", "analytics", "dashboard", "metrics"],
+    "weight": 1.0
+  }
+}

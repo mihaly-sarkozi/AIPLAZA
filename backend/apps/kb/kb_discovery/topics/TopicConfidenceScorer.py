@@ -1,5 +1,3 @@
-from __future__ import annotations
-
-from apps.kb.kb_discovery.topics.TopicRuleMatcher import TopicConfidenceScorer
+from apps.kb.kb_discovery.topics.TopicDetectionService import TopicConfidenceScorer
 
 __all__ = ["TopicConfidenceScorer"]

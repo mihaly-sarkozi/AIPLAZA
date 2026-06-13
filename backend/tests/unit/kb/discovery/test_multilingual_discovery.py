@@ -32,6 +32,9 @@ class _FakeMentionRepo:
     def replace_for_job(self, *args, **kwargs):
         pass
 
+    def list_by_job_grouped_by_chunk(self, *args, **kwargs):
+        return {}
+
 
 class _FakeEnrichmentRepo:
     def __init__(self) -> None:
@@ -42,13 +45,19 @@ class _FakeEnrichmentRepo:
 
 
 class _FakeKeywordRepo:
-    def replace_for_job(self, *args, **kwargs):
-        pass
+    def __init__(self) -> None:
+        self.rows = []
+
+    def replace_for_job(self, job_id, rows):
+        self.rows = rows
 
 
 class _FakeTopicRepo:
-    def replace_for_job(self, *args, **kwargs):
-        pass
+    def __init__(self) -> None:
+        self.rows = []
+
+    def replace_for_job(self, job_id, rows):
+        self.rows = rows
 
 
 def _ctx(language_code="unknown", language_confidence=0.0):
@@ -69,23 +78,40 @@ def _ctx(language_code="unknown", language_confidence=0.0):
 
 def test_misi_okos_without_person_directory_has_zero_entities():
     service = ExtractEntitiesService(_FakeEntityRepo(), _FakeMentionRepo(), person_directory=[])
-    chunks = [DiscoveryChunkDto(chunk_id="c1", text="Misi okos", chunk_type="paragraph", order_index=0)]
+    chunks = [
+        DiscoveryChunkDto(
+            chunk_id="c1",
+            text="Misi okos",
+            chunk_type="paragraph",
+            order_index=0,
+            language_code="hu",
+        )
+    ]
     entities, mentions = service.run(_ctx(), chunks)
     assert len(entities) == 0
 
 
 def test_misi_okos_enrichment_extracts_keywords():
-    enrichment_repo = _FakeEnrichmentRepo()
+    keyword_repo = _FakeKeywordRepo()
     service = LocalKnowledgeEnrichmentService(
-        enrichment_repo,
-        _FakeKeywordRepo(),
+        _FakeEnrichmentRepo(),
+        keyword_repo,
         _FakeTopicRepo(),
+        _FakeMentionRepo(),
     )
-    chunks = [DiscoveryChunkDto(chunk_id="c1", text="Misi okos", chunk_type="paragraph", order_index=0)]
-    enrichments = service.run(_ctx(language_code="hu", language_confidence=0.6), chunks)
-    assert len(enrichments) == 1
-    terms = set(enrichments[0].keywords)
-    assert "misi" in terms or "okos" in terms
+    chunks = [
+        DiscoveryChunkDto(
+            chunk_id="c1",
+            text="Misi okos",
+            chunk_type="paragraph",
+            order_index=0,
+            language_code="hu",
+        )
+    ]
+    result = service.run(_ctx(language_code="hu", language_confidence=0.6), chunks)
+    assert len(result.enrichments) == 1
+    assert result.enrichments[0].metadata["keyword_count"] >= 1
+    assert len(keyword_repo.rows) >= 1
 
 
 @pytest.mark.parametrize(
@@ -106,18 +132,26 @@ def test_language_detection_hu_en_es(text, expected):
 
 
 def test_multilingual_enrichment_topics_by_language():
-    enrichment_repo = _FakeEnrichmentRepo()
     service = LocalKnowledgeEnrichmentService(
-        enrichment_repo,
+        _FakeEnrichmentRepo(),
         _FakeKeywordRepo(),
         _FakeTopicRepo(),
+        _FakeMentionRepo(),
     )
     cases = [
-        ("Az ügyfél számlázása Budapesten történik.", "hu", "finance"),
-        ("The customer onboarding starts in London.", "en", "sales"),
-        ("La factura se crea en Madrid.", "es", "finance"),
+        ("Az ügyfél számlázása Budapesten történik.", "hu", "billing"),
+        ("The customer onboarding starts in London.", "en", "customer_onboarding"),
+        ("La factura se crea en Madrid.", "es", "billing"),
     ]
     for text, language_code, expected_topic in cases:
-        chunks = [DiscoveryChunkDto(chunk_id="c1", text=text, chunk_type="paragraph", order_index=0)]
-        enrichments = service.run(_ctx(language_code=language_code, language_confidence=0.8), chunks)
-        assert expected_topic in enrichments[0].topics
+        chunks = [
+            DiscoveryChunkDto(
+                chunk_id="c1",
+                text=text,
+                chunk_type="paragraph",
+                order_index=0,
+                language_code=language_code,
+            )
+        ]
+        result = service.run(_ctx(language_code=language_code, language_confidence=0.8), chunks)
+        assert expected_topic in result.enrichments[0].metadata.get("top_topics", [])

@@ -42,5 +42,15 @@ class EntityMentionRepository:
             session.commit()
             return len(mentions)
 
+    def list_by_job_grouped_by_chunk(self, job_id: str) -> dict[str, list[EntityMention]]:
+        with self._session_factory() as session:
+            rows = list(
+                session.execute(select(EntityMention).where(EntityMention.job_id == job_id)).scalars()
+            )
+        grouped: dict[str, list[EntityMention]] = {}
+        for row in rows:
+            grouped.setdefault(row.chunk_id, []).append(row)
+        return grouped
+
 
 __all__ = ["EntityMentionRepository", "EntityRepository"]

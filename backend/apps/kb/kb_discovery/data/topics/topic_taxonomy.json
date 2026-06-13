@@ -1,0 +1,122 @@
+{
+  "billing": {
+    "path": ["business", "finance", "billing"],
+    "display_name": {
+      "hu": "Számlázás",
+      "en": "Billing",
+      "es": "Facturación"
+    }
+  },
+  "customer_onboarding": {
+    "path": ["business", "customers", "onboarding"],
+    "display_name": {
+      "hu": "Ügyfél onboarding",
+      "en": "Customer onboarding",
+      "es": "Incorporación de clientes"
+    }
+  },
+  "access_management": {
+    "path": ["business", "security", "access_management"],
+    "display_name": {
+      "hu": "Hozzáférés kezelés",
+      "en": "Access management",
+      "es": "Gestión de accesos"
+    }
+  },
+  "document_management": {
+    "path": ["business", "documents", "management"],
+    "display_name": {
+      "hu": "Dokumentumkezelés",
+      "en": "Document management",
+      "es": "Gestión documental"
+    }
+  },
+  "sales": {
+    "path": ["business", "sales"],
+    "display_name": {
+      "hu": "Értékesítés",
+      "en": "Sales",
+      "es": "Ventas"
+    }
+  },
+  "support": {
+    "path": ["business", "support"],
+    "display_name": {
+      "hu": "Ügyfélszolgálat",
+      "en": "Support",
+      "es": "Soporte"
+    }
+  },
+  "privacy": {
+    "path": ["compliance", "privacy"],
+    "display_name": {
+      "hu": "Adatvédelem",
+      "en": "Privacy",
+      "es": "Privacidad"
+    }
+  },
+  "security": {
+    "path": ["compliance", "security"],
+    "display_name": {
+      "hu": "Biztonság",
+      "en": "Security",
+      "es": "Seguridad"
+    }
+  },
+  "legal": {
+    "path": ["compliance", "legal"],
+    "display_name": {
+      "hu": "Jogi",
+      "en": "Legal",
+      "es": "Legal"
+    }
+  },
+  "hr": {
+    "path": ["business", "hr"],
+    "display_name": {
+      "hu": "HR",
+      "en": "Human resources",
+      "es": "Recursos humanos"
+    }
+  },
+  "operations": {
+    "path": ["business", "operations"],
+    "display_name": {
+      "hu": "Működés",
+      "en": "Operations",
+      "es": "Operaciones"
+    }
+  },
+  "technical_support": {
+    "path": ["business", "support", "technical"],
+    "display_name": {
+      "hu": "Technikai támogatás",
+      "en": "Technical support",
+      "es": "Soporte técnico"
+    }
+  },
+  "integration": {
+    "path": ["business", "integration"],
+    "display_name": {
+      "hu": "Integráció",
+      "en": "Integration",
+      "es": "Integración"
+    }
+  },
+  "reporting": {
+    "path": ["business", "reporting"],
+    "display_name": {
+      "hu": "Riportolás",
+      "en": "Reporting",
+      "es": "Informes"
+    }
+  },
+  "maintenance": {
+    "path": ["business", "operations", "maintenance"],
+    "display_name": {
+      "hu": "Karbantartás",
+      "en": "Maintenance",
+      "es": "Mantenimiento"
+    }
+  }
+}

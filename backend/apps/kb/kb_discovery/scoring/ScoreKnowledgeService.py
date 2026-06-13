@@ -36,7 +36,7 @@ class ScoreKnowledgeService:
 
         for chunk in chunks:
             enrichment = enrichment_by_chunk.get(chunk.chunk_id)
-            keyword_count = len(enrichment.keywords) if enrichment else 0
+            keyword_count = int(enrichment.metadata.get("keyword_count", 0)) if enrichment else 0
             components = {
                 "keyword_quality": min(1.0, keyword_count / 10.0),
                 "entity_density": min(1.0, entity_counts.get(chunk.chunk_id, 0) / 5.0),

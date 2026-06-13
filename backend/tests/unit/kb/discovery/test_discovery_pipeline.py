@@ -9,6 +9,7 @@ from apps.kb.kb_discovery.dto.DiscoveryChunkDto import DiscoveryChunkDto
 from apps.kb.kb_discovery.enums.DiscoveryStatus import DiscoveryStatus
 from apps.kb.kb_discovery.service.DiscoveryPipelineService import DiscoveryPipelineService
 from apps.kb.kb_discovery.service.DiscoveryTraceService import DiscoveryTraceService
+from apps.kb.kb_discovery.dto.KnowledgeEnrichmentDto import EnrichmentRunResult, KnowledgeEnrichmentDto
 from apps.kb.kb_discovery.validation.ValidateDiscoveryResult import DiscoveryChecklist
 
 pytestmark = pytest.mark.unit
@@ -95,12 +96,23 @@ def test_discovery_pipeline_happy_path():
             LanguageDetectionResult(language_code="hu", language_confidence=0.8, chunk_languages={"c1": "hu"}),
         ),
         entity_service=_Step("entity", ([], [])),
-        enrichment_service=_Step("enrichment", []),
+        enrichment_service=_Step(
+            "enrichment",
+            EnrichmentRunResult(
+                enrichments=(
+                    KnowledgeEnrichmentDto(
+                        chunk_id="c1",
+                        metadata={"keyword_count": 1, "topic_count": 1, "top_topics": ["sales"]},
+                    ),
+                ),
+                trace={"enrichments_created": 1},
+            ),
+        ),
         relationship_service=_Step("relationship", 2),
         scoring_service=_Step("score", []),
         validate_service=_Step(
             "validate",
-            (DiscoveryStatus.READY_FOR_EMBEDDING, DiscoveryChecklist(has_chunks=True)),
+            (DiscoveryStatus.READY_FOR_EMBEDDING, DiscoveryChecklist(has_chunks=True, has_enrichments=True)),
         ),
         emit_completed=emit("completed"),
         emit_failed=emit("failed"),
@@ -125,7 +137,12 @@ def test_discovery_pipeline_partial_on_optional_failure():
         DiscoveryTraceService(_FakeStepRunRepo()),
         language_service=_Step("language", error=RuntimeError("language fail")),
         entity_service=_Step("entity", ([], [])),
-        enrichment_service=_Step("enrichment", []),
+        enrichment_service=_Step(
+            "enrichment",
+            EnrichmentRunResult(
+                enrichments=(KnowledgeEnrichmentDto(chunk_id="c1", metadata={"keyword_count": 0}),),
+            ),
+        ),
         relationship_service=_Step("relationship", 0),
         scoring_service=_Step("score", []),
         validate_service=_Step(

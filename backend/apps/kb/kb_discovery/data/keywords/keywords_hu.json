@@ -1,0 +1,32 @@
+{
+  "ügyfél onboarding": {
+    "aliases": ["customer onboarding", "client onboarding"],
+    "category": "customer_onboarding",
+    "weight": 1.4
+  },
+  "hozzáférés kezelés": {
+    "aliases": ["access management", "hozzáférés-kezelés"],
+    "category": "access_management",
+    "weight": 1.3
+  },
+  "two factor authentication": {
+    "aliases": ["kétfaktoros hitelesítés", "2fa"],
+    "category": "security",
+    "weight": 1.3
+  },
+  "hubspot": {
+    "aliases": [],
+    "category": "integration",
+    "weight": 1.2
+  },
+  "szerződés": {
+    "aliases": ["contract"],
+    "category": "document_management",
+    "weight": 1.2
+  },
+  "számlázás": {
+    "aliases": ["billing", "invoice"],
+    "category": "billing",
+    "weight": 1.2
+  }
+}

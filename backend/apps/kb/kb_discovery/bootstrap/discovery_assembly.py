@@ -64,10 +64,17 @@ def build_discovery_services(
             enrichment_repository,
             keyword_repository,
             topic_repository,
+            mention_repository,
+            flow_recorder=flow_recorder,
         ),
         relationship_service=BuildRelationshipsService(relationship_repository),
         scoring_service=ScoreKnowledgeService(score_repository),
-        validate_service=ValidateDiscoveryService(entity_repository),
+        validate_service=ValidateDiscoveryService(
+            entity_repository,
+            enrichment_repository,
+            keyword_repository,
+            topic_repository,
+        ),
     )
     return DiscoveryServices(
         job_repository=job_repository,

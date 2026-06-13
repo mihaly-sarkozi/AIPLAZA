@@ -15,6 +15,7 @@ from core.modules.tenant.service import (
     TenantSchemaHook,
     install_schema_tables,
     register_tenant_schema_hooks,
+    run_schema_statements,
 )
 
 
@@ -36,6 +37,41 @@ def _install_kb_discovery_schema(engine, slug: str) -> None:
             KnowledgeScore.__table__,
         ),
     )
+    run_schema_statements(
+        engine,
+        slug,
+        (
+            'ALTER TABLE "{schema}".kb_enrichments ADD COLUMN IF NOT EXISTS knowledge_base_id VARCHAR(64)',
+            'ALTER TABLE "{schema}".kb_enrichments ADD COLUMN IF NOT EXISTS training_item_id VARCHAR(64)',
+            'ALTER TABLE "{schema}".kb_enrichments ADD COLUMN IF NOT EXISTS preview_text TEXT NOT NULL DEFAULT \'\'',
+            'ALTER TABLE "{schema}".kb_enrichments ADD COLUMN IF NOT EXISTS content_type_confidence DOUBLE PRECISION NOT NULL DEFAULT 0',
+            'ALTER TABLE "{schema}".kb_enrichments ADD COLUMN IF NOT EXISTS profile_confidence DOUBLE PRECISION NOT NULL DEFAULT 0',
+            'ALTER TABLE "{schema}".kb_enrichments ADD COLUMN IF NOT EXISTS metadata_json JSONB NOT NULL DEFAULT \'{{}}\'::jsonb',
+            'ALTER TABLE "{schema}".kb_enrichments ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP NOT NULL DEFAULT NOW()',
+            'ALTER TABLE "{schema}".kb_keywords ADD COLUMN IF NOT EXISTS knowledge_base_id VARCHAR(64)',
+            'ALTER TABLE "{schema}".kb_keywords ADD COLUMN IF NOT EXISTS training_item_id VARCHAR(64)',
+            'ALTER TABLE "{schema}".kb_keywords ADD COLUMN IF NOT EXISTS normalized_term VARCHAR(256) NOT NULL DEFAULT \'\'',
+            'ALTER TABLE "{schema}".kb_keywords ADD COLUMN IF NOT EXISTS display_term VARCHAR(256) NOT NULL DEFAULT \'\'',
+            'ALTER TABLE "{schema}".kb_keywords ADD COLUMN IF NOT EXISTS language_code VARCHAR(8)',
+            'ALTER TABLE "{schema}".kb_keywords ADD COLUMN IF NOT EXISTS confidence DOUBLE PRECISION NOT NULL DEFAULT 0',
+            'ALTER TABLE "{schema}".kb_keywords ADD COLUMN IF NOT EXISTS source VARCHAR(64) NOT NULL DEFAULT \'\'',
+            'ALTER TABLE "{schema}".kb_keywords ADD COLUMN IF NOT EXISTS extractor_version VARCHAR(32) NOT NULL DEFAULT \'\'',
+            'ALTER TABLE "{schema}".kb_keywords ADD COLUMN IF NOT EXISTS start_offset INTEGER',
+            'ALTER TABLE "{schema}".kb_keywords ADD COLUMN IF NOT EXISTS end_offset INTEGER',
+            'ALTER TABLE "{schema}".kb_keywords ADD COLUMN IF NOT EXISTS metadata_json JSONB NOT NULL DEFAULT \'{{}}\'::jsonb',
+            'ALTER TABLE "{schema}".kb_keywords ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP NOT NULL DEFAULT NOW()',
+            'ALTER TABLE "{schema}".kb_topics ADD COLUMN IF NOT EXISTS knowledge_base_id VARCHAR(64)',
+            'ALTER TABLE "{schema}".kb_topics ADD COLUMN IF NOT EXISTS training_item_id VARCHAR(64)',
+            'ALTER TABLE "{schema}".kb_topics ADD COLUMN IF NOT EXISTS display_name VARCHAR(256) NOT NULL DEFAULT \'\'',
+            'ALTER TABLE "{schema}".kb_topics ADD COLUMN IF NOT EXISTS normalized_topic VARCHAR(128) NOT NULL DEFAULT \'\'',
+            'ALTER TABLE "{schema}".kb_topics ADD COLUMN IF NOT EXISTS language_code VARCHAR(8)',
+            'ALTER TABLE "{schema}".kb_topics ADD COLUMN IF NOT EXISTS score DOUBLE PRECISION NOT NULL DEFAULT 0',
+            'ALTER TABLE "{schema}".kb_topics ADD COLUMN IF NOT EXISTS source VARCHAR(64) NOT NULL DEFAULT \'\'',
+            'ALTER TABLE "{schema}".kb_topics ADD COLUMN IF NOT EXISTS taxonomy_version VARCHAR(32) NOT NULL DEFAULT \'\'',
+            'ALTER TABLE "{schema}".kb_topics ADD COLUMN IF NOT EXISTS metadata_json JSONB NOT NULL DEFAULT \'{{}}\'::jsonb',
+            'ALTER TABLE "{schema}".kb_topics ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP NOT NULL DEFAULT NOW()',
+        ),
+    )
 
 
 def register_kb_discovery_tenant_hooks() -> None:
@@ -43,7 +79,7 @@ def register_kb_discovery_tenant_hooks() -> None:
         [
             TenantSchemaHook(
                 name="kb_discovery",
-                revision="kb.discovery.schema.v3",
+                revision="kb.discovery.schema.v4",
                 install=_install_kb_discovery_schema,
                 table_names=(
                     "kb_discovery_jobs",

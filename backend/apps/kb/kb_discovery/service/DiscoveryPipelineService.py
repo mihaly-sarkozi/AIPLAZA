@@ -72,6 +72,7 @@ class DiscoveryPipelineService:
         had_optional_failures = False
         entities, mentions = [], []
         enrichments = []
+        enrichment_result = None
         relationship_count = 0
         scores = []
 
@@ -109,13 +110,14 @@ class DiscoveryPipelineService:
             had_optional_failures = True
 
         try:
-            enrichments = self._run_step(
+            enrichment_result = self._run_step(
                 ctx,
                 DiscoveryStep.LOCAL_KNOWLEDGE_ENRICHMENT,
                 lambda: self._enrichment.run(ctx, chunks),
                 input_summary={"chunk_count": len(chunks), "language_code": ctx.language_code},
-                output_summary=lambda r: {"enrichment_count": len(r)},
+                output_summary=lambda r: r.trace,
             )
+            enrichments = list(enrichment_result.enrichments)
         except Exception:
             had_optional_failures = True
 
@@ -149,6 +151,7 @@ class DiscoveryPipelineService:
                     ctx,
                     chunks=chunks,
                     chunk_count=len(chunks),
+                    enrichment_result=enrichment_result,
                     had_optional_failures=had_optional_failures,
                 ),
                 input_summary={"had_optional_failures": had_optional_failures},

@@ -97,23 +97,53 @@ def mention_dto_to_orm(ctx: DiscoveryJobContext, dto: EntityMentionDto) -> Entit
 
 
 def keyword_dto_to_orm(ctx: DiscoveryJobContext, dto: KnowledgeKeywordDto) -> KnowledgeKeyword:
+    from shared.utils.clock import utc_now_naive
+
+    now = utc_now_naive()
     return KnowledgeKeyword(
         id=new_id("keyword"),
         job_id=ctx.job_id,
+        knowledge_base_id=ctx.knowledge_base_id,
+        training_item_id=ctx.training_item_id,
         chunk_id=dto.chunk_id,
         term=dto.term[:256],
+        normalized_term=dto.normalized_term[:256],
+        display_term=dto.display_term[:256],
+        language_code=dto.language_code,
         rank=dto.rank,
         score=dto.score,
+        confidence=dto.confidence,
+        source=dto.source[:64],
+        extractor_version=dto.extractor_version[:32],
+        start_offset=dto.start_offset,
+        end_offset=dto.end_offset,
+        metadata_json=dict(dto.metadata),
+        created_at=now,
+        updated_at=now,
     )
 
 
 def topic_dto_to_orm(ctx: DiscoveryJobContext, dto: KnowledgeTopicDto) -> KnowledgeTopic:
+    from shared.utils.clock import utc_now_naive
+
+    now = utc_now_naive()
     return KnowledgeTopic(
         id=new_id("topic"),
         job_id=ctx.job_id,
+        knowledge_base_id=ctx.knowledge_base_id,
+        training_item_id=ctx.training_item_id,
         chunk_id=dto.chunk_id,
         topic_key=dto.topic_key[:128],
+        display_name=dto.display_name[:256],
+        normalized_topic=dto.normalized_topic[:128],
+        language_code=dto.language_code,
         confidence=dto.confidence,
+        score=dto.score,
+        source=dto.source[:64],
+        taxonomy_version=dto.taxonomy_version[:32],
+        metadata_json=dict(dto.metadata),
+        created_at=now,
+        updated_at=now,
     )
 
 

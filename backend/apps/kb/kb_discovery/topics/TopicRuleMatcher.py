@@ -9,19 +9,26 @@ class TopicRuleMatcher:
         self._dictionary = dictionary
         self._normalizer = TextNormalizer()
 
-    def match(self, text: str) -> dict[str, int]:
+    def match(
+        self,
+        text: str,
+        *,
+        language_code: str,
+        keyword_terms: list[str] | None = None,
+    ) -> dict[str, int]:
         normalized = self._normalizer.normalize(text)
+        keyword_set = {term.casefold() for term in keyword_terms or []}
         hits: dict[str, int] = {}
-        for topic_key, keywords in self._dictionary.rules().items():
-            count = sum(1 for keyword in keywords if keyword in normalized)
+        for topic_key, rule in self._dictionary.rules_for(language_code).items():
+            count = sum(1 for marker in rule.markers if marker in normalized)
+            count += sum(
+                1
+                for marker in rule.markers
+                if marker.casefold() in keyword_set
+            )
             if count:
                 hits[topic_key] = count
         return hits
 
 
-class TopicConfidenceScorer:
-    def score(self, *, hits: int) -> float:
-        return min(1.0, 0.5 + 0.15 * hits)
-
-
-__all__ = ["TopicConfidenceScorer", "TopicRuleMatcher"]
+__all__ = ["TopicRuleMatcher"]

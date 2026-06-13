@@ -1,0 +1,32 @@
+{
+  "incorporación de clientes": {
+    "aliases": ["onboarding de clientes", "customer onboarding"],
+    "category": "customer_onboarding",
+    "weight": 1.4
+  },
+  "gestión de accesos": {
+    "aliases": ["access management"],
+    "category": "access_management",
+    "weight": 1.3
+  },
+  "autenticación de dos factores": {
+    "aliases": ["2fa", "two factor authentication"],
+    "category": "security",
+    "weight": 1.3
+  },
+  "hubspot": {
+    "aliases": [],
+    "category": "integration",
+    "weight": 1.2
+  },
+  "contrato de cliente": {
+    "aliases": ["contrato"],
+    "category": "document_management",
+    "weight": 1.2
+  },
+  "facturación": {
+    "aliases": ["billing", "invoice"],
+    "category": "billing",
+    "weight": 1.2
+  }
+}
