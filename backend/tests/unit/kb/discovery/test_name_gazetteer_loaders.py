@@ -54,11 +54,11 @@ def test_legal_form_gazetteer_caches_compiled_patterns() -> None:
     from apps.kb.kb_discovery.gazetteers.LegalFormGazetteer import LegalFormGazetteer
 
     gazetteer = LegalFormGazetteer()
-    first = gazetteer.company_pattern_for_language("hu")
-    second = gazetteer.company_pattern_for_language("hu")
+    first = gazetteer.suffix_pattern_for_language("hu")
+    second = gazetteer.suffix_pattern_for_language("hu")
     assert first is second
 
-    other = gazetteer.company_pattern_for_language("en")
+    other = gazetteer.suffix_pattern_for_language("en")
     assert other is not first
 
 

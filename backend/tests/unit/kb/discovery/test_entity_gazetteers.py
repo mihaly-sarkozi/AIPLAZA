@@ -62,8 +62,8 @@ def test_legal_form_recognizer_finds_hungarian_company():
 @pytest.mark.parametrize(
     ("text", "language_code", "expected_fragment"),
     [
-        ("La Empresa Demo S.L. opera en Madrid.", "es", "Demo S.L."),
-        ("Grupo Norte S.A. reportó resultados.", "es", "Norte S.A."),
+        ("La Empresa Demo S.L. opera en Madrid.", "es", "Empresa Demo S.L."),
+        ("Grupo Norte S.A. reportó resultados.", "es", "Grupo Norte S.A."),
         ("Acme Solutions Inc. signed the deal.", "en", "Acme Solutions Inc."),
         ("Global Trade Ltd. opened a branch.", "en", "Global Trade Ltd."),
         ("OpenAI, LLC policy applies.", "en", "OpenAI, LLC"),
@@ -86,7 +86,7 @@ def test_legal_form_recognizer_handles_dotted_suffixes(text, language_code, expe
         training_item_id="item1",
     )
     result = recognizer.recognize(chunks, context)
-    assert any(expected_fragment in item.name for item in result)
+    assert any(item.name == expected_fragment for item in result)
 
 
 def test_systems_gazetteer_loads_tenant_and_kb_overlays():

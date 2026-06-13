@@ -200,6 +200,10 @@ def _build_legal_forms() -> None:
 
 def _write_gleif_legal_forms_from_csv(raw: str, *, source_label: str) -> bool:
     forms_by_lang: dict[str, set[str]] = {key: set() for key in ("hu", "en", "es", "global")}
+    suffixes_by_lang: dict[str, set[str]] = {
+        key: set(_CURATED_LEGAL_FORM_SUFFIXES.get(key, ())) for key in ("hu", "en", "es", "global")
+    }
+    full_names_by_lang: dict[str, set[str]] = {key: set() for key in ("hu", "en", "es", "global")}
     reader = csv.DictReader(raw.splitlines())
     if not reader.fieldnames:
         return False
@@ -215,21 +219,32 @@ def _write_gleif_legal_forms_from_csv(raw: str, *, source_label: str) -> bool:
             "Entity Legal Form name Local name",
         ):
             for token in _split_gleif_tokens(row.get(field) or ""):
-                if _is_usable_legal_form(token):
-                    forms_by_lang[bucket].add(token)
+                if not _is_usable_legal_form(token):
+                    continue
+                forms_by_lang[bucket].add(token)
+                if _is_legal_form_suffix(token):
+                    suffixes_by_lang[bucket].add(token)
                     if bucket != "global":
-                        forms_by_lang["global"].update(_common_global_forms(token))
+                        suffixes_by_lang["global"].update(
+                            _common_global_forms(token) & _GLOBAL_SUFFIX_MARKERS
+                        )
+                else:
+                    full_names_by_lang[bucket].add(token)
 
     if not any(forms_by_lang.values()):
         return False
 
-    for key, values in forms_by_lang.items():
-        merged = sorted(values, key=lambda item: (-len(item), item.casefold()))
-        _write_json(DATA_ROOT / "legal_forms" / f"legal_forms_{key}.json", merged)
+    for key in forms_by_lang:
+        merged_forms = sorted(forms_by_lang[key], key=lambda item: (-len(item), item.casefold()))
+        merged_suffixes = sorted(suffixes_by_lang[key], key=lambda item: (-len(item), item.casefold()))
+        merged_full_names = sorted(full_names_by_lang[key], key=lambda item: (-len(item), item.casefold()))
+        _write_json(DATA_ROOT / "legal_forms" / f"legal_forms_{key}.json", merged_forms)
+        _write_json(DATA_ROOT / "legal_forms" / f"legal_form_suffixes_{key}.json", merged_suffixes)
+        _write_json(DATA_ROOT / "legal_forms" / f"legal_form_full_names_{key}.json", merged_full_names)
     print(
         f"OK: GLEIF legal forms ({source_label}) -> "
-        f"hu={len(forms_by_lang['hu'])}, en={len(forms_by_lang['en'])}, "
-        f"es={len(forms_by_lang['es'])}, global={len(forms_by_lang['global'])}"
+        f"hu suffixes={len(suffixes_by_lang['hu'])}, en suffixes={len(suffixes_by_lang['en'])}, "
+        f"es suffixes={len(suffixes_by_lang['es'])}, global suffixes={len(suffixes_by_lang['global'])}"
     )
     return True
 
@@ -264,6 +279,117 @@ def _is_usable_legal_form(value: str) -> bool:
     if cleaned.isdigit():
         return False
     return any(char.isalpha() for char in cleaned)
+
+
+_GENERIC_SUFFIX_BLOCKLIST = frozenset(
+    {
+        "series",
+        "group",
+        "company",
+        "enterprise",
+        "business",
+        "association",
+        "foundation",
+        "society",
+    }
+)
+
+_CURATED_LEGAL_FORM_SUFFIXES: dict[str, tuple[str, ...]] = {
+    "hu": (
+        "Kft.",
+        "Kft",
+        "Bt.",
+        "Bt",
+        "Zrt.",
+        "Zrt",
+        "Nyrt.",
+        "Nyrt",
+        "Kkt.",
+        "Kkt",
+        "Rt.",
+        "Rt",
+    ),
+    "en": (
+        "LLC",
+        "L.L.C.",
+        "Ltd.",
+        "Ltd",
+        "Limited",
+        "Inc.",
+        "Inc",
+        "Corp.",
+        "Corporation",
+        "PLC",
+        "LLP",
+    ),
+    "es": (
+        "S.L.",
+        "SL",
+        "S.L.U.",
+        "S.A.",
+        "SA",
+        "Sociedad Limitada",
+        "Sociedad Anónima",
+    ),
+    "global": (
+        "GmbH",
+        "AG",
+        "B.V.",
+        "N.V.",
+        "S.à r.l.",
+        "Pty Ltd",
+        "Pte. Ltd.",
+        "SRL",
+        "SpA",
+    ),
+}
+
+_GLOBAL_SUFFIX_MARKERS = frozenset(
+    {
+        "GMBH",
+        "AG",
+        "BV",
+        "NV",
+        "LLC",
+        "LTD",
+        "PLC",
+        "LLP",
+        "INC",
+        "CORP",
+        "SA",
+        "SL",
+        "SRL",
+        "SPA",
+        "PTY LTD",
+        "PTE LTD",
+    }
+)
+
+
+def _is_legal_form_suffix(value: str) -> bool:
+    cleaned = value.strip()
+    if not _is_usable_legal_form(cleaned):
+        return False
+    if cleaned.casefold() in _GENERIC_SUFFIX_BLOCKLIST:
+        return False
+    if cleaned in _CURATED_LEGAL_FORM_SUFFIXES.get("hu", ()):
+        return True
+    if cleaned in _CURATED_LEGAL_FORM_SUFFIXES.get("en", ()):
+        return True
+    if cleaned in _CURATED_LEGAL_FORM_SUFFIXES.get("es", ()):
+        return True
+    if cleaned in _CURATED_LEGAL_FORM_SUFFIXES.get("global", ()):
+        return True
+    if len(cleaned) > 25 or len(cleaned.split()) > 4:
+        return False
+    compact = cleaned.upper().replace(".", "").replace(" ", "")
+    if compact in _GLOBAL_SUFFIX_MARKERS:
+        return True
+    if re.search(r"[.\-]", cleaned) and len(cleaned) <= 15:
+        return True
+    if cleaned.isupper() and len(cleaned) <= 8:
+        return True
+    return False
 
 
 def _common_global_forms(value: str) -> set[str]:
@@ -304,6 +430,7 @@ def _build_fallback_legal_forms() -> None:
             "Kkt.",
             "Kkt",
             "Nonprofit Kft.",
+            "Korlátolt felelősségű társaság",
             "Egyesület",
             "Alapítvány",
         ],
@@ -321,6 +448,8 @@ def _build_fallback_legal_forms() -> None:
             "LLP",
             "GmbH",
             "AG",
+            "Limited Liability Company",
+            "Public Limited Company",
         ],
         "es": [
             "S.L.",
@@ -330,6 +459,7 @@ def _build_fallback_legal_forms() -> None:
             "SA",
             "Sociedad Limitada",
             "Sociedad Anónima",
+            "Sociedad de Responsabilidad Limitada",
             "Autónomo",
             "Asociación",
             "Fundación",
@@ -338,7 +468,11 @@ def _build_fallback_legal_forms() -> None:
         "global": ["B.V.", "N.V.", "S.A.", "S.à r.l.", "Pty Ltd", "Pte. Ltd."],
     }
     for key, values in forms.items():
+        suffixes = [value for value in values if _is_legal_form_suffix(value)]
+        full_names = [value for value in values if value not in suffixes]
         _write_json(DATA_ROOT / "legal_forms" / f"legal_forms_{key}.json", values)
+        _write_json(DATA_ROOT / "legal_forms" / f"legal_form_suffixes_{key}.json", suffixes)
+        _write_json(DATA_ROOT / "legal_forms" / f"legal_form_full_names_{key}.json", full_names)
 
 
 def _build_hu_es_aliases() -> None:
