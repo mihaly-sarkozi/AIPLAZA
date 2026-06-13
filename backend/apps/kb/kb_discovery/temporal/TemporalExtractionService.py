@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from apps.kb.kb_discovery.dto.DiscoveryJobContext import DiscoveryJobContext
-from apps.kb.kb_discovery.dto.DiscoveryResultDtos import TemporalMentionDto
+from apps.kb.kb_discovery.dto.DiscoveryResultDtos import TemporalExtractionResult, TemporalMentionDto
 from apps.kb.kb_discovery.dto.DiscoveryChunkDto import DiscoveryChunkDto
 from apps.kb.kb_discovery.mapper.discovery_mapper import temporal_dto_to_orm
 from apps.kb.kb_discovery.repository.TemporalRepository import TemporalRepository
@@ -25,7 +25,7 @@ class TemporalExtractionService:
         ]
         self._scorer = TemporalContextScorer()
 
-    def run(self, ctx: DiscoveryJobContext, chunks: list[DiscoveryChunkDto]) -> list[TemporalMentionDto]:
+    def run(self, ctx: DiscoveryJobContext, chunks: list[DiscoveryChunkDto]) -> TemporalExtractionResult:
         mentions: list[TemporalMentionDto] = []
         for chunk in chunks:
             for recognizer in self._recognizers:
@@ -43,7 +43,11 @@ class TemporalExtractionService:
         self._temporal_repository.replace_for_job(
             ctx.job_id, [temporal_dto_to_orm(ctx, mention) for mention in mentions]
         )
-        return mentions
+        trace = {
+            "chunks_processed": len(chunks),
+            "temporal_mentions_created": len(mentions),
+        }
+        return TemporalExtractionResult(mentions=tuple(mentions), trace=trace)
 
 
 __all__ = ["TemporalExtractionService"]

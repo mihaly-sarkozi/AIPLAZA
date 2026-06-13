@@ -7,6 +7,7 @@ from typing import Any, Callable
 
 from apps.kb.kb_discovery.dto.DiscoveryChunkDto import DiscoveryChunkDto
 from apps.kb.kb_discovery.dto.DiscoveryJobContext import DiscoveryJobContext
+from apps.kb.kb_discovery.dto.DiscoveryResultDtos import RelationshipBuildInput
 from apps.kb.kb_discovery.dto.LanguageDetectionResult import LanguageDetectionResult
 from apps.kb.kb_discovery.enums.DiscoveryErrorCode import DiscoveryErrorCode
 from apps.kb.kb_discovery.enums.DiscoveryStatus import DiscoveryStatus
@@ -25,6 +26,9 @@ _OPTIONAL_STEPS = frozenset(
         DiscoveryStep.LANGUAGE_DETECTION,
         DiscoveryStep.ENTITY_EXTRACTION,
         DiscoveryStep.LOCAL_KNOWLEDGE_ENRICHMENT,
+        DiscoveryStep.TEMPORAL_EXTRACTION,
+        DiscoveryStep.SPATIAL_EXTRACTION,
+        DiscoveryStep.PROCESS_EXTRACTION,
         DiscoveryStep.RELATIONSHIP_BUILD,
         DiscoveryStep.KNOWLEDGE_SCORING,
     }
@@ -34,6 +38,9 @@ _STEP_STATUS = {
     DiscoveryStep.LANGUAGE_DETECTION: DiscoveryStatus.DETECTING_LANGUAGE,
     DiscoveryStep.ENTITY_EXTRACTION: DiscoveryStatus.EXTRACTING_ENTITIES,
     DiscoveryStep.LOCAL_KNOWLEDGE_ENRICHMENT: DiscoveryStatus.ENRICHING_LOCAL,
+    DiscoveryStep.TEMPORAL_EXTRACTION: DiscoveryStatus.EXTRACTING_TEMPORAL,
+    DiscoveryStep.SPATIAL_EXTRACTION: DiscoveryStatus.EXTRACTING_SPATIAL,
+    DiscoveryStep.PROCESS_EXTRACTION: DiscoveryStatus.EXTRACTING_PROCESS,
     DiscoveryStep.RELATIONSHIP_BUILD: DiscoveryStatus.BUILDING_RELATIONSHIPS,
     DiscoveryStep.KNOWLEDGE_SCORING: DiscoveryStatus.SCORING,
     DiscoveryStep.VALIDATION: DiscoveryStatus.VALIDATING,
@@ -49,6 +56,9 @@ class DiscoveryPipelineService:
         language_service,
         entity_service,
         enrichment_service,
+        temporal_service,
+        spatial_service,
+        process_service,
         relationship_service,
         scoring_service,
         validate_service,
@@ -61,6 +71,9 @@ class DiscoveryPipelineService:
         self._language = language_service
         self._entity = entity_service
         self._enrichment = enrichment_service
+        self._temporal = temporal_service
+        self._spatial = spatial_service
+        self._process = process_service
         self._relationship = relationship_service
         self._scoring = scoring_service
         self._validate = validate_service
@@ -71,9 +84,11 @@ class DiscoveryPipelineService:
     def run(self, ctx: DiscoveryJobContext, chunks) -> DiscoveryStatus:
         had_optional_failures = False
         entities, mentions = [], []
-        enrichments = []
         enrichment_result = None
-        relationship_count = 0
+        temporal_result = None
+        spatial_result = None
+        process_result = None
+        relationship_result = None
         scores = []
 
         try:
@@ -104,7 +119,7 @@ class DiscoveryPipelineService:
                 DiscoveryStep.ENTITY_EXTRACTION,
                 lambda: self._entity.run(ctx, chunks),
                 input_summary={"chunk_count": len(chunks)},
-                output_summary=lambda r: {"entity_count": len(r[0])},
+                output_summary=lambda r: {"entity_count": len(r[0]), "mention_count": len(r[1])},
             )
         except Exception:
             had_optional_failures = True
@@ -117,17 +132,62 @@ class DiscoveryPipelineService:
                 input_summary={"chunk_count": len(chunks), "language_code": ctx.language_code},
                 output_summary=lambda r: r.trace,
             )
-            enrichments = list(enrichment_result.enrichments)
         except Exception:
             had_optional_failures = True
 
         try:
-            relationship_count = self._run_step(
+            temporal_result = self._run_step(
+                ctx,
+                DiscoveryStep.TEMPORAL_EXTRACTION,
+                lambda: self._temporal.run(ctx, chunks),
+                input_summary={"chunk_count": len(chunks)},
+                output_summary=lambda r: r.trace,
+            )
+        except Exception:
+            had_optional_failures = True
+
+        try:
+            spatial_result = self._run_step(
+                ctx,
+                DiscoveryStep.SPATIAL_EXTRACTION,
+                lambda: self._spatial.run(ctx, chunks),
+                input_summary={"chunk_count": len(chunks)},
+                output_summary=lambda r: r.trace,
+            )
+        except Exception:
+            had_optional_failures = True
+
+        try:
+            process_result = self._run_step(
+                ctx,
+                DiscoveryStep.PROCESS_EXTRACTION,
+                lambda: self._process.run(ctx, chunks),
+                input_summary={"chunk_count": len(chunks)},
+                output_summary=lambda r: r.trace,
+            )
+        except Exception:
+            had_optional_failures = True
+
+        try:
+            relationship_result = self._run_step(
                 ctx,
                 DiscoveryStep.RELATIONSHIP_BUILD,
-                lambda: self._relationship.run(ctx, entities=entities, enrichments=enrichments),
+                lambda: self._relationship.run(
+                    ctx,
+                    build_input=RelationshipBuildInput(
+                        chunks=tuple(chunks),
+                        entities=tuple(entities),
+                        mentions=tuple(mentions),
+                        enrichments=tuple(enrichment_result.enrichments if enrichment_result else ()),
+                        keywords=tuple(enrichment_result.keywords if enrichment_result else ()),
+                        topics=tuple(enrichment_result.topics if enrichment_result else ()),
+                        temporal_mentions=tuple(temporal_result.mentions if temporal_result else ()),
+                        spatial_mentions=tuple(spatial_result.mentions if spatial_result else ()),
+                        process_mentions=tuple(process_result.mentions if process_result else ()),
+                    ),
+                ),
                 input_summary={"entity_count": len(entities)},
-                output_summary=lambda r: {"relationship_count": r},
+                output_summary=lambda r: r.trace,
             )
         except Exception:
             had_optional_failures = True
@@ -136,7 +196,21 @@ class DiscoveryPipelineService:
             scores = self._run_step(
                 ctx,
                 DiscoveryStep.KNOWLEDGE_SCORING,
-                lambda: self._scoring.run(ctx, chunks, entities=entities, enrichments=enrichments),
+                lambda: self._scoring.run(
+                    ctx,
+                    chunks,
+                    entities=entities,
+                    enrichments=list(enrichment_result.enrichments) if enrichment_result else [],
+                    keywords=list(enrichment_result.keywords) if enrichment_result else [],
+                    topics=list(enrichment_result.topics) if enrichment_result else [],
+                    entity_mentions=mentions,
+                    temporal_mentions=list(temporal_result.mentions) if temporal_result else [],
+                    spatial_mentions=list(spatial_result.mentions) if spatial_result else [],
+                    process_mentions=list(process_result.mentions) if process_result else [],
+                    relationship_count=(
+                        relationship_result.relationship_count if relationship_result else 0
+                    ),
+                ),
                 input_summary={"chunk_count": len(chunks)},
                 output_summary=lambda r: {"score_count": len(r)},
             )

@@ -10,6 +10,7 @@ from apps.kb.kb_discovery.entities.DictionaryEntityRecognizer import SystemNameR
 from apps.kb.kb_discovery.entities.LegalFormCompanyRecognizer import LegalFormCompanyRecognizer
 from apps.kb.kb_discovery.enums.EntityType import EntityType
 from apps.kb.kb_discovery.keywords.KeywordExtractionService import KeywordExtractionService
+from apps.kb.kb_discovery.dto.DiscoveryResultDtos import RelationshipBuildInput
 from apps.kb.kb_discovery.dto.KnowledgeEnrichmentDto import KnowledgeEnrichmentDto
 from apps.kb.kb_discovery.relationships.BuildRelationshipsService import BuildRelationshipsService
 from apps.kb.kb_discovery.entities.EntityRecognitionService import EntityRecognitionService
@@ -114,7 +115,16 @@ def test_full_sentence_keywords_topics_relationships():
             return len(rows)
 
     repo = _RelRepo()
-    RelationshipBuildService(repo).run(ctx, entities=entities, enrichments=[enrichment])
+    BuildRelationshipsService(repo).run(
+        ctx,
+        build_input=RelationshipBuildInput(
+            chunks=(chunk,),
+            entities=tuple(entities),
+            enrichments=(enrichment,),
+            keywords=tuple(keywords),
+            topics=tuple(topics),
+        ),
+    )
 
     terms = {k.normalized_term.lower() for k in keywords}
     assert any("acme" in t or "hubspot" in t for t in terms)

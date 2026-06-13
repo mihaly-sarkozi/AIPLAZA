@@ -9,7 +9,9 @@ from apps.kb.kb_discovery.dto.DiscoveryChunkDto import DiscoveryChunkDto
 from apps.kb.kb_discovery.enums.DiscoveryStatus import DiscoveryStatus
 from apps.kb.kb_discovery.service.DiscoveryPipelineService import DiscoveryPipelineService
 from apps.kb.kb_discovery.service.DiscoveryTraceService import DiscoveryTraceService
-from apps.kb.kb_discovery.dto.KnowledgeEnrichmentDto import EnrichmentRunResult, KnowledgeEnrichmentDto
+from apps.kb.kb_discovery.dto.DiscoveryResultDtos import RelationshipBuildResult
+from apps.kb.kb_discovery.dto.DiscoveryResultDtos import LocalKnowledgeEnrichmentResult
+from apps.kb.kb_discovery.dto.KnowledgeEnrichmentDto import KnowledgeEnrichmentDto
 from apps.kb.kb_discovery.validation.ValidateDiscoveryResult import DiscoveryChecklist
 
 pytestmark = pytest.mark.unit
@@ -88,6 +90,12 @@ def test_discovery_pipeline_happy_path():
 
     from apps.kb.kb_discovery.dto.LanguageDetectionResult import LanguageDetectionResult
 
+    from apps.kb.kb_discovery.dto.DiscoveryResultDtos import (
+        ProcessExtractionResult,
+        SpatialExtractionResult,
+        TemporalExtractionResult,
+    )
+
     pipeline = DiscoveryPipelineService(
         _FakeJobRepo(),
         DiscoveryTraceService(_FakeStepRunRepo()),
@@ -98,7 +106,7 @@ def test_discovery_pipeline_happy_path():
         entity_service=_Step("entity", ([], [])),
         enrichment_service=_Step(
             "enrichment",
-            EnrichmentRunResult(
+            LocalKnowledgeEnrichmentResult(
                 enrichments=(
                     KnowledgeEnrichmentDto(
                         chunk_id="c1",
@@ -108,11 +116,14 @@ def test_discovery_pipeline_happy_path():
                 trace={"enrichments_created": 1},
             ),
         ),
-        relationship_service=_Step("relationship", 2),
+        temporal_service=_Step("temporal", TemporalExtractionResult(trace={"temporal_mentions_created": 1})),
+        spatial_service=_Step("spatial", SpatialExtractionResult(trace={"spatial_mentions_created": 1})),
+        process_service=_Step("process", ProcessExtractionResult(trace={"process_mentions_created": 0})),
+        relationship_service=_Step("relationship", RelationshipBuildResult(relationship_count=2)),
         scoring_service=_Step("score", []),
         validate_service=_Step(
             "validate",
-            (DiscoveryStatus.READY_FOR_EMBEDDING, DiscoveryChecklist(has_chunks=True, has_enrichments=True)),
+            (DiscoveryStatus.READY_FOR_EMBEDDING, DiscoveryChecklist(has_chunks=True, has_enrichments=True, has_scores=True)),
         ),
         emit_completed=emit("completed"),
         emit_failed=emit("failed"),
@@ -132,6 +143,13 @@ def test_discovery_pipeline_partial_on_optional_failure():
 
         return _emit
 
+    from apps.kb.kb_discovery.dto.DiscoveryResultDtos import (
+        ProcessExtractionResult,
+        RelationshipBuildResult,
+        SpatialExtractionResult,
+        TemporalExtractionResult,
+    )
+
     pipeline = DiscoveryPipelineService(
         _FakeJobRepo(),
         DiscoveryTraceService(_FakeStepRunRepo()),
@@ -139,11 +157,14 @@ def test_discovery_pipeline_partial_on_optional_failure():
         entity_service=_Step("entity", ([], [])),
         enrichment_service=_Step(
             "enrichment",
-            EnrichmentRunResult(
+            LocalKnowledgeEnrichmentResult(
                 enrichments=(KnowledgeEnrichmentDto(chunk_id="c1", metadata={"keyword_count": 0}),),
             ),
         ),
-        relationship_service=_Step("relationship", 0),
+        temporal_service=_Step("temporal", TemporalExtractionResult()),
+        spatial_service=_Step("spatial", SpatialExtractionResult()),
+        process_service=_Step("process", ProcessExtractionResult()),
+        relationship_service=_Step("relationship", RelationshipBuildResult(relationship_count=0)),
         scoring_service=_Step("score", []),
         validate_service=_Step(
             "validate",

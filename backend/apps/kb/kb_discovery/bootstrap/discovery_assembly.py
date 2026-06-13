@@ -4,21 +4,29 @@ from dataclasses import dataclass
 
 from apps.kb.kb_discovery.entities.ExtractEntitiesService import ExtractEntitiesService
 from apps.kb.kb_discovery.enrichment.LocalKnowledgeEnrichmentService import LocalKnowledgeEnrichmentService
+from apps.kb.kb_discovery.processes.ProcessExtractionService import ProcessExtractionService
 from apps.kb.kb_discovery.relationships.BuildRelationshipsService import BuildRelationshipsService
+from apps.kb.kb_discovery.repository.DiscoveryBundleRepository import DiscoveryBundleRepository
 from apps.kb.kb_discovery.repository.DiscoveryJobRepository import DiscoveryJobRepository
 from apps.kb.kb_discovery.repository.DiscoveryStepRunRepository import DiscoveryStepRunRepository
 from apps.kb.kb_discovery.repository.EnrichmentRepository import EnrichmentRepository
 from apps.kb.kb_discovery.repository.EntityRepository import EntityMentionRepository, EntityRepository
 from apps.kb.kb_discovery.repository.KeywordRepository import KeywordRepository
+from apps.kb.kb_discovery.repository.ProcessRepository import ProcessRepository
 from apps.kb.kb_discovery.repository.RelationshipRepository import RelationshipRepository
 from apps.kb.kb_discovery.repository.ScoreRepository import ScoreRepository
+from apps.kb.kb_discovery.repository.SpatialRepository import SpatialRepository
+from apps.kb.kb_discovery.repository.TemporalRepository import TemporalRepository
 from apps.kb.kb_discovery.repository.TopicRepository import TopicRepository
+from apps.kb.kb_discovery.scoring.KnowledgeScoringService import KnowledgeScoringService
 from apps.kb.kb_discovery.scoring.ScoreKnowledgeService import ScoreKnowledgeService
 from apps.kb.kb_discovery.service.DiscoveryPipelineService import DiscoveryPipelineService
 from apps.kb.kb_discovery.service.DiscoveryTraceService import DiscoveryTraceService
 from apps.kb.kb_discovery.service.LanguageDetectionService import LanguageDetectionService
 from apps.kb.kb_discovery.service.StartDiscoveryService import StartDiscoveryService
 from apps.kb.kb_discovery.service.ValidateDiscoveryService import ValidateDiscoveryService
+from apps.kb.kb_discovery.spatial.SpatialExtractionService import SpatialExtractionService
+from apps.kb.kb_discovery.temporal.TemporalExtractionService import TemporalExtractionService
 from apps.kb.kb_discovery.ports.ChunkLanguageWriterPort import ChunkLanguageWriterPort
 from apps.kb.kb_discovery.ports.ChunkReaderPort import ChunkReaderPort, UnderstandingJobReaderPort
 
@@ -28,6 +36,7 @@ class DiscoveryServices:
     job_repository: DiscoveryJobRepository
     start_service: StartDiscoveryService
     pipeline: DiscoveryPipelineService
+    bundle_repository: DiscoveryBundleRepository
 
 
 def build_discovery_services(
@@ -46,10 +55,24 @@ def build_discovery_services(
     enrichment_repository = EnrichmentRepository(session_factory)
     keyword_repository = KeywordRepository(session_factory)
     topic_repository = TopicRepository(session_factory)
+    temporal_repository = TemporalRepository(session_factory)
+    spatial_repository = SpatialRepository(session_factory)
+    process_repository = ProcessRepository(session_factory)
     relationship_repository = RelationshipRepository(session_factory)
     score_repository = ScoreRepository(session_factory)
 
     trace = DiscoveryTraceService(step_run_repository)
+    knowledge_scoring = KnowledgeScoringService(score_repository)
+    bundle_repository = DiscoveryBundleRepository(
+        enrichment_repository,
+        entity_repository,
+        mention_repository,
+        temporal_repository,
+        spatial_repository,
+        process_repository,
+        relationship_repository,
+        score_repository,
+    )
     pipeline = DiscoveryPipelineService(
         job_repository,
         trace,
@@ -67,13 +90,22 @@ def build_discovery_services(
             mention_repository,
             flow_recorder=flow_recorder,
         ),
+        temporal_service=TemporalExtractionService(temporal_repository),
+        spatial_service=SpatialExtractionService(spatial_repository),
+        process_service=ProcessExtractionService(process_repository),
         relationship_service=BuildRelationshipsService(relationship_repository),
-        scoring_service=ScoreKnowledgeService(score_repository),
+        scoring_service=ScoreKnowledgeService(knowledge_scoring),
         validate_service=ValidateDiscoveryService(
             entity_repository,
+            mention_repository,
             enrichment_repository,
             keyword_repository,
             topic_repository,
+            score_repository,
+            relationship_repository,
+            temporal_repository,
+            spatial_repository,
+            process_repository,
         ),
     )
     return DiscoveryServices(
@@ -84,6 +116,7 @@ def build_discovery_services(
             understanding_job_reader=understanding_job_reader,
         ),
         pipeline=pipeline,
+        bundle_repository=bundle_repository,
     )
 
 

@@ -6,6 +6,7 @@ from apps.kb.kb_discovery.dto.DiscoveryJobContext import DiscoveryJobContext
 from apps.kb.kb_discovery.dto.DiscoveryChunkDto import DiscoveryChunkDto
 from apps.kb.kb_discovery.dto.KnowledgeEntityDto import KnowledgeEntityDto
 from apps.kb.kb_discovery.enums.EntityType import EntityType
+from apps.kb.kb_discovery.dto.DiscoveryResultDtos import KnowledgeScoringInput
 from apps.kb.kb_discovery.scoring.KnowledgeScoringService import KnowledgeScoringService
 
 pytestmark = pytest.mark.unit
@@ -49,14 +50,17 @@ def test_knowledge_scoring_produces_components():
     ]
     scores = service.run(
         ctx,
-        chunks,
-        entities=entities,
-        keywords=[],
-        topics=[],
-        temporal=[],
-        spatial=[],
-        content_types={"c1": "note"},
+        KnowledgeScoringInput(
+            chunks=tuple(chunks),
+            entities=tuple(entities),
+            enrichments=(),
+            keywords=(),
+            topics=(),
+            temporal_mentions=(),
+            spatial_mentions=(),
+            process_mentions=(),
+        ),
     )
     assert len(scores) == 1
     assert scores[0].knowledge_score > 0
-    assert "freshness" in scores[0].components
+    assert "freshness_score" in scores[0].components

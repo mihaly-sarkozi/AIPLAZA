@@ -10,6 +10,7 @@ from apps.kb.kb_discovery.dto.DiscoveryResultDtos import (
     KnowledgeKeywordDto,
     KnowledgeScoreDto,
     KnowledgeTopicDto,
+    ProcessMentionDto,
     SpatialMentionDto,
     TemporalMentionDto,
 )
@@ -19,6 +20,7 @@ from apps.kb.kb_discovery.orm.KnowledgeEntity import KnowledgeEntity
 from apps.kb.kb_discovery.orm.KnowledgeKeyword import KnowledgeKeyword
 from apps.kb.kb_discovery.orm.KnowledgeScore import KnowledgeScore
 from apps.kb.kb_discovery.orm.KnowledgeTopic import KnowledgeTopic
+from apps.kb.kb_discovery.orm.ProcessMention import ProcessMention
 from apps.kb.kb_discovery.orm.SpatialMention import SpatialMention
 from apps.kb.kb_discovery.orm.TemporalMention import TemporalMention
 from apps.kb.shared.ids import new_id
@@ -173,6 +175,33 @@ def spatial_dto_to_orm(ctx: DiscoveryJobContext, dto: SpatialMentionDto) -> Spat
     )
 
 
+def process_dto_to_orm(ctx: DiscoveryJobContext, dto: ProcessMentionDto) -> ProcessMention:
+    from shared.utils.clock import utc_now_naive
+
+    now = utc_now_naive()
+    return ProcessMention(
+        id=new_id("process"),
+        job_id=ctx.job_id,
+        knowledge_base_id=ctx.knowledge_base_id,
+        training_item_id=ctx.training_item_id,
+        chunk_id=dto.chunk_id,
+        process_name=dto.process_name[:256],
+        step_text=dto.step_text[:1024],
+        step_order=dto.step_order,
+        responsibility=dto.responsibility[:256] if dto.responsibility else None,
+        input_hint=dto.input_hint[:512] if dto.input_hint else None,
+        output_hint=dto.output_hint[:512] if dto.output_hint else None,
+        is_required=dto.is_required,
+        is_optional=dto.is_optional,
+        confidence=dto.confidence,
+        language_code=dto.language_code,
+        recognizer_name=dto.recognizer_name[:64],
+        metadata_json=dict(dto.metadata),
+        created_at=now,
+        updated_at=now,
+    )
+
+
 def score_dto_to_orm(ctx: DiscoveryJobContext, dto: KnowledgeScoreDto) -> KnowledgeScore:
     return KnowledgeScore(
         id=new_id("score"),
@@ -189,6 +218,7 @@ __all__ = [
     "keyword_dto_to_orm",
     "mention_dto_from_candidate",
     "mention_dto_to_orm",
+    "process_dto_to_orm",
     "score_dto_to_orm",
     "spatial_dto_to_orm",
     "temporal_dto_to_orm",

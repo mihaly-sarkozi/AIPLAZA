@@ -63,14 +63,18 @@ class SpatialScore:
 
 class FinalKnowledgeScore:
     _WEIGHTS = {
-        "freshness": 0.10,
-        "structure": 0.15,
-        "entity_density": 0.15,
-        "keyword_quality": 0.15,
-        "temporal_score": 0.10,
-        "spatial_score": 0.10,
-        "content_type": 0.10,
-        "topic_presence": 0.15,
+        "language_confidence": 0.08,
+        "freshness_score": 0.06,
+        "structure_score": 0.10,
+        "entity_density_score": 0.10,
+        "keyword_quality_score": 0.12,
+        "topic_coverage_score": 0.10,
+        "temporal_score": 0.08,
+        "spatial_score": 0.08,
+        "process_score": 0.08,
+        "relationship_score": 0.10,
+        "content_type_score": 0.10,
+        "source_quality_score": 0.10,
     }
 
     def score(self, components: dict[str, float]) -> float:

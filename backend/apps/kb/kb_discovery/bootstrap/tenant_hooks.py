@@ -9,6 +9,7 @@ from apps.kb.kb_discovery.orm.KnowledgeKeyword import KnowledgeKeyword
 from apps.kb.kb_discovery.orm.KnowledgeRelationship import KnowledgeRelationship
 from apps.kb.kb_discovery.orm.KnowledgeScore import KnowledgeScore
 from apps.kb.kb_discovery.orm.KnowledgeTopic import KnowledgeTopic
+from apps.kb.kb_discovery.orm.ProcessMention import ProcessMention
 from apps.kb.kb_discovery.orm.SpatialMention import SpatialMention
 from apps.kb.kb_discovery.orm.TemporalMention import TemporalMention
 from core.modules.tenant.service import (
@@ -33,6 +34,7 @@ def _install_kb_discovery_schema(engine, slug: str) -> None:
             KnowledgeTopic.__table__,
             TemporalMention.__table__,
             SpatialMention.__table__,
+            ProcessMention.__table__,
             KnowledgeRelationship.__table__,
             KnowledgeScore.__table__,
         ),
@@ -79,7 +81,7 @@ def register_kb_discovery_tenant_hooks() -> None:
         [
             TenantSchemaHook(
                 name="kb_discovery",
-                revision="kb.discovery.schema.v4",
+                revision="kb.discovery.schema.v5",
                 install=_install_kb_discovery_schema,
                 table_names=(
                     "kb_discovery_jobs",
@@ -91,6 +93,7 @@ def register_kb_discovery_tenant_hooks() -> None:
                     "kb_topics",
                     "kb_temporal_mentions",
                     "kb_spatial_mentions",
+                    "kb_process_mentions",
                     "kb_relationships",
                     "kb_scores",
                 ),

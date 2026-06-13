@@ -52,5 +52,15 @@ class EntityMentionRepository:
             grouped.setdefault(row.chunk_id, []).append(row)
         return grouped
 
+    def count_for_job(self, job_id: str) -> int:
+        with self._session_factory() as session:
+            return len(
+                list(
+                    session.execute(
+                        select(EntityMention.id).where(EntityMention.job_id == job_id)
+                    ).scalars()
+                )
+            )
+
 
 __all__ = ["EntityMentionRepository", "EntityRepository"]

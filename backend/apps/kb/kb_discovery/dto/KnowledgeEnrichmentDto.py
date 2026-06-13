@@ -16,12 +16,4 @@ class KnowledgeEnrichmentDto:
     metadata: dict[str, object] = field(default_factory=dict)
 
 
-@dataclass(frozen=True)
-class EnrichmentRunResult:
-    enrichments: tuple[KnowledgeEnrichmentDto, ...]
-    keywords: tuple[str, ...] = ()
-    topics: tuple[str, ...] = ()
-    trace: dict[str, object] = field(default_factory=dict)
-
-
-__all__ = ["EnrichmentRunResult", "KnowledgeEnrichmentDto"]
+__all__ = ["KnowledgeEnrichmentDto"]

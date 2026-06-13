@@ -5,7 +5,8 @@ from collections import Counter
 from apps.kb.kb_discovery.content_types.ContentTypeDetectionService import ContentTypeDetectionService
 from apps.kb.kb_discovery.dto.DiscoveryChunkDto import DiscoveryChunkDto
 from apps.kb.kb_discovery.dto.DiscoveryJobContext import DiscoveryJobContext
-from apps.kb.kb_discovery.dto.KnowledgeEnrichmentDto import EnrichmentRunResult, KnowledgeEnrichmentDto
+from apps.kb.kb_discovery.dto.DiscoveryResultDtos import DiscoveryWarning, LocalKnowledgeEnrichmentResult
+from apps.kb.kb_discovery.dto.KnowledgeEnrichmentDto import KnowledgeEnrichmentDto
 from apps.kb.kb_discovery.enrichment.chunk_metadata_boost import chunk_metadata_boost
 from apps.kb.kb_discovery.enrichment.chunk_profile import lead_sentence, preview_text
 from apps.kb.kb_discovery.enrichment.entity_signals import entity_signals
@@ -52,20 +53,29 @@ class LocalKnowledgeEnrichmentService:
         self._content_types = content_type_service or ContentTypeDetectionService()
         self._flow_recorder = flow_recorder or NoOpProcessingFlowRecorder()
 
-    def run(self, ctx: DiscoveryJobContext, chunks: list[DiscoveryChunkDto]) -> EnrichmentRunResult:
+    def run(self, ctx: DiscoveryJobContext, chunks: list[DiscoveryChunkDto]) -> LocalKnowledgeEnrichmentResult:
         mentions_by_chunk = self._load_mentions(ctx.job_id)
         enrichments: list[KnowledgeEnrichmentDto] = []
+        keyword_dtos = []
+        topic_dtos = []
         keyword_rows = []
         topic_rows = []
         content_type_distribution: Counter[str] = Counter()
         language_distribution: Counter[str] = Counter()
         fallback_language_chunks = 0
-        low_confidence_chunks = 0
+        low_confidence_chunks: list[str] = []
+        warnings: list[DiscoveryWarning] = []
 
         for chunk in chunks:
             language_code, used_fallback = self._resolve_language(chunk, ctx)
             if used_fallback:
                 fallback_language_chunks += 1
+                warnings.append(
+                    DiscoveryWarning(
+                        code=ProcessingIssueCode.MISSING_CHUNK_LANGUAGE_FOR_ENRICHMENT.value,
+                        chunk_id=chunk.chunk_id,
+                    )
+                )
                 self._open_issue(
                     ctx,
                     chunk,
@@ -78,9 +88,16 @@ class LocalKnowledgeEnrichmentService:
                 language_code=language_code,
                 mentions=mentions,
             )
+            keyword_dtos.extend(chunk_keywords)
             keyword_rows.extend(keyword_dto_to_orm(ctx, item) for item in chunk_keywords)
 
             if len(chunk.text.strip()) > self._MIN_TEXT_FOR_KEYWORDS and not chunk_keywords:
+                warnings.append(
+                    DiscoveryWarning(
+                        code=ProcessingIssueCode.NO_KEYWORDS_EXTRACTED.value,
+                        chunk_id=chunk.chunk_id,
+                    )
+                )
                 self._open_issue(ctx, chunk, ProcessingIssueCode.NO_KEYWORDS_EXTRACTED.value)
 
             chunk_topics = self._topics.detect_for_chunk(
@@ -89,12 +106,25 @@ class LocalKnowledgeEnrichmentService:
                 keyword_terms=[item.normalized_term for item in chunk_keywords[:10]],
                 mentions=mentions,
             )
+            topic_dtos.extend(chunk_topics)
             topic_rows.extend(topic_dto_to_orm(ctx, item) for item in chunk_topics)
             if not chunk_topics and len(chunk.text.strip()) > 200:
+                warnings.append(
+                    DiscoveryWarning(
+                        code=ProcessingIssueCode.NO_TOPICS_DETECTED.value,
+                        chunk_id=chunk.chunk_id,
+                    )
+                )
                 self._open_issue(ctx, chunk, ProcessingIssueCode.NO_TOPICS_DETECTED.value)
 
             content_type_result = self._content_types.detect_for_chunk(chunk)
             if content_type_result.content_type == "unknown":
+                warnings.append(
+                    DiscoveryWarning(
+                        code=ProcessingIssueCode.CONTENT_TYPE_UNKNOWN.value,
+                        chunk_id=chunk.chunk_id,
+                    )
+                )
                 self._open_issue(ctx, chunk, ProcessingIssueCode.CONTENT_TYPE_UNKNOWN.value)
 
             profile_confidence = self._profile_confidence(
@@ -105,7 +135,13 @@ class LocalKnowledgeEnrichmentService:
                 chunk.language_confidence if chunk.language_confidence is not None else ctx.language_confidence,
             )
             if profile_confidence < 0.45:
-                low_confidence_chunks += 1
+                low_confidence_chunks.append(chunk.chunk_id)
+                warnings.append(
+                    DiscoveryWarning(
+                        code=ProcessingIssueCode.LOW_ENRICHMENT_CONFIDENCE.value,
+                        chunk_id=chunk.chunk_id,
+                    )
+                )
                 self._open_issue(ctx, chunk, ProcessingIssueCode.LOW_ENRICHMENT_CONFIDENCE.value)
 
             metadata = {
@@ -149,9 +185,18 @@ class LocalKnowledgeEnrichmentService:
             "content_type_distribution": dict(content_type_distribution),
             "language_distribution": dict(language_distribution),
             "fallback_language_chunks": fallback_language_chunks,
-            "low_confidence_chunks": low_confidence_chunks,
+            "low_confidence_chunks": len(low_confidence_chunks),
         }
-        return EnrichmentRunResult(enrichments=tuple(enrichments), trace=trace)
+        return LocalKnowledgeEnrichmentResult(
+            enrichments=tuple(enrichments),
+            keywords=tuple(keyword_dtos),
+            topics=tuple(topic_dtos),
+            content_type_distribution=dict(content_type_distribution),
+            language_distribution=dict(language_distribution),
+            low_confidence_chunks=tuple(low_confidence_chunks),
+            warnings=tuple(warnings),
+            trace=trace,
+        )
 
     def _load_mentions(self, job_id: str) -> dict[str, list]:
         if self._mention_repository is None:
