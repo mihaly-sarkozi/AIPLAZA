@@ -37,9 +37,31 @@ class ChatPacketTextRenderer:
                 continue
             seen.add(key)
             chunk_text_lines.append(f"- {text}")
+        if chunk_text_lines:
+            return ("Context chunks:\n" + "\n".join(chunk_text_lines))[: self._max_context_text_chars]
+
+        prompt_context = str(packet.get("encoded_prompt_context") or packet.get("prompt_context") or "").strip()
+        if prompt_context:
+            return prompt_context[: self._max_context_text_chars]
+
+        for index, block in enumerate(
+            (packet.get("context_blocks") or packet.get("matched_semantic_blocks") or [])[: self._max_context_blocks],
+            start=1,
+        ):
+            text = str(block.get("snippet") or block.get("text") or "").strip()
+            if not text:
+                continue
+            if len(text) > self._max_context_block_snippet_chars:
+                text = f"{text[: self._max_context_block_snippet_chars].rstrip()}..."
+            key = " ".join(text.lower().split())
+            if key in seen:
+                continue
+            seen.add(key)
+            citation_id = str(block.get("citation_id") or f"B{index}").strip()
+            chunk_text_lines.append(f"- [{citation_id}] {text}")
         if not chunk_text_lines:
             return ""
-        return ("Context chunks:\n" + "\n".join(chunk_text_lines))[: self._max_context_text_chars]
+        return ("Context:\n" + "\n".join(chunk_text_lines))[: self._max_context_text_chars]
 
     def context_text(self, packet: dict[str, Any]) -> str:
         block_lines = self._block_lines(packet)

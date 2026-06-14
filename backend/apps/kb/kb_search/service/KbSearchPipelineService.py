@@ -233,6 +233,7 @@ class KbSearchPipelineService:
             "cited_source_ids": [c.get("source_id") for c in citations if c.get("source_id")],
             "sources": sources,
             "citations": citation_ids,
+            "citation_records": citations,
             "query_profile": query_profile,
             "scoring_summary": {
                 "hit_count": len(hits),

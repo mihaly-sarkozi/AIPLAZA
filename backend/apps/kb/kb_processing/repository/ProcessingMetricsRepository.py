@@ -48,6 +48,9 @@ class ProcessingMetricsRepository:
         tenant_slug: str | None,
         issue_counts: dict[str, int],
     ) -> ProcessingMetrics:
+        existing = self.get_for_knowledge_base(knowledge_base_id)
+        preserved_metadata = dict(existing.metadata_json or {}) if existing is not None else {}
+
         with self._session_factory() as session:
             items_total = int(
                 session.execute(
@@ -174,7 +177,7 @@ class ProcessingMetricsRepository:
 
         open_total = sum(issue_counts.values())
         return ProcessingMetrics(
-            id=new_id("proc_metrics"),
+            id=existing.id if existing is not None else new_id("proc_metrics"),
             tenant_slug=tenant_slug,
             knowledge_base_id=knowledge_base_id,
             documents_total=items_total,
@@ -197,7 +200,7 @@ class ProcessingMetricsRepository:
             last_processed_at=last_processed_at,
             last_failed_at=last_failed_at,
             last_indexed_at=last_indexed_at,
-            metadata_json={},
+            metadata_json=preserved_metadata,
             updated_at=utc_now_naive(),
         )
 

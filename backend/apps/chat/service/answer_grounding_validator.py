@@ -21,7 +21,7 @@ class AnswerGroundingValidator:
         citations = packet.get("citations") or []
         sources = packet.get("sources") or []
 
-        if answer_mode == "NO_ANSWER" or not context_blocks or not citations:
+        if answer_mode == "NO_ANSWER" or not context_blocks or (not citations and not sources):
             return {
                 "answer": self.NO_EVIDENCE_ANSWER,
                 "answer_mode": "NO_ANSWER",

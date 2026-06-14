@@ -265,6 +265,10 @@ class ChatWithSourcesService:
         payload["conversation_id"] = effective_conversation_id
         payload["turn_id"] = None
         payload["answer_mode"] = str(grounded.get("answer_mode") or payload.get("answer_mode") or "ANSWERED")
+        if str(payload.get("answer") or "").strip().startswith("⚠️"):
+            payload["answer_mode"] = "LLM_ERROR"
+            payload["answer_source"] = "none"
+            payload["confidence"] = 0.0
         payload["citations"] = packet.get("citations") or []
         payload["readiness"] = packet.get("readiness") or {}
         if session_service is not None:

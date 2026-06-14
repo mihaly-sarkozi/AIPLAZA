@@ -168,6 +168,12 @@ class LLMAnswerService:
             return str(answer or "")
         except RateLimitError as exc:
             logger.error("LLM rate limit hiba: %s", exc, exc_info=True)
+            error_text = str(exc).lower()
+            if "insufficient_quota" in error_text:
+                return (
+                    "⚠️ Az OpenAI API kvóta lemerült. "
+                    "Ellenőrizd a számlázást, vagy állítsd a CHAT_PROVIDER=ollama értéket lokális modellhez."
+                )
             return "⚠️ Túl sok kérés. Kérlek, próbáld újra később."
         except APITimeoutError as exc:
             increment_metric("llm_timeout_total", 1.0, tags={"provider": "chat_completion"})
