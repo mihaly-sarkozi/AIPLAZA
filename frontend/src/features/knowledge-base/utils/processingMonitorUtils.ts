@@ -260,6 +260,288 @@ export type FlowProgressDetail = {
   remainingSteps: Array<{ module: string; step: string }>;
 };
 
+export type FlowProgressOptions = {
+  /** Kalibráció: korábbi futások eseményei (pl. teljes KB lista). */
+  referenceEvents?: ProcessingEventSummary[];
+  /** Aktuális dokumentum azonosító — kizárás a referencia futásból. */
+  currentItemId?: string | null;
+  /** Aktív lépés időinterpolációjához. */
+  nowMs?: number;
+};
+
+const DEFAULT_STEP_WEIGHT_MS = 1000;
+const MIN_STEP_WEIGHT_MS = 100;
+
+/** Időt nagyságrendre kerekít (zajcsökkentés, stabil súlyozás). */
+export function roundDurationToMagnitude(durationMs: number): number {
+  if (!Number.isFinite(durationMs) || durationMs <= 0) return DEFAULT_STEP_WEIGHT_MS;
+  const ms = Math.max(MIN_STEP_WEIGHT_MS, durationMs);
+  const exponent = Math.floor(Math.log10(ms));
+  const base = 10 ** exponent;
+  const normalized = ms / base;
+  let factor = 1;
+  if (normalized >= 7.5) factor = 10;
+  else if (normalized >= 3) factor = 5;
+  else if (normalized >= 1.6) factor = 2.5;
+  return Math.round(factor * base);
+}
+
+/** Utolsó teljesen indexelt futás training_item azonosítója. */
+export function findLastCompletedRunItemId(
+  events: ProcessingEventSummary[],
+  excludeItemId?: string | null,
+): string | null {
+  const byItem = new Map<string, ProcessingEventSummary[]>();
+  for (const event of events) {
+    const itemId = resolveFlowItemId(event);
+    if (!itemId) continue;
+    const bucket = byItem.get(itemId) ?? [];
+    bucket.push(event);
+    byItem.set(itemId, bucket);
+  }
+
+  let bestItemId: string | null = null;
+  let bestTime = 0;
+  for (const [itemId, itemEvents] of byItem) {
+    if (excludeItemId && itemId === excludeItemId) continue;
+    const indexingDone = itemEvents.find(
+      (event) =>
+        event.module === "kb_indexing" &&
+        event.step === "PIPELINE" &&
+        normalizeStatus(event.status) === "completed",
+    );
+    if (!indexingDone) continue;
+    const time = Date.parse(indexingDone.created_at);
+    if (time > bestTime) {
+      bestTime = time;
+      bestItemId = itemId;
+    }
+  }
+  return bestItemId;
+}
+
+export function extractRawStepDurationsMs(
+  events: ProcessingEventSummary[],
+  understandingSteps: UnderstandingStepSummary[] = [],
+): Map<string, number> {
+  const raw = new Map<string, number>();
+  for (const row of mergeUnderstandingSteps(buildStepRows(events), understandingSteps)) {
+    if (normalizeStatus(row.status) !== "completed") continue;
+    if (row.durationMs == null || row.durationMs <= 0) continue;
+    raw.set(row.key, row.durationMs);
+  }
+  return raw;
+}
+
+/** Modul szintű várható idő: al-lépések duration_ms összege (PIPELINE összesítő külön). */
+export function computeModuleWallTimes(
+  events: ProcessingEventSummary[],
+  rawDurations: Map<string, number> = new Map(),
+): Map<string, number> {
+  const result = new Map<string, number>();
+
+  for (const moduleName of PIPELINE_MODULE_ORDER) {
+    const subKeys = PROCESSING_PIPELINE_CATALOG.filter(
+      (entry) => entry.module === moduleName && entry.step !== "PIPELINE",
+    ).map((entry) => stepKey(entry.module, entry.step));
+    const subSum = subKeys.reduce((sum, key) => sum + (rawDurations.get(key) ?? 0), 0);
+    const pipelineMs = rawDurations.get(stepKey(moduleName, "PIPELINE")) ?? 0;
+
+    if (subSum > 0) {
+      result.set(moduleName, subSum);
+      continue;
+    }
+    if (pipelineMs > 0) {
+      result.set(moduleName, pipelineMs);
+      continue;
+    }
+
+    const itemId = events.length ? resolveFlowItemId(events[0]) : null;
+    const modEvents = events.filter(
+      (event) =>
+        event.module === moduleName && (!itemId || resolveFlowItemId(event) === itemId),
+    );
+    if (modEvents.length < 2) continue;
+    const parsed = modEvents
+      .map((event) => Date.parse(event.created_at))
+      .filter((value) => Number.isFinite(value));
+    if (parsed.length < 2) continue;
+    const wallMs = Math.max(...parsed) - Math.min(...parsed);
+    if (wallMs > 0) result.set(moduleName, wallMs);
+  }
+
+  return result;
+}
+
+function normalizeModuleStepWeights(
+  profile: Map<string, number>,
+  rawDurations: Map<string, number>,
+  moduleWallTimes: Map<string, number>,
+): void {
+  for (const moduleName of PIPELINE_MODULE_ORDER) {
+    const entries = PROCESSING_PIPELINE_CATALOG.filter((entry) => entry.module === moduleName);
+    if (!entries.length) continue;
+
+    const pipelineKey = stepKey(moduleName, "PIPELINE");
+    const subEntries = entries.filter((entry) => entry.step !== "PIPELINE");
+    const subKeys = subEntries.map((entry) => stepKey(entry.module, entry.step));
+    const rawSubTotal = subKeys.reduce((sum, key) => sum + (rawDurations.get(key) ?? 0), 0);
+    const hasSubMeasurements = rawSubTotal > 0;
+    const moduleWall = moduleWallTimes.get(moduleName);
+
+    if (hasSubMeasurements) {
+      profile.set(pipelineKey, MIN_STEP_WEIGHT_MS);
+
+      for (const key of subKeys) {
+        if (!profile.has(key)) profile.set(key, MIN_STEP_WEIGHT_MS);
+      }
+
+      const measurableKeys = subKeys.filter((key) => (rawDurations.get(key) ?? 0) > 0);
+      const measuredTotal = measurableKeys.reduce((sum, key) => sum + (profile.get(key) ?? 0), 0);
+      const targetTotal =
+        moduleWall != null && moduleWall > 0 ? roundDurationToMagnitude(moduleWall) : measuredTotal;
+
+      if (measuredTotal > 0 && targetTotal > 0) {
+        const scale = targetTotal / measuredTotal;
+        for (const key of measurableKeys) {
+          profile.set(key, Math.max(MIN_STEP_WEIGHT_MS, roundDurationToMagnitude((profile.get(key) ?? 0) * scale)));
+        }
+      }
+      continue;
+    }
+
+    const pipelineRaw = rawDurations.get(pipelineKey) ?? 0;
+    if (pipelineRaw > 0) {
+      profile.set(pipelineKey, roundDurationToMagnitude(pipelineRaw));
+      for (const key of subKeys) profile.set(key, MIN_STEP_WEIGHT_MS);
+      continue;
+    }
+
+    if (moduleWall != null && moduleWall > 0) {
+      const perStep = Math.max(MIN_STEP_WEIGHT_MS, roundDurationToMagnitude(moduleWall / entries.length));
+      for (const entry of entries) {
+        profile.set(stepKey(entry.module, entry.step), perStep);
+      }
+    }
+  }
+}
+
+/** Lépésenkénti várható idő (ms) az utolsó sikeres futás + aktuális befejezett lépések alapján. */
+export function buildStepDurationProfile(
+  referenceEvents: ProcessingEventSummary[],
+  options?: {
+    excludeItemId?: string | null;
+    overlayEvents?: ProcessingEventSummary[];
+    understandingSteps?: UnderstandingStepSummary[];
+  },
+): Map<string, number> {
+  const profile = new Map<string, number>();
+  const rawDurations = new Map<string, number>();
+
+  const lastItemId = findLastCompletedRunItemId(referenceEvents, options?.excludeItemId);
+  if (lastItemId) {
+    const itemEvents = referenceEvents.filter((event) => resolveFlowItemId(event) === lastItemId);
+    for (const [key, value] of extractRawStepDurationsMs(itemEvents)) {
+      rawDurations.set(key, value);
+      profile.set(key, roundDurationToMagnitude(value));
+    }
+  }
+
+  if (options?.overlayEvents?.length) {
+    for (const [key, value] of extractRawStepDurationsMs(
+      options.overlayEvents,
+      options.understandingSteps ?? [],
+    )) {
+      rawDurations.set(key, value);
+      profile.set(key, roundDurationToMagnitude(value));
+    }
+  }
+
+  const moduleWallTimes = computeModuleWallTimes(
+    options?.overlayEvents?.length
+      ? options.overlayEvents
+      : lastItemId
+        ? referenceEvents.filter((event) => resolveFlowItemId(event) === lastItemId)
+        : referenceEvents,
+    rawDurations,
+  );
+  normalizeModuleStepWeights(profile, rawDurations, moduleWallTimes);
+
+  for (const entry of PROCESSING_PIPELINE_CATALOG) {
+    const key = stepKey(entry.module, entry.step);
+    if (!profile.has(key)) profile.set(key, MIN_STEP_WEIGHT_MS);
+  }
+
+  return profile;
+}
+
+function findStepStartedAt(events: ProcessingEventSummary[], module: string, step: string): number | null {
+  const matches = events
+    .filter(
+      (event) =>
+        event.module === module &&
+        event.step === step &&
+        normalizeStatus(event.status) === "started",
+    )
+    .sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at));
+  const latest = matches[0];
+  if (!latest) return null;
+  const parsed = Date.parse(latest.created_at);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+export function computeWeightedProgressPercent(
+  timeline: ProcessingStepRow[],
+  weights: number[],
+  events: ProcessingEventSummary[],
+  nowMs?: number,
+): number {
+  if (!timeline.length) return 0;
+
+  let earnedWeight = 0;
+  let activeIndex = -1;
+
+  for (let index = 0; index < timeline.length; index += 1) {
+    const row = timeline[index];
+    const status = normalizeStatus(row.status);
+    if (status === "completed") {
+      earnedWeight += weights[index] ?? DEFAULT_STEP_WEIGHT_MS;
+      continue;
+    }
+    if (status === "started" || status === "failed" || status === "skipped") {
+      activeIndex = index;
+      break;
+    }
+    if (row.isPending || status === "pending") {
+      activeIndex = index;
+      break;
+    }
+  }
+
+  const totalWeight = weights.reduce((sum, weight) => sum + weight, 0);
+  if (totalWeight <= 0) return 0;
+
+  if (activeIndex >= 0) {
+    const stepWeight = weights[activeIndex] ?? DEFAULT_STEP_WEIGHT_MS;
+    const row = timeline[activeIndex];
+    let ratio = 0.04;
+
+    const batch = extractBatchProgress(events);
+    if (batch && batch.total > 0) {
+      ratio = Math.min(0.95, batch.done / batch.total);
+    } else if (nowMs != null) {
+      const startedAt = findStepStartedAt(events, row.module, row.step);
+      if (startedAt != null) {
+        ratio = Math.min(0.92, Math.max(0, nowMs - startedAt) / Math.max(stepWeight, MIN_STEP_WEIGHT_MS));
+      }
+    }
+
+    earnedWeight += stepWeight * ratio;
+  }
+
+  return Math.round((earnedWeight / totalWeight) * 100);
+}
+
 function readPositiveInt(value: unknown): number | null {
   const num = typeof value === "number" ? value : Number(value);
   if (!Number.isFinite(num) || num < 0) return null;
@@ -300,24 +582,32 @@ export function deriveFlowProgress(
   events: ProcessingEventSummary[],
   issues: ProcessingIssueSummary[],
   understandingSteps: UnderstandingStepSummary[] = [],
+  options: FlowProgressOptions = {},
 ): FlowProgressDetail | null {
   const flowStatus = deriveFlowStatus(events, issues);
   if (flowStatus !== "running") return null;
 
-  const timeline = buildPipelineTimelineCompact(events, understandingSteps);
-  const completedSteps = timeline.filter((row) => normalizeStatus(row.status) === "completed").length;
-  const totalSteps = timeline.length;
-  const pendingRows = timeline.filter(
+  const progressTimeline = buildPipelineTimeline(events, understandingSteps);
+  const displayTimeline = buildPipelineTimelineCompact(events, understandingSteps);
+  const completedSteps = progressTimeline.filter((row) => normalizeStatus(row.status) === "completed").length;
+  const totalSteps = progressTimeline.length;
+  const pendingRows = displayTimeline.filter(
     (row) => row.isPending || normalizeStatus(row.status) === "pending" || normalizeStatus(row.status) === "started",
   );
   const remainingSteps = pendingRows.slice(0, 4).map((row) => ({ module: row.module, step: row.step }));
 
-  let percent = totalSteps > 0 ? Math.round((completedSteps / totalSteps) * 100) : 0;
+  const currentItemId =
+    options.currentItemId ?? (events.length ? resolveFlowItemId(events[0]) : null);
+  const referenceEvents = options.referenceEvents ?? events;
+  const durationProfile = buildStepDurationProfile(referenceEvents, {
+    excludeItemId: currentItemId,
+    overlayEvents: events,
+    understandingSteps,
+  });
+  const weights = progressTimeline.map((row) => durationProfile.get(row.key) ?? DEFAULT_STEP_WEIGHT_MS);
+
+  const percent = computeWeightedProgressPercent(progressTimeline, weights, events, options.nowMs);
   const batch = extractBatchProgress(events);
-  if (batch && batch.total > 0) {
-    const micro = Math.round((batch.done / batch.total) * 100);
-    percent = Math.min(99, Math.round(percent * 0.8 + micro * 0.2));
-  }
 
   return {
     percent: Math.min(Math.max(percent, completedSteps > 0 ? 1 : 0), 99),
@@ -514,7 +804,8 @@ export function deriveFlowProcessingDisplay(
 export function buildFlowSummaries(
   runs: IngestRun[],
   events: ProcessingEventSummary[],
-  issues: ProcessingIssueSummary[]
+  issues: ProcessingIssueSummary[],
+  options: Pick<FlowProgressOptions, "nowMs"> = {},
 ): ProcessingFlowSummary[] {
   const catalog = buildItemCatalogFromRuns(runs);
   enrichCatalogFromEvents(catalog, events);
@@ -548,7 +839,11 @@ export function buildFlowSummaries(
     const lastEvent = itemEvents[0] ?? null;
     const active = deriveActiveProgress(itemEvents);
     const pipelineHead = active ? null : findPipelineHead(itemEvents);
-    const progress = deriveFlowProgress(itemEvents, itemIssues);
+    const progress = deriveFlowProgress(itemEvents, itemIssues, [], {
+      referenceEvents: events,
+      currentItemId: itemId,
+      nowMs: options.nowMs,
+    });
     flows.push({
       itemId,
       title: meta?.title ?? itemId,

@@ -12,6 +12,7 @@ from apps.kb.kb_indexing.enums.IndexingErrorCode import IndexingErrorCode
 from apps.kb.kb_indexing.enums.IndexingStatus import IndexingStatus
 from apps.kb.kb_indexing.errors.IndexingProcessingError import IndexingProcessingError
 from apps.kb.kb_indexing.ports.reader_ports import KnowledgeBaseReaderPort
+from apps.kb.kb_indexing.repository.IndexVerificationRepository import IndexVerificationRepository
 from apps.kb.kb_indexing.repository.IndexingJobRepository import IndexingJobRepository
 from apps.kb.kb_indexing.service.DeleteIndexedChunksService import DeleteIndexedChunksService
 from apps.kb.kb_indexing.service.IndexingFailureRecorderService import IndexingFailureRecorderService
@@ -29,6 +30,7 @@ class ReindexTrainingItemService:
         *,
         embedding_job_repository: EmbeddingJobRepository,
         indexing_job_repository: IndexingJobRepository,
+        verification_repository: IndexVerificationRepository,
         knowledge_base_reader: KnowledgeBaseReaderPort,
         delete_service: DeleteIndexedChunksService,
         start_indexing_service: StartIndexingService,
@@ -37,6 +39,7 @@ class ReindexTrainingItemService:
     ) -> None:
         self._embedding_jobs = embedding_job_repository
         self._indexing_jobs = indexing_job_repository
+        self._verifications = verification_repository
         self._knowledge_bases = knowledge_base_reader
         self._delete = delete_service
         self._start = start_indexing_service
@@ -114,6 +117,7 @@ class ReindexTrainingItemService:
             reason=request.reason or "reindex",
             new_status=IndexedChunkStatus.REPLACED.value,
         )
+        points_deleted = int(delete_result.qdrant_deleted or 0)
         if delete_result.partial:
             self._record(
                 request,
@@ -134,15 +138,11 @@ class ReindexTrainingItemService:
                 indexing_job_id=job.id,
                 status=IndexingStatus.FAILED.value,
                 error_code=IndexingErrorCode.REINDEX_DELETE_OLD_POINTS_FAILED.value,
-                points_deleted=delete_result.qdrant_deleted,
+                points_deleted=points_deleted,
                 embedding_job_id=embedding_job.id,
             )
 
-        self._record(
-            request,
-            "REINDEX_OLD_POINTS_DELETE_COMPLETED",
-            {"points_deleted": delete_result.qdrant_deleted},
-        )
+        self._record(request, "REINDEX_OLD_POINTS_DELETE_COMPLETED", {"points_deleted": points_deleted})
         self._record(request, "REINDEX_INDEXING_STARTED", {"embedding_job_id": embedding_job.id})
 
         status = self._start.start(
@@ -156,13 +156,27 @@ class ReindexTrainingItemService:
         )
         latest_job = self._indexing_jobs.get_latest_for_training_item(item_id)
         indexing_job_id = latest_job.id if latest_job else ""
+        points_indexed, points_verified, verification_id, error_message = self._indexing_metrics(indexing_job_id)
 
         if status == IndexingStatus.COMPLETED:
-            self._record(request, "REINDEX_COMPLETED", {"indexing_job_id": indexing_job_id})
+            self._record(
+                request,
+                "REINDEX_COMPLETED",
+                {
+                    "indexing_job_id": indexing_job_id,
+                    "points_deleted": points_deleted,
+                    "points_indexed": points_indexed,
+                    "points_verified": points_verified,
+                    "verification_id": verification_id,
+                },
+            )
             return ReindexTrainingItemResultDto(
                 indexing_job_id=indexing_job_id,
                 status=status.value,
-                points_deleted=delete_result.qdrant_deleted,
+                points_deleted=points_deleted,
+                points_indexed=points_indexed,
+                points_verified=points_verified,
+                verification_id=verification_id,
                 embedding_job_id=embedding_job.id,
             )
 
@@ -171,14 +185,38 @@ class ReindexTrainingItemService:
             if status == IndexingStatus.PARTIAL
             else IndexingErrorCode.REINDEX_INDEXING_FAILED.value
         )
-        self._record(request, "REINDEX_FAILED", {"error_code": error_code, "status": status.value})
+        self._record(
+            request,
+            "REINDEX_FAILED",
+            {
+                "error_code": error_code,
+                "status": status.value,
+                "points_indexed": points_indexed,
+                "points_verified": points_verified,
+            },
+        )
         return ReindexTrainingItemResultDto(
             indexing_job_id=indexing_job_id,
             status=status.value,
             error_code=error_code,
-            points_deleted=delete_result.qdrant_deleted,
+            error_message=error_message,
+            points_deleted=points_deleted,
+            points_indexed=points_indexed,
+            points_verified=points_verified,
+            verification_id=verification_id,
             embedding_job_id=embedding_job.id,
         )
+
+    def _indexing_metrics(self, indexing_job_id: str) -> tuple[int, int, str | None, str | None]:
+        if not indexing_job_id:
+            return 0, 0, None, None
+        job = self._indexing_jobs.get_job(indexing_job_id)
+        points_indexed = int(getattr(job, "chunks_indexed", 0) or 0) if job else 0
+        error_message = getattr(job, "error_message", None) if job else None
+        verification = self._verifications.get_latest_for_indexing_job(indexing_job_id)
+        if verification is None:
+            return points_indexed, 0, None, error_message
+        return points_indexed, int(getattr(verification, "verified_points", 0) or 0), verification.id, error_message
 
     def _record(self, request: ReindexTrainingItemRequestDto, event_type: str, summary: dict) -> None:
         if self._flow_recorder is None:

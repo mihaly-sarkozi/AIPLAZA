@@ -30,6 +30,8 @@ vector_hash_mismatches = 0
 - **Reindex training item** — régi Qdrant pointok törlése/replace, új indexing + verification, majd `ready_for_search` újraértékelés
 - **Rebuild KB index** — teljes KB Qdrant törlés + itemenkénti reindex; `kb_index_rebuilds` audit; `search_status` a metrics-ben
 - Rebuild/reindex partial esetén: `ready_for_search = false`, `search_status = SEARCH_PARTIAL` vagy `SEARCH_NOT_READY`
+- **`READY_FOR_SEARCH` csak akkor igaz**, ha rebuild/indexing `COMPLETED`, `points_reindexed > 0`, **`points_verified = points_reindexed`**, és nincs blocking issue
+- Partial rebuild után (`points_verified < points_reindexed`) a keresés nem engedélyezett
 
 ## Ha nem teljesül
 

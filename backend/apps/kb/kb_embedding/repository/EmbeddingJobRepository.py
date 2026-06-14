@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from sqlalchemy import select
 
+from apps.kb.kb_embedding.dto.EmbeddableTrainingItemSnapshotDto import EmbeddableTrainingItemSnapshotDto
 from apps.kb.kb_embedding.enums.EmbeddingStatus import TERMINAL_STATUSES, EmbeddingStatus
 from apps.kb.kb_embedding.orm.EmbeddingJob import EmbeddingJob
 from apps.kb.shared.ids import new_id
@@ -141,7 +142,9 @@ class EmbeddingJobRepository:
                 session.expunge(row)
             return row
 
-    def list_latest_embeddable_for_knowledge_base(self, knowledge_base_id: str) -> list[EmbeddingJob]:
+    def list_latest_embeddable_for_knowledge_base(
+        self, knowledge_base_id: str
+    ) -> list[EmbeddableTrainingItemSnapshotDto]:
         allowed = {"COMPLETED", "PARTIAL"}
         with self._session_factory() as session:
             rows = list(
@@ -157,15 +160,30 @@ class EmbeddingJobRepository:
                 .scalars()
                 .all()
             )
-        seen: set[str] = set()
-        latest: list[EmbeddingJob] = []
-        for row in rows:
-            if row.training_item_id in seen:
-                continue
-            seen.add(row.training_item_id)
-            session.expunge(row)
-            latest.append(row)
-        return latest
+            seen: set[str] = set()
+            latest: list[EmbeddableTrainingItemSnapshotDto] = []
+            for row in rows:
+                if row.training_item_id in seen:
+                    continue
+                seen.add(row.training_item_id)
+                latest.append(
+                    EmbeddableTrainingItemSnapshotDto(
+                        training_item_id=row.training_item_id,
+                        knowledge_base_id=row.knowledge_base_id,
+                        embedding_job_id=row.id,
+                        discovery_job_id=row.discovery_job_id,
+                        understanding_job_id=row.understanding_job_id,
+                        status=row.status,
+                        embedding_model=row.embedding_model,
+                        embedding_provider=row.embedding_provider,
+                        embedding_dimension=int(row.embedding_dimension or 0),
+                        chunks_embedded=int(row.chunks_embedded or 0),
+                        chunks_failed=int(row.chunks_failed or 0),
+                        created_at=row.created_at,
+                        finished_at=row.finished_at,
+                    )
+                )
+            return latest
 
 
 __all__ = ["EmbeddingJobRepository"]

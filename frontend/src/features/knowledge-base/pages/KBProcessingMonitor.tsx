@@ -12,6 +12,8 @@ import ProcessingMonitorLiveBanner from "../components/monitor/ProcessingMonitor
 import ProcessingMonitorBreadcrumb from "../components/monitor/ProcessingMonitorBreadcrumb";
 import ProcessingStatusBadge from "../components/monitor/ProcessingStatusBadge";
 import { useProcessingMonitorBundle } from "../hooks/useProcessingMonitorBundle";
+import { useMonitorRouteRefetch } from "../hooks/useMonitorRouteRefetch";
+import { useProgressClock } from "../hooks/useProgressClock";
 import { useKbList } from "../hooks/useKb";
 import {
   buildFlowSummaries,
@@ -38,13 +40,15 @@ export default function KBProcessingMonitor() {
   }, [kb, kbLoading, navigate, uuid]);
 
   const { runsQuery, eventsQuery, issuesQuery, metricsQuery, isLive } = useProcessingMonitorBundle(uuid);
+  useMonitorRouteRefetch(uuid);
+  const progressNowMs = useProgressClock(isLive);
 
   const flows = useMemo(() => {
     const runs = runsQuery.data?.items ?? [];
     const events = eventsQuery.data?.items ?? [];
     const issues = issuesQuery.data?.items ?? [];
-    return buildFlowSummaries(runs, events, issues);
-  }, [eventsQuery.data?.items, issuesQuery.data?.items, runsQuery.data?.items]);
+    return buildFlowSummaries(runs, events, issues, { nowMs: progressNowMs });
+  }, [eventsQuery.data?.items, issuesQuery.data?.items, progressNowMs, runsQuery.data?.items]);
 
   const activeFlowCount = useMemo(
     () => countActiveFlows(runsQuery.data?.items ?? [], eventsQuery.data?.items ?? []),
@@ -58,11 +62,16 @@ export default function KBProcessingMonitor() {
 
   const primaryFlowProgress = useMemo(() => {
     if (!primaryActiveFlow) return null;
-    const itemEvents = (eventsQuery.data?.items ?? []).filter(
+    const allEvents = eventsQuery.data?.items ?? [];
+    const itemEvents = allEvents.filter(
       (event) => resolveFlowItemId(event) === primaryActiveFlow.itemId,
     );
-    return deriveFlowProgress(itemEvents, issuesQuery.data?.items ?? []);
-  }, [primaryActiveFlow, eventsQuery.data?.items, issuesQuery.data?.items]);
+    return deriveFlowProgress(itemEvents, issuesQuery.data?.items ?? [], [], {
+      referenceEvents: allEvents,
+      currentItemId: primaryActiveFlow.itemId,
+      nowMs: progressNowMs,
+    });
+  }, [primaryActiveFlow, eventsQuery.data?.items, issuesQuery.data?.items, progressNowMs]);
 
   const blockingIssueCount = useMemo(
     () => countOpenBlockingIssues(issuesQuery.data?.items ?? []),

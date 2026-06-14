@@ -74,3 +74,96 @@ def test_delete_indexed_chunks_marks_replaced():
     assert result.postgres_updated == 1
     indexed_repo.update_chunk_status.assert_called_once()
     assert indexed_repo.update_chunk_status.call_args.kwargs["status"] == IndexedChunkStatus.REPLACED.value
+
+
+def test_rebuild_status_completed_when_verified_matches_indexed():
+    from apps.kb.kb_indexing.enums.IndexRebuildStatus import IndexRebuildStatus
+    from apps.kb.kb_indexing.service.RebuildKnowledgeBaseIndexService import RebuildKnowledgeBaseIndexService
+
+    status, error = RebuildKnowledgeBaseIndexService._resolve_rebuild_status(
+        training_items_total=3,
+        training_items_reindexed=3,
+        training_items_failed=0,
+        points_reindexed=35,
+        points_verified=35,
+        delete_failed=False,
+    )
+    assert status == IndexRebuildStatus.COMPLETED
+    assert error is None
+
+
+def test_rebuild_status_partial_when_verification_incomplete():
+    from apps.kb.kb_indexing.enums.IndexRebuildStatus import IndexRebuildStatus
+    from apps.kb.kb_indexing.enums.IndexingErrorCode import IndexingErrorCode
+    from apps.kb.kb_indexing.service.RebuildKnowledgeBaseIndexService import RebuildKnowledgeBaseIndexService
+
+    status, error = RebuildKnowledgeBaseIndexService._resolve_rebuild_status(
+        training_items_total=3,
+        training_items_reindexed=3,
+        training_items_failed=0,
+        points_reindexed=35,
+        points_verified=33,
+        delete_failed=False,
+    )
+    assert status == IndexRebuildStatus.PARTIAL
+    assert error == IndexingErrorCode.KB_INDEX_REBUILD_VERIFICATION_INCOMPLETE.value
+
+
+def test_rebuild_status_failed_when_no_points_reindexed():
+    from apps.kb.kb_indexing.enums.IndexRebuildStatus import IndexRebuildStatus
+    from apps.kb.kb_indexing.enums.IndexingErrorCode import IndexingErrorCode
+    from apps.kb.kb_indexing.service.RebuildKnowledgeBaseIndexService import RebuildKnowledgeBaseIndexService
+
+    status, error = RebuildKnowledgeBaseIndexService._resolve_rebuild_status(
+        training_items_total=2,
+        training_items_reindexed=0,
+        training_items_failed=2,
+        points_reindexed=0,
+        points_verified=0,
+        delete_failed=False,
+    )
+    assert status == IndexRebuildStatus.FAILED
+    assert error == IndexingErrorCode.KB_INDEX_REBUILD_NO_POINTS_REINDEXED.value
+
+
+def test_list_embeddable_returns_dto_snapshots():
+    from datetime import datetime
+
+    from apps.kb.kb_embedding.dto.EmbeddableTrainingItemSnapshotDto import EmbeddableTrainingItemSnapshotDto
+    from apps.kb.kb_embedding.orm.EmbeddingJob import EmbeddingJob
+    from apps.kb.kb_embedding.repository.EmbeddingJobRepository import EmbeddingJobRepository
+
+    row = EmbeddingJob(
+        id="emb_job_1",
+        tenant_slug="tenant",
+        knowledge_base_id="kb_1",
+        training_item_id="item_1",
+        understanding_job_id="u_1",
+        discovery_job_id="d_1",
+        status="COMPLETED",
+        chunks_embedded=5,
+        chunks_failed=0,
+        embedding_model="model",
+        embedding_provider="local",
+        embedding_dimension=1024,
+        created_at=datetime(2026, 6, 14, 12, 0, 0),
+        finished_at=datetime(2026, 6, 14, 12, 1, 0),
+    )
+
+    class FakeSession:
+        def execute(self, _query):
+            return SimpleNamespace(scalars=lambda: SimpleNamespace(all=lambda: [row]))
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+    repo = EmbeddingJobRepository(lambda: FakeSession())
+    snapshots = repo.list_latest_embeddable_for_knowledge_base("kb_1")
+
+    assert len(snapshots) == 1
+    assert isinstance(snapshots[0], EmbeddableTrainingItemSnapshotDto)
+    assert snapshots[0].embedding_job_id == "emb_job_1"
+    assert snapshots[0].training_item_id == "item_1"

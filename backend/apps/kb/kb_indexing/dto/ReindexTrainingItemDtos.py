@@ -21,6 +21,9 @@ class ReindexTrainingItemResultDto:
     error_code: str | None = None
     error_message: str | None = None
     points_deleted: int = 0
+    points_indexed: int = 0
+    points_verified: int = 0
+    verification_id: str | None = None
     embedding_job_id: str | None = None
 
 

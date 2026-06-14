@@ -14,6 +14,8 @@ import ProcessingMonitorLiveBanner from "../components/monitor/ProcessingMonitor
 import ProcessingMonitorBreadcrumb from "../components/monitor/ProcessingMonitorBreadcrumb";
 import ProcessingStatusBadge from "../components/monitor/ProcessingStatusBadge";
 import { useProcessingMonitorBundle } from "../hooks/useProcessingMonitorBundle";
+import { useMonitorRouteRefetch } from "../hooks/useMonitorRouteRefetch";
+import { useProgressClock } from "../hooks/useProgressClock";
 import { useKbList } from "../hooks/useKb";
 import {
   buildItemCatalogFromRuns,
@@ -37,9 +39,12 @@ export default function KBProcessingStepDetail() {
   const { data: kbList = [], isLoading: kbLoading } = useKbList();
   const kb = useMemo(() => kbList.find((item) => item.uuid === uuid), [kbList, uuid]);
 
-  const { runsQuery, eventsQuery, understandingQuery, issuesQuery, isLive } = useProcessingMonitorBundle(uuid, {
-    trainingItemId: itemId,
-  });
+  const { runsQuery, eventsQuery, referenceEventsQuery, understandingQuery, issuesQuery, isLive } =
+    useProcessingMonitorBundle(uuid, {
+      trainingItemId: itemId,
+    });
+  useMonitorRouteRefetch(uuid);
+  const progressNowMs = useProgressClock(isLive);
 
   useEffect(() => {
     if (kbLoading) return;
@@ -55,8 +60,20 @@ export default function KBProcessingStepDetail() {
         eventsQuery.data?.items ?? [],
         issuesQuery.data?.items ?? [],
         understandingQuery.data?.steps ?? [],
+        {
+          referenceEvents: referenceEventsQuery.data?.items ?? eventsQuery.data?.items ?? [],
+          currentItemId: itemId ?? null,
+          nowMs: progressNowMs,
+        },
       ),
-    [eventsQuery.data?.items, issuesQuery.data?.items, understandingQuery.data?.steps],
+    [
+      eventsQuery.data?.items,
+      issuesQuery.data?.items,
+      understandingQuery.data?.steps,
+      referenceEventsQuery.data?.items,
+      itemId,
+      progressNowMs,
+    ],
   );
 
   const activeProgress = useMemo(

@@ -73,7 +73,23 @@ POINT_DELETE_AND_REINDEX (default)
 
 `RECREATE_COLLECTION` → explicit `UNSUPPORTED_REBUILD_MODE` (nincs néma NotImplemented).
 
-Metrics metadata: `search_status`, `last_rebuild_job_id`, `rebuild_started_at` / `rebuild_finished_at`.
+### Rebuild audit mezők (`kb_index_rebuilds`)
+
+| Mező | Jelentés |
+|------|----------|
+| `points_deleted` | Régi Qdrant pointok törlése / `REPLACED` státusz (KB-wide delete + item szintű törlés maximuma) |
+| `points_reindexed` | Újonnan Qdrantba upsertelt pointok száma (`chunks_indexed` összesítve) |
+| `points_verified` | Qdrant verification által visszaigazolt új pointok száma |
+
+A három mező **külön jelentésű** — nem szabad összekeverni (pl. `points_reindexed += points_deleted` hibás).
+
+Rebuild státusz:
+
+- `COMPLETED` — minden item sikeres, `points_verified = points_reindexed > 0`
+- `PARTIAL` — van sikeres reindex, de item hiba vagy `points_verified < points_reindexed`
+- `FAILED` — `points_reindexed = 0` vagy minden item failed
+
+Metrics metadata: `search_status`, `last_rebuild_job_id`, `rebuild_finished_at`, `ready_for_search`.
 
 ## Táblák
 

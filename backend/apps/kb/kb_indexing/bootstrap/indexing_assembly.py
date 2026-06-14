@@ -129,6 +129,7 @@ def build_indexing_services(
     reindex_service = ReindexTrainingItemService(
         embedding_job_repository=emb_repo,
         indexing_job_repository=job_repository,
+        verification_repository=verification_repository,
         knowledge_base_reader=knowledge_base_reader,
         delete_service=delete_service,
         start_indexing_service=start_service,

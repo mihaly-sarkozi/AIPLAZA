@@ -23,6 +23,8 @@ class RebuildKnowledgeBaseIndexResultDto:
     training_items_reindexed: int = 0
     training_items_failed: int = 0
     points_deleted: int = 0
+    points_reindexed: int = 0
+    points_verified: int = 0
 
 
 __all__ = ["RebuildKnowledgeBaseIndexRequestDto", "RebuildKnowledgeBaseIndexResultDto"]
