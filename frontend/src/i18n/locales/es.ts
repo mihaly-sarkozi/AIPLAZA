@@ -340,6 +340,7 @@ export const es = {
         stepDetailIntro: "Datos clave de entrada y salida del paso seleccionado, para verificación.",
         entityPreviewTitle: "Entidades (mayor confianza)",
         previewTruncated: "Se muestran hasta {{count}} elementos.",
+        previewSectionTitle: "Tablas de verificación",
         keywordPreviewTitle: "Palabras clave",
         topicPreviewTitle: "Temas",
         temporalPreviewTitle: "Menciones temporales",

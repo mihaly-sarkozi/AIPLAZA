@@ -340,6 +340,7 @@ export const hu = {
         stepDetailIntro: "A kiválasztott lépés fontosabb bemeneti és kimeneti adatai ellenőrzéshez.",
         entityPreviewTitle: "Entitások (legmagasabb bizonyosság)",
         previewTruncated: "Legfeljebb {{count}} elem jelenik meg.",
+        previewSectionTitle: "Ellenőrző táblázatok",
         keywordPreviewTitle: "Kulcsszavak",
         topicPreviewTitle: "Témák",
         temporalPreviewTitle: "Időbeli említések",

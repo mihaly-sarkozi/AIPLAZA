@@ -339,6 +339,7 @@ export const en = {
         stepDetailIntro: "Key input and output data for the selected step, for verification.",
         entityPreviewTitle: "Entities (highest confidence)",
         previewTruncated: "Showing up to {{count}} items.",
+        previewSectionTitle: "Verification tables",
         keywordPreviewTitle: "Keywords",
         topicPreviewTitle: "Topics",
         temporalPreviewTitle: "Temporal mentions",

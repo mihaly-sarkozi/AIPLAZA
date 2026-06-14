@@ -8,6 +8,7 @@ import { useTranslation } from "../../../i18n";
 import { getApiErrorMessage } from "../../../utils/getApiErrorMessage";
 import { formatDateTime } from "../../../utils/dateTimeFormatting";
 import { useLocaleSettings } from "../../settings/hooks/useSettings";
+import ProcessingStepPreviewSection from "../components/monitor/ProcessingStepPreviewSection";
 import ProcessingStepSummaryPanel from "../components/monitor/ProcessingStepSummaryPanel";
 import ProcessingMonitorBreadcrumb from "../components/monitor/ProcessingMonitorBreadcrumb";
 import ProcessingStatusBadge from "../components/monitor/ProcessingStatusBadge";
@@ -152,6 +153,8 @@ export default function KBProcessingStepDetail() {
                 emptyLabel={t("kb.processingMonitor.emptyOutput")}
               />
             </div>
+
+            <ProcessingStepPreviewSection tables={outputDisplay.previewTables} />
           </>
         ) : null}
       </div>
