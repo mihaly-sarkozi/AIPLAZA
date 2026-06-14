@@ -62,13 +62,18 @@ def validate_observability(settings: Any) -> None:
 def validate_embedding(settings: Any) -> None:
     provider = (settings.embedding_provider or "").strip().lower()
     if provider not in ALLOWED_EMBEDDING_PROVIDERS:
-        raise ValueError("embedding_provider érvénytelen. Megengedett értékek: local, openai.")
+        raise ValueError("embedding_provider érvénytelen. Megengedett értékek: local, openai, dummy.")
     if settings.embedding_vector_size <= 0:
         raise ValueError("embedding_vector_size pozitívnak kell lennie.")
     if settings.embedding_batch_size <= 0:
         raise ValueError("embedding_batch_size pozitívnak kell lennie.")
     if settings.embedding_worker_concurrency <= 0:
         raise ValueError("embedding_worker_concurrency pozitívnak kell lennie.")
+    device = str(getattr(settings, "embedding_device", "cpu") or "cpu").strip().lower()
+    if device not in {"cpu", "cuda", "mps"}:
+        raise ValueError("embedding_device érvénytelen. Megengedett: cpu, cuda, mps.")
+    if provider == "dummy" and not bool(getattr(settings, "embedding_allow_dummy", False)):
+        raise ValueError("embedding_provider=dummy csak embedding_allow_dummy=true esetén engedélyezett.")
 
 
 __all__ = [

@@ -32,9 +32,79 @@ Siker vagy engedélyezett partial esetén:
 Determinisztikus, válogatott discovery kontextus: chunk text, heading, content type, top keywords/topics/entities, process lépések.
 Nem kerül bele: technikai ID-k, page numbers, score részletek, teljes relationship lista.
 
+## Lokális embedding provider (default)
+
+Production default: `embedding_provider=local` valódi **sentence-transformers** modellel.
+
+**Default modell:** `BAAI/bge-m3` (multilingual — magyar / angol / spanyol).
+
+Alternatívák (configból):
+
+- `intfloat/multilingual-e5-large`
+- `sentence-transformers/paraphrase-multilingual-mpnet-base-v2`
+
+A `LocalEmbeddingAdapter` **nem** használ dummy fallbacket. Modell betöltési vagy generálási hiba esetén a job `FAILED` / `PARTIAL`, és processing issue nyílik.
+
+### Konfiguráció (env)
+
+| Env változó | Default | Leírás |
+|-------------|---------|--------|
+| `EMBEDDING_PROVIDER` | `local` | `local`, `openai`, vagy `dummy` (dev only) |
+| `EMBEDDING_MODEL` | `BAAI/bge-m3` | HuggingFace modell azonosító |
+| `EMBEDDING_DEVICE` | `cpu` | `cpu`, `cuda`, `mps` |
+| `EMBEDDING_BATCH_SIZE` | `16` | Batch méret encode során |
+| `EMBEDDING_NORMALIZE` | `true` | Normalizált vektorok |
+| `EMBEDDING_VECTOR_SIZE` | `1024` | Elvárt dimenzió (ellenőrzött) |
+| `EMBEDDING_ALLOW_DUMMY` | `false` | Dummy provider engedélyezése |
+| `EMBEDDING_MODEL_CACHE_DIR` | *(üres)* | Lokális modell cache útvonal |
+
+A `KB_EMBEDDING_*` prefixű env aliasok is elfogadottak (pl. `KB_EMBEDDING_PROVIDER`).
+
+### Dummy provider (csak fejlesztés)
+
+- `embedding_provider=dummy` csak ha `embedding_allow_dummy=true` **és** nem production.
+- Productionben `dummy` és `embedding_allow_dummy=true` **tilos** (startup guard).
+
+### Modell cache / offline
+
+Ha `EMBEDDING_MODEL_CACHE_DIR` meg van adva (pl. `/models/sentence-transformers`), a modell innen töltődik vagy ide cache-el.
+Production runtime alatt nem szükséges internet, ha a modell előre letöltve van.
+
+### Batch feldolgozás
+
+`texts → batch split (EMBEDDING_BATCH_SIZE) → model.encode(batch) → vectors`
+
+### Dimenzió ellenőrzés
+
+Minden vektor hossza = `EMBEDDING_VECTOR_SIZE`. Eltérés esetén chunk `FAILED`, issue: `LOCAL_EMBEDDING_DIMENSION_MISMATCH`.
+
+### metadata_json
+
+Sikeres mentéskor:
+
+```json
+{
+  "provider": "local",
+  "model": "BAAI/bge-m3",
+  "device": "cpu",
+  "normalized": true,
+  "batch_size": 16
+}
+```
+
 ## Issue kódok
 
-`NO_CHUNKS_FOR_EMBEDDING`, `MISSING_EMBEDDING`, `EMBEDDING_DIMENSION_MISMATCH`, `EMPTY_EMBEDDING_VECTOR`, `EMBEDDING_PROVIDER_FAILED`, `EMBEDDING_PARTIAL_FAILURE`
+Általános: `NO_CHUNKS_FOR_EMBEDDING`, `MISSING_EMBEDDING`, `EMBEDDING_DIMENSION_MISMATCH`, `EMPTY_EMBEDDING_VECTOR`, `EMBEDDING_PROVIDER_FAILED`, `EMBEDDING_PARTIAL_FAILURE`
+
+Lokális provider: `LOCAL_EMBEDDING_MODEL_LOAD_FAILED`, `LOCAL_EMBEDDING_GENERATION_FAILED`, `LOCAL_EMBEDDING_DIMENSION_MISMATCH`
+
+## Processing események
+
+`EMBEDDING_*` és lokális provider események a közös `kb_processing_events` táblában:
+
+- `LOCAL_EMBEDDING_MODEL_LOADING_STARTED` / `COMPLETED`
+- `LOCAL_EMBEDDING_BATCH_STARTED` / `COMPLETED`
+- `LOCAL_EMBEDDING_GENERATION_FAILED`
 
 ## Mit nem csinál
 
@@ -44,4 +114,4 @@ Nem kerül bele: technikai ID-k, page numbers, score részletek, teljes relation
 
 ## Processing napló
 
-`kb_processing_events`, `kb_processing_issues`, `kb_processing_metrics` — EMBEDDING_* event típusokkal.
+`kb_processing_events`, `kb_processing_issues`, `kb_processing_metrics`.

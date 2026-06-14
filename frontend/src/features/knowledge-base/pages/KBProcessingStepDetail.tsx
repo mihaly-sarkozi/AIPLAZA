@@ -24,13 +24,8 @@ import {
   formatDurationMs,
   mergeUnderstandingSteps,
   buildStepRows,
+  translateProcessingMonitorKey,
 } from "../utils/processingMonitorUtils";
-
-function translateKey(t: (key: string) => string, prefix: string, value: string): string {
-  const translated = t(`${prefix}.${value}`);
-  if (translated !== `${prefix}.${value}`) return translated;
-  return value.replace(/_/g, " ");
-}
 
 export default function KBProcessingStepDetail() {
   const { uuid, itemId: rawItemId, module: rawModule, step: rawStep } = useParams();
@@ -49,8 +44,8 @@ export default function KBProcessingStepDetail() {
 
   useEffect(() => {
     if (kbLoading) return;
-    if (!uuid || !kb) navigate("/kb", { replace: true });
-  }, [kb, kbLoading, navigate, uuid]);
+    if (!uuid) navigate("/kb", { replace: true });
+  }, [kbLoading, navigate, uuid]);
 
   const catalog = useMemo(() => buildItemCatalogFromRuns(runsQuery.data?.items ?? []), [runsQuery.data?.items]);
   const title = itemId ? (catalog.get(itemId)?.title ?? itemId) : t("kb.processingMonitor.unknownDocument");
@@ -78,12 +73,12 @@ export default function KBProcessingStepDetail() {
             { label: t("kb.title"), to: "/kb" },
             { label: kb?.name ?? t("kb.processingMonitor.title"), to: monitorUrl },
             { label: title, to: flowUrl },
-            { label: step ? translateKey(t, "kb.processingMonitor.steps", step) : t("kb.processingMonitor.stepDetail") },
+            { label: step ? translateProcessingMonitorKey(t, step, "step") : t("kb.processingMonitor.stepDetail") },
           ]}
         />
         <PageHeader
           eyebrow={t("kb.processingMonitor.stepDetailEyebrow")}
-          title={step ? translateKey(t, "kb.processingMonitor.steps", step) : t("kb.processingMonitor.stepDetail")}
+          title={step ? translateProcessingMonitorKey(t, step, "step") : t("kb.processingMonitor.stepDetail")}
           description={t("kb.processingMonitor.stepDetailIntro")}
           actions={
             <Button variant="secondary" onClick={() => navigate(flowUrl)}>
@@ -100,14 +95,14 @@ export default function KBProcessingStepDetail() {
             <section className="mb-6 grid gap-3 rounded-2xl border border-[var(--color-border)] bg-[var(--color-card)] p-4 md:grid-cols-4">
               <div>
                 <p className="text-xs uppercase tracking-wide text-[var(--color-muted)]">{t("kb.processingMonitor.table.module")}</p>
-                <p className="mt-1 text-sm font-medium">{translateKey(t, "kb.processingMonitor.modules", stepRow.module)}</p>
+                <p className="mt-1 text-sm font-medium">{translateProcessingMonitorKey(t, stepRow.module, "module")}</p>
               </div>
               <div>
                 <p className="text-xs uppercase tracking-wide text-[var(--color-muted)]">{t("kb.processingMonitor.table.status")}</p>
                 <p className="mt-1">
                   <ProcessingStatusBadge
                     status={stepRow.status}
-                    label={translateKey(t, "kb.processingMonitor.statuses", stepRow.status)}
+                    label={translateProcessingMonitorKey(t, stepRow.status, "status")}
                   />
                 </p>
               </div>
@@ -135,7 +130,7 @@ export default function KBProcessingStepDetail() {
               {stepRow.errorCode ? (
                 <div className="md:col-span-4">
                   <p className="text-xs uppercase tracking-wide text-[var(--color-muted)]">{t("kb.processingMonitor.errorCode")}</p>
-                  <p className="mt-1 text-sm">{translateKey(t, "kb.processingMonitor.issueCodes", stepRow.errorCode)}</p>
+                  <p className="mt-1 text-sm">{translateProcessingMonitorKey(t, stepRow.errorCode, "issue")}</p>
                 </div>
               ) : null}
             </section>

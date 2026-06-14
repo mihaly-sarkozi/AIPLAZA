@@ -17,13 +17,7 @@ import {
   useProcessingMetrics,
 } from "../hooks/useKbProcessingMonitor";
 import { useKbList } from "../hooks/useKb";
-import { buildFlowSummaries } from "../utils/processingMonitorUtils";
-
-function translateKey(t: (key: string) => string, prefix: string, value: string): string {
-  const translated = t(`${prefix}.${value}`);
-  if (translated !== `${prefix}.${value}`) return translated;
-  return value.replace(/_/g, " ");
-}
+import { buildFlowSummaries, translateProcessingMonitorKey } from "../utils/processingMonitorUtils";
 
 export default function KBProcessingMonitor() {
   const { uuid } = useParams();
@@ -126,12 +120,12 @@ export default function KBProcessingMonitor() {
                         {flow.latestMessage ? <p className="mt-1 line-clamp-2 text-xs text-[var(--color-muted)]">{flow.latestMessage}</p> : null}
                       </div>
                       <div className="text-sm text-[var(--color-muted)]">
-                        {translateKey(t, "kb.processingMonitor.inputTypes", flow.inputType)}
+                        {translateProcessingMonitorKey(t, flow.inputType, "inputType")}
                       </div>
                       <div>
                         <ProcessingStatusBadge
                           status={flow.status}
-                          label={translateKey(t, "kb.processingMonitor.flowStatuses", flow.status)}
+                          label={translateProcessingMonitorKey(t, flow.status, "flowStatus")}
                         />
                       </div>
                       <div className="text-sm text-[var(--color-muted)]">

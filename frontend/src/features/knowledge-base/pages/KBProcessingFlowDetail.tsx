@@ -23,13 +23,8 @@ import {
   buildItemCatalogFromRuns,
   buildStepRows,
   mergeUnderstandingSteps,
+  translateProcessingMonitorKey,
 } from "../utils/processingMonitorUtils";
-
-function translateKey(t: (key: string) => string, prefix: string, value: string): string {
-  const translated = t(`${prefix}.${value}`);
-  if (translated !== `${prefix}.${value}`) return translated;
-  return value.replace(/_/g, " ");
-}
 
 export default function KBProcessingFlowDetail() {
   const { uuid, itemId: rawItemId } = useParams();
@@ -47,8 +42,8 @@ export default function KBProcessingFlowDetail() {
 
   useEffect(() => {
     if (kbLoading) return;
-    if (!uuid || !kb) navigate("/kb", { replace: true });
-  }, [kb, kbLoading, navigate, uuid]);
+    if (!uuid) navigate("/kb", { replace: true });
+  }, [kbLoading, navigate, uuid]);
 
   const catalog = useMemo(() => buildItemCatalogFromRuns(runsQuery.data?.items ?? []), [runsQuery.data?.items]);
   const meta = itemId ? catalog.get(itemId) : undefined;
@@ -106,7 +101,7 @@ export default function KBProcessingFlowDetail() {
         <section className="mb-6 grid gap-3 rounded-2xl border border-[var(--color-border)] bg-[var(--color-card)] p-4 md:grid-cols-3">
           <div>
             <p className="text-xs uppercase tracking-wide text-[var(--color-muted)]">{t("kb.processingMonitor.table.type")}</p>
-            <p className="mt-1 text-sm font-medium">{translateKey(t, "kb.processingMonitor.inputTypes", meta?.inputType ?? "unknown")}</p>
+            <p className="mt-1 text-sm font-medium">{translateProcessingMonitorKey(t, meta?.inputType ?? "unknown", "inputType")}</p>
           </div>
           <div>
             <p className="text-xs uppercase tracking-wide text-[var(--color-muted)]">{t("kb.processingMonitor.jobStatus")}</p>
@@ -114,7 +109,7 @@ export default function KBProcessingFlowDetail() {
               {job ? (
                 <ProcessingStatusBadge
                   status={job.status}
-                  label={translateKey(t, "kb.processingMonitor.jobStatuses", job.status)}
+                  label={translateProcessingMonitorKey(t, job.status, "jobStatus")}
                 />
               ) : (
                 <span className="text-sm text-[var(--color-muted)]">—</span>
@@ -153,11 +148,11 @@ export default function KBProcessingFlowDetail() {
               {issuesQuery.data.items.map((issue) => (
                 <div key={issue.id} className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm">
                   <p className="font-medium text-amber-950">
-                    {translateKey(t, "kb.processingMonitor.issueCodes", issue.issue_code)} · {translateKey(t, "kb.processingMonitor.severities", issue.severity)}
+                    {translateProcessingMonitorKey(t, issue.issue_code, "issue")} · {translateProcessingMonitorKey(t, issue.severity, "severity")}
                   </p>
                   {issue.issue_message ? <p className="mt-1 text-amber-900">{issue.issue_message}</p> : null}
                   <p className="mt-1 text-xs text-amber-800">
-                    {translateKey(t, "kb.processingMonitor.modules", issue.module)} / {translateKey(t, "kb.processingMonitor.steps", issue.step ?? issue.stage)}
+                    {translateProcessingMonitorKey(t, issue.module, "module")} / {translateProcessingMonitorKey(t, issue.step ?? issue.stage, "stepOrStage")}
                   </p>
                 </div>
               ))}

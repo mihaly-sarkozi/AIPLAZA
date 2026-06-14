@@ -167,4 +167,13 @@ def _validate_production_debug_bypass_env() -> None:
             "PII_ALLOW_LEGACY_PLAINTEXT_READ production-ben nem engedélyezett. "
             "Futtasd le a PII migrációt, majd állítsd false értékre."
         )
+    embedding_provider = str(getattr(settings, "embedding_provider", "local") or "local").strip().lower()
+    if embedding_provider == "dummy":
+        raise ValueError(
+            "embedding_provider=dummy production környezetben tilos. Használj embedding_provider=local."
+        )
+    if bool(getattr(settings, "embedding_allow_dummy", False)):
+        raise ValueError(
+            "embedding_allow_dummy=true production környezetben tilos."
+        )
 __all__ = ["validate_production_security_settings"]

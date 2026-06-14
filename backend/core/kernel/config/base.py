@@ -232,10 +232,14 @@ class BaseConfig(BaseSettings):
     training_mfa_required: bool = True
 
     # Embedding provider konfiguráció (knowledge indexelés / retrieval).
-    embedding_provider: str = "local"  # local | openai
+    embedding_provider: str = "local"  # local | openai | dummy (dummy csak dev + allow_dummy)
     embedding_model: str = "BAAI/bge-m3"
     embedding_vector_size: int = 1024
     embedding_batch_size: int = 16
+    embedding_device: str = "cpu"
+    embedding_normalize: bool = True
+    embedding_allow_dummy: bool = False
+    embedding_model_cache_dir: str = ""
     embedding_worker_concurrency: int = 2
     knowledge_ingest_backgroundtasks_fallback_enabled: bool = False
     knowledge_url_ingest_enabled: bool = False

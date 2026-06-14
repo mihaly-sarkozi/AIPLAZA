@@ -41,6 +41,10 @@ class EmbeddingPipelineService:
         embedding_model: str,
         embedding_provider: str,
         embedding_dimension: int,
+        embedding_batch_size: int = 16,
+        embedding_device: str = "cpu",
+        embedding_normalize: bool = True,
+        provider_metadata: dict | None = None,
         flow_recorder=None,
         emit_indexing_requested: Callable[..., None] = add_indexing_requested_event,
     ) -> None:
@@ -54,6 +58,10 @@ class EmbeddingPipelineService:
         self.embedding_model = embedding_model
         self.embedding_provider = embedding_provider
         self.embedding_dimension = embedding_dimension
+        self.embedding_batch_size = embedding_batch_size
+        self.embedding_device = embedding_device
+        self.embedding_normalize = embedding_normalize
+        self._provider_metadata = dict(provider_metadata or {})
         self._flow_recorder = flow_recorder or NoOpProcessingFlowRecorder()
         self._emit_indexing_requested = emit_indexing_requested
 
@@ -141,22 +149,55 @@ class EmbeddingPipelineService:
 
         generated: list[EmbeddingResultDto] = []
         failed_chunks = 0
+        store_metadata = self._build_store_metadata()
         if inputs_to_generate:
+            self._generate_service.bind_local_events(flow_ctx, self._flow_recorder)
             try:
-                generated = self._generate_service.generate(
+                generation = self._generate_service.generate(
                     inputs_to_generate,
                     model=self.embedding_model,
                 )
-                self._store_service.store_results(
-                    tenant_slug=ctx.tenant_slug,
-                    knowledge_base_id=ctx.knowledge_base_id,
-                    training_item_id=ctx.training_item_id,
-                    discovery_job_id=ctx.discovery_job_id,
-                    embedding_job_id=ctx.job_id,
-                    embedding_provider=self.embedding_provider,
-                    embedding_model=self.embedding_model,
-                    results=generated,
-                )
+                generated = generation.results
+                if generated:
+                    self._store_service.store_results(
+                        tenant_slug=ctx.tenant_slug,
+                        knowledge_base_id=ctx.knowledge_base_id,
+                        training_item_id=ctx.training_item_id,
+                        discovery_job_id=ctx.discovery_job_id,
+                        embedding_job_id=ctx.job_id,
+                        embedding_provider=self.embedding_provider,
+                        embedding_model=self.embedding_model,
+                        results=generated,
+                        metadata=store_metadata,
+                    )
+                for failure in generation.failures:
+                    input_item = input_by_chunk.get(failure.chunk_id)
+                    self._store_service.store_failure(
+                        tenant_slug=ctx.tenant_slug,
+                        knowledge_base_id=ctx.knowledge_base_id,
+                        training_item_id=ctx.training_item_id,
+                        chunk_id=failure.chunk_id,
+                        discovery_job_id=ctx.discovery_job_id,
+                        embedding_job_id=ctx.job_id,
+                        embedding_provider=self.embedding_provider,
+                        embedding_model=self.embedding_model,
+                        embedding_dimension=self.embedding_dimension,
+                        error_code=failure.error_code,
+                        error_message=failure.error_message,
+                        content_hash=input_item.content_hash if input_item else None,
+                        embedding_input_hash=input_item.input_hash if input_item else None,
+                        metadata=store_metadata,
+                    )
+                    failed_chunks += 1
+                    self._flow_recorder.open_issue(
+                        flow_ctx,
+                        module=_PROCESSING_MODULE,
+                        stage="EMBEDDING",
+                        step="GENERATE",
+                        severity="error",
+                        issue_code=failure.error_code,
+                        issue_message=failure.error_message,
+                    )
             except EmbeddingProcessingError as exc:
                 for item in inputs_to_generate:
                     self._store_service.store_failure(
@@ -173,10 +214,25 @@ class EmbeddingPipelineService:
                         error_message=str(exc),
                         content_hash=item.content_hash,
                         embedding_input_hash=item.input_hash,
+                        metadata=store_metadata,
                     )
                     failed_chunks += 1
+                self._flow_recorder.open_issue(
+                    flow_ctx,
+                    module=_PROCESSING_MODULE,
+                    stage="EMBEDDING",
+                    step="GENERATE",
+                    severity="error",
+                    issue_code=str(exc.code),
+                    issue_message=str(exc),
+                )
             except Exception as exc:
                 logger.exception("Embedding generation hiba")
+                error_code = (
+                    EmbeddingErrorCode.LOCAL_EMBEDDING_GENERATION_FAILED.value
+                    if self.embedding_provider == "local"
+                    else EmbeddingErrorCode.EMBEDDING_PROVIDER_FAILED.value
+                )
                 for item in inputs_to_generate:
                     self._store_service.store_failure(
                         tenant_slug=ctx.tenant_slug,
@@ -188,12 +244,22 @@ class EmbeddingPipelineService:
                         embedding_provider=self.embedding_provider,
                         embedding_model=self.embedding_model,
                         embedding_dimension=self.embedding_dimension,
-                        error_code=EmbeddingErrorCode.EMBEDDING_PROVIDER_FAILED.value,
+                        error_code=error_code,
                         error_message=str(exc),
                         content_hash=item.content_hash,
                         embedding_input_hash=item.input_hash,
+                        metadata=store_metadata,
                     )
                     failed_chunks += 1
+                self._flow_recorder.open_issue(
+                    flow_ctx,
+                    module=_PROCESSING_MODULE,
+                    stage="EMBEDDING",
+                    step="GENERATE",
+                    severity="error",
+                    issue_code=error_code,
+                    issue_message=str(exc),
+                )
 
         self._flow_recorder.record_stage_completed(
             flow_ctx,
@@ -286,6 +352,17 @@ class EmbeddingPipelineService:
                     issue_code=issue,
                 )
         self._flow_recorder.recalculate_metrics(flow_ctx)
+
+    def _build_store_metadata(self) -> dict[str, Any]:
+        metadata = {
+            "provider": self.embedding_provider,
+            "model": self.embedding_model,
+            "device": self.embedding_device,
+            "normalized": self.embedding_normalize,
+            "batch_size": self.embedding_batch_size,
+        }
+        metadata.update(self._provider_metadata)
+        return metadata
 
     @staticmethod
     def _safe_emit(callback: Callable[..., None], **kwargs: Any) -> None:

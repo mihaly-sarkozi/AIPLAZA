@@ -272,3 +272,66 @@ export function formatDurationMs(durationMs: number | null | undefined, t: (key:
   const seconds = (durationMs / 1000).toFixed(durationMs >= 10_000 ? 0 : 1);
   return `${seconds} ${t("kb.processingMonitor.units.sec")}`;
 }
+
+const MONITOR_PREFIX = "kb.processingMonitor";
+
+type ProcessingMonitorLabelKind =
+  | "module"
+  | "stage"
+  | "step"
+  | "issue"
+  | "event"
+  | "jobStatus"
+  | "flowStatus"
+  | "status"
+  | "inputType"
+  | "severity"
+  | "stepOrStage";
+
+function prefixesForKind(kind: ProcessingMonitorLabelKind): string[] {
+  switch (kind) {
+    case "module":
+      return [`${MONITOR_PREFIX}.modules`];
+    case "stage":
+      return [`${MONITOR_PREFIX}.stages`];
+    case "step":
+      return [`${MONITOR_PREFIX}.steps`];
+    case "issue":
+      return [`${MONITOR_PREFIX}.issueCodes`];
+    case "event":
+      return [`${MONITOR_PREFIX}.eventTypes`];
+    case "jobStatus":
+      return [`${MONITOR_PREFIX}.jobStatuses`];
+    case "flowStatus":
+      return [`${MONITOR_PREFIX}.flowStatuses`];
+    case "status":
+      return [`${MONITOR_PREFIX}.statuses`];
+    case "inputType":
+      return [`${MONITOR_PREFIX}.inputTypes`];
+    case "severity":
+      return [`${MONITOR_PREFIX}.severities`];
+    case "stepOrStage":
+      return [
+        `${MONITOR_PREFIX}.steps`,
+        `${MONITOR_PREFIX}.stages`,
+        `${MONITOR_PREFIX}.eventTypes`,
+      ];
+    default:
+      return [];
+  }
+}
+
+/** Fordított címke a monitorban; ismeretlen kulcs esetén olvasható fallback. */
+export function translateProcessingMonitorKey(
+  t: (key: string) => string,
+  value: string | null | undefined,
+  kind: ProcessingMonitorLabelKind,
+): string {
+  if (!value) return "";
+  for (const prefix of prefixesForKind(kind)) {
+    const key = `${prefix}.${value}`;
+    const translated = t(key);
+    if (translated !== key) return translated;
+  }
+  return value.replace(/_/g, " ");
+}

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 from apps.kb.kb_embedding.dto.EmbeddingResultDto import EmbeddingResultDto
 from apps.kb.kb_embedding.repository.KnowledgeEmbeddingRepository import KnowledgeEmbeddingRepository
 
@@ -19,6 +21,7 @@ class StoreEmbeddingService:
         embedding_provider: str,
         embedding_model: str,
         results: list[EmbeddingResultDto],
+        metadata: dict[str, Any] | None = None,
     ) -> int:
         stored = 0
         for result in results:
@@ -37,6 +40,7 @@ class StoreEmbeddingService:
                 content_hash=result.content_hash,
                 embedding_input_hash=result.input_hash,
                 status="COMPLETED",
+                metadata=metadata,
             )
             stored += 1
         return stored
@@ -57,6 +61,7 @@ class StoreEmbeddingService:
         error_message: str | None,
         content_hash: str | None = None,
         embedding_input_hash: str | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> None:
         self._repository.upsert_embedding(
             tenant_slug=tenant_slug,
@@ -75,6 +80,7 @@ class StoreEmbeddingService:
             status="FAILED",
             error_code=error_code,
             error_message=error_message,
+            metadata=metadata,
         )
 
 

@@ -4,7 +4,7 @@ import type { SettingsDateFormat, SettingsTimeFormat, SettingsTimezone } from ".
 import { useTranslation } from "../../../../i18n";
 import { formatDateTime } from "../../../../utils/dateTimeFormatting";
 import type { ProcessingStepRow } from "../../utils/processingMonitorUtils";
-import { formatDurationMs } from "../../utils/processingMonitorUtils";
+import { formatDurationMs, translateProcessingMonitorKey } from "../../utils/processingMonitorUtils";
 import ProcessingStatusBadge from "./ProcessingStatusBadge";
 
 type ProcessingStepsTableProps = {
@@ -16,12 +16,6 @@ type ProcessingStepsTableProps = {
   dateFormat?: SettingsDateFormat;
   timeFormat?: SettingsTimeFormat;
 };
-
-function translateKey(t: (key: string) => string, prefix: string, value: string): string {
-  const translated = t(`${prefix}.${value}`);
-  if (translated !== `${prefix}.${value}`) return translated;
-  return value.replace(/_/g, " ");
-}
 
 export default function ProcessingStepsTable({
   kbUuid,
@@ -59,17 +53,17 @@ export default function ProcessingStepsTable({
             >
               <div>
                 <p className="text-sm font-medium text-[var(--color-foreground)]">
-                  {translateKey(t, "kb.processingMonitor.modules", step.module)}
+                  {translateProcessingMonitorKey(t, step.module, "module")}
                 </p>
-                <p className="text-xs text-[var(--color-muted)]">{translateKey(t, "kb.processingMonitor.stages", step.stage)}</p>
+                <p className="text-xs text-[var(--color-muted)]">{translateProcessingMonitorKey(t, step.stage, "stage")}</p>
               </div>
               <div className="text-sm text-[var(--color-foreground)]">
-                {translateKey(t, "kb.processingMonitor.steps", step.step)}
+                {translateProcessingMonitorKey(t, step.step, "step")}
               </div>
               <div>
                 <ProcessingStatusBadge
                   status={step.status}
-                  label={translateKey(t, "kb.processingMonitor.statuses", step.status)}
+                  label={translateProcessingMonitorKey(t, step.status, "status")}
                 />
               </div>
               <div className="text-sm text-[var(--color-muted)]">{formatDurationMs(step.durationMs, t)}</div>

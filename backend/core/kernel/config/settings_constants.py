@@ -14,7 +14,7 @@ DEFAULT_SMTP_FROM_NAME = ""
 
 ALLOWED_COOKIE_SAMESITE_VALUES = {"lax", "strict", "none"}
 ALLOWED_DEMO_CAPTCHA_PROVIDERS = {"none", "turnstile", "recaptcha"}
-ALLOWED_EMBEDDING_PROVIDERS = {"local", "openai"}
+ALLOWED_EMBEDDING_PROVIDERS = {"local", "openai", "dummy"}
 ALLOWED_MALWARE_SCAN_PROVIDERS = {"none", "clamav"}
 ALLOWED_PASSWORD_SECURITY_LEVELS = {"basic", "standard", "high"}
 
