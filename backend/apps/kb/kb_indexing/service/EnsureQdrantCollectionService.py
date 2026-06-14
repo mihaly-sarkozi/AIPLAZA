@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from apps.kb.kb_indexing.adapters.QdrantCollectionManager import QdrantCollectionManager
+from apps.kb.kb_indexing.adapters.QdrantConfigValidator import QdrantConfigValidator
 from apps.kb.kb_indexing.enums.IndexingErrorCode import IndexingErrorCode
 from apps.kb.kb_indexing.errors.IndexingProcessingError import IndexingProcessingError
 
@@ -27,10 +28,18 @@ class EnsureQdrantCollectionService:
                 IndexingErrorCode.QDRANT_DIMENSION_MISMATCH.value,
                 message=str(exc),
             ) from exc
+        except IndexingProcessingError:
+            raise
         except Exception as exc:
+            message = str(exc)
+            if not QdrantConfigValidator.is_configured():
+                raise IndexingProcessingError(
+                    IndexingErrorCode.QDRANT_CONFIG_MISSING.value,
+                    message=message,
+                ) from exc
             raise IndexingProcessingError(
                 IndexingErrorCode.QDRANT_COLLECTION_MISSING.value,
-                message=str(exc),
+                message=message,
                 retryable=True,
             ) from exc
 

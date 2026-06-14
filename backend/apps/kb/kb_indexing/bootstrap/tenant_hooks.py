@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from apps.kb.kb_indexing.orm.IndexVerification import IndexVerification
+from apps.kb.kb_indexing.orm.IndexVerificationItem import IndexVerificationItem
 from apps.kb.kb_indexing.orm.IndexedChunk import IndexedChunk
 from apps.kb.kb_indexing.orm.IndexingJob import IndexingJob
 from core.modules.tenant.service import (
@@ -16,6 +18,8 @@ def _install_kb_indexing_schema(engine, slug: str) -> None:
         (
             IndexingJob.__table__,
             IndexedChunk.__table__,
+            IndexVerification.__table__,
+            IndexVerificationItem.__table__,
         ),
     )
 
@@ -25,11 +29,13 @@ def register_kb_indexing_tenant_hooks() -> None:
         [
             TenantSchemaHook(
                 name="kb_indexing",
-                revision="kb.indexing.schema.v1",
+                revision="kb.indexing.schema.v2",
                 install=_install_kb_indexing_schema,
                 table_names=(
                     "kb_indexing_jobs",
                     "kb_indexed_chunks",
+                    "kb_index_verifications",
+                    "kb_index_verification_items",
                 ),
             )
         ]

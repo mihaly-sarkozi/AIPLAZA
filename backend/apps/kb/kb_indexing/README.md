@@ -2,51 +2,115 @@
 
 ## Felelősség
 
-Embedding vektorok + chunk + discovery bundle alapján **Qdrant payloadot épít** és **vector + payload upsert**et végez.
-A kereséskor a Qdrant már kész, szűrhető payloadot ad vissza.
+Embedding vektorok + chunk + discovery bundle alapján **Qdrant payloadot épít**, **upsert**el, majd **production-ready verification** után jelöli a tudástárat kereshetőre.
 
-## Input event
+A keresés (`kb_search`) csak verified + `ready_for_search` állapotra épülhet — lásd `docs/kb-search-readiness.md`.
+
+## Pipeline sorrend
+
+```text
+StartIndexingService
+  → IndexingPipelineService
+    → EnsureQdrantCollectionService
+    → BuildQdrantPayloadService / BuildQdrantPointService
+    → UpsertQdrantPointsService
+    → ValidateIndexingService
+    → VerifyQdrantStorageService
+    → MarkReadyForSearchService
+  → kb.indexing_completed (csak teljes siker esetén)
+```
+
+## Input / output event
 
 - `kb.indexing_requested`
-- Payload: `tenant_slug`, `knowledge_base_id`, `training_item_id`, `understanding_job_id`, `discovery_job_id`, `embedding_job_id`, `created_by`
-
-## Output event
-
-- `kb.indexing_completed` — siker vagy partial esetén (`status` mezővel)
+- `kb.indexing_completed` — **csak** ha indexing + Qdrant verification sikeres és `ready_for_search=true`
 
 ## Táblák
 
 - `kb_indexing_jobs` — indexelési futás
-- `kb_indexed_chunks` — chunk ↔ Qdrant point mapping, payload/vector hash
+- `kb_indexed_chunks` — chunk ↔ Qdrant point mapping
+- `kb_index_verifications` — Qdrant verification futás összesítő
+- `kb_index_verification_items` — chunk szintű verification eredmény
 
-## Qdrant payload szabály
+## Qdrant verification
 
-Payload **indexing időben** épül (`BuildQdrantPayloadService`), upsert előtt.
-Filterezhető mezők: `knowledge_base_id`, `training_item_id`, `language_code`, `content_type`, `topics`, `entities`, `overall_score`.
-Teljes chunk text csak preview (`text_preview`, max ~500 char).
+`VerifyQdrantStorageService` minden `INDEXED` `kb_indexed_chunks` rekordra:
 
-## Collection
+- collection létezik
+- point létezik Qdrantban (retrieve)
+- vector + payload jelen van
+- payload mezők egyeznek (chunk_id, knowledge_base_id, training_item_id, vector_hash, embedding_id)
+- `language_code`, `content_type`, `overall_score` validáció
 
-- Név: knowledge base `qdrant_collection_name` (kb_crud)
-- Distance: cosine
-- Vector size: embedding model dimension
-- Collection + payload indexek: `EnsureQdrantCollectionService`
+Hiba esetén processing issue nyílik (`QDRANT_*` kódok).
 
-## Idempotencia
+## Search readiness
 
-- Ugyanarra az `embedding_job_id`-ra nem indul több aktív indexing job.
-- Point ID: determinisztikus (`stable_point_id(chunk_id)`) → upsert, nem duplikáció.
+`MarkReadyForSearchService` a `kb_processing_metrics.metadata_json` alatt tárolja:
 
-## Issue kódok
+```json
+{
+  "ready_for_search": true,
+  "qdrant_verified": true,
+  "search_ready_at": "...",
+  "indexed_chunks_total": 120,
+  "qdrant_verified_chunks_total": 120
+}
+```
 
-`NO_EMBEDDINGS_FOR_INDEXING`, `QDRANT_COLLECTION_MISSING`, `QDRANT_DIMENSION_MISMATCH`, `QDRANT_UPSERT_FAILED`, `INDEX_PAYLOAD_BUILD_FAILED`, `MISSING_EMBEDDING`, `INDEXING_PARTIAL_FAILURE`
+## Admin diagnosztika
 
-## Mit nem csinál
+```text
+GET /kb/{knowledge_base_id}/indexing/diagnostics          (kb.admin)
+GET /kb/{knowledge_base_id}/training-items/{item_id}/indexing/diagnostics
+```
 
-- Embedding generálás
-- Discovery / understanding
-- Payload építés search időben (kb_search csak olvas)
+## Qdrant adapter
 
-## Processing napló
+- Lazy client init (`QdrantClientFactory`)
+- Config ellenőrzés: `QdrantConfigValidator` — hiányzó URL esetén failed indexing job + `QDRANT_CONFIG_MISSING`
+- Payload index típusok: `overall_score → float`, keyword mezők keyword, datetime mezők datetime
 
-INDEXING_*, QDRANT_* event típusok a közös processing rétegben.
+## Reindex / delete / rebuild (skeleton)
+
+- `ReindexTrainingItemService`
+- `DeleteIndexedChunksService`
+- `RebuildKnowledgeBaseIndexService`
+
+## SQL diagnosztika
+
+```sql
+SELECT id, status, chunks_total, chunks_indexed, chunks_failed, collection_name, error_code, error_message, created_at, finished_at
+FROM kb_indexing_jobs
+ORDER BY created_at DESC
+LIMIT 20;
+```
+
+```sql
+SELECT id, chunk_id, embedding_id, qdrant_collection, qdrant_point_id, payload_hash, vector_hash, status, error_code, indexed_at
+FROM kb_indexed_chunks
+ORDER BY created_at DESC
+LIMIT 20;
+```
+
+```sql
+SELECT id, status, expected_points, verified_points, missing_points, payload_mismatches, vector_hash_mismatches, error_code, error_message, created_at, finished_at
+FROM kb_index_verifications
+ORDER BY created_at DESC
+LIMIT 20;
+```
+
+```sql
+SELECT id, verification_id, chunk_id, qdrant_point_id, status, error_code, error_message
+FROM kb_index_verification_items
+ORDER BY created_at DESC
+LIMIT 50;
+```
+
+## Processing eventek
+
+`QDRANT_VERIFICATION_*`, `READY_FOR_SEARCH_MARKED`, `READY_FOR_SEARCH_BLOCKED`, `INDEXING_DIAGNOSTICS_REQUESTED`
+
+## Issue kódok (kiegészítés)
+
+`QDRANT_POINT_MISSING`, `QDRANT_PAYLOAD_MISMATCH`, `QDRANT_VECTOR_HASH_MISMATCH`, `QDRANT_VERIFICATION_FAILED`, `QDRANT_CONFIG_MISSING`, …

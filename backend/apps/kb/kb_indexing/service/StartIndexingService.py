@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from apps.kb.kb_indexing.adapters.QdrantConfigValidator import QdrantConfigValidator
 from apps.kb.kb_indexing.dto.IndexingJobContext import IndexingJobContext
 from apps.kb.kb_indexing.enums.IndexingErrorCode import IndexingErrorCode
 from apps.kb.kb_indexing.enums.IndexingStatus import IndexingStatus
@@ -40,6 +41,19 @@ class StartIndexingService:
             raise IndexingProcessingError(
                 IndexingErrorCode.JOB_ALREADY_RUNNING.value,
                 embedding_job_id=embedding_job_id,
+            )
+
+        config_error = QdrantConfigValidator.validate_or_error_code()
+        if config_error:
+            return self._create_failed_job(
+                tenant_slug=tenant_slug,
+                knowledge_base_id=knowledge_base_id,
+                training_item_id=training_item_id,
+                understanding_job_id=understanding_job_id,
+                discovery_job_id=discovery_job_id,
+                embedding_job_id=embedding_job_id,
+                created_by=created_by,
+                error_code=config_error,
             )
 
         embedding_job = self._embedding_job_reader.get_job(embedding_job_id)

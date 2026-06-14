@@ -6,6 +6,9 @@ Keresés és kontextusépítés a `kb_indexing` által írt indexek fölött.
 tudásanyagot — csak olvassa az indexeket. Minden találat visszavezethető a
 forrásra (citation builder, bizonyíték szabály).
 
+**Readiness contract:** a keresés csak verified + `ready_for_search` KB-n fut.
+Részletek: [`docs/kb-search-readiness.md`](../../../../docs/kb-search-readiness.md).
+
 ## Részei
 
 ```text

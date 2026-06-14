@@ -183,6 +183,7 @@ def make_indexing_services_provider(session_factory: Any):
                         kb_id,
                         tenant_slug=tenant_slug,
                     ),
+                    metrics_repository=processing.metrics_repository,
                 )
             return cache["services"]
 

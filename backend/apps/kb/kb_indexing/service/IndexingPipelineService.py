@@ -6,6 +6,7 @@ from collections.abc import Callable
 from typing import Any
 
 from apps.kb.kb_indexing.dto.IndexingJobContext import IndexingJobContext
+from apps.kb.kb_indexing.enums.IndexVerificationStatus import IndexVerificationStatus
 from apps.kb.kb_indexing.enums.IndexingErrorCode import IndexingErrorCode
 from apps.kb.kb_indexing.enums.IndexingStatus import IndexingStatus
 from apps.kb.kb_indexing.errors.IndexingProcessingError import IndexingProcessingError
@@ -13,8 +14,10 @@ from apps.kb.kb_indexing.events.indexing_completed_event import add_indexing_com
 from apps.kb.kb_indexing.repository.IndexingJobRepository import IndexingJobRepository
 from apps.kb.kb_indexing.service.BuildQdrantPointService import BuildQdrantPointService
 from apps.kb.kb_indexing.service.EnsureQdrantCollectionService import EnsureQdrantCollectionService
+from apps.kb.kb_indexing.service.MarkReadyForSearchService import MarkReadyForSearchService
 from apps.kb.kb_indexing.service.UpsertQdrantPointsService import UpsertQdrantPointsService
 from apps.kb.kb_indexing.service.ValidateIndexingService import ValidateIndexingService
+from apps.kb.kb_indexing.service.VerifyQdrantStorageService import VerifyQdrantStorageService
 from apps.kb.kb_indexing.ports.reader_ports import ChunkReaderPort, DiscoveryBundleReaderPort, EmbeddingReaderPort
 from apps.kb.shared.contracts import IndexingChunkSnapshot, IndexingEmbeddingSnapshot
 from apps.kb.shared.ports.processing_flow_recorder import NoOpProcessingFlowRecorder, ProcessingFlowContext
@@ -35,6 +38,8 @@ class IndexingPipelineService:
         build_point_service: BuildQdrantPointService,
         upsert_service: UpsertQdrantPointsService,
         validate_service: ValidateIndexingService,
+        verify_service: VerifyQdrantStorageService,
+        mark_ready_service: MarkReadyForSearchService,
         *,
         flow_recorder=None,
         metrics_updater: Callable[[str, str | None], None] | None = None,
@@ -48,6 +53,8 @@ class IndexingPipelineService:
         self._build_point = build_point_service
         self._upsert = upsert_service
         self._validate = validate_service
+        self._verify = verify_service
+        self._mark_ready = mark_ready_service
         self._flow_recorder = flow_recorder or NoOpProcessingFlowRecorder()
         self._metrics_updater = metrics_updater
         self._emit_indexing_completed = emit_indexing_completed
@@ -172,7 +179,7 @@ class IndexingPipelineService:
         )
 
         vector_hashes = {emb.id: emb.vector_hash or "" for emb in embeddings}
-        _, issues = self._validate.validate(
+        _, validation_issues = self._validate.validate(
             ctx.job_id,
             embedding_ids=[emb.id for emb in embeddings],
             vector_hashes=vector_hashes,
@@ -180,19 +187,63 @@ class IndexingPipelineService:
 
         if indexed == 0:
             status = IndexingStatus.FAILED
-        elif failed > 0 or issues:
+        elif failed > 0 or validation_issues:
             status = IndexingStatus.PARTIAL
         else:
             status = IndexingStatus.COMPLETED
 
+        verification = None
+        readiness = None
+        if indexed > 0:
+            verification = self._verify.verify(
+                tenant_slug=ctx.tenant_slug,
+                knowledge_base_id=ctx.knowledge_base_id,
+                training_item_id=ctx.training_item_id,
+                indexing_job_id=ctx.job_id,
+                collection_name=ctx.collection_name,
+                flow_ctx=flow_ctx,
+            )
+            if verification.status != IndexVerificationStatus.COMPLETED.value:
+                status = IndexingStatus.PARTIAL if verification.verified_points > 0 else IndexingStatus.FAILED
+            else:
+                status = IndexingStatus.COMPLETED
+
+            readiness = self._mark_ready.mark_if_ready(
+                tenant_slug=ctx.tenant_slug,
+                knowledge_base_id=ctx.knowledge_base_id,
+                training_item_id=ctx.training_item_id,
+                indexing_job_id=ctx.job_id,
+                embedding_job_id=ctx.embedding_job_id,
+                verification=verification,
+                indexing_status=status,
+                flow_ctx=flow_ctx,
+            )
+            if not readiness.ready_for_search and status == IndexingStatus.COMPLETED:
+                status = IndexingStatus.PARTIAL
+
+        error_code = None
+        error_message = None
+        if verification and verification.error_code:
+            error_code = verification.error_code
+            error_message = verification.error_message
+        elif validation_issues and status != IndexingStatus.COMPLETED:
+            error_code = validation_issues[0]
+            error_message = ", ".join(validation_issues)
+
         self._job_repository.mark_finished(
             ctx.job_id,
             status,
-            error_code=issues[0] if issues and status != IndexingStatus.COMPLETED else None,
-            error_message=", ".join(issues) if issues else None,
+            error_code=error_code,
+            error_message=error_message,
         )
 
-        event_type = "INDEXING_COMPLETED" if status != IndexingStatus.FAILED else "INDEXING_FAILED"
+        issues = list(validation_issues)
+        if verification:
+            issues.extend(list(verification.issue_codes))
+        if readiness and readiness.blocked_reasons:
+            issues.extend(list(readiness.blocked_reasons))
+
+        event_type = "INDEXING_COMPLETED" if status == IndexingStatus.COMPLETED else "INDEXING_FAILED"
         self._flow_recorder.record_stage_completed(
             flow_ctx,
             module=_PROCESSING_MODULE,
@@ -200,22 +251,28 @@ class IndexingPipelineService:
             step="PIPELINE",
             event_type=event_type,
             duration_ms=int((time.monotonic() - started) * 1000),
-            output_summary_json={"status": status.value, "issues": issues},
+            output_summary_json={
+                "status": status.value,
+                "issues": issues,
+                "verification_status": verification.status if verification else None,
+                "ready_for_search": readiness.ready_for_search if readiness else False,
+            },
         )
-        for issue in issues:
+        for issue in set(issues):
+            severity = "error" if issue.startswith("QDRANT_") or issue == "INDEXING_FAILED" else "warning"
             self._flow_recorder.open_issue(
                 flow_ctx,
                 module=_PROCESSING_MODULE,
                 stage="INDEXING",
-                step="VALIDATION",
-                severity="warning",
+                step="VALIDATION" if issue in validation_issues else "VERIFY_QDRANT",
+                severity=severity,
                 issue_code=issue,
             )
         if self._metrics_updater is not None:
             self._metrics_updater(ctx.knowledge_base_id, ctx.tenant_slug)
         self._flow_recorder.recalculate_metrics(flow_ctx)
 
-        if status in (IndexingStatus.COMPLETED, IndexingStatus.PARTIAL) and indexed > 0:
+        if status == IndexingStatus.COMPLETED and verification and readiness and readiness.ready_for_search:
             self._safe_emit(
                 self._emit_indexing_completed,
                 tenant_slug=ctx.tenant_slug,

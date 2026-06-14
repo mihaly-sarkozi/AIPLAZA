@@ -2,19 +2,23 @@ from __future__ import annotations
 
 import logging
 
+from qdrant_client.models import PayloadSchemaType
+
 from apps.kb.kb_indexing.adapters.QdrantAdapter import QdrantAdapter
 
 logger = logging.getLogger(__name__)
 
-_FILTER_INDEX_FIELDS = (
-    "knowledge_base_id",
-    "training_item_id",
-    "language_code",
-    "content_type",
-    "topics",
-    "entities",
-    "overall_score",
-)
+_PAYLOAD_INDEX_SCHEMA: dict[str, PayloadSchemaType] = {
+    "knowledge_base_id": PayloadSchemaType.KEYWORD,
+    "training_item_id": PayloadSchemaType.KEYWORD,
+    "language_code": PayloadSchemaType.KEYWORD,
+    "content_type": PayloadSchemaType.KEYWORD,
+    "topics": PayloadSchemaType.KEYWORD,
+    "entities": PayloadSchemaType.KEYWORD,
+    "overall_score": PayloadSchemaType.FLOAT,
+    "created_at": PayloadSchemaType.DATETIME,
+    "updated_at": PayloadSchemaType.DATETIME,
+}
 
 
 class QdrantCollectionManager:
@@ -45,12 +49,12 @@ class QdrantCollectionManager:
 
     def _ensure_payload_indexes(self, collection_name: str) -> None:
         client = self._qdrant.client
-        for field in _FILTER_INDEX_FIELDS:
+        for field, schema in _PAYLOAD_INDEX_SCHEMA.items():
             try:
                 client.create_payload_index(
                     collection_name=collection_name,
                     field_name=field,
-                    field_schema="keyword",
+                    field_schema=schema,
                 )
             except Exception:
                 logger.debug(
