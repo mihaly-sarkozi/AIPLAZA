@@ -204,6 +204,7 @@ class BaseConfig(BaseSettings):
     chat_use_kb_search: bool = True
     chat_allow_legacy_retrieval: bool = False
     kb_search_top_k: int = 10
+    kb_search_language_filter_mode: str = "soft"
     chat_context_timeout_sec: int = 20
     channel_default_max_daily_limit: int = 5000
     channel_default_max_per_minute_limit: int = 120

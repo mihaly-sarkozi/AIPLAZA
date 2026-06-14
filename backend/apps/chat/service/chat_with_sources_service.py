@@ -164,6 +164,20 @@ class ChatWithSourcesService:
             payload["conversation_id"] = effective_conversation_id
             payload["answer_mode"] = "BLOCKED_NOT_READY"
             payload["readiness"] = packet.get("readiness") or {}
+            payload["sources"] = []
+            if session_service is not None:
+                turn_id = session_service.store_assistant_turn(
+                    session_id=effective_conversation_id,
+                    tenant_slug=tenant,
+                    answer=answer,
+                    query_run_id=packet.get("query_run_id"),
+                    answer_mode="BLOCKED_NOT_READY",
+                    packet=packet,
+                    conversation_history=effective_history,
+                    prompt_context={},
+                    sources=[],
+                )
+                payload["turn_id"] = turn_id
             return payload
 
         if blocked_mode == "NO_ANSWER" or not (packet.get("context_blocks") or []):

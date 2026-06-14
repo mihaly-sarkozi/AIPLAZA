@@ -542,6 +542,8 @@ async def handle_channel_chat_request(
             status_code = 503 if "nem elérhető" in str(detail).lower() else 429
             raise HTTPException(status_code=status_code, detail=detail)
 
+    channel_id = str(principal.channel_type or "channel").strip().lower() or "channel"
+
     try:
         payload = await svc.chat_with_sources(
             req.question,
@@ -552,6 +554,8 @@ async def handle_channel_chat_request(
             debug=effective_debug,
             conversation_history=req.conversation_history,
             retrieval_history=req.retrieval_history,
+            conversation_id=session_id,
+            channel_id=channel_id,
         )
     except ChatPolicyViolationError:
         channel_svc.release_question_slot(quota_reservation)

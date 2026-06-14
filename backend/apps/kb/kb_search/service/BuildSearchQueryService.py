@@ -3,6 +3,8 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from core.kernel.config.config_loader import settings
+
 
 class BuildSearchQueryService:
     _HU_CHARS = re.compile(r"[áéíóöőúüű]", re.I)
@@ -20,7 +22,8 @@ class BuildSearchQueryService:
         rewritten = self._rewrite_followup(normalized, conversation_history)
         language_code = self._detect_language(rewritten or normalized)
         filters: dict[str, Any] = {"knowledge_base_id": knowledge_base_id}
-        if language_code:
+        mode = self._language_filter_mode()
+        if language_code and mode in {"soft", "strict"}:
             filters["language_code"] = language_code
         if channel_id:
             filters["channel_id"] = channel_id
@@ -28,8 +31,16 @@ class BuildSearchQueryService:
             "normalized_question": normalized,
             "rewritten_question": rewritten or normalized,
             "language_code": language_code,
+            "language_filter_mode": mode,
             "filters": filters,
         }
+
+    @staticmethod
+    def _language_filter_mode() -> str:
+        mode = str(getattr(settings, "kb_search_language_filter_mode", "soft") or "soft").strip().lower()
+        if mode not in {"off", "soft", "strict"}:
+            return "soft"
+        return mode
 
     def _detect_language(self, text: str) -> str | None:
         if self._HU_CHARS.search(text):

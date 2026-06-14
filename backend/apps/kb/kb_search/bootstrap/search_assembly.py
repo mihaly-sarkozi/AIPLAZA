@@ -54,7 +54,7 @@ def build_search_services(
         dimension,
         batch_size,
     )
-    query_embedding = QueryEmbeddingProviderAdapter(provider, expected_dimension=dimension)
+    query_embedding = QueryEmbeddingProviderAdapter(provider, default_dimension=dimension)
 
     readiness = SearchReadinessService(
         metrics_repository=ProcessingMetricsRepository(session_factory),

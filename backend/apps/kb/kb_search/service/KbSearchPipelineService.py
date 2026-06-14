@@ -147,7 +147,11 @@ class KbSearchPipelineService:
         ranked = self._hybrid_rank.rank(hits)
         hydrated = self._hydration.hydrate(ranked)
         context_blocks, prompt_context = self._build_context.build(hydrated)
-        citations, citation_ids = self._build_citation.build(context_blocks, kb_uuid=kb_uuid)
+        citations, citation_ids = self._build_citation.build(
+            context_blocks,
+            kb_uuid=kb_uuid,
+            query_run_id=run.id,
+        )
 
         collection = self._kb_reader.get_qdrant_collection_name(knowledge_base_id)
         if not context_blocks:
@@ -194,7 +198,8 @@ class KbSearchPipelineService:
                 "section_title": c.get("section_title"),
                 "snippet": c.get("snippet"),
                 "kb_uuid": kb_uuid,
-                "download_url": c.get("download_ref"),
+                "download_url": c.get("download_url") or c.get("download_ref"),
+                "download_url_template": c.get("download_url_template"),
             }
             for c in citations
         ]

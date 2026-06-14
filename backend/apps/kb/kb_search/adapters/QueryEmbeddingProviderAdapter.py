@@ -11,11 +11,18 @@ logger = logging.getLogger(__name__)
 class QueryEmbeddingProviderAdapter:
     """Runtime query embedding — ugyanaz a provider mint az indexelésnél."""
 
-    def __init__(self, provider: Any, *, expected_dimension: int) -> None:
+    def __init__(self, provider: Any, *, default_dimension: int | None = None) -> None:
         self._provider = provider
-        self._expected_dimension = max(1, int(expected_dimension))
+        self._default_dimension = max(1, int(default_dimension)) if default_dimension else None
 
-    def embed_query(self, text: str, *, model: str) -> tuple[list[float], str, int]:
+    def embed_query(
+        self,
+        text: str,
+        *,
+        model: str,
+        expected_dimension: int | None = None,
+    ) -> tuple[list[float], str, int]:
+        resolved_dimension = expected_dimension or self._default_dimension
         normalized = str(text or "").strip() or " "
         try:
             if hasattr(self._provider, "ensure_model_loaded"):
@@ -35,15 +42,16 @@ class QueryEmbeddingProviderAdapter:
             raise LocalEmbeddingError("QUERY_EMBEDDING_FAILED", message="empty_vector", model=model)
 
         vector = [float(v) for v in vectors[0]]
-        if len(vector) != self._expected_dimension:
+        actual_dimension = len(vector)
+        if resolved_dimension is not None and actual_dimension != resolved_dimension:
             raise LocalEmbeddingError(
                 "QUERY_EMBEDDING_DIMENSION_MISMATCH",
                 message="dimension_mismatch",
-                expected=self._expected_dimension,
-                actual=len(vector),
+                expected=resolved_dimension,
+                actual=actual_dimension,
                 model=model,
             )
-        return vector, model, len(vector)
+        return vector, model, actual_dimension
 
 
 __all__ = ["QueryEmbeddingProviderAdapter"]

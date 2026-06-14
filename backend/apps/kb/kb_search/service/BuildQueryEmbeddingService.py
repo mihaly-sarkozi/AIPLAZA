@@ -31,7 +31,11 @@ class BuildQueryEmbeddingService:
     ) -> dict[str, Any]:
         model, dimension = self._resolve_model(knowledge_base_id)
         try:
-            vector, resolved_model, resolved_dim = self._adapter.embed_query(question, model=model)
+            vector, resolved_model, resolved_dim = self._adapter.embed_query(
+                question,
+                model=model,
+                expected_dimension=dimension,
+            )
         except Exception as exc:
             code = getattr(exc, "code", None) or SearchErrorCode.QUERY_EMBEDDING_FAILED.value
             logger.warning("Query embedding failed: %s", exc)

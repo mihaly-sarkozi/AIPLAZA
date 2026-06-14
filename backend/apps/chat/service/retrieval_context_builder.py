@@ -116,30 +116,36 @@ class RetrievalContextBuilder:
             packet["is_followup"] = self._is_followup(user_id, parsed)
             return packet
 
+        if (
+            kb_uuid
+            and _USE_KB_SEARCH
+            and self.retrieval_service is not None
+            and hasattr(self.retrieval_service, "build_context_for_chat")
+        ):
+            packet = await self._call_context_builder(
+                self.retrieval_service.build_context_for_chat,
+                tenant=tenant,
+                kwargs={
+                    "question": question,
+                    "current_user_id": user_id,
+                    "current_user_role": user_role,
+                    "parsed_query": parsed,
+                    "kb_uuid": kb_uuid,
+                    "debug": debug,
+                    "conversation_history": conversation_history,
+                    "channel_id": channel_id,
+                    "conversation_id": conversation_id,
+                },
+            )
+            packet["query_focus"] = parsed
+            packet["parser_audit"] = parsed.get("parser_audit") or {}
+            packet.setdefault("scoring_summary", {})
+            packet.setdefault("scoring_summary", {}).setdefault("latency_ms", {})
+            packet["scoring_summary"]["latency_ms"]["parse"] = float(parsed.get("parse_time_ms") or 0.0)
+            packet["is_followup"] = self._is_followup(user_id, parsed)
+            return packet
+
         if user_id is not None:
-            if _USE_KB_SEARCH and self.retrieval_service is not None and hasattr(self.retrieval_service, "build_context_for_chat"):
-                packet = await self._call_context_builder(
-                    self.retrieval_service.build_context_for_chat,
-                    tenant=tenant,
-                    kwargs={
-                        "question": question,
-                        "current_user_id": user_id,
-                        "current_user_role": user_role,
-                        "parsed_query": parsed,
-                        "kb_uuid": kb_uuid,
-                        "debug": debug,
-                        "conversation_history": conversation_history,
-                        "channel_id": channel_id,
-                        "conversation_id": conversation_id,
-                    },
-                )
-                packet["query_focus"] = parsed
-                packet["parser_audit"] = parsed.get("parser_audit") or {}
-                packet.setdefault("scoring_summary", {})
-                packet.setdefault("scoring_summary", {}).setdefault("latency_ms", {})
-                packet["scoring_summary"]["latency_ms"]["parse"] = float(parsed.get("parse_time_ms") or 0.0)
-                packet["is_followup"] = self._is_followup(user_id, parsed)
-                return packet
             if _ALLOW_LEGACY and self.retrieval_service is not None and hasattr(self.retrieval_service, "build_context_for_chat"):
                 packet = await self._call_context_builder(
                     self.retrieval_service.build_context_for_chat,

@@ -27,3 +27,10 @@ Production-ready Qdrant-alapú keresési modul. **Az AI nem keres** — csak ez 
 - `CHAT_USE_KB_SEARCH=true` (default)
 - `CHAT_ALLOW_LEGACY_RETRIEVAL=false` (default)
 - `KB_SEARCH_TOP_K=10`
+- `KB_SEARCH_LANGUAGE_FILTER_MODE=soft` — `off` | `soft` (fallback nyelv filter nélkül) | `strict`
+
+## Source download URL
+
+Kanokikus template: `/api/chat/sources/{query_run_id}/{source_id}/download`
+
+A pipeline futás közben konkrét URL kerül a `download_ref` / `download_url` mezőbe; a `download_url_template` mező mindig dokumentálja a sablont.

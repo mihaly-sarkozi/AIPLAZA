@@ -4,7 +4,9 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from apps.kb.kb_search.bootstrap.dependencies import get_kb_search_pipeline
-from core.modules.auth.web.dependencies.auth_dependencies import require_permission
+from core.kernel.http.tenant_dependencies import RequiredTenantContextDep
+from core.modules.auth.web.dependencies.auth_dependencies import get_current_user, require_permission
+from core.modules.users.domain.dto import User
 
 
 router = APIRouter(prefix="/kb/search", tags=["kb-search"])
@@ -21,16 +23,18 @@ class SearchRequestBody(BaseModel):
 @router.post("")
 async def search_knowledge_base(
     body: SearchRequestBody,
-    tenant_slug: str | None = None,
+    tenant: RequiredTenantContextDep,
+    current_user: User = Depends(get_current_user),
     pipeline=Depends(get_kb_search_pipeline),
-    _user=Depends(require_permission("kb.read")),
+    _perm=Depends(require_permission("kb.read")),
 ):
     try:
         return pipeline.execute(
             question=body.question,
             knowledge_base_id=body.kb_uuid,
             kb_uuid=body.kb_uuid,
-            tenant_slug=tenant_slug,
+            tenant_slug=getattr(tenant, "slug", None),
+            user_id=current_user.id,
             conversation_history=body.conversation_history,
             top_k=body.top_k,
             debug=body.debug,
