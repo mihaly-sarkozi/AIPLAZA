@@ -20,6 +20,7 @@ class KbEmbeddingModule:
         container.register_repository(KB_EMBEDDING_REPOSITORY, KnowledgeEmbeddingRepository(sf))
 
     def register_event_handlers(self, event_bus) -> None:
+        # Event handlers: apps/kb/events.py (canonical wiring)
         pass
 
 

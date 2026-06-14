@@ -26,6 +26,8 @@ export const PROCESSING_PIPELINE_CATALOG: PipelineCatalogEntry[] = [
   { module: "kb_indexing", step: "ENSURE_COLLECTION", stage: "INDEXING" },
   { module: "kb_indexing", step: "BUILD_PAYLOAD", stage: "INDEXING" },
   { module: "kb_indexing", step: "UPSERT", stage: "INDEXING" },
+  { module: "kb_indexing", step: "VERIFY_QDRANT", stage: "INDEXING" },
+  { module: "kb_indexing", step: "READY_FOR_SEARCH", stage: "INDEXING" },
   { module: "kb_indexing", step: "PIPELINE", stage: "INDEXING" },
 ];
 

@@ -20,6 +20,7 @@ import {
   buildPipelineTimelineCompact,
   deriveActiveProgress,
   deriveFlowProcessingDisplay,
+  deriveFlowProgress,
   translateProcessingMonitorKey,
 } from "../utils/processingMonitorUtils";
 
@@ -56,6 +57,16 @@ export default function KBProcessingFlowDetail() {
   const activeProgress = useMemo(
     () => deriveActiveProgress(eventsQuery.data?.items ?? []),
     [eventsQuery.data?.items],
+  );
+
+  const flowProgress = useMemo(
+    () =>
+      deriveFlowProgress(
+        eventsQuery.data?.items ?? [],
+        issuesQuery.data?.items ?? [],
+        understandingQuery.data?.steps ?? [],
+      ),
+    [eventsQuery.data?.items, issuesQuery.data?.items, understandingQuery.data?.steps],
   );
 
   const processingDisplay = useMemo(
@@ -121,11 +132,40 @@ export default function KBProcessingFlowDetail() {
                 }
               : null
           }
+          progress={flowProgress}
         />
 
         {error ? <Alert tone="error">{error}</Alert> : null}
 
         <section className="mb-6 grid gap-3 rounded-2xl border border-[var(--color-border)] bg-[var(--color-card)] p-4 md:grid-cols-3">
+          {flowProgress ? (
+            <div className="md:col-span-3">
+              <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                <p className="text-xs uppercase tracking-wide text-[var(--color-muted)]">
+                  {t("kb.processingMonitor.overallProgress")}
+                </p>
+                <p className="text-sm font-semibold text-[var(--color-foreground)]">
+                  {t("kb.processingMonitor.percentComplete").replace("{{percent}}", String(flowProgress.percent))}
+                </p>
+              </div>
+              <div className="h-2 overflow-hidden rounded-full bg-[var(--color-card-muted)]">
+                <div
+                  className="h-full rounded-full bg-sky-600 transition-[width] duration-500 ease-out"
+                  style={{ width: `${Math.max(flowProgress.percent, 2)}%` }}
+                />
+              </div>
+              <p className="mt-2 text-xs text-[var(--color-muted)]">
+                {t("kb.processingMonitor.pipelineProgress")
+                  .replace("{{completed}}", String(flowProgress.completedSteps))
+                  .replace("{{total}}", String(flowProgress.totalSteps))}
+                {flowProgress.batchTotal != null && flowProgress.batchDone != null
+                  ? ` · ${t("kb.processingMonitor.batchProgress")
+                      .replace("{{done}}", String(flowProgress.batchDone))
+                      .replace("{{total}}", String(flowProgress.batchTotal))}`
+                  : ""}
+              </p>
+            </div>
+          ) : null}
           <div>
             <p className="text-xs uppercase tracking-wide text-[var(--color-muted)]">{t("kb.processingMonitor.table.type")}</p>
             <p className="mt-1 text-sm font-medium">{translateProcessingMonitorKey(t, meta?.inputType ?? "unknown", "inputType")}</p>

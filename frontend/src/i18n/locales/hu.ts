@@ -412,6 +412,11 @@ export const hu = {
         liveUpdating: "Élő frissítés — feldolgozás fut",
         activeProgress: "Jelenleg: {{module}} — {{step}}",
         activeFlowCount: "{{count}} aktív feldolgozási folyamat",
+        percentComplete: "{{percent}}% kész",
+        overallProgress: "Teljes előrehaladás",
+        pipelineProgress: "Pipeline lépések: {{completed}} / {{total}}",
+        batchProgress: "Aktuális lépés: {{done}} / {{total}} elem",
+        remainingSteps: "Hátra: {{steps}}",
         stepIssueHintAria: "Figyelmeztetés — mutasd az egérrel a részleteket",
         stepCompletedOk: "Sikeresen lefutott",
         terms: {

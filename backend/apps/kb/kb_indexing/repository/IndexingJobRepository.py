@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from sqlalchemy import select
+from sqlalchemy import desc, select
 
 from apps.kb.kb_indexing.enums.IndexingStatus import TERMINAL_STATUSES, IndexingStatus
 from apps.kb.kb_indexing.orm.IndexedChunk import IndexedChunk
@@ -60,9 +60,12 @@ class IndexingJobRepository:
             return job
 
     def has_active_job_for_embedding(self, embedding_job_id: str) -> bool:
+        return self.get_active_job_id_for_embedding(embedding_job_id) is not None
+
+    def get_active_job_id_for_embedding(self, embedding_job_id: str) -> str | None:
         terminal_values = [status.value for status in TERMINAL_STATUSES]
         with self._session_factory() as session:
-            row = (
+            return (
                 session.execute(
                     select(IndexingJob.id)
                     .where(
@@ -74,7 +77,39 @@ class IndexingJobRepository:
                 .scalars()
                 .first()
             )
-            return row is not None
+
+    def get_active_job_id_for_training_item(self, training_item_id: str) -> str | None:
+        terminal_values = [status.value for status in TERMINAL_STATUSES]
+        with self._session_factory() as session:
+            return (
+                session.execute(
+                    select(IndexingJob.id)
+                    .where(
+                        IndexingJob.training_item_id == training_item_id,
+                        IndexingJob.status.notin_(terminal_values),
+                    )
+                    .order_by(IndexingJob.created_at.desc())
+                    .limit(1)
+                )
+                .scalars()
+                .first()
+            )
+
+    def get_latest_for_training_item(self, training_item_id: str) -> IndexingJob | None:
+        with self._session_factory() as session:
+            row = (
+                session.execute(
+                    select(IndexingJob)
+                    .where(IndexingJob.training_item_id == training_item_id)
+                    .order_by(IndexingJob.created_at.desc())
+                    .limit(1)
+                )
+                .scalars()
+                .first()
+            )
+            if row is not None:
+                session.expunge(row)
+            return row
 
     def set_status(self, job_id: str, status: IndexingStatus) -> None:
         with self._session_factory() as session:

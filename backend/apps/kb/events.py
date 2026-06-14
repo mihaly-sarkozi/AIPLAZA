@@ -4,6 +4,16 @@ import logging
 import threading
 from typing import Any
 
+"""
+KB cross-module event wiring (canonical hely).
+
+Az összes KB pipeline event handler regisztrációja itt történik:
+  understanding → discovery → embedding → indexing
+
+Modulok `register_event_handlers()` metódusa szándékos no-op / deprecated;
+ne regisztráljanak duplikált handlert lokálisan.
+"""
+
 from core.kernel.jobs import register_job_handler
 
 from apps.kb.shared.events import (

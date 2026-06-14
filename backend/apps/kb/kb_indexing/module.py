@@ -80,6 +80,7 @@ class KbIndexingModule:
         container.register_service(KB_INDEXING_DIAGNOSTICS_SERVICE, services.diagnostics_service)
 
     def register_event_handlers(self, event_bus) -> None:
+        # Event handlers: apps/kb/events.py (canonical wiring)
         pass
 
 

@@ -105,5 +105,94 @@ class IndexedChunkRepository:
             counts[status] = counts.get(status, 0) + 1
         return counts
 
+    def list_indexed_for_training_item(
+        self,
+        training_item_id: str,
+        *,
+        knowledge_base_id: str | None = None,
+    ) -> list[IndexedChunk]:
+        with self._session_factory() as session:
+            query = select(IndexedChunk).where(
+                IndexedChunk.training_item_id == training_item_id,
+                IndexedChunk.status == "INDEXED",
+            )
+            if knowledge_base_id:
+                query = query.where(IndexedChunk.knowledge_base_id == knowledge_base_id)
+            rows = list(session.execute(query).scalars().all())
+            for row in rows:
+                session.expunge(row)
+            return rows
+
+    def list_indexed_for_knowledge_base(self, knowledge_base_id: str) -> list[IndexedChunk]:
+        with self._session_factory() as session:
+            rows = list(
+                session.execute(
+                    select(IndexedChunk).where(
+                        IndexedChunk.knowledge_base_id == knowledge_base_id,
+                        IndexedChunk.status == "INDEXED",
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            for row in rows:
+                session.expunge(row)
+            return rows
+
+    def list_for_indexing_job(self, indexing_job_id: str, *, statuses: list[str] | None = None) -> list[IndexedChunk]:
+        with self._session_factory() as session:
+            query = select(IndexedChunk).where(IndexedChunk.indexing_job_id == indexing_job_id)
+            if statuses:
+                query = query.where(IndexedChunk.status.in_(statuses))
+            rows = list(session.execute(query).scalars().all())
+            for row in rows:
+                session.expunge(row)
+            return rows
+
+    def list_by_chunk_ids(
+        self,
+        chunk_ids: list[str],
+        *,
+        knowledge_base_id: str,
+        statuses: list[str] | None = None,
+    ) -> list[IndexedChunk]:
+        if not chunk_ids:
+            return []
+        with self._session_factory() as session:
+            query = select(IndexedChunk).where(
+                IndexedChunk.knowledge_base_id == knowledge_base_id,
+                IndexedChunk.chunk_id.in_(chunk_ids),
+            )
+            if statuses:
+                query = query.where(IndexedChunk.status.in_(statuses))
+            rows = list(session.execute(query).scalars().all())
+            for row in rows:
+                session.expunge(row)
+            return rows
+
+    def update_chunk_status(
+        self,
+        row_id: str,
+        *,
+        status: str,
+        error_code: str | None = None,
+        error_message: str | None = None,
+        metadata_patch: dict | None = None,
+    ) -> None:
+        now = utc_now_naive()
+        with self._session_factory() as session:
+            row = session.get(IndexedChunk, row_id)
+            if row is None:
+                return
+            row.status = status
+            row.error_code = error_code
+            row.error_message = (error_message or "")[:4000] or None
+            meta = dict(row.metadata_json or {})
+            if metadata_patch:
+                meta.update(metadata_patch)
+            row.metadata_json = meta
+            row.updated_at = now
+            session.commit()
+
 
 __all__ = ["IndexedChunkRepository"]

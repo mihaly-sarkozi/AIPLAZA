@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
+from apps.kb.kb_indexing.dto.QdrantDeleteResult import QdrantDeleteResult
 
 from apps.kb.kb_indexing.adapters.QdrantClientFactory import QdrantClientFactory
 
@@ -110,15 +110,42 @@ class QdrantAdapter:
             )
         return results
 
-    def delete_points(self, collection_name: str, point_ids: list[str]) -> None:
+    def delete_points(self, collection_name: str, point_ids: list[str]) -> QdrantDeleteResult:
         if not point_ids:
-            return
+            return QdrantDeleteResult()
         from qdrant_client.models import PointIdsList
 
-        self.client.delete(
-            collection_name=collection_name,
-            points_selector=PointIdsList(points=point_ids),
-        )
+        requested = len(point_ids)
+        try:
+            self.client.delete(
+                collection_name=collection_name,
+                points_selector=PointIdsList(points=point_ids),
+            )
+            return QdrantDeleteResult(requested=requested, deleted=requested)
+        except Exception as exc:
+            logger.warning("Qdrant delete_points hiba (%s): %s", collection_name, exc, exc_info=True)
+            missing = 0
+            deleted = 0
+            failed: list[str] = []
+            for point_id in point_ids:
+                try:
+                    found = self.retrieve_points(collection_name, [point_id], with_vectors=False, with_payload=False)
+                    if not found:
+                        missing += 1
+                        continue
+                    self.client.delete(
+                        collection_name=collection_name,
+                        points_selector=PointIdsList(points=[point_id]),
+                    )
+                    deleted += 1
+                except Exception:
+                    failed.append(str(point_id))
+            return QdrantDeleteResult(
+                requested=requested,
+                deleted=deleted,
+                missing=missing,
+                failed_ids=tuple(failed),
+            )
 
     def delete_collection(self, collection_name: str) -> bool:
         name = str(collection_name or "").strip()

@@ -8,6 +8,9 @@ class IndexedChunkStatus(str, Enum):
     INDEXED = "INDEXED"
     FAILED = "FAILED"
     DELETED = "DELETED"
+    REMOVED = "REMOVED"
+    REPLACED = "REPLACED"
+    DELETE_FAILED = "DELETE_FAILED"
 
 
 __all__ = ["IndexedChunkStatus"]

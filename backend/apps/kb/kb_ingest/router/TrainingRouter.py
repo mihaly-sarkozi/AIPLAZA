@@ -4,7 +4,7 @@ from __future__ import annotations
 # Feladat: Tanítási HTTP végpontok (szöveg batch indítás, batch részletek).
 # Sárközi Mihály - 2026.06.07
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
 
 from apps.kb.kb_ingest.dto.FileEstimateCommand import FileEstimateCommand
 from apps.kb.kb_ingest.dto.IngestRunListResponse import IngestRunListResponse
@@ -18,6 +18,8 @@ from apps.kb.kb_ingest.bootstrap.dependencies import (
     require_kb_read,
     require_kb_train,
 )
+from apps.kb.kb_ingest.bootstrap.service_keys import KB_INGEST_REPOSITORY
+from core.kernel.http.app_dependencies import get_module_repository
 from apps.kb.kb_ingest.dto.TrainingBatchStatusResponse import TrainingBatchStatusResponse
 from apps.kb.kb_ingest.dto.TrainingFileEstimateResponse import TrainingFileEstimateResponse
 from apps.kb.kb_ingest.dto.TrainingTextResponse import TrainingTextResponse
@@ -112,12 +114,17 @@ async def create_text_training_batch(
 @router.post("/{kb_id}/training/files/estimate", response_model=TrainingFileEstimateResponse)
 async def estimate_file_training(
     kb_id: str,
+    request: Request,
     tenant: RequestTenantContext = Depends(require_tenant_context),
     estimate_service: EstimateFilesService = Depends(get_estimate_files_service),
     files: list[UploadFile] = File(...),
     _: User = Depends(require_kb_train),
 ) -> TrainingFileEstimateResponse:
-    _ = kb_id
+    repository = get_module_repository(KB_INGEST_REPOSITORY, request)
+    try:
+        repository.ensure_active_knowledge_base(kb_id)
+    except TrainingValidationError as exc:
+        _raise_training_validation_http(exc)
     result = await estimate_service.execute(FileEstimateCommand(tenant=tenant, uploads=files))
     return to_training_file_estimate(result)
 
@@ -147,10 +154,7 @@ async def create_file_training_batch(
             detail=_coded_error_detail(exc, fallback_code=TrainingErrorCode.DUPLICATE_CONTENT.value),
         ) from exc
     except TrainingValidationError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=_coded_error_detail(exc, fallback_code=TrainingErrorCode.VALIDATION_ERROR.value),
-        ) from exc
+        _raise_training_validation_http(exc)
     except TrainingQueueUnavailableError as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,

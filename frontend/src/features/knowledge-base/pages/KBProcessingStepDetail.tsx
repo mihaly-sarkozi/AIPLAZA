@@ -10,6 +10,7 @@ import { formatDateTime } from "../../../utils/dateTimeFormatting";
 import { useLocaleSettings } from "../../settings/hooks/useSettings";
 import ProcessingStepPreviewSection from "../components/monitor/ProcessingStepPreviewSection";
 import ProcessingStepSummaryPanel from "../components/monitor/ProcessingStepSummaryPanel";
+import ProcessingMonitorLiveBanner from "../components/monitor/ProcessingMonitorLiveBanner";
 import ProcessingMonitorBreadcrumb from "../components/monitor/ProcessingMonitorBreadcrumb";
 import ProcessingStatusBadge from "../components/monitor/ProcessingStatusBadge";
 import { useProcessingMonitorBundle } from "../hooks/useProcessingMonitorBundle";
@@ -17,6 +18,8 @@ import { useKbList } from "../hooks/useKb";
 import {
   buildItemCatalogFromRuns,
   buildPipelineTimelineCompact,
+  deriveActiveProgress,
+  deriveFlowProgress,
   findStepRow,
   formatDurationMs,
   translateProcessingMonitorKey,
@@ -34,7 +37,7 @@ export default function KBProcessingStepDetail() {
   const { data: kbList = [], isLoading: kbLoading } = useKbList();
   const kb = useMemo(() => kbList.find((item) => item.uuid === uuid), [kbList, uuid]);
 
-  const { runsQuery, eventsQuery, understandingQuery } = useProcessingMonitorBundle(uuid, {
+  const { runsQuery, eventsQuery, understandingQuery, issuesQuery, isLive } = useProcessingMonitorBundle(uuid, {
     trainingItemId: itemId,
   });
 
@@ -45,6 +48,21 @@ export default function KBProcessingStepDetail() {
 
   const catalog = useMemo(() => buildItemCatalogFromRuns(runsQuery.data?.items ?? []), [runsQuery.data?.items]);
   const title = itemId ? (catalog.get(itemId)?.title ?? itemId) : t("kb.processingMonitor.unknownDocument");
+
+  const flowProgress = useMemo(
+    () =>
+      deriveFlowProgress(
+        eventsQuery.data?.items ?? [],
+        issuesQuery.data?.items ?? [],
+        understandingQuery.data?.steps ?? [],
+      ),
+    [eventsQuery.data?.items, issuesQuery.data?.items, understandingQuery.data?.steps],
+  );
+
+  const activeProgress = useMemo(
+    () => deriveActiveProgress(eventsQuery.data?.items ?? []),
+    [eventsQuery.data?.items],
+  );
 
   const stepRow = useMemo(() => {
     if (!module || !step) return null;
@@ -91,6 +109,21 @@ export default function KBProcessingStepDetail() {
               {t("kb.processingMonitor.backToFlow")}
             </Button>
           }
+        />
+
+        <ProcessingMonitorLiveBanner
+          isLive={isLive}
+          activeFlow={
+            activeProgress
+              ? {
+                  activeModule: activeProgress.module,
+                  activeStage: activeProgress.stage,
+                  activeStep: activeProgress.step,
+                  latestMessage: activeProgress.message,
+                }
+              : null
+          }
+          progress={flowProgress}
         />
 
         {error ? <Alert tone="error">{error}</Alert> : null}

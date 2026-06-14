@@ -4,7 +4,13 @@
 
 Embedding vektorok + chunk + discovery bundle alapján **Qdrant payloadot épít**, **upsert**el, majd **production-ready verification** után jelöli a tudástárat kereshetőre.
 
-A keresés (`kb_search`) csak verified + `ready_for_search` állapotra épülhet — lásd `docs/kb-search-readiness.md`.
+A keresés (`kb_search`) csak verified + `ready_for_search` állapotra épülhet — lásd [`docs/kb-search-readiness.md`](../../../../docs/kb-search-readiness.md).
+
+## Event wiring
+
+**Canonical hely:** [`apps/kb/events.py`](../events.py) — minden KB cross-module event handler (understanding → discovery → embedding → indexing) itt regisztrálódik.
+
+A `KbIndexingModule.register_event_handlers()` szándékos no-op; ne duplikálj handler regisztrációt modul szinten.
 
 ## Pipeline sorrend
 
@@ -20,43 +26,82 @@ StartIndexingService
   → kb.indexing_completed (csak teljes siker esetén)
 ```
 
-## Input / output event
+## Failed job láthatóság
 
-- `kb.indexing_requested`
-- `kb.indexing_completed` — **csak** ha indexing + Qdrant verification sikeres és `ready_for_search=true`
+`StartIndexingService` + `IndexingFailureRecorderService`: minden ismert előfeltétel-hiba **failed `kb_indexing_jobs` rekordot** hoz létre + processing event/issue-t:
+
+- `EMBEDDING_JOB_NOT_FOUND`
+- `EMBEDDING_NOT_READY`
+- `QDRANT_COLLECTION_MISSING` / `QDRANT_CONFIG_MISSING`
+- `KNOWLEDGE_BASE_NOT_FOUND`
+- `NO_EMBEDDINGS_FOR_INDEXING`
+
+Eventek: `INDEXING_REQUEST_RECEIVED`, `INDEXING_FAILED_BEFORE_JOB_START`, `INDEXING_FAILED`, `INDEXING_JOB_CREATED`.
+
+## Reindex training item
+
+`ReindexTrainingItemService.reindex()`:
+
+```text
+régi Qdrant pointok törlése (DeleteIndexedChunksService)
+kb_indexed_chunks → REPLACED
+új indexing job (StartIndexingService → pipeline → verify → ready)
+```
+
+Eventek: `REINDEX_*`. Issue-k: `REINDEX_*`.
+
+Idempotencia: aktív indexing job training itemre → `JOB_ALREADY_RUNNING` (kivéve `force=true`).
+
+## Delete indexed chunks
+
+`DeleteIndexedChunksService` — Qdrant delete + Postgres soft-state:
+
+- `training_item_id` / `chunk_id` lista / `indexing_job_id` / teljes `knowledge_base_id`
+- státuszok: `INDEXED`, `REMOVED`, `REPLACED`, `DELETE_FAILED`
+- metadata: `removed_at`, `removed_by`, `remove_reason`
+
+## Rebuild knowledge base index
+
+`RebuildKnowledgeBaseIndexService.rebuild()` — Postgres source of truth, Qdrant újraépítés:
+
+```text
+POINT_DELETE_AND_REINDEX (default)
+  → összes INDEXED chunk törlése Qdrantból
+  → training itemenként ReindexTrainingItemService
+  → kb_index_rebuilds audit rekord
+```
+
+`RECREATE_COLLECTION` → explicit `UNSUPPORTED_REBUILD_MODE` (nincs néma NotImplemented).
+
+Metrics metadata: `search_status`, `last_rebuild_job_id`, `rebuild_started_at` / `rebuild_finished_at`.
 
 ## Táblák
 
-- `kb_indexing_jobs` — indexelési futás
-- `kb_indexed_chunks` — chunk ↔ Qdrant point mapping
-- `kb_index_verifications` — Qdrant verification futás összesítő
-- `kb_index_verification_items` — chunk szintű verification eredmény
+- `kb_indexing_jobs`
+- `kb_indexed_chunks`
+- `kb_index_verifications`
+- `kb_index_verification_items`
+- `kb_index_rebuilds`
+
+Tenant séma: `kb.indexing.schema.v3`
 
 ## Qdrant verification
 
-`VerifyQdrantStorageService` minden `INDEXED` `kb_indexed_chunks` rekordra:
-
-- collection létezik
-- point létezik Qdrantban (retrieve)
-- vector + payload jelen van
-- payload mezők egyeznek (chunk_id, knowledge_base_id, training_item_id, vector_hash, embedding_id)
-- `language_code`, `content_type`, `overall_score` validáció
-
-Hiba esetén processing issue nyílik (`QDRANT_*` kódok).
+`VerifyQdrantStorageService` minden `INDEXED` chunkra retrieve + payload/vector ellenőrzés.
 
 ## Search readiness
 
-`MarkReadyForSearchService` a `kb_processing_metrics.metadata_json` alatt tárolja:
+`MarkReadyForSearchService` → `kb_processing_metrics.metadata_json`:
 
 ```json
 {
   "ready_for_search": true,
   "qdrant_verified": true,
-  "search_ready_at": "...",
-  "indexed_chunks_total": 120,
-  "qdrant_verified_chunks_total": 120
+  "indexed_chunks_total": 120
 }
 ```
+
+Csak sikeres verification után.
 
 ## Admin diagnosztika
 
@@ -65,52 +110,34 @@ GET /kb/{knowledge_base_id}/indexing/diagnostics          (kb.admin)
 GET /kb/{knowledge_base_id}/training-items/{item_id}/indexing/diagnostics
 ```
 
-## Qdrant adapter
-
-- Lazy client init (`QdrantClientFactory`)
-- Config ellenőrzés: `QdrantConfigValidator` — hiányzó URL esetén failed indexing job + `QDRANT_CONFIG_MISSING`
-- Payload index típusok: `overall_score → float`, keyword mezők keyword, datetime mezők datetime
-
-## Reindex / delete / rebuild (skeleton)
-
-- `ReindexTrainingItemService`
-- `DeleteIndexedChunksService`
-- `RebuildKnowledgeBaseIndexService`
-
 ## SQL diagnosztika
 
 ```sql
-SELECT id, status, chunks_total, chunks_indexed, chunks_failed, collection_name, error_code, error_message, created_at, finished_at
+SELECT id, status, error_code, error_message, created_at, finished_at
 FROM kb_indexing_jobs
 ORDER BY created_at DESC
 LIMIT 20;
 ```
 
 ```sql
-SELECT id, chunk_id, embedding_id, qdrant_collection, qdrant_point_id, payload_hash, vector_hash, status, error_code, indexed_at
+SELECT id, chunk_id, qdrant_point_id, status, error_code, metadata_json
 FROM kb_indexed_chunks
 ORDER BY created_at DESC
 LIMIT 20;
 ```
 
 ```sql
-SELECT id, status, expected_points, verified_points, missing_points, payload_mismatches, vector_hash_mismatches, error_code, error_message, created_at, finished_at
+SELECT id, status, expected_points, verified_points, missing_points,
+       payload_mismatches, vector_hash_mismatches
 FROM kb_index_verifications
 ORDER BY created_at DESC
 LIMIT 20;
 ```
 
 ```sql
-SELECT id, verification_id, chunk_id, qdrant_point_id, status, error_code, error_message
-FROM kb_index_verification_items
+SELECT id, status, mode, training_items_total, training_items_reindexed,
+       training_items_failed, points_deleted, points_reindexed, points_verified
+FROM kb_index_rebuilds
 ORDER BY created_at DESC
-LIMIT 50;
+LIMIT 20;
 ```
-
-## Processing eventek
-
-`QDRANT_VERIFICATION_*`, `READY_FOR_SEARCH_MARKED`, `READY_FOR_SEARCH_BLOCKED`, `INDEXING_DIAGNOSTICS_REQUESTED`
-
-## Issue kódok (kiegészítés)
-
-`QDRANT_POINT_MISSING`, `QDRANT_PAYLOAD_MISMATCH`, `QDRANT_VECTOR_HASH_MISMATCH`, `QDRANT_VERIFICATION_FAILED`, `QDRANT_CONFIG_MISSING`, …

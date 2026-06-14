@@ -4,6 +4,7 @@ import logging
 from typing import Any, Callable
 
 from apps.kb.kb_indexing.enums.IndexingErrorCode import IndexingErrorCode
+from apps.kb.kb_indexing.enums.IndexingStatus import IndexingStatus
 from apps.kb.kb_indexing.errors.IndexingProcessingError import IndexingProcessingError
 
 logger = logging.getLogger(__name__)
@@ -50,6 +51,7 @@ def make_indexing_requested_handler(services_provider: Callable[[], Any]):
                         embedding_job_id,
                     )
                     return
+                logger.exception("kb.indexing_requested: váratlan indexing hiba (code=%s)", exc.code)
                 raise
             logger.info(
                 "kb.indexing_requested feldolgozva (item=%s embedding=%s status=%s)",

@@ -413,6 +413,11 @@ export const en = {
         liveUpdating: "Live refresh — processing in progress",
         activeProgress: "Current step: {{module}} — {{step}}",
         activeFlowCount: "{{count}} active processing flows",
+        percentComplete: "{{percent}}% complete",
+        overallProgress: "Overall progress",
+        pipelineProgress: "Pipeline steps: {{completed}} / {{total}}",
+        batchProgress: "Current step: {{done}} / {{total}} items",
+        remainingSteps: "Remaining: {{steps}}",
         stepIssueHintAria: "Warning — hover for details",
         stepCompletedOk: "Completed successfully",
         metrics: {

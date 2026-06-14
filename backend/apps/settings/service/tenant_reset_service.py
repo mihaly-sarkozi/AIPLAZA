@@ -46,6 +46,7 @@ class TenantResetResult:
     message: str
     tenant_slug: str
     owner_user_id: int
+    default_knowledge_base_uuid: str | None = None
 
 
 class TenantResetService:
@@ -91,7 +92,7 @@ class TenantResetService:
             owner=owner_snapshot,
             authenticator=authenticator_snapshot,
         )
-        self._ensure_default_knowledge_base(
+        default_kb_uuid = self._ensure_default_knowledge_base(
             slug=normalized_slug,
             owner_user_id=owner_user_id,
             owner_snapshot=owner_snapshot,
@@ -105,6 +106,7 @@ class TenantResetService:
             message="A tenant adatai alaphelyzetbe álltak. A tulajdonos belépési adatai változatlanok.",
             tenant_slug=normalized_slug,
             owner_user_id=owner_user_id,
+            default_knowledge_base_uuid=default_kb_uuid,
         )
 
     def _snapshot_owner_auth(
@@ -168,7 +170,7 @@ class TenantResetService:
         slug: str,
         owner_user_id: int,
         owner_snapshot: dict[str, Any],
-    ) -> None:
+    ) -> str | None:
         token = current_tenant_schema.set(slug)
         try:
             with self._sf() as db:
@@ -178,7 +180,7 @@ class TenantResetService:
                     .first()
                 )
                 if existing is not None:
-                    return
+                    return str(existing.uuid)
                 locale = normalize_demo_locale(str(owner_snapshot.get("preferred_locale") or "hu"))
                 kb_uuid = str(uuid_lib.uuid4())
                 kb = KnowledgeBaseORM(
@@ -202,6 +204,7 @@ class TenantResetService:
                     )
                 )
                 db.commit()
+                return kb_uuid
         finally:
             current_tenant_schema.reset(token)
 

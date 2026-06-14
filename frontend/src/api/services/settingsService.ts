@@ -131,6 +131,7 @@ export type TenantResetResponse = {
   message: string;
   tenant_slug: string;
   owner_user_id: number;
+  default_knowledge_base_uuid?: string | null;
 };
 
 export async function postTenantReset(body: TenantResetPayload): Promise<TenantResetResponse> {

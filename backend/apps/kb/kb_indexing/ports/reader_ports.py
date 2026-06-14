@@ -30,6 +30,8 @@ class DiscoveryBundleReaderPort(Protocol):
 class KnowledgeBaseReaderPort(Protocol):
     def get_qdrant_collection_name(self, knowledge_base_id: str) -> str | None: ...
 
+    def exists(self, knowledge_base_id: str) -> bool: ...
+
 
 __all__ = [
     "ChunkReaderPort",

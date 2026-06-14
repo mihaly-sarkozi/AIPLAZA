@@ -16,6 +16,8 @@ import { useKbList } from "../hooks/useKb";
 import {
   buildFlowSummaries,
   countOpenBlockingIssues,
+  deriveFlowProgress,
+  resolveFlowItemId,
   translateProcessingMonitorKey,
 } from "../utils/processingMonitorUtils";
 import { countActiveFlows } from "../utils/processingMonitorPolling";
@@ -54,6 +56,14 @@ export default function KBProcessingMonitor() {
     [flows],
   );
 
+  const primaryFlowProgress = useMemo(() => {
+    if (!primaryActiveFlow) return null;
+    const itemEvents = (eventsQuery.data?.items ?? []).filter(
+      (event) => resolveFlowItemId(event) === primaryActiveFlow.itemId,
+    );
+    return deriveFlowProgress(itemEvents, issuesQuery.data?.items ?? []);
+  }, [primaryActiveFlow, eventsQuery.data?.items, issuesQuery.data?.items]);
+
   const blockingIssueCount = useMemo(
     () => countOpenBlockingIssues(issuesQuery.data?.items ?? []),
     [issuesQuery.data?.items],
@@ -89,6 +99,7 @@ export default function KBProcessingMonitor() {
           isLive={isLive}
           activeFlowCount={activeFlowCount}
           activeFlow={primaryActiveFlow}
+          progress={primaryFlowProgress}
         />
 
         {error ? <Alert tone="error">{error}</Alert> : null}
@@ -131,14 +142,19 @@ export default function KBProcessingMonitor() {
                 {flows.map((flow) => {
                   const detailUrl = `/kb/monitor/${uuid}/flows/${encodeURIComponent(flow.itemId)}`;
                   const progressLabel =
-                    flow.status !== "completed" && flow.activeModule && flow.activeStep
-                      ? [
-                          translateProcessingMonitorKey(t, flow.activeModule, "module"),
-                          translateProcessingMonitorKey(t, flow.activeStep, "stepOrStage"),
-                        ]
-                          .filter(Boolean)
-                          .join(" · ")
-                      : null;
+                    flow.status === "running" && flow.progressPercent != null
+                      ? t("kb.processingMonitor.percentComplete").replace(
+                          "{{percent}}",
+                          String(flow.progressPercent),
+                        )
+                      : flow.status !== "completed" && flow.activeModule && flow.activeStep
+                        ? [
+                            translateProcessingMonitorKey(t, flow.activeModule, "module"),
+                            translateProcessingMonitorKey(t, flow.activeStep, "stepOrStage"),
+                          ]
+                            .filter(Boolean)
+                            .join(" · ")
+                        : null;
                   return (
                     <Link
                       key={flow.itemId}
@@ -164,7 +180,9 @@ export default function KBProcessingMonitor() {
                         />
                       </div>
                       <div className="text-sm text-[var(--color-muted)]">
-                        {flow.completedSteps}/{flow.completedSteps + flow.failedSteps || flow.completedSteps}
+                        {flow.progressTotalSteps != null && flow.status === "running"
+                          ? `${flow.completedSteps}/${flow.progressTotalSteps}`
+                          : `${flow.completedSteps}/${flow.completedSteps + flow.failedSteps || flow.completedSteps}`}
                       </div>
                       <div className="text-sm text-[var(--color-muted)]">{flow.openIssues}</div>
                       <div className="text-sm text-[var(--color-muted)]">

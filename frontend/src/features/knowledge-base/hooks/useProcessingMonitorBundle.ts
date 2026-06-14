@@ -41,7 +41,9 @@ function useMonitorPollOptions(kbUuid: string | undefined, scope?: MonitorScope)
 
     return {
       refetchInterval: resolvePollInterval,
-      refetchIntervalInBackground: false,
+      refetchIntervalInBackground: true,
+      staleTime: 0,
+      refetchOnWindowFocus: true,
     };
   }, [kbUuid, queryClient, scope?.trainingItemId]);
 }

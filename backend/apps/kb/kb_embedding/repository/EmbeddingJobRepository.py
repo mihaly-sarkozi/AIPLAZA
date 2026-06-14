@@ -116,5 +116,56 @@ class EmbeddingJobRepository:
             job.finished_at = utc_now_naive()
             session.commit()
 
+    def get_latest_completed_for_training_item(
+        self,
+        training_item_id: str,
+        *,
+        knowledge_base_id: str | None = None,
+    ) -> EmbeddingJob | None:
+        allowed = {"COMPLETED", "PARTIAL"}
+        with self._session_factory() as session:
+            query = (
+                select(EmbeddingJob)
+                .where(
+                    EmbeddingJob.training_item_id == training_item_id,
+                    EmbeddingJob.status.in_(allowed),
+                    EmbeddingJob.chunks_embedded > 0,
+                )
+                .order_by(EmbeddingJob.created_at.desc())
+                .limit(1)
+            )
+            if knowledge_base_id:
+                query = query.where(EmbeddingJob.knowledge_base_id == knowledge_base_id)
+            row = session.execute(query).scalars().first()
+            if row is not None:
+                session.expunge(row)
+            return row
+
+    def list_latest_embeddable_for_knowledge_base(self, knowledge_base_id: str) -> list[EmbeddingJob]:
+        allowed = {"COMPLETED", "PARTIAL"}
+        with self._session_factory() as session:
+            rows = list(
+                session.execute(
+                    select(EmbeddingJob)
+                    .where(
+                        EmbeddingJob.knowledge_base_id == knowledge_base_id,
+                        EmbeddingJob.status.in_(allowed),
+                        EmbeddingJob.chunks_embedded > 0,
+                    )
+                    .order_by(EmbeddingJob.created_at.desc())
+                )
+                .scalars()
+                .all()
+            )
+        seen: set[str] = set()
+        latest: list[EmbeddingJob] = []
+        for row in rows:
+            if row.training_item_id in seen:
+                continue
+            seen.add(row.training_item_id)
+            session.expunge(row)
+            latest.append(row)
+        return latest
+
 
 __all__ = ["EmbeddingJobRepository"]

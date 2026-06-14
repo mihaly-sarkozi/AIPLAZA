@@ -3,7 +3,7 @@ import type { IngestRun } from "../../../api/services/kb/types";
 import { isTrainingActive } from "./trainingProgress";
 import { deriveFlowStatus, resolveFlowItemId, type ProcessingFlowStatus } from "./processingMonitorUtils";
 
-export const PROCESSING_MONITOR_POLL_MS = 2000;
+export const PROCESSING_MONITOR_POLL_MS = 1500;
 
 export function isActiveFlowStatus(status: ProcessingFlowStatus): boolean {
   return status === "running";
@@ -26,7 +26,7 @@ export function computeMonitorPollInterval(
 
   if (trainingItemId) {
     const itemEvents = eventList.filter((event) => resolveFlowItemId(event) === trainingItemId);
-    if (itemEvents.length && deriveFlowStatus(itemEvents, []) === "running") {
+    if (itemEvents.length && isActiveFlowStatus(deriveFlowStatus(itemEvents, []))) {
       return PROCESSING_MONITOR_POLL_MS;
     }
     return false;
@@ -37,7 +37,7 @@ export function computeMonitorPollInterval(
   );
   for (const itemId of itemIds) {
     const itemEvents = eventList.filter((event) => resolveFlowItemId(event) === itemId);
-    if (deriveFlowStatus(itemEvents, []) === "running") {
+    if (isActiveFlowStatus(deriveFlowStatus(itemEvents, []))) {
       return PROCESSING_MONITOR_POLL_MS;
     }
   }

@@ -40,6 +40,7 @@ class KbDiscoveryModule:
         container.register_repository(KB_DISCOVERY_SCORE_REPOSITORY, ScoreRepository(sf))
 
     def register_event_handlers(self, event_bus) -> None:
+        # Event handlers: apps/kb/events.py (canonical wiring)
         pass
 
 

@@ -37,6 +37,10 @@ export type ProcessingFlowSummary = {
   activeStage: string | null;
   activeStep: string | null;
   activeEventType: string | null;
+  progressPercent: number | null;
+  progressTotalSteps: number | null;
+  progressBatchDone: number | null;
+  progressBatchTotal: number | null;
 };
 
 export type ProcessingStepRow = {
@@ -134,6 +138,13 @@ function enrichCatalogFromEvents(
   }
 }
 
+const PIPELINE_MODULE_ORDER = [
+  "kb_understanding",
+  "kb_discovery",
+  "kb_embedding",
+  "kb_indexing",
+] as const;
+
 export function deriveFlowStatus(events: ProcessingEventSummary[], issues: ProcessingIssueSummary[]): ProcessingFlowStatus {
   const terminal = events.filter((event) => TERMINAL_STATUSES.has(normalizeStatus(event.status)));
   if (terminal.some((event) => normalizeStatus(event.status) === "failed")) return "failed";
@@ -166,6 +177,23 @@ export function deriveFlowStatus(events: ProcessingEventSummary[], issues: Proce
       normalizeStatus(event.status) === "completed"
   );
   if (hasEmbeddingDone || hasDiscoveryDone || hasUnderstandingDone) return "running";
+
+  if (!hasIndexingDone) {
+    if (events.some((event) => normalizeStatus(event.status) === "started")) return "running";
+    for (const moduleName of PIPELINE_MODULE_ORDER) {
+      const modEvents = events.filter((event) => event.module === moduleName);
+      if (!modEvents.length) continue;
+      const pipelineTerminal = modEvents.some(
+        (event) => event.step === "PIPELINE" && TERMINAL_STATUSES.has(normalizeStatus(event.status)),
+      );
+      if (
+        !pipelineTerminal &&
+        modEvents.some((event) => TERMINAL_STATUSES.has(normalizeStatus(event.status)))
+      ) {
+        return "running";
+      }
+    }
+  }
 
   const hasPipelineDone = terminal.some(
     (event) => event.step === "PIPELINE" && normalizeStatus(event.status) === "completed"
@@ -223,12 +251,83 @@ export function deriveActiveProgress(events: ProcessingEventSummary[]): {
   };
 }
 
-const PIPELINE_MODULE_ORDER = [
-  "kb_understanding",
-  "kb_discovery",
-  "kb_embedding",
-  "kb_indexing",
-] as const;
+export type FlowProgressDetail = {
+  percent: number;
+  completedSteps: number;
+  totalSteps: number;
+  batchDone: number | null;
+  batchTotal: number | null;
+  remainingSteps: Array<{ module: string; step: string }>;
+};
+
+function readPositiveInt(value: unknown): number | null {
+  const num = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(num) || num < 0) return null;
+  return Math.floor(num);
+}
+
+/** Aktív lépés batch előrehaladása (embedding, indexelés, Qdrant ellenőrzés). */
+export function extractBatchProgress(events: ProcessingEventSummary[]): { done: number; total: number } | null {
+  const sorted = [...events].sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at));
+  for (const event of sorted) {
+    const out = event.output_summary_json ?? {};
+    const expected = readPositiveInt(out.expected_points);
+    const verified = readPositiveInt(out.verified_points);
+    if (expected != null && verified != null && expected > 0) {
+      return { done: verified, total: expected };
+    }
+    const indexed = readPositiveInt(out.indexed);
+    const points = readPositiveInt(out.points);
+    if (indexed != null && points != null && points > 0) {
+      return { done: indexed, total: points };
+    }
+    const generated = readPositiveInt(out.generated);
+    if (generated != null) {
+      const failed = readPositiveInt(out.failed) ?? 0;
+      const total = generated + failed;
+      if (total > 0) return { done: generated, total };
+    }
+    const chunksIndexed = readPositiveInt(out.chunks_indexed);
+    const chunksTotal = readPositiveInt(out.chunks_total);
+    if (chunksIndexed != null && chunksTotal != null && chunksTotal > 0) {
+      return { done: chunksIndexed, total: chunksTotal };
+    }
+  }
+  return null;
+}
+
+export function deriveFlowProgress(
+  events: ProcessingEventSummary[],
+  issues: ProcessingIssueSummary[],
+  understandingSteps: UnderstandingStepSummary[] = [],
+): FlowProgressDetail | null {
+  const flowStatus = deriveFlowStatus(events, issues);
+  if (flowStatus !== "running") return null;
+
+  const timeline = buildPipelineTimelineCompact(events, understandingSteps);
+  const completedSteps = timeline.filter((row) => normalizeStatus(row.status) === "completed").length;
+  const totalSteps = timeline.length;
+  const pendingRows = timeline.filter(
+    (row) => row.isPending || normalizeStatus(row.status) === "pending" || normalizeStatus(row.status) === "started",
+  );
+  const remainingSteps = pendingRows.slice(0, 4).map((row) => ({ module: row.module, step: row.step }));
+
+  let percent = totalSteps > 0 ? Math.round((completedSteps / totalSteps) * 100) : 0;
+  const batch = extractBatchProgress(events);
+  if (batch && batch.total > 0) {
+    const micro = Math.round((batch.done / batch.total) * 100);
+    percent = Math.min(99, Math.round(percent * 0.8 + micro * 0.2));
+  }
+
+  return {
+    percent: Math.min(Math.max(percent, completedSteps > 0 ? 1 : 0), 99),
+    completedSteps,
+    totalSteps,
+    batchDone: batch?.done ?? null,
+    batchTotal: batch?.total ?? null,
+    remainingSteps,
+  };
+}
 
 export type FlowProcessingDisplay = {
   badgeStatus: string;
@@ -449,6 +548,7 @@ export function buildFlowSummaries(
     const lastEvent = itemEvents[0] ?? null;
     const active = deriveActiveProgress(itemEvents);
     const pipelineHead = active ? null : findPipelineHead(itemEvents);
+    const progress = deriveFlowProgress(itemEvents, itemIssues);
     flows.push({
       itemId,
       title: meta?.title ?? itemId,
@@ -456,7 +556,7 @@ export function buildFlowSummaries(
       charCount: meta?.charCount ?? null,
       lastEventAt: lastEvent?.created_at ?? null,
       status: deriveFlowStatus(itemEvents, itemIssues),
-      completedSteps: stepRows.filter((row) => normalizeStatus(row.status) === "completed").length,
+      completedSteps: progress?.completedSteps ?? stepRows.filter((row) => normalizeStatus(row.status) === "completed").length,
       failedSteps: stepRows.filter((row) => normalizeStatus(row.status) === "failed").length,
       openIssues: countOpenBlockingIssues(itemIssues),
       latestMessage: active?.message ?? lastEvent?.message ?? itemIssues[0]?.issue_message ?? null,
@@ -464,6 +564,10 @@ export function buildFlowSummaries(
       activeStage: active?.stage ?? pipelineHead?.stage ?? null,
       activeStep: active?.step ?? pipelineHead?.step ?? null,
       activeEventType: active?.eventType ?? null,
+      progressPercent: progress?.percent ?? null,
+      progressTotalSteps: progress?.totalSteps ?? null,
+      progressBatchDone: progress?.batchDone ?? null,
+      progressBatchTotal: progress?.batchTotal ?? null,
     });
   }
 

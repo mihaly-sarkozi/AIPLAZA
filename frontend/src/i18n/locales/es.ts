@@ -414,6 +414,11 @@ export const es = {
         liveUpdating: "Actualización en vivo — procesamiento en curso",
         activeProgress: "Paso actual: {{module}} — {{step}}",
         activeFlowCount: "{{count}} flujos de procesamiento activos",
+        percentComplete: "{{percent}}% completado",
+        overallProgress: "Progreso total",
+        pipelineProgress: "Pasos del pipeline: {{completed}} / {{total}}",
+        batchProgress: "Paso actual: {{done}} / {{total}} elementos",
+        remainingSteps: "Pendiente: {{steps}}",
         stepIssueHintAria: "Advertencia — pasa el cursor para ver detalles",
         stepCompletedOk: "Completado con éxito",
         metrics: {

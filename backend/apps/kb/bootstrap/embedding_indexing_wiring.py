@@ -307,6 +307,21 @@ class KnowledgeBaseReaderAdapter:
             return None
         return str(row) or None
 
+    def exists(self, knowledge_base_id: str) -> bool:
+        from apps.kb.kb_crud.orm.KnowledgeBaseORM import KnowledgeBaseORM
+        from sqlalchemy import select
+
+        with self._session_factory() as session:
+            row = session.execute(
+                select(KnowledgeBaseORM.id)
+                .where(
+                    KnowledgeBaseORM.uuid == knowledge_base_id,
+                    KnowledgeBaseORM.deleted_at.is_(None),
+                )
+                .limit(1)
+            ).scalar_one_or_none()
+        return row is not None
+
 
 __all__ = [
     "DiscoveryJobReaderAdapter",

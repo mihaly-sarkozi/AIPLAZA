@@ -14,6 +14,7 @@ const API_ERROR_I18N_KEYS: Record<string, string> = {
   storage_error: "kb.errorStorage",
   queue_unavailable: "kb.errorQueueUnavailable",
   kb_not_found: "kb.errorNotFound",
+  knowledge_base_not_found: "kb.errorNotFound",
   kb_name_exists: "kb.errorNameExists",
   kb_name_invalid: "kb.errorNameInvalid",
   kb_confirm_name_mismatch: "kb.errorConfirmNameMismatch",
