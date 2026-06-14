@@ -9,6 +9,7 @@ DISCOVERY_COMPLETED = "kb.discovery_completed"
 DISCOVERY_FAILED = "kb.discovery_failed"
 EMBEDDING_REQUESTED = "kb.embedding_requested"
 INDEXING_REQUESTED = "kb.indexing_requested"
+INDEXING_COMPLETED = "kb.indexing_completed"
 REINDEX_REQUESTED = "kb.reindex_requested"
 FEEDBACK_SUBMITTED = "kb.feedback_submitted"
 
@@ -18,6 +19,7 @@ __all__ = [
     "DISCOVERY_REQUESTED",
     "EMBEDDING_REQUESTED",
     "FEEDBACK_SUBMITTED",
+    "INDEXING_COMPLETED",
     "INDEXING_REQUESTED",
     "MATERIAL_READ",
     "REINDEX_REQUESTED",

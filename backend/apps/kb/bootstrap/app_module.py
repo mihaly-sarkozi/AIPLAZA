@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from apps.kb.kb_crud.module import KbCrudModule
 from apps.kb.kb_discovery.module import KbDiscoveryModule
+from apps.kb.kb_embedding.module import KbEmbeddingModule
 from apps.kb.kb_feedback.module import KbFeedbackModule
 from apps.kb.kb_indexing.module import KbIndexingModule
 from apps.kb.kb_ingest.module import KbIngestModule
@@ -27,6 +28,7 @@ KB_MODULES = [
     KbUnderstandingModule(),
     KbProcessingModule(),
     KbDiscoveryModule(),
+    KbEmbeddingModule(),
     KbIndexingModule(),
     KbSearchModule(),
     KbServicesModule(),
@@ -83,6 +85,8 @@ class KbAppModule(BaseAppModule):
     def tenant_schema_hooks(self) -> tuple:
         from apps.kb.kb_crud.bootstrap.tenant_hooks import register_kb_crud_tenant_hooks
         from apps.kb.kb_discovery.bootstrap.tenant_hooks import register_kb_discovery_tenant_hooks
+        from apps.kb.kb_embedding.bootstrap.tenant_hooks import register_kb_embedding_tenant_hooks
+        from apps.kb.kb_indexing.bootstrap.tenant_hooks import register_kb_indexing_tenant_hooks
         from apps.kb.kb_ingest.bootstrap.tenant_hooks import register_kb_ingest_tenant_hooks
         from apps.kb.kb_processing.bootstrap.tenant_hooks import register_kb_processing_tenant_hooks
         from apps.kb.kb_understanding.bootstrap.tenant_hooks import (
@@ -95,6 +99,8 @@ class KbAppModule(BaseAppModule):
             register_kb_understanding_tenant_hooks,
             register_kb_processing_tenant_hooks,
             register_kb_discovery_tenant_hooks,
+            register_kb_embedding_tenant_hooks,
+            register_kb_indexing_tenant_hooks,
         )
 
 

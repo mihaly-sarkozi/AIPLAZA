@@ -1,0 +1,20 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+
+@dataclass(frozen=True)
+class EmbeddingJobContext:
+    job_id: str
+    understanding_job_id: str
+    discovery_job_id: str
+    training_item_id: str
+    training_batch_id: str
+    knowledge_base_id: str
+    tenant_slug: str | None
+    created_by: int | None
+    title: str
+    source_type: str
+
+
+__all__ = ["EmbeddingJobContext"]

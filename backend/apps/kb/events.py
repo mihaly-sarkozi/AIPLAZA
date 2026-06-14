@@ -11,6 +11,7 @@ from apps.kb.shared.events import (
     DISCOVERY_FAILED,
     DISCOVERY_REQUESTED,
     EMBEDDING_REQUESTED,
+    INDEXING_COMPLETED,
     INDEXING_REQUESTED,
     UNDERSTANDING_COMPLETED,
     UNDERSTANDING_FAILED,
@@ -42,6 +43,143 @@ def make_understanding_services_provider(session_factory: Any):
                     file_storage=MinioFileStorage(),
                     item_reader=TrainingItemReader(session_factory),
                     flow_recorder=processing.flow_recorder,
+                )
+            return cache["services"]
+
+    return _provider
+
+
+def make_embedding_services_provider(session_factory: Any):
+    lock = threading.Lock()
+    cache: dict[str, Any] = {}
+
+    def _provider():
+        if session_factory is None:
+            raise RuntimeError("kb embedding handler: hiányzó session_factory")
+        with lock:
+            if "services" not in cache:
+                from apps.kb.bootstrap.discovery_wiring import UnderstandingJobReaderAdapter
+                from apps.kb.bootstrap.embedding_indexing_wiring import (
+                    DiscoveryJobReaderAdapter,
+                    EmbeddingChunkReaderAdapter,
+                    EmbeddingDiscoveryBundleReaderAdapter,
+                )
+                from apps.kb.kb_discovery.repository.DiscoveryBundleRepository import DiscoveryBundleRepository
+                from apps.kb.kb_discovery.repository.DiscoveryJobRepository import DiscoveryJobRepository
+                from apps.kb.kb_discovery.repository.EnrichmentRepository import EnrichmentRepository
+                from apps.kb.kb_discovery.repository.EntityRepository import EntityMentionRepository, EntityRepository
+                from apps.kb.kb_discovery.repository.ProcessRepository import ProcessRepository
+                from apps.kb.kb_discovery.repository.RelationshipRepository import RelationshipRepository
+                from apps.kb.kb_discovery.repository.ScoreRepository import ScoreRepository
+                from apps.kb.kb_discovery.repository.SpatialRepository import SpatialRepository
+                from apps.kb.kb_discovery.repository.TemporalRepository import TemporalRepository
+                from apps.kb.kb_embedding.bootstrap.embedding_assembly import build_embedding_services
+                from apps.kb.kb_processing.bootstrap.processing_assembly import build_processing_services
+                from apps.kb.kb_understanding.repository.ChunkRepository import ChunkRepository
+                from apps.kb.kb_understanding.repository.UnderstandingJobRepository import UnderstandingJobRepository
+
+                chunk_repository = ChunkRepository(session_factory)
+                processing = build_processing_services(session_factory=session_factory)
+                understanding_job_reader = UnderstandingJobReaderAdapter(
+                    UnderstandingJobRepository(session_factory)
+                )
+                discovery_job_repository = DiscoveryJobRepository(session_factory)
+                bundle_repository = DiscoveryBundleRepository(
+                    EnrichmentRepository(session_factory),
+                    EntityRepository(session_factory),
+                    EntityMentionRepository(session_factory),
+                    TemporalRepository(session_factory),
+                    SpatialRepository(session_factory),
+                    ProcessRepository(session_factory),
+                    RelationshipRepository(session_factory),
+                    ScoreRepository(session_factory),
+                )
+                cache["services"] = build_embedding_services(
+                    session_factory=session_factory,
+                    chunk_reader=EmbeddingChunkReaderAdapter(chunk_repository),
+                    discovery_job_reader=DiscoveryJobReaderAdapter(
+                        discovery_job_repository,
+                        understanding_job_reader=understanding_job_reader,
+                    ),
+                    bundle_reader=EmbeddingDiscoveryBundleReaderAdapter(bundle_repository),
+                    flow_recorder=processing.flow_recorder,
+                )
+            return cache["services"]
+
+    return _provider
+
+
+def make_indexing_services_provider(session_factory: Any):
+    lock = threading.Lock()
+    cache: dict[str, Any] = {}
+
+    def _provider():
+        if session_factory is None:
+            raise RuntimeError("kb indexing handler: hiányzó session_factory")
+        with lock:
+            if "services" not in cache:
+                from apps.kb.bootstrap.discovery_wiring import UnderstandingJobReaderAdapter
+                from apps.kb.bootstrap.embedding_indexing_wiring import (
+                    DiscoveryJobReaderAdapter,
+                    EmbeddingJobReaderAdapter,
+                    EmbeddingRecordReaderAdapter,
+                    IndexingChunkReaderAdapter,
+                    IndexingDiscoveryBundleReaderAdapter,
+                    KnowledgeBaseReaderAdapter,
+                )
+                from apps.kb.kb_discovery.repository.DiscoveryBundleRepository import DiscoveryBundleRepository
+                from apps.kb.kb_discovery.repository.DiscoveryJobRepository import DiscoveryJobRepository
+                from apps.kb.kb_discovery.repository.EnrichmentRepository import EnrichmentRepository
+                from apps.kb.kb_discovery.repository.EntityRepository import EntityMentionRepository, EntityRepository
+                from apps.kb.kb_discovery.repository.ProcessRepository import ProcessRepository
+                from apps.kb.kb_discovery.repository.RelationshipRepository import RelationshipRepository
+                from apps.kb.kb_discovery.repository.ScoreRepository import ScoreRepository
+                from apps.kb.kb_discovery.repository.SpatialRepository import SpatialRepository
+                from apps.kb.kb_discovery.repository.TemporalRepository import TemporalRepository
+                from apps.kb.kb_embedding.repository.EmbeddingJobRepository import EmbeddingJobRepository
+                from apps.kb.kb_embedding.repository.KnowledgeEmbeddingRepository import KnowledgeEmbeddingRepository
+                from apps.kb.kb_indexing.bootstrap.indexing_assembly import build_indexing_services
+                from apps.kb.kb_processing.bootstrap.processing_assembly import build_processing_services
+                from apps.kb.kb_understanding.repository.ChunkRepository import ChunkRepository
+                from apps.kb.kb_understanding.repository.UnderstandingJobRepository import UnderstandingJobRepository
+
+                chunk_repository = ChunkRepository(session_factory)
+                processing = build_processing_services(session_factory=session_factory)
+                understanding_job_reader = UnderstandingJobReaderAdapter(
+                    UnderstandingJobRepository(session_factory)
+                )
+                discovery_job_repository = DiscoveryJobRepository(session_factory)
+                discovery_job_reader = DiscoveryJobReaderAdapter(
+                    discovery_job_repository,
+                    understanding_job_reader=understanding_job_reader,
+                )
+                bundle_repository = DiscoveryBundleRepository(
+                    EnrichmentRepository(session_factory),
+                    EntityRepository(session_factory),
+                    EntityMentionRepository(session_factory),
+                    TemporalRepository(session_factory),
+                    SpatialRepository(session_factory),
+                    ProcessRepository(session_factory),
+                    RelationshipRepository(session_factory),
+                    ScoreRepository(session_factory),
+                )
+                embedding_job_repository = EmbeddingJobRepository(session_factory)
+                embedding_repository = KnowledgeEmbeddingRepository(session_factory)
+                cache["services"] = build_indexing_services(
+                    session_factory=session_factory,
+                    chunk_reader=IndexingChunkReaderAdapter(chunk_repository),
+                    embedding_reader=EmbeddingRecordReaderAdapter(embedding_repository),
+                    embedding_job_reader=EmbeddingJobReaderAdapter(
+                        embedding_job_repository,
+                        discovery_job_reader,
+                    ),
+                    bundle_reader=IndexingDiscoveryBundleReaderAdapter(
+                        bundle_repository,
+                        chunk_repository,
+                    ),
+                    knowledge_base_reader=KnowledgeBaseReaderAdapter(session_factory),
+                    flow_recorder=processing.flow_recorder,
+                    metrics_updater=processing.metrics_service.update_after_indexing,
                 )
             return cache["services"]
 
@@ -101,6 +239,12 @@ def register_kb_event_handlers(dispatcher: Any, *, session_factory: Any = None) 
     from apps.kb.kb_discovery.events.discovery_requested_handler import (
         make_discovery_requested_handler,
     )
+    from apps.kb.kb_embedding.events.embedding_requested_handler import (
+        make_embedding_requested_handler,
+    )
+    from apps.kb.kb_indexing.events.indexing_requested_handler import (
+        make_indexing_requested_handler,
+    )
     from apps.kb.kb_understanding.events.understanding_requested_handler import (
         make_understanding_requested_handler,
     )
@@ -122,8 +266,17 @@ def register_kb_event_handlers(dispatcher: Any, *, session_factory: Any = None) 
         DISCOVERY_REQUESTED,
         make_discovery_requested_handler(make_discovery_services_provider(session_factory)),
     )
-    register_job_handler(dispatcher, EMBEDDING_REQUESTED, make_kb_acknowledge_handler(EMBEDDING_REQUESTED))
-    register_job_handler(dispatcher, INDEXING_REQUESTED, make_kb_acknowledge_handler(INDEXING_REQUESTED))
+    register_job_handler(
+        dispatcher,
+        EMBEDDING_REQUESTED,
+        make_embedding_requested_handler(make_embedding_services_provider(session_factory)),
+    )
+    register_job_handler(
+        dispatcher,
+        INDEXING_REQUESTED,
+        make_indexing_requested_handler(make_indexing_services_provider(session_factory)),
+    )
+    register_job_handler(dispatcher, INDEXING_COMPLETED, make_kb_acknowledge_handler(INDEXING_COMPLETED))
     register_job_handler(dispatcher, DISCOVERY_COMPLETED, make_kb_acknowledge_handler(DISCOVERY_COMPLETED))
     register_job_handler(dispatcher, DISCOVERY_FAILED, make_kb_acknowledge_handler(DISCOVERY_FAILED))
     register_job_handler(
@@ -133,6 +286,8 @@ def register_kb_event_handlers(dispatcher: Any, *, session_factory: Any = None) 
 
 __all__ = [
     "make_discovery_services_provider",
+    "make_embedding_services_provider",
+    "make_indexing_services_provider",
     "make_kb_acknowledge_handler",
     "make_understanding_services_provider",
     "register_kb_event_handlers",

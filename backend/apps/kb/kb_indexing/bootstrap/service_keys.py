@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-# backend/apps/kb/kb_indexing/bootstrap/service_keys.py
-# Feladat: Indexelési modul DI service kulcsok.
-# Kulcs-konvenció: module_service_key("kb", "indexing.<komponens>").
-# Sárközi Mihály - 2026.06.11
+KB_INDEXING_JOB_REPOSITORY = "kb_indexing.job_repository"
+KB_INDEXED_CHUNK_REPOSITORY = "kb_indexing.indexed_chunk_repository"
 
-__all__: list[str] = []
+__all__ = ["KB_INDEXED_CHUNK_REPOSITORY", "KB_INDEXING_JOB_REPOSITORY"]

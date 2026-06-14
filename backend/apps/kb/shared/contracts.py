@@ -45,6 +45,29 @@ class ChunkLanguageUpdate:
 
 
 @dataclass(frozen=True)
+class IndexingChunkSnapshot:
+    chunk_id: str
+    text: str
+    chunk_type: str
+    order_index: int
+    section_title: str | None = None
+    page_number: int | None = None
+    language_code: str | None = None
+    language_confidence: float | None = None
+    metadata_json: dict | None = None
+
+
+@dataclass(frozen=True)
+class IndexingEmbeddingSnapshot:
+    id: str
+    chunk_id: str
+    embedding_vector: tuple[float, ...]
+    vector_hash: str | None
+    embedding_dimension: int
+    status: str
+
+
+@dataclass(frozen=True)
 class IngestItemSnapshot:
     """Ingest item olvasási nézet a megértési pipeline számára (modulhatáron átadott contract)."""
 
@@ -63,6 +86,8 @@ class IngestItemSnapshot:
 __all__ = [
     "ChunkLanguageUpdate",
     "DiscoveryChunkSnapshot",
+    "IndexingChunkSnapshot",
+    "IndexingEmbeddingSnapshot",
     "IngestItemSnapshot",
     "MaterialRef",
     "SearchContextItem",
