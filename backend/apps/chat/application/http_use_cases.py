@@ -32,6 +32,7 @@ from apps.chat.application.chat_payload_policy import (
     validate_chat_payload_or_413,
 )
 from apps.chat.errors import ChatPermissionDenied
+from apps.chat.service.channel_audit import build_channel_api_audit
 from apps.chat.service.chat_service import (
     ChatPolicyViolationError,
     PiiDepersonalizationUnavailableError,
@@ -542,7 +543,11 @@ async def handle_channel_chat_request(
             status_code = 503 if "nem elérhető" in str(detail).lower() else 429
             raise HTTPException(status_code=status_code, detail=detail)
 
-    channel_id = str(principal.channel_type or "channel").strip().lower() or "channel"
+    channel_id, channel_metadata = build_channel_api_audit(
+        channel_type=principal.channel_type,
+        credential_id=principal.credential_id,
+        external_session_id=session_id,
+    )
 
     try:
         payload = await svc.chat_with_sources(
@@ -556,6 +561,7 @@ async def handle_channel_chat_request(
             retrieval_history=req.retrieval_history,
             conversation_id=session_id,
             channel_id=channel_id,
+            channel_metadata=channel_metadata,
         )
     except ChatPolicyViolationError:
         channel_svc.release_question_slot(quota_reservation)

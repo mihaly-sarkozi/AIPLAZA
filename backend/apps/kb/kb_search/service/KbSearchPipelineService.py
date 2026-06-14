@@ -19,6 +19,7 @@ from apps.kb.kb_search.service.HybridRankService import HybridRankService
 from apps.kb.kb_search.service.PostgresHydrationService import PostgresHydrationService
 from apps.kb.kb_search.service.QdrantVectorSearchService import QdrantVectorSearchService
 from apps.kb.kb_search.service.SearchReadinessService import SearchReadinessService
+from apps.kb.kb_search.service.SearchIssueRecorderService import SearchIssueRecorderService
 from apps.kb.kb_search.service.StoreSearchRunService import StoreSearchRunService
 
 logger = logging.getLogger(__name__)
@@ -39,6 +40,7 @@ class KbSearchPipelineService:
         build_citation_service: BuildCitationService,
         store_run_service: StoreSearchRunService,
         knowledge_base_reader,
+        issue_recorder: SearchIssueRecorderService | None = None,
         default_top_k: int = 10,
     ) -> None:
         self._runs = run_repository
@@ -52,6 +54,7 @@ class KbSearchPipelineService:
         self._build_citation = build_citation_service
         self._store = store_run_service
         self._kb_reader = knowledge_base_reader
+        self._issue_recorder = issue_recorder
         self._default_top_k = default_top_k
 
     def execute(
@@ -64,6 +67,7 @@ class KbSearchPipelineService:
         user_id: int | None = None,
         channel_id: str | None = None,
         conversation_id: str | None = None,
+        channel_metadata: dict[str, Any] | None = None,
         conversation_history: list[dict[str, Any]] | None = None,
         top_k: int | None = None,
         debug: bool = False,
@@ -86,10 +90,12 @@ class KbSearchPipelineService:
             normalized_question=question,
             search_mode=SearchMode.HYBRID.value,
             top_k=int(top_k or self._default_top_k),
+            filters={},
             ranking_config={
                 "vector_score_weight": 0.75,
                 "knowledge_score_weight": 0.25,
             },
+            metadata=self._search_run_metadata(channel_metadata=channel_metadata, conversation_id=conversation_id),
         )
         run.status = SearchStatus.RUNNING.value
         self._runs.create(run)
@@ -109,7 +115,24 @@ class KbSearchPipelineService:
                 level=logging.WARNING,
                 knowledge_base_id=knowledge_base_id,
             )
-            return self._blocked_packet(run, readiness={"ready_for_search": False, "blocked_reasons": list(exc.blocked_reasons)})
+            self._record_issue(
+                issue_code=SearchErrorCode.KB_NOT_READY,
+                tenant_slug=tenant_slug,
+                knowledge_base_id=knowledge_base_id,
+                query_run_id=run.id,
+                conversation_id=conversation_id,
+                question=question,
+                search_status=run.status,
+                message=exc.message,
+            )
+            return self._blocked_packet(
+                run,
+                readiness={
+                    "ready_for_search": False,
+                    "qdrant_verified": False,
+                    "blocking_issues": list(exc.blocked_reasons),
+                },
+            )
 
         query_profile = self._build_query.build(
             question=question,
@@ -128,12 +151,23 @@ class KbSearchPipelineService:
                 question=query_profile["rewritten_question"],
                 knowledge_base_id=knowledge_base_id,
             )
-        except RuntimeError:
+        except RuntimeError as exc:
             run.status = SearchStatus.FAILED.value
             run.error_code = SearchErrorCode.QUERY_EMBEDDING_FAILED.value
+            run.error_message = str(exc)
             run.duration_ms = int((perf_counter() - started) * 1000)
             self._runs.update(run)
             increment_metric("kb.search.embedding_failed", 1.0)
+            self._record_issue(
+                issue_code=SearchErrorCode.QUERY_EMBEDDING_FAILED,
+                tenant_slug=tenant_slug,
+                knowledge_base_id=knowledge_base_id,
+                query_run_id=run.id,
+                conversation_id=conversation_id,
+                question=question,
+                search_status=run.status,
+                message=str(exc),
+            )
             raise
 
         run.query_embedding_model = embedding["embedding_model"]
@@ -146,12 +180,23 @@ class KbSearchPipelineService:
                 top_k=run.top_k,
                 filters=run.filters_json,
             )
-        except Exception:
+        except Exception as exc:
             run.status = SearchStatus.FAILED.value
             run.error_code = SearchErrorCode.QDRANT_FAILED.value
+            run.error_message = str(exc)
             run.duration_ms = int((perf_counter() - started) * 1000)
             self._runs.update(run)
             increment_metric("kb.search.qdrant_failed", 1.0)
+            self._record_issue(
+                issue_code=SearchErrorCode.QDRANT_FAILED,
+                tenant_slug=tenant_slug,
+                knowledge_base_id=knowledge_base_id,
+                query_run_id=run.id,
+                conversation_id=conversation_id,
+                question=question,
+                search_status=run.status,
+                message=str(exc),
+            )
             raise
 
         ranked = self._hybrid_rank.rank(hits)
@@ -166,13 +211,24 @@ class KbSearchPipelineService:
         collection = self._kb_reader.get_qdrant_collection_name(knowledge_base_id)
         if not context_blocks:
             run.status = SearchStatus.NO_RESULTS.value
-            run.error_code = SearchErrorCode.NO_RESULTS.value
+            run.error_code = SearchErrorCode.NO_RESULTS.value if not ranked else SearchErrorCode.CONTEXT_EMPTY.value
+            issue_code = SearchErrorCode.NO_RESULTS if not ranked else SearchErrorCode.CONTEXT_EMPTY
             increment_metric("kb.search.no_results", 1.0)
             log_structured_event(
                 "apps.kb.kb_search",
                 "KB_SEARCH_NO_RESULTS",
                 level=logging.INFO,
                 query_run_id=run.id,
+            )
+            self._record_issue(
+                issue_code=issue_code,
+                tenant_slug=tenant_slug,
+                knowledge_base_id=knowledge_base_id,
+                query_run_id=run.id,
+                conversation_id=conversation_id,
+                question=question,
+                search_status=run.status,
+                message="Nincs releváns találat a keresésben.",
             )
         else:
             run.status = SearchStatus.COMPLETED.value
@@ -218,6 +274,7 @@ class KbSearchPipelineService:
                 "section_title": c.get("section_title"),
                 "snippet": c.get("snippet"),
                 "kb_uuid": kb_uuid,
+                "download_ref": c.get("download_ref"),
                 "download_url": c.get("download_url") or c.get("download_ref"),
                 "download_url_template": c.get("download_url_template"),
             }
@@ -266,6 +323,38 @@ class KbSearchPipelineService:
                 },
             }
         return packet
+
+    @staticmethod
+    def _search_run_metadata(*, channel_metadata: dict[str, Any] | None, conversation_id: str | None) -> dict[str, Any]:
+        metadata = dict(channel_metadata or {})
+        if conversation_id:
+            metadata["conversation_id"] = str(conversation_id)
+        return metadata
+
+    def _record_issue(
+        self,
+        *,
+        issue_code: SearchErrorCode,
+        tenant_slug: str | None,
+        knowledge_base_id: str,
+        query_run_id: str | None,
+        conversation_id: str | None,
+        question: str | None,
+        search_status: str | None,
+        message: str | None = None,
+    ) -> None:
+        if self._issue_recorder is None:
+            return
+        self._issue_recorder.record(
+            issue_code=issue_code,
+            tenant_slug=tenant_slug,
+            knowledge_base_id=knowledge_base_id,
+            message=message,
+            query_run_id=query_run_id,
+            conversation_id=conversation_id,
+            question=question,
+            search_status=search_status,
+        )
 
     @staticmethod
     def _blocked_packet(run, *, readiness: dict[str, Any]) -> dict[str, Any]:

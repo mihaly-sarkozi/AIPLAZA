@@ -77,6 +77,7 @@ class ChatContextPacketService:
         conversation_history: list[dict[str, str]] | None = None,
         channel_id: str | None = None,
         conversation_id: str | None = None,
+        channel_metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         if self._retrieval_context_builder is None:
             return {}
@@ -90,6 +91,7 @@ class ChatContextPacketService:
             conversation_history=conversation_history,
             channel_id=channel_id,
             conversation_id=conversation_id,
+            channel_metadata=channel_metadata,
         )
 
     async def build_single_kb(

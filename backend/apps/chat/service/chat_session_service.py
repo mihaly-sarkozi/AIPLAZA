@@ -29,6 +29,8 @@ class ChatSessionService:
         user_id: int | None,
         kb_uuid: str | None,
         channel_id: str | None = None,
+        external_session_id: str | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> tuple[str, list[dict[str, str]]]:
         if conversation_id:
             session = self._sessions.get(conversation_id)
@@ -42,6 +44,8 @@ class ChatSessionService:
             channel_id=channel_id,
             kb_uuid=kb_uuid,
             knowledge_base_id=kb_uuid,
+            external_session_id=external_session_id,
+            metadata=metadata,
         )
         log_structured_event("apps.chat", "CHAT_SESSION_CREATED", level=logging.INFO, session_id=session.id)
         return session.id, []
@@ -81,6 +85,9 @@ class ChatSessionService:
         conversation_history: list[dict[str, str]] | None,
         prompt_context: dict[str, Any] | None,
         sources: list[dict[str, Any]] | None,
+        citations: list | None = None,
+        context_blocks: list | None = None,
+        matched_chunks: list | None = None,
     ) -> str:
         turn = self._turns.create(
             session_id=session_id,
@@ -91,19 +98,23 @@ class ChatSessionService:
             answer_mode=answer_mode,
         )
         if packet is not None:
+            resolved_sources = sources if sources is not None else (packet.get("sources") or [])
+            resolved_citations = citations if citations is not None else (packet.get("citations") or [])
+            resolved_context_blocks = context_blocks if context_blocks is not None else (packet.get("context_blocks") or [])
+            resolved_matched_chunks = matched_chunks if matched_chunks is not None else (packet.get("matched_chunks") or [])
             self._snapshots.create(
                 turn_id=turn.id,
                 session_id=session_id,
                 query_run_id=query_run_id,
                 conversation_context={"history": conversation_history or []},
                 search_context={
-                    "context_blocks": packet.get("context_blocks") or [],
-                    "matched_chunks": packet.get("matched_chunks") or [],
+                    "context_blocks": resolved_context_blocks,
+                    "matched_chunks": resolved_matched_chunks,
                     "query_profile": packet.get("query_profile") or {},
                 },
                 prompt_context_text=str(packet.get("prompt_context") or ""),
-                citations=packet.get("citations") or [],
-                sources=sources or packet.get("sources") or [],
+                citations=resolved_citations,
+                sources=resolved_sources,
                 metadata={"prompt_context": prompt_context or {}},
             )
         self._sessions.touch(session_id)

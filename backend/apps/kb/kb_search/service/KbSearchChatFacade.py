@@ -48,6 +48,7 @@ class KbSearchChatFacade:
         conversation_history: list[dict] | None = None,
         channel_id: str | None = None,
         conversation_id: str | None = None,
+        channel_metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         if not kb_uuid:
             return self._empty_packet(answer_mode="NO_ANSWER")
@@ -71,6 +72,7 @@ class KbSearchChatFacade:
             user_id=current_user_id,
             channel_id=channel_id,
             conversation_id=conversation_id,
+            channel_metadata=channel_metadata,
             conversation_history=conversation_history,
             debug=debug,
         )

@@ -37,6 +37,32 @@ vector_hash_mismatches = 0
 
 A `kb_search` modul `SearchNotReadyError`-t dob — implementálva: `SearchReadinessService`.
 
+Chat response: `answer_mode=BLOCKED_NOT_READY`, egységes readiness payload:
+
+```json
+{
+  "answer_mode": "BLOCKED_NOT_READY",
+  "readiness": {
+    "ready_for_search": false,
+    "qdrant_verified": false,
+    "blocking_issues": ["..."]
+  },
+  "sources": [],
+  "citations": [],
+  "context_blocks": []
+}
+```
+
+Debug/admin módban: `debug.diagnostics_url = /api/kb/{knowledge_base_id}/indexing/diagnostics`
+
+## Search hibák monitoring
+
+Fontos search események a `kb_processing_issues` táblában is (`module=kb_search`). Lásd `backend/apps/kb/kb_search/README.md`.
+
+## E2E checklist
+
+`qa/chat-search-e2e-checklist.md`
+
 ## Diagnosztika
 
 ```text

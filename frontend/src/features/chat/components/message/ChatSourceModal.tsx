@@ -108,6 +108,11 @@ export default function ChatSourceModal({
         <div className="space-y-3 text-[12px] leading-relaxed">
           {sourceTab === "sources" ? (
             <div className="space-y-2">
+              {citations.length > 0 ? (
+                <div className="rounded-lg border border-[var(--color-border)] p-2 text-[var(--color-muted)]">
+                  Citations: {citations.join(", ")}
+                </div>
+              ) : null}
               {sources.length === 0 ? <div className="text-[var(--color-muted)]">Nincs megjeleníthető forrás.</div> : null}
               {sources.map((source) => (
                 <div key={`${source.source_id}-${source.point_id}`} className="rounded-lg border border-[var(--color-border)] p-2">
@@ -116,7 +121,7 @@ export default function ChatSourceModal({
                   <button
                     type="button"
                     disabled={sourceLoadingId === source.source_id}
-                    onClick={() => onDownloadSource(source.source_id)}
+                    onClick={() => onDownloadSource(source.source_id || source.point_id)}
                     className="mt-2 rounded border border-[var(--color-border)] px-2 py-1 text-xs"
                   >
                     Letöltés

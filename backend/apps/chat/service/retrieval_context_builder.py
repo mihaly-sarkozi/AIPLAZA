@@ -80,6 +80,7 @@ class RetrievalContextBuilder:
         conversation_history: list[dict] | None = None,
         channel_id: str | None = None,
         conversation_id: str | None = None,
+        channel_metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         permission_subject = PermissionSubject(id=user_id, role=user_role, is_active=True) if user_id is not None else None
         t_parse = perf_counter()
@@ -140,6 +141,7 @@ class RetrievalContextBuilder:
                     "conversation_history": conversation_history,
                     "channel_id": channel_id,
                     "conversation_id": conversation_id,
+                    "channel_metadata": channel_metadata,
                 },
             )
             packet["query_focus"] = parsed

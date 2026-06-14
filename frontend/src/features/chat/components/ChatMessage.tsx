@@ -97,6 +97,14 @@ function ChatMessageInner({
     promptContextDetail.latestHits.length > 0 ||
     Boolean(promptContextDetail.indexDebug);
 
+  const normalizedAnswerMode = String(answerMode || "").toUpperCase();
+  const canShowEvidenceUi =
+    !isUser &&
+    !isTrainingStatus &&
+    normalizedAnswerMode !== "NO_ANSWER" &&
+    normalizedAnswerMode !== "BLOCKED_NOT_READY" &&
+    (sources.length > 0 || (hasPromptContext && normalizedAnswerMode === "ANSWERED"));
+
   const sendFeedback = async (helpful: boolean) => {
     if (!queryRunId || feedbackLoading) return;
     setFeedbackLoading(true);
@@ -118,9 +126,12 @@ function ChatMessageInner({
     }
     setSourceLoadingId(sourceId);
     try {
-      const url = queryRunId
-        ? `/chat/sources/${encodeURIComponent(queryRunId)}/${encodeURIComponent(sourceId)}/download`
-        : `/knowledge/sources/${encodeURIComponent(sourceId)}/download`;
+      const matchedSource = sources.find((item) => (item.source_id || item.point_id) === sourceId);
+      const url =
+        matchedSource?.download_url ||
+        (queryRunId
+          ? `/chat/sources/${encodeURIComponent(queryRunId)}/${encodeURIComponent(sourceId)}/download`
+          : `/knowledge/sources/${encodeURIComponent(sourceId)}/download`);
       const res = await api.get(url, { responseType: "blob" });
       const filename =
         filenameFromContentDisposition(res.headers["content-disposition"]) ||
@@ -177,9 +188,9 @@ function ChatMessageInner({
           {sanitizeMessage(actionLabel)}
         </a>
       ) : null}
-      {!isUser && !isTrainingStatus && (sources.length > 0 || queryRunId || hasPromptContext) ? (
+      {canShowEvidenceUi ? (
         <div className="mt-1.5 flex flex-wrap items-center gap-2 px-2 text-xs text-[var(--color-muted)]">
-          {queryRunId ? (
+          {queryRunId && sources.length > 0 ? (
             <ChatFeedbackControls feedbackValue={feedbackValue} feedbackLoading={feedbackLoading} onSendFeedback={sendFeedback} t={t} />
           ) : null}
           <button

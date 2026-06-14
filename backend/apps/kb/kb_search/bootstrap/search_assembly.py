@@ -8,6 +8,11 @@ from apps.kb.kb_indexing.adapters.QdrantAdapter import QdrantAdapter
 from apps.kb.kb_indexing.repository.IndexVerificationRepository import IndexVerificationRepository
 from apps.kb.kb_indexing.repository.IndexingJobRepository import IndexingJobRepository
 from apps.kb.kb_processing.repository.ProcessingMetricsRepository import ProcessingMetricsRepository
+from apps.kb.kb_processing.repository.ProcessingEventRepository import ProcessingEventRepository
+from apps.kb.kb_processing.repository.ProcessingIssueRepository import ProcessingIssueRepository
+from apps.kb.kb_processing.service.ProcessingEventService import ProcessingEventService
+from apps.kb.kb_processing.service.ProcessingIssueService import ProcessingIssueService
+from apps.kb.kb_search.service.SearchIssueRecorderService import SearchIssueRecorderService
 from apps.kb.kb_search.adapters.QdrantSearchAdapter import QdrantSearchAdapter
 from apps.kb.kb_search.adapters.QueryEmbeddingProviderAdapter import QueryEmbeddingProviderAdapter
 from apps.kb.kb_search.repository.SearchCitationRepository import SearchCitationRepository
@@ -75,6 +80,12 @@ def build_search_services(
         context_block_repository=block_repository,
         citation_repository=citation_repository,
     )
+    issue_repository = ProcessingIssueRepository(session_factory)
+    event_repository = ProcessingEventRepository(session_factory)
+    issue_recorder = SearchIssueRecorderService(
+        issue_service=ProcessingIssueService(issue_repository),
+        event_service=ProcessingEventService(event_repository),
+    )
     pipeline = KbSearchPipelineService(
         run_repository=run_repository,
         readiness_service=readiness,
@@ -90,6 +101,7 @@ def build_search_services(
         build_citation_service=BuildCitationService(),
         store_run_service=store_run,
         knowledge_base_reader=kb_reader,
+        issue_recorder=issue_recorder,
         default_top_k=int(getattr(settings, "kb_search_top_k", 10) or 10),
     )
     chat_facade = KbSearchChatFacade(

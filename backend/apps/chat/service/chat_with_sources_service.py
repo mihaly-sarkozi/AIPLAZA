@@ -17,8 +17,21 @@ from apps.chat.service.chat_telemetry_service import ChatTelemetryService
 from apps.chat.service.llm_answer_service import LLMAnswerService
 from apps.chat.service.pii_chat_guard_service import PiiChatContext, PiiChatGuardService
 from apps.chat.service.answer_grounding_validator import AnswerGroundingValidator
+from apps.chat.service.channel_audit import build_web_channel_audit
 
 logger = logging.getLogger(__name__)
+
+_EMPTY_EVIDENCE_LIST: list[Any] = []
+
+
+def _apply_empty_evidence_fields(payload: dict[str, Any]) -> dict[str, Any]:
+    payload["sources"] = []
+    payload["citations"] = []
+    payload["context_blocks"] = []
+    payload["matched_chunks"] = []
+    payload["evidence"] = []
+    payload["cited_source_ids"] = []
+    return payload
 
 
 @dataclass
@@ -103,6 +116,7 @@ class ChatWithSourcesService:
         retrieval_history: list[str] | None = None,
         conversation_id: str | None = None,
         channel_id: str | None = None,
+        channel_metadata: dict[str, Any] | None = None,
         base_prompt_id: str | None = None,
     ) -> dict[str, Any]:
         started_at = perf_counter()
@@ -110,13 +124,17 @@ class ChatWithSourcesService:
         session_service = self._current_session_service()
         effective_history = list(conversation_history or [])
         effective_conversation_id = conversation_id
+        resolved_channel_id, default_channel_metadata = build_web_channel_audit(channel_id=channel_id)
+        effective_channel_metadata = dict(channel_metadata or default_channel_metadata)
         if session_service is not None:
             effective_conversation_id, backend_history = session_service.resolve_or_create_session(
                 conversation_id=conversation_id,
                 tenant_slug=tenant,
                 user_id=user_id,
                 kb_uuid=kb_uuid,
-                channel_id=channel_id or "web",
+                channel_id=resolved_channel_id,
+                external_session_id=conversation_id if channel_metadata else None,
+                metadata=effective_channel_metadata,
             )
             if not effective_history:
                 effective_history = backend_history
@@ -137,7 +155,8 @@ class ChatWithSourcesService:
             conversation_history=effective_history,
             retrieval_history=retrieval_history,
             conversation_id=effective_conversation_id,
-            channel_id=channel_id,
+            channel_id=resolved_channel_id,
+            channel_metadata=effective_channel_metadata,
         )
         if context_result.direct_payload is not None:
             return context_result.direct_payload
@@ -161,10 +180,17 @@ class ChatWithSourcesService:
                 debug=debug,
                 kb_uuid=kb_uuid,
             )
+            payload = _apply_empty_evidence_fields(payload)
             payload["conversation_id"] = effective_conversation_id
             payload["answer_mode"] = "BLOCKED_NOT_READY"
+            payload["answer_source"] = "none"
+            payload["confidence"] = 0.0
             payload["readiness"] = packet.get("readiness") or {}
-            payload["sources"] = []
+            if debug and kb_uuid:
+                payload["debug"] = {
+                    **(payload.get("debug") or {}),
+                    "diagnostics_url": f"/api/kb/{kb_uuid}/indexing/diagnostics",
+                }
             if session_service is not None:
                 turn_id = session_service.store_assistant_turn(
                     session_id=effective_conversation_id,
@@ -175,7 +201,10 @@ class ChatWithSourcesService:
                     packet=packet,
                     conversation_history=effective_history,
                     prompt_context={},
-                    sources=[],
+                    sources=_EMPTY_EVIDENCE_LIST,
+                    citations=_EMPTY_EVIDENCE_LIST,
+                    context_blocks=_EMPTY_EVIDENCE_LIST,
+                    matched_chunks=_EMPTY_EVIDENCE_LIST,
                 )
                 payload["turn_id"] = turn_id
             return payload
@@ -185,7 +214,7 @@ class ChatWithSourcesService:
             payload = self._answer_post_processor.build_payload(
                 packet=packet,
                 answer=answer,
-                context_text=context_text,
+                context_text="",
                 context_failed=True,
                 prompt_context={},
                 encoded_prompt_context="",
@@ -194,11 +223,13 @@ class ChatWithSourcesService:
                 debug=debug,
                 kb_uuid=kb_uuid,
             )
+            payload = _apply_empty_evidence_fields(payload)
             payload["conversation_id"] = effective_conversation_id
             payload["answer_mode"] = "NO_ANSWER"
-            payload["sources"] = []
+            payload["answer_source"] = "none"
+            payload["confidence"] = 0.0
             if session_service is not None:
-                session_service.store_assistant_turn(
+                turn_id = session_service.store_assistant_turn(
                     session_id=effective_conversation_id,
                     tenant_slug=tenant,
                     answer=answer,
@@ -207,8 +238,12 @@ class ChatWithSourcesService:
                     packet=packet,
                     conversation_history=effective_history,
                     prompt_context={},
-                    sources=[],
+                    sources=_EMPTY_EVIDENCE_LIST,
+                    citations=_EMPTY_EVIDENCE_LIST,
+                    context_blocks=_EMPTY_EVIDENCE_LIST,
+                    matched_chunks=_EMPTY_EVIDENCE_LIST,
                 )
+                payload["turn_id"] = turn_id
             return payload
 
         pii_context = self._pii_chat_guard.prepare_question(
@@ -306,6 +341,7 @@ class ChatWithSourcesService:
         retrieval_history: list[str] | None,
         conversation_id: str | None = None,
         channel_id: str | None = None,
+        channel_metadata: dict[str, Any] | None = None,
     ) -> ContextBuildResult:
         try:
             context_started_at = perf_counter()
@@ -320,6 +356,7 @@ class ChatWithSourcesService:
                     conversation_history=conversation_history,
                     conversation_id=conversation_id,
                     channel_id=channel_id,
+                    channel_metadata=channel_metadata,
                 ),
                 timeout=self._context_timeout_sec,
             )

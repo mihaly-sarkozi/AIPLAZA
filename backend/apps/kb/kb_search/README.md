@@ -31,6 +31,38 @@ Production-ready Qdrant-alapú keresési modul. **Az AI nem keres** — csak ez 
 
 ## Source download URL
 
-Kanokikus template: `/api/chat/sources/{query_run_id}/{source_id}/download`
+- **`download_ref`** — belső referencia / source azonosító (pl. `source:chunk_abc123`)
+- **`download_url`** — frontend által használható konkrét endpoint (pl. `/api/chat/sources/qry_xxx/chunk_yyy/download`)
+- **`download_url_template`** — dokumentált sablon: `/api/chat/sources/{query_run_id}/{source_id}/download`
 
-A pipeline futás közben konkrét URL kerül a `download_ref` / `download_url` mezőbe; a `download_url_template` mező mindig dokumentálja a sablont.
+A pipeline futás közben minden citation/source kap konkrét `download_url`-t, ha ismert a `query_run_id`.
+
+## Search issue logging
+
+Kritikus search hibák a `kb_processing_issues` táblában is megjelennek (`SearchIssueRecorderService`):
+
+| Kód | Severity |
+|-----|----------|
+| `SEARCH_NO_RESULTS` | INFO |
+| `SEARCH_KB_NOT_READY` | WARNING |
+| `SEARCH_CONTEXT_EMPTY` | WARNING |
+| `SEARCH_QUERY_EMBEDDING_FAILED` | ERROR |
+| `SEARCH_QDRANT_FAILED` | ERROR |
+
+Issue metadata tartalmazza: `query_run_id`, `conversation_id`, `question`, `search_status`.
+
+## Channel / audit metadata
+
+`kb_search_query_runs.metadata_json`:
+
+```json
+{
+  "channel_type": "widget",
+  "channel_credential_id": "42",
+  "conversation_id": "conv_..."
+}
+```
+
+## E2E checklist
+
+`qa/chat-search-e2e-checklist.md`

@@ -650,6 +650,7 @@ class ChatService:
         retrieval_history: list[str] | None = None,
         conversation_id: str | None = None,
         channel_id: str | None = None,
+        channel_metadata: dict[str, Any] | None = None,
         base_prompt_id: str | None = None,
     ) -> dict:
         """Chat válasz forráslistával együtt."""
@@ -664,6 +665,7 @@ class ChatService:
             retrieval_history=retrieval_history,
             conversation_id=conversation_id,
             channel_id=channel_id,
+            channel_metadata=channel_metadata,
             base_prompt_id=base_prompt_id,
         )
 

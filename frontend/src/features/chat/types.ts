@@ -13,9 +13,13 @@ export type ChatSourceItem = {
   kb_name?: string;
   point_id: string;
   source_id?: string;
+  citation_id?: string;
   title?: string;
   snippet?: string;
   source_type?: string;
+  download_url?: string;
+  download_url_template?: string;
+  download_ref?: string;
   file_ref?: string | null;
   display_type?: string;
   created_by?: number | null;

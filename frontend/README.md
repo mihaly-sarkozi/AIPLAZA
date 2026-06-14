@@ -71,3 +71,11 @@ export default defineConfig([
   },
 ])
 ```
+
+## Chat források
+
+- Source letöltés: elsődlegesen `source.download_url`, fallback: `/api/chat/sources/{queryRunId}/{sourceId}/download`
+- `NO_ANSWER` / `BLOCKED_NOT_READY`: nincs forrás UI
+- Debug modal: context blocks, index hits, raw JSON — csak ha van prompt context / debug payload
+
+E2E checklist: `qa/chat-search-e2e-checklist.md`
