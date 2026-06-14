@@ -69,7 +69,12 @@ class KbSearchPipelineService:
         debug: bool = False,
     ) -> dict[str, Any]:
         started = perf_counter()
-        log_structured_event("apps.kb.kb_search", "KB_SEARCH_STARTED", knowledge_base_id=knowledge_base_id)
+        log_structured_event(
+            "apps.kb.kb_search",
+            "KB_SEARCH_STARTED",
+            level=logging.INFO,
+            knowledge_base_id=knowledge_base_id,
+        )
         run = self._runs.new_run(
             tenant_slug=tenant_slug,
             user_id=user_id,
@@ -98,7 +103,12 @@ class KbSearchPipelineService:
             run.duration_ms = int((perf_counter() - started) * 1000)
             self._runs.update(run)
             increment_metric("kb.search.blocked_not_ready", 1.0)
-            log_structured_event("apps.kb.kb_search", "SEARCH_KB_NOT_READY", knowledge_base_id=knowledge_base_id)
+            log_structured_event(
+                "apps.kb.kb_search",
+                "SEARCH_KB_NOT_READY",
+                level=logging.WARNING,
+                knowledge_base_id=knowledge_base_id,
+            )
             return self._blocked_packet(run, readiness={"ready_for_search": False, "blocked_reasons": list(exc.blocked_reasons)})
 
         query_profile = self._build_query.build(
@@ -158,10 +168,20 @@ class KbSearchPipelineService:
             run.status = SearchStatus.NO_RESULTS.value
             run.error_code = SearchErrorCode.NO_RESULTS.value
             increment_metric("kb.search.no_results", 1.0)
-            log_structured_event("apps.kb.kb_search", "KB_SEARCH_NO_RESULTS", query_run_id=run.id)
+            log_structured_event(
+                "apps.kb.kb_search",
+                "KB_SEARCH_NO_RESULTS",
+                level=logging.INFO,
+                query_run_id=run.id,
+            )
         else:
             run.status = SearchStatus.COMPLETED.value
-            log_structured_event("apps.kb.kb_search", "KB_SEARCH_COMPLETED", query_run_id=run.id)
+            log_structured_event(
+                "apps.kb.kb_search",
+                "KB_SEARCH_COMPLETED",
+                level=logging.INFO,
+                query_run_id=run.id,
+            )
 
         run.duration_ms = int((perf_counter() - started) * 1000)
         self._store.store(

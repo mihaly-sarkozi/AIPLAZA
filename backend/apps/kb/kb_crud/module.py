@@ -35,13 +35,16 @@ class KbCrudModule:
         from apps.kb.kb_crud.repository.KnowledgeBaseRepository import KnowledgeBaseRepository
         from apps.kb.kb_crud.service.KbCrudAuditLogger import KbCrudAuditLogger
 
+        kb_repository = KnowledgeBaseRepository(container.session_factory)
+        permission_repository = KnowledgeBasePermissionRepository(container.session_factory)
+
         container.register_repository(
             KB_CRUD_REPOSITORY,
-            KnowledgeBaseRepository(container.session_factory),
+            kb_repository,
         )
         container.register_repository(
             KB_CRUD_PERMISSION_REPOSITORY,
-            KnowledgeBasePermissionRepository(container.session_factory),
+            permission_repository,
         )
         container.register_repository(
             KB_CRUD_USER_DIRECTORY,
@@ -57,6 +60,16 @@ class KbCrudModule:
         container.register_repository(
             KB_CRUD_AUDIT_LOGGER,
             KbCrudAuditLogger(container.audit_service),
+        )
+
+        from apps.kb.kb_crud.adapters.ChatKnowledgeServiceAdapter import ChatKnowledgeServiceAdapter
+        from apps.kb.kb_crud.service.KbAccessPolicy import KbAccessPolicy
+        from apps.state_keys import KNOWLEDGE_SERVICE
+
+        access_policy = KbAccessPolicy(kb_repository, permission_repository)
+        container.register_service(
+            KNOWLEDGE_SERVICE,
+            ChatKnowledgeServiceAdapter(access_policy=access_policy, repository=kb_repository),
         )
 
     def register_event_handlers(self, event_bus) -> None:

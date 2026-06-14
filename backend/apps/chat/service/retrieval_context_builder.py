@@ -81,22 +81,27 @@ class RetrievalContextBuilder:
         channel_id: str | None = None,
         conversation_id: str | None = None,
     ) -> dict[str, Any]:
-        if self.kb_service is None:
-            return {
-                "query_focus": {},
-                "top_assertions": [],
-                "evidence_sentences": [],
-                "source_chunks": [],
-                "related_entities": [],
-                "scoring_summary": {},
-            }
         permission_subject = PermissionSubject(id=user_id, role=user_role, is_active=True) if user_id is not None else None
-        if kb_uuid and user_id is not None and not self.kb_service.user_can_use(kb_uuid, user_id, permission_subject):
-            raise ChatPermissionDenied("Nincs jogosultság a megadott tudástár használatához.")
         t_parse = perf_counter()
         parsed = self.query_parser.parse(question) if self.query_parser is not None else {"intent": "summary"}
         parsed = self._enrich_parsed_query(question, parsed)
         parsed["parse_time_ms"] = round((perf_counter() - t_parse) * 1000.0, 2)
+
+        can_use_kb_search = (
+            bool(kb_uuid)
+            and _USE_KB_SEARCH
+            and self.retrieval_service is not None
+            and hasattr(self.retrieval_service, "build_context_for_chat")
+        )
+        if self.kb_service is None and not can_use_kb_search:
+            return self._empty_context_packet(parsed, user_id)
+
+        if kb_uuid and user_id is not None and self.kb_service is not None:
+            can_use = self.kb_service.user_can_use(kb_uuid, user_id, permission_subject)
+            if inspect.isawaitable(can_use):
+                can_use = await can_use
+            if not can_use:
+                raise ChatPermissionDenied("Nincs jogosultság a megadott tudástár használatához.")
 
         if not kb_uuid and user_id is not None:
             packet = await self._build_multi_kb_context_packet(
@@ -311,6 +316,8 @@ class RetrievalContextBuilder:
                 "scoring_summary": {"latency_ms": {"parse": float(parsed.get("parse_time_ms") or 0.0)}},
             }
         corpora = list_all(current_user_id=user_id, current_user=permission_subject)
+        if inspect.isawaitable(corpora):
+            corpora = await corpora
         candidates = [
             item
             for item in corpora
@@ -384,6 +391,19 @@ class RetrievalContextBuilder:
             no_ready_index_build=not has_ready_index_candidate,
             multi_kb_diagnostics=diagnostics,
         )
+
+    @staticmethod
+    def _empty_context_packet(parsed: dict[str, Any], user_id: int | None) -> dict[str, Any]:
+        return {
+            "query_focus": parsed,
+            "parser_audit": parsed.get("parser_audit") or {},
+            "top_assertions": [],
+            "evidence_sentences": [],
+            "source_chunks": [],
+            "related_entities": [],
+            "scoring_summary": {"latency_ms": {"parse": float(parsed.get("parse_time_ms") or 0.0)}},
+            "is_followup": False,
+        }
 
 
 __all__ = ["PermissionSubject", "RetrievalContextBuilder"]

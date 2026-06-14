@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from apps.chat.repository.ChatSessionRepository import ChatSessionRepository
@@ -42,7 +43,7 @@ class ChatSessionService:
             kb_uuid=kb_uuid,
             knowledge_base_id=kb_uuid,
         )
-        log_structured_event("apps.chat", "CHAT_SESSION_CREATED", session_id=session.id)
+        log_structured_event("apps.chat", "CHAT_SESSION_CREATED", level=logging.INFO, session_id=session.id)
         return session.id, []
 
     def store_user_message(
@@ -59,7 +60,13 @@ class ChatSessionService:
             message_text=message_text,
         )
         self._sessions.touch(session_id)
-        log_structured_event("apps.chat", "CHAT_USER_MESSAGE_STORED", session_id=session_id, turn_id=turn.id)
+        log_structured_event(
+            "apps.chat",
+            "CHAT_USER_MESSAGE_STORED",
+            level=logging.INFO,
+            session_id=session_id,
+            turn_id=turn.id,
+        )
         return turn.id
 
     def store_assistant_turn(
@@ -100,7 +107,13 @@ class ChatSessionService:
                 metadata={"prompt_context": prompt_context or {}},
             )
         self._sessions.touch(session_id)
-        log_structured_event("apps.chat", "CHAT_RESPONSE_STORED", session_id=session_id, turn_id=turn.id)
+        log_structured_event(
+            "apps.chat",
+            "CHAT_RESPONSE_STORED",
+            level=logging.INFO,
+            session_id=session_id,
+            turn_id=turn.id,
+        )
         return turn.id
 
     def get_session_payload(self, session_id: str) -> dict[str, Any] | None:

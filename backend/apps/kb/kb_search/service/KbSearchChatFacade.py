@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import json
 import logging
 from typing import Any
@@ -50,7 +51,7 @@ class KbSearchChatFacade:
     ) -> dict[str, Any]:
         if not kb_uuid:
             return self._empty_packet(answer_mode="NO_ANSWER")
-        if current_user_id is not None and not self._can_use_kb(kb_uuid, current_user_id, current_user_role):
+        if current_user_id is not None and not await self._can_use_kb(kb_uuid, current_user_id, current_user_role):
             from apps.chat.errors import ChatPermissionDenied
 
             raise ChatPermissionDenied("Nincs jogosultság a megadott tudástár használatához.")
@@ -58,6 +59,7 @@ class KbSearchChatFacade:
         log_structured_event(
             "apps.kb.kb_search",
             "CHAT_CONTEXT_BUILT",
+            level=logging.INFO,
             kb_uuid=kb_uuid,
             user_id=current_user_id,
         )
@@ -154,18 +156,19 @@ class KbSearchChatFacade:
             "corpus_uuid": run.kb_uuid,
         }
 
-    def _can_use_kb(self, kb_uuid: str, user_id: int, user_role: str | None) -> bool:
+    async def _can_use_kb(self, kb_uuid: str, user_id: int, user_role: str | None) -> bool:
         checker = self._access_checker
         if checker is None:
             return True
+        subject = type("S", (), {"id": user_id, "role": user_role, "is_active": True})()
         if hasattr(checker, "user_can_use"):
             try:
-                result = checker.user_can_use(kb_uuid, user_id, type("S", (), {"id": user_id, "role": user_role, "is_active": True})())
-                if hasattr(result, "__await__"):
-                    return False
-                return bool(result)
+                result = checker.user_can_use(kb_uuid, user_id, subject)
             except TypeError:
-                return bool(checker.user_can_use(kb_uuid, user_id))
+                result = checker.user_can_use(kb_uuid, subject)
+            if inspect.isawaitable(result):
+                result = await result
+            return bool(result)
         return True
 
     @staticmethod
