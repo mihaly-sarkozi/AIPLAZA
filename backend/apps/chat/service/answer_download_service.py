@@ -18,8 +18,15 @@ class PermissionSubject:
 
 
 class AnswerDownloadService:
-    def __init__(self, kb_service: Any = None):
+    def __init__(self, kb_service: Any = None, retrieval_service: Any = None):
         self._kb_service = kb_service
+        self._retrieval_service = retrieval_service
+
+    def _download_provider(self) -> Any | None:
+        for provider in (self._retrieval_service, self._kb_service):
+            if provider is not None and hasattr(provider, "get_query_source_download"):
+                return provider
+        return None
 
     def download_answer_source(
         self,
@@ -30,9 +37,10 @@ class AnswerDownloadService:
         user_role: str | None = None,
     ) -> dict | None:
         kb_service = self._kb_service
-        if kb_service is None or not hasattr(kb_service, "get_query_source_download"):
+        provider = self._download_provider()
+        if provider is None:
             return None
-        download = kb_service.get_query_source_download(query_run_id, source_id)
+        download = provider.get_query_source_download(query_run_id, source_id)
         if download is None:
             return None
         self._ensure_can_use_download(download, user_id=user_id, user_role=user_role)
@@ -46,9 +54,10 @@ class AnswerDownloadService:
         user_role: str | None = None,
     ) -> dict | None:
         kb_service = self._kb_service
-        if kb_service is None or not hasattr(kb_service, "get_query_context_download"):
+        provider = self._download_provider()
+        if provider is None or not hasattr(provider, "get_query_context_download"):
             return None
-        download = kb_service.get_query_context_download(query_run_id)
+        download = provider.get_query_context_download(query_run_id)
         if download is None:
             return None
         self._ensure_can_use_download(download, user_id=user_id, user_role=user_role)

@@ -9,6 +9,46 @@ class AnswerSourceBuilder:
         self._sanitize_debug_text = sanitize_debug_text
 
     def build_sources_from_packet(self, packet: dict[str, Any]) -> list[dict[str, Any]]:
+        kb_sources = packet.get("sources") or []
+        if isinstance(kb_sources, list) and kb_sources:
+            out: list[dict[str, Any]] = []
+            kb_uuid = str(packet.get("kb_uuid") or packet.get("corpus_uuid") or "").strip()
+            for row in kb_sources:
+                if not isinstance(row, dict):
+                    continue
+                source_id = str(row.get("source_id") or row.get("chunk_id") or "").strip()
+                if not source_id:
+                    continue
+                pages = row.get("page_numbers") or []
+                page_label = ", ".join(str(p) for p in pages) if pages else ""
+                title = str(row.get("document_title") or row.get("title") or source_id)
+                if page_label:
+                    title = f"{title} — oldal {page_label}"
+                section = str(row.get("section_title") or "").strip()
+                if section:
+                    title = f"{title} — {section}"
+                citation_id = str(row.get("citation_id") or "")
+                if citation_id:
+                    title = f"[{citation_id}] {title}"
+                out.append(
+                    {
+                        "kb_uuid": str(row.get("kb_uuid") or kb_uuid),
+                        "kb_name": str(packet.get("kb_name") or ""),
+                        "point_id": source_id,
+                        "source_id": source_id,
+                        "title": self._sanitize_debug_text(title),
+                        "snippet": self._sanitize_debug_text(row.get("snippet") or ""),
+                        "source_type": self._sanitize_debug_text(row.get("document_type") or row.get("source_type") or ""),
+                        "file_ref": None,
+                        "display_type": "",
+                        "created_by": None,
+                        "created_by_label": "",
+                        "created_at": None,
+                    }
+                )
+            if out:
+                return out[:8]
+
         rows = []
         context_blocks = packet.get("context_blocks") or packet.get("matched_semantic_blocks") or []
         blocks_by_source = self._blocks_by_source(context_blocks)

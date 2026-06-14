@@ -349,12 +349,21 @@ class AnswerPostProcessor:
             "matched_chunks": packet.get("matched_chunks") or [],
             "claims": packet.get("matched_claims") or [],
             "context_blocks": packet.get("context_blocks") or packet.get("matched_semantic_blocks") or [],
-            "sources": self.build_sources_from_packet(packet) if context_text and not context_failed else [],
+            "citations": packet.get("citations") or [],
+            "readiness": packet.get("readiness") or {},
+            "sources": self.build_sources_from_packet(packet) if (context_text and not context_failed) or packet.get("sources") else [],
             "prompt_context": prompt_context,
             "encoded_prompt_context": encoded_prompt_context if pii_enabled else "",
             "restored_pii_spans": restored_pii_spans,
         }
-        has_grounding_rows = bool(packet.get("source_chunks") or packet.get("evidence_summary") or packet.get("cited_source_ids"))
+        has_grounding_rows = bool(
+            packet.get("source_chunks")
+            or packet.get("evidence_summary")
+            or packet.get("cited_source_ids")
+            or packet.get("context_blocks")
+            or packet.get("citations")
+            or packet.get("sources")
+        )
         if has_knowledge_context and payload["answer"] and not payload["sources"] and not has_grounding_rows:
             payload["answer"] = self._insufficient_context_answer()
             payload["answer_mode"] = "no_answer"

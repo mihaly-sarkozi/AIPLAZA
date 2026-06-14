@@ -3,7 +3,7 @@ import type { ChatSource } from "./chatMessageTypes";
 import { sourceDisplayLabel } from "../../utils/chatMessageFormatting";
 import type { SettingsDateFormat, SettingsTimeFormat, SettingsTimezone } from "../../../../api/services/settingsService";
 
-type SourceTab = "raw" | "parts" | "provenance";
+type SourceTab = "sources" | "context_blocks" | "index_hits" | "prompt" | "raw" | "parts" | "provenance" | "debug";
 
 type ChatSourceModalProps = {
   sourceTab: SourceTab;
@@ -19,6 +19,10 @@ type ChatSourceModalProps = {
   citedSourceIds: string[];
   promptContext?: Record<string, unknown>;
   sources: ChatSource[];
+  contextBlocks?: Array<Record<string, unknown>>;
+  matchedChunks?: Array<Record<string, unknown>>;
+  citations?: string[];
+  debugPayload?: Record<string, unknown> | null;
   sourceLoadingId: string | null;
   onDownloadSource: (sourceId: string | undefined) => void;
   context: {
@@ -70,6 +74,10 @@ export default function ChatSourceModal({
   citedSourceIds,
   promptContext,
   sources,
+  contextBlocks = [],
+  matchedChunks = [],
+  citations = [],
+  debugPayload = null,
   sourceLoadingId,
   onDownloadSource,
   context,
@@ -88,11 +96,50 @@ export default function ChatSourceModal({
           </button>
         </div>
         <div className="mb-3 flex flex-wrap gap-2 text-xs">
+          <SourceTabButton active={sourceTab === "sources"} onClick={() => setSourceTab("sources")}>Források</SourceTabButton>
+          <SourceTabButton active={sourceTab === "context_blocks"} onClick={() => setSourceTab("context_blocks")}>Context blokkok</SourceTabButton>
+          <SourceTabButton active={sourceTab === "index_hits"} onClick={() => setSourceTab("index_hits")}>Index találatok</SourceTabButton>
+          <SourceTabButton active={sourceTab === "prompt"} onClick={() => setSourceTab("prompt")}>Prompt context</SourceTabButton>
+          <SourceTabButton active={sourceTab === "debug"} onClick={() => setSourceTab("debug")}>Raw debug JSON</SourceTabButton>
           <SourceTabButton active={sourceTab === "raw"} onClick={() => setSourceTab("raw")}>Teljes nyers context</SourceTabButton>
           <SourceTabButton active={sourceTab === "parts"} onClick={() => setSourceTab("parts")}>Context összetevők</SourceTabButton>
           <SourceTabButton active={sourceTab === "provenance"} onClick={() => setSourceTab("provenance")}>Válaszinformáció forrása</SourceTabButton>
         </div>
         <div className="space-y-3 text-[12px] leading-relaxed">
+          {sourceTab === "sources" ? (
+            <div className="space-y-2">
+              {sources.length === 0 ? <div className="text-[var(--color-muted)]">Nincs megjeleníthető forrás.</div> : null}
+              {sources.map((source) => (
+                <div key={`${source.source_id}-${source.point_id}`} className="rounded-lg border border-[var(--color-border)] p-2">
+                  <div className="font-semibold">{sourceDisplayLabel(source, source.title || source.source_id || "forrás", locale, timezone, dateFormat, timeFormat)}</div>
+                  <div className="mt-1 whitespace-pre-wrap text-[var(--color-muted)]">{sanitizeMessage(source.snippet || "")}</div>
+                  <button
+                    type="button"
+                    disabled={sourceLoadingId === source.source_id}
+                    onClick={() => onDownloadSource(source.source_id)}
+                    className="mt-2 rounded border border-[var(--color-border)] px-2 py-1 text-xs"
+                  >
+                    Letöltés
+                  </button>
+                </div>
+              ))}
+            </div>
+          ) : null}
+          {sourceTab === "context_blocks" ? (
+            <ContextBox title="Promptba került evidence blokkok" value={JSON.stringify(contextBlocks, null, 2)} />
+          ) : null}
+          {sourceTab === "index_hits" ? (
+            <ContextBox title="Qdrant / hybrid index találatok" value={JSON.stringify(matchedChunks, null, 2)} />
+          ) : null}
+          {sourceTab === "prompt" ? (
+            <ContextBox
+              title="Végső prompt context"
+              value={String(context.rawContextSentToLlm || context.encodedLlmContextText || context.llmContextText || "-")}
+            />
+          ) : null}
+          {sourceTab === "debug" ? (
+            <ContextBox title="Raw debug JSON" value={JSON.stringify(debugPayload || promptContext?.debug || {}, null, 2)} />
+          ) : null}
           {sourceTab === "raw" ? (
             <div>
               <div className="mb-1 font-semibold">Az API híváskor AI-nak küldött teljes nyers tartalom</div>

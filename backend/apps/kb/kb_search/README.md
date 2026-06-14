@@ -1,50 +1,29 @@
 # kb_search
 
-Keresés és kontextusépítés a `kb_indexing` által írt indexek fölött.
+Production-ready Qdrant-alapú keresési modul. **Az AI nem keres** — csak ez a modul hív Qdrantot és Postgres hydrationt.
 
-**Szabály:** a `kb_search` nem dolgoz fel dokumentumot és nem módosítja a
-tudásanyagot — csak olvassa az indexeket. Minden találat visszavezethető a
-forrásra (citation builder, bizonyíték szabály).
+## Flow
 
-**Readiness contract:** a keresés csak verified + `ready_for_search` KB-n fut.
-Részletek: [`docs/kb-search-readiness.md`](../../../../docs/kb-search-readiness.md).
+1. `SearchReadinessService` — `ready_for_search`, `qdrant_verified`, index/verification gate
+2. `BuildSearchQueryService` — normalizálás, follow-up rewrite (determinisztikus)
+3. `BuildQueryEmbeddingService` — runtime query embedding (ugyanaz a modell mint indexelésnél)
+4. `QdrantVectorSearchService` + `PayloadFilterService` — kötelező `knowledge_base_id` filter
+5. `HybridRankService` — vector + knowledge score
+6. `PostgresHydrationService` — chunk text, metadata source of truth
+7. `BuildSearchContextService` + `BuildCitationService` — prompt evidence + CIT-n
+8. `StoreSearchRunService` — audit táblák (`kb_search_query_*`)
 
-## Részei
+## Chat integráció
 
-```text
-query parser, full-text search, vector search, entity search,
-metadata filter, hybrid ranking, context builder, citation builder
-```
+`KbSearchChatFacade.build_context_for_chat()` — chat `RetrievalContextBuilder` elsődleges provider-je (`CHAT_USE_KB_SEARCH=true`).
 
-## Cél-szerkezet
+## API
 
-```text
-kb_search/
-├── module.py                        ✓ (skeleton)
-├── bootstrap/
-│   ├── dependencies.py
-│   └── service_keys.py              ✓ (skeleton)
-├── router/
-│   └── SearchRouter.py
-├── dto/
-├── enums/
-├── service/
-│   ├── ParseQueryService.py
-│   ├── FullTextSearchService.py
-│   ├── VectorSearchService.py
-│   ├── EntitySearchService.py
-│   ├── HybridSearchService.py
-│   ├── RankResultsService.py
-│   ├── BuildContextService.py
-│   └── BuildCitationService.py
-├── repository/
-│   └── SearchRepository.py
-├── mapper/
-│   └── search_result_mapper.py
-└── validation/
-    └── ValidateSearchQuery.py
-```
+- `POST /api/kb/search` — közvetlen search (kb.read)
+- Download: `get_query_source_download`, `get_query_context_download` a chat routeren keresztül
 
-## Fejlesztési sorrend (a teljes KB sorrendből)
+## Env
 
-hybrid search (10.)
+- `CHAT_USE_KB_SEARCH=true` (default)
+- `CHAT_ALLOW_LEGACY_RETRIEVAL=false` (default)
+- `KB_SEARCH_TOP_K=10`

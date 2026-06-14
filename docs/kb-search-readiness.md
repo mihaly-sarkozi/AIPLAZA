@@ -35,7 +35,7 @@ vector_hash_mismatches = 0
 
 ## Ha nem teljesül
 
-A `kb_search` modul `SearchNotReadyError`-t dob (tervezett).
+A `kb_search` modul `SearchNotReadyError`-t dob — implementálva: `SearchReadinessService`.
 
 ## Diagnosztika
 

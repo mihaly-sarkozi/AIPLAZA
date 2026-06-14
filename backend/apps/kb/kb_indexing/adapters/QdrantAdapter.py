@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import logging
+from typing import Any
+
 from apps.kb.kb_indexing.dto.QdrantDeleteResult import QdrantDeleteResult
 
 from apps.kb.kb_indexing.adapters.QdrantClientFactory import QdrantClientFactory

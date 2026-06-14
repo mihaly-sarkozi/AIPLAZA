@@ -239,6 +239,8 @@ def audit_channel_credential_revoked(
 def _response_from_payload(payload: dict[str, Any], *, limits: dict[str, Any], effective_debug: bool) -> AskResponse:
     response_kwargs = {
         "answer": str(payload.get("answer") or ""),
+        "conversation_id": payload.get("conversation_id"),
+        "turn_id": payload.get("turn_id"),
         "query_run_id": payload.get("query_run_id") or None,
         "sources": (payload.get("sources") or [])[: int(limits["max_sources"])],
         "answer_mode": str(payload.get("answer_mode") or "no_answer"),
@@ -248,10 +250,12 @@ def _response_from_payload(payload: dict[str, Any], *, limits: dict[str, Any], e
         "cited_claim_ids": payload.get("cited_claim_ids") or [],
         "cited_sentence_ids": payload.get("cited_sentence_ids") or [],
         "cited_source_ids": payload.get("cited_source_ids") or [],
+        "citations": payload.get("citations") or [],
         "query_profile": payload.get("query_profile") or {},
         "matched_chunks": payload.get("matched_chunks") or [],
         "claims": payload.get("claims") or [],
         "context_blocks": payload.get("context_blocks") or [],
+        "readiness": payload.get("readiness") or {},
         "encoded_prompt_context": str(payload.get("encoded_prompt_context") or "") if effective_debug else "",
         "restored_pii_spans": payload.get("restored_pii_spans") or [],
     }
@@ -305,6 +309,9 @@ async def handle_chat_request(*, req, tenant, current_user, svc) -> AskResponse:
                         debug=effective_debug,
                         conversation_history=req.conversation_history,
                         retrieval_history=req.retrieval_history,
+                        conversation_id=req.conversation_id,
+                        channel_id=req.channel_id or "web",
+                        base_prompt_id=req.base_prompt_id,
                     )
                 except TypeError:
                     try:

@@ -1,8 +1,13 @@
 from __future__ import annotations
 
-# backend/apps/kb/kb_search/bootstrap/service_keys.py
-# Feladat: Keresési modul DI service kulcsok.
-# Kulcs-konvenció: module_service_key("kb", "search.<komponens>").
-# Sárközi Mihály - 2026.06.11
+from core.kernel.interface.app_conventions import module_service_key
 
-__all__: list[str] = []
+KB_SEARCH_CHAT_FACADE = module_service_key("kb", "search", "chat_facade")
+KB_SEARCH_PIPELINE = module_service_key("kb", "search", "pipeline")
+KB_SEARCH_RUN_REPOSITORY = module_service_key("kb", "search", "run_repository")
+
+__all__ = [
+    "KB_SEARCH_CHAT_FACADE",
+    "KB_SEARCH_PIPELINE",
+    "KB_SEARCH_RUN_REPOSITORY",
+]

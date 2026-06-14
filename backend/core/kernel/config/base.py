@@ -201,6 +201,10 @@ class BaseConfig(BaseSettings):
     chat_demo_max_retrieval_chars: int = 1800
     chat_demo_allow_debug: bool = False
     chat_debug_responses_enabled: bool = True
+    chat_use_kb_search: bool = True
+    chat_allow_legacy_retrieval: bool = False
+    kb_search_top_k: int = 10
+    chat_context_timeout_sec: int = 20
     channel_default_max_daily_limit: int = 5000
     channel_default_max_per_minute_limit: int = 120
     channel_demo_max_daily_limit: int = 100

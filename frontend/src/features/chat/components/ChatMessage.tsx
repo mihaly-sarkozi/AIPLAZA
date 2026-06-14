@@ -30,6 +30,7 @@ export type ChatMessageProps = {
   matchedChunks?: Array<Record<string, unknown>>;
   claims?: Array<Record<string, unknown>>;
   contextBlocks?: Array<Record<string, unknown>>;
+  citations?: string[];
   promptContext?: Record<string, unknown>;
   encodedPromptContext?: string;
   debug?: Record<string, unknown> | null;
@@ -64,6 +65,10 @@ function ChatMessageInner({
   excludeFromAiContext,
   queryRunId,
   sources = [],
+  matchedChunks = [],
+  contextBlocks = [],
+  citations = [],
+  debug = null,
   promptContext,
   encodedPromptContext,
   restoredPiiSpans = [],
@@ -75,7 +80,7 @@ function ChatMessageInner({
   const isTrainingStatus = role === "training-status";
   const [sourceLoadingId, setSourceLoadingId] = useState<string | null>(null);
   const [sourceModalOpen, setSourceModalOpen] = useState(false);
-  const [sourceTab, setSourceTab] = useState<"raw" | "parts" | "provenance">("raw");
+  const [sourceTab, setSourceTab] = useState<"sources" | "context_blocks" | "index_hits" | "prompt" | "raw" | "parts" | "provenance" | "debug">("sources");
   const [feedbackValue, setFeedbackValue] = useState<boolean | null>(null);
   const [feedbackLoading, setFeedbackLoading] = useState(false);
   const primarySource = sources[0];
@@ -201,6 +206,10 @@ function ChatMessageInner({
           citedSourceIds={citedSourceIds}
           promptContext={promptContext}
           sources={sources}
+          contextBlocks={contextBlocks}
+          matchedChunks={matchedChunks}
+          citations={citations}
+          debugPayload={debug}
           sourceLoadingId={sourceLoadingId}
           onDownloadSource={downloadSource}
           context={promptContextDetail}

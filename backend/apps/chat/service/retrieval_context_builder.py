@@ -8,7 +8,12 @@ from typing import Any, Awaitable, Callable
 
 from apps.chat.errors import ChatPermissionDenied
 
+from core.kernel.config.config_loader import settings
+
 logger = logging.getLogger(__name__)
+
+_USE_KB_SEARCH = bool(getattr(settings, "chat_use_kb_search", True))
+_ALLOW_LEGACY = bool(getattr(settings, "chat_allow_legacy_retrieval", False))
 
 
 @dataclass(frozen=True)
@@ -72,6 +77,9 @@ class RetrievalContextBuilder:
         kb_uuid: str | None = None,
         tenant: str | None = None,
         debug: bool = False,
+        conversation_history: list[dict] | None = None,
+        channel_id: str | None = None,
+        conversation_id: str | None = None,
     ) -> dict[str, Any]:
         if self.kb_service is None:
             return {
@@ -109,7 +117,30 @@ class RetrievalContextBuilder:
             return packet
 
         if user_id is not None:
-            if self.retrieval_service is not None and hasattr(self.retrieval_service, "build_context_for_chat"):
+            if _USE_KB_SEARCH and self.retrieval_service is not None and hasattr(self.retrieval_service, "build_context_for_chat"):
+                packet = await self._call_context_builder(
+                    self.retrieval_service.build_context_for_chat,
+                    tenant=tenant,
+                    kwargs={
+                        "question": question,
+                        "current_user_id": user_id,
+                        "current_user_role": user_role,
+                        "parsed_query": parsed,
+                        "kb_uuid": kb_uuid,
+                        "debug": debug,
+                        "conversation_history": conversation_history,
+                        "channel_id": channel_id,
+                        "conversation_id": conversation_id,
+                    },
+                )
+                packet["query_focus"] = parsed
+                packet["parser_audit"] = parsed.get("parser_audit") or {}
+                packet.setdefault("scoring_summary", {})
+                packet.setdefault("scoring_summary", {}).setdefault("latency_ms", {})
+                packet["scoring_summary"]["latency_ms"]["parse"] = float(parsed.get("parse_time_ms") or 0.0)
+                packet["is_followup"] = self._is_followup(user_id, parsed)
+                return packet
+            if _ALLOW_LEGACY and self.retrieval_service is not None and hasattr(self.retrieval_service, "build_context_for_chat"):
                 packet = await self._call_context_builder(
                     self.retrieval_service.build_context_for_chat,
                     tenant=tenant,
@@ -129,7 +160,7 @@ class RetrievalContextBuilder:
                 packet["scoring_summary"]["latency_ms"]["parse"] = float(parsed.get("parse_time_ms") or 0.0)
                 packet["is_followup"] = self._is_followup(user_id, parsed)
                 return packet
-            if hasattr(self.kb_service, "build_context_for_chat"):
+            if _ALLOW_LEGACY and hasattr(self.kb_service, "build_context_for_chat"):
                 packet = await self._call_context_builder(
                     self.kb_service.build_context_for_chat,
                     tenant=tenant,
@@ -148,7 +179,7 @@ class RetrievalContextBuilder:
                 packet["scoring_summary"]["latency_ms"]["parse"] = float(parsed.get("parse_time_ms") or 0.0)
                 packet["is_followup"] = self._is_followup(user_id, parsed)
                 return packet
-            if hasattr(self.kb_service, "build_chat_context"):
+            if _ALLOW_LEGACY and hasattr(self.kb_service, "build_chat_context"):
                 packet = await self._call_context_builder(
                     self.kb_service.build_chat_context,
                     tenant=tenant,

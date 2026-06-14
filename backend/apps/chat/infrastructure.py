@@ -57,6 +57,7 @@ class _KnowledgePiiBridge:
 @dataclass(frozen=True)
 class ChatModuleInfrastructure:
     knowledge_service: object | None = None
+    kb_search_facade: object | None = None
     db_session_factory: object | None = None
     audit_service: object | None = None
 
@@ -92,6 +93,11 @@ class ChatModuleInfrastructure:
         )
         channel_access_service = None
         pii_depersonalization_service = None
+        chat_session_service = None
+        retrieval_service = self.knowledge_service
+        use_kb_search = bool(getattr(settings, "chat_use_kb_search", True))
+        if use_kb_search and self.kb_search_facade is not None:
+            retrieval_service = self.kb_search_facade
         if self.db_session_factory is not None:
             channel_access_service = ChannelAccessService(ChannelAccessRepository(self.db_session_factory))
             pii_bridge = _KnowledgePiiBridge(self.knowledge_service)
@@ -99,14 +105,25 @@ class ChatModuleInfrastructure:
                 pii_bridge,
                 detector=pii_bridge.detect,
             )
+            from apps.chat.repository.ChatSessionRepository import ChatSessionRepository
+            from apps.chat.repository.ChatTurnContextSnapshotRepository import ChatTurnContextSnapshotRepository
+            from apps.chat.repository.ChatTurnRepository import ChatTurnRepository
+            from apps.chat.service.chat_session_service import ChatSessionService
+
+            chat_session_service = ChatSessionService(
+                session_repository=ChatSessionRepository(self.db_session_factory),
+                turn_repository=ChatTurnRepository(self.db_session_factory),
+                snapshot_repository=ChatTurnContextSnapshotRepository(self.db_session_factory),
+            )
         return ChatService(
             chat_model=self.build_llm_client(),
             chat_model_name=model_name,
             kb_service=self.knowledge_service,
-            retrieval_service=self.knowledge_service,
+            retrieval_service=retrieval_service,
             channel_access_service=channel_access_service,
             pii_depersonalization_service=pii_depersonalization_service,
             audit_service=self.audit_service,
+            chat_session_service=chat_session_service,
         )
 
 
@@ -114,11 +131,13 @@ class ChatModuleInfrastructure:
 def build_chat_infrastructure(
     *,
     knowledge_service: object | None = None,
+    kb_search_facade: object | None = None,
     db_session_factory: object | None = None,
     audit_service: object | None = None,
 ) -> ChatModuleInfrastructure:
     return ChatModuleInfrastructure(
         knowledge_service=knowledge_service,
+        kb_search_facade=kb_search_facade,
         db_session_factory=db_session_factory,
         audit_service=audit_service,
     )

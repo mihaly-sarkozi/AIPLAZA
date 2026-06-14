@@ -33,6 +33,8 @@ export type RestoredPiiSpan = {
 
 export type ChatApiResponse = {
   answer: string;
+  conversation_id?: string | null;
+  turn_id?: string | null;
   query_run_id?: string | null;
   answer_mode?: string;
   answer_source?: string;
@@ -41,11 +43,13 @@ export type ChatApiResponse = {
   cited_claim_ids?: string[];
   cited_sentence_ids?: string[];
   cited_source_ids?: string[];
+  citations?: string[];
   query_profile?: Record<string, unknown>;
   matched_chunks?: Array<Record<string, unknown>>;
   claims?: Array<Record<string, unknown>>;
   context_blocks?: Array<Record<string, unknown>>;
   sources?: ChatSourceItem[];
+  readiness?: Record<string, unknown>;
   prompt_context?: Record<string, unknown>;
   debug?: Record<string, unknown> | null;
   encoded_prompt_context?: string;
@@ -55,6 +59,9 @@ export type ChatApiResponse = {
 export type ChatApiRequest = {
   question: string;
   kb_uuid?: string;
+  conversation_id?: string;
+  channel_id?: string;
+  base_prompt_id?: string | null;
   debug?: boolean;
   conversation_history?: Array<{ role: "user" | "assistant"; content: string }>;
   retrieval_history?: string[];
@@ -67,6 +74,7 @@ export type ChatMessageType = {
   excludeFromAiContext?: boolean;
   question?: string;
   queryRunId?: string | null;
+  turnId?: string | null;
   answerMode?: string;
   answerSource?: string;
   confidence?: number;
@@ -78,6 +86,8 @@ export type ChatMessageType = {
   matchedChunks?: Array<Record<string, unknown>>;
   claims?: Array<Record<string, unknown>>;
   contextBlocks?: Array<Record<string, unknown>>;
+  citations?: string[];
+  readiness?: Record<string, unknown>;
   sources?: ChatSourceItem[];
   promptContext?: Record<string, unknown>;
   debug?: Record<string, unknown> | null;
@@ -97,6 +107,7 @@ export type PersistedChatSession = {
   messages: ChatMessageType[];
   contextNotice: string | null;
   draft: string;
+  conversationId?: string;
   chatMode?: "query" | "train";
   selectedChatKbUuid?: string;
   selectedTrainKbUuid?: string;

@@ -83,6 +83,7 @@ class ChatService:
         channel_access_service: Any = None,
         pii_depersonalization_service: PiiDepersonalizationService | None = None,
         audit_service: Any = None,
+        chat_session_service: Any = None,
     ):
         build_chat_service_runtime(
             self,
@@ -95,6 +96,7 @@ class ChatService:
             channel_access_service=channel_access_service,
             pii_depersonalization_service=pii_depersonalization_service,
             audit_service=audit_service,
+            chat_session_service=chat_session_service,
         )
 
     @staticmethod
@@ -267,6 +269,9 @@ class ChatService:
         kb_uuid: str | None = None,
         tenant: str | None = None,
         debug: bool = False,
+        conversation_history: list[dict[str, str]] | None = None,
+        channel_id: str | None = None,
+        conversation_id: str | None = None,
     ) -> dict:
         return await self._context_packet_service.build(
             question=question,
@@ -275,6 +280,9 @@ class ChatService:
             kb_uuid=kb_uuid,
             tenant=tenant,
             debug=debug,
+            conversation_history=conversation_history,
+            channel_id=channel_id,
+            conversation_id=conversation_id,
         )
 
     async def _build_single_kb_context_packet(
@@ -640,6 +648,9 @@ class ChatService:
         debug: bool = False,
         conversation_history: list[dict[str, str]] | None = None,
         retrieval_history: list[str] | None = None,
+        conversation_id: str | None = None,
+        channel_id: str | None = None,
+        base_prompt_id: str | None = None,
     ) -> dict:
         """Chat válasz forráslistával együtt."""
         return await self._chat_with_sources_service.build(
@@ -651,6 +662,9 @@ class ChatService:
             debug=debug,
             conversation_history=conversation_history,
             retrieval_history=retrieval_history,
+            conversation_id=conversation_id,
+            channel_id=channel_id,
+            base_prompt_id=base_prompt_id,
         )
 
     async def chat_stream(

@@ -15,12 +15,17 @@ class ChatModule(BaseAppModule):
     key = module_key("chat")
 
     def optional_service_dependencies(self) -> tuple[str, ...]:
-        return (KNOWLEDGE_SERVICE,)
+        from apps.kb.kb_search.bootstrap.service_keys import KB_SEARCH_CHAT_FACADE
+
+        return (KNOWLEDGE_SERVICE, KB_SEARCH_CHAT_FACADE)
 
     # Ez a metódus regisztrálja a(z) register logikáját.
     def register(self, container: ModuleContext) -> None:
+        from apps.kb.kb_search.bootstrap.service_keys import KB_SEARCH_CHAT_FACADE
+
         infra = build_chat_infrastructure(
             knowledge_service=container.get_optional_service(KNOWLEDGE_SERVICE),
+            kb_search_facade=container.get_optional_service(KB_SEARCH_CHAT_FACADE),
             db_session_factory=container.infrastructure.db_session_factory,
             audit_service=container.audit_service,
         )
@@ -47,6 +52,11 @@ class ChatModule(BaseAppModule):
         return ("/api/chat", "/api/channel/chat", "/api/channel/feedback")
 
     # Ez a metódus a(z) permissions logikáját valósítja meg.
+    def tenant_schema_hooks(self) -> tuple:
+        from apps.chat.bootstrap.tenant_hooks import register_chat_tenant_hooks
+
+        return (register_chat_tenant_hooks,)
+
     def permissions(self) -> tuple[str, ...]:
         return ("chat.use", "chat.channel.manage", "chat.channel.analytics")
 

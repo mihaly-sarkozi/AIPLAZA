@@ -60,6 +60,7 @@ export default function ChatMessagesList({
                   matchedChunks={msg.matchedChunks}
                   claims={msg.claims}
                   contextBlocks={msg.contextBlocks}
+                  citations={msg.citations}
                   actionLabel={msg.actionLabel}
                   actionHref={msg.actionHref}
                   progressPercent={msg.progressPercent}

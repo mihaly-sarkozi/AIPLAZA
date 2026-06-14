@@ -12,6 +12,8 @@ type UseChatSendMessageOptions = {
   loading: boolean;
   billingRestricted: boolean;
   effectiveChatKbUuid: string;
+  conversationId: string;
+  setConversationId: (value: string) => void;
   messagesRef: RefObject<ChatMessageType[]>;
   inputRef: RefObject<HTMLInputElement | null>;
   appendMessage: (message: ChatMessageType) => void;
@@ -29,6 +31,8 @@ export function useChatSendMessage({
   loading,
   billingRestricted,
   effectiveChatKbUuid,
+  conversationId,
+  setConversationId,
   messagesRef,
   inputRef,
   appendMessage,
@@ -65,15 +69,26 @@ export function useChatSendMessage({
         debug: true,
         conversation_history: conversationHistory,
         retrieval_history: retrievalHistory,
+        channel_id: "web",
       };
       if (effectiveChatKbUuid) payload.kb_uuid = effectiveChatKbUuid;
+      if (conversationId) payload.conversation_id = conversationId;
       const res = await api.post<ChatApiResponse>("/chat", payload);
       const data = res.data;
-      const answer = String(data?.answer || "").trim() || t("chat.insufficientInfo");
+      if (data?.conversation_id) setConversationId(String(data.conversation_id));
+      const blockedReady = data?.answer_mode === "BLOCKED_NOT_READY";
+      const noEvidence = data?.answer_mode === "NO_ANSWER" || data?.answer_mode === "no_answer";
+      const answer = blockedReady
+        ? "A kiválasztott tudástár még nem kereshető. Az indexelés vagy ellenőrzés nem fejeződött be."
+        : noEvidence
+          ? "Nem találtam releváns választ a kiválasztott tudástárban."
+          : String(data?.answer || "").trim() || t("chat.insufficientInfo");
       const responseSources = Array.isArray(data?.sources) ? data.sources : [];
-      const sources = shouldShowAnswerSources(data, answer, t("chat.insufficientInfo"), responseSources.length)
-        ? dedupeChatSources(responseSources)
-        : [];
+      const sources = noEvidence || blockedReady
+        ? []
+        : shouldShowAnswerSources(data, answer, t("chat.insufficientInfo"), responseSources.length)
+          ? dedupeChatSources(responseSources)
+          : [];
       const encodedQuestionForHistory = getEncodedHistoryText(data, "encoded_latest_question", question);
       const encodedAnswerForHistory = getEncodedHistoryText(data, "encoded_answer_text", answer);
       setMessages((prev) => {
@@ -92,6 +107,7 @@ export function useChatSendMessage({
         aiContextContent: encodedAnswerForHistory || answer,
         question,
         queryRunId: data?.query_run_id ?? null,
+        turnId: data?.turn_id ?? null,
         answerMode: data?.answer_mode,
         answerSource: data?.answer_source,
         confidence: typeof data?.confidence === "number" ? data.confidence : undefined,
@@ -99,10 +115,12 @@ export function useChatSendMessage({
         citedClaimIds: Array.isArray(data?.cited_claim_ids) ? data.cited_claim_ids : [],
         citedSentenceIds: Array.isArray(data?.cited_sentence_ids) ? data.cited_sentence_ids : [],
         citedSourceIds: Array.isArray(data?.cited_source_ids) ? data.cited_source_ids : [],
+        citations: Array.isArray(data?.citations) ? data.citations : [],
         queryProfile: data?.query_profile,
         matchedChunks: Array.isArray(data?.matched_chunks) ? data.matched_chunks : [],
         claims: Array.isArray(data?.claims) ? data.claims : [],
         contextBlocks: Array.isArray(data?.context_blocks) ? data.context_blocks : [],
+        readiness: data?.readiness && typeof data.readiness === "object" ? data.readiness : undefined,
         sources,
         promptContext: data?.prompt_context && typeof data.prompt_context === "object" ? data.prompt_context : undefined,
         debug: data?.debug ?? null,
@@ -126,6 +144,8 @@ export function useChatSendMessage({
     appendMessage,
     billingRestricted,
     clearHistory,
+    conversationId,
+    setConversationId,
     effectiveChatKbUuid,
     flushPersistToDisk,
     inputDraft,

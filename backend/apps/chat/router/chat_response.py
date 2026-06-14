@@ -21,6 +21,8 @@ class ChatSourceItem(BaseModel):
 
 class AskResponse(BaseModel):
     answer: str
+    conversation_id: str | None = None
+    turn_id: str | None = None
     query_run_id: str | None = None
     sources: list[ChatSourceItem] = Field(default_factory=list)
     debug: dict[str, Any] | None = Field(default=None)
@@ -31,10 +33,12 @@ class AskResponse(BaseModel):
     cited_claim_ids: list[str] = Field(default_factory=list)
     cited_sentence_ids: list[str] = Field(default_factory=list)
     cited_source_ids: list[str] = Field(default_factory=list)
+    citations: list[str] = Field(default_factory=list)
     query_profile: dict[str, Any] = Field(default_factory=dict)
     matched_chunks: list[dict[str, Any]] = Field(default_factory=list)
     claims: list[dict[str, Any]] = Field(default_factory=list)
     context_blocks: list[dict[str, Any]] = Field(default_factory=list)
+    readiness: dict[str, Any] = Field(default_factory=dict)
     prompt_context: dict[str, Any] = Field(default_factory=dict)
     encoded_prompt_context: str = ""
     restored_pii_spans: list[dict[str, Any]] = Field(default_factory=list)

@@ -16,6 +16,7 @@ from apps.chat.service.answer_post_processor import AnswerPostProcessor
 from apps.chat.service.chat_telemetry_service import ChatTelemetryService
 from apps.chat.service.llm_answer_service import LLMAnswerService
 from apps.chat.service.pii_chat_guard_service import PiiChatContext, PiiChatGuardService
+from apps.chat.service.answer_grounding_validator import AnswerGroundingValidator
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +51,8 @@ class ChatWithSourcesService:
         max_answer_chars: int,
         enumeration_policy_detail: str,
         telemetry_service: ChatTelemetryService | None = None,
+        grounding_validator: AnswerGroundingValidator | None = None,
+        chat_session_service: Callable[[], Any | None] | Any | None = None,
     ) -> None:
         self._build_context_packet = build_context_packet
         self._llm_context_text_from_packet = llm_context_text_from_packet
@@ -68,6 +71,8 @@ class ChatWithSourcesService:
         self._max_answer_chars = max_answer_chars
         self._enumeration_policy_detail = enumeration_policy_detail
         self._telemetry_service = telemetry_service or ChatTelemetryService()
+        self._grounding_validator = grounding_validator or AnswerGroundingValidator()
+        self._chat_session_service = chat_session_service
 
     async def _call_build_context_packet(self, **kwargs: Any) -> dict[str, Any]:
         result = self._build_context_packet(**kwargs)
@@ -80,6 +85,11 @@ class ChatWithSourcesService:
             return self._kb_service()
         return self._kb_service
 
+    def _current_session_service(self) -> Any | None:
+        if callable(self._chat_session_service):
+            return self._chat_session_service()
+        return self._chat_session_service
+
     async def build(
         self,
         *,
@@ -91,9 +101,31 @@ class ChatWithSourcesService:
         debug: bool = False,
         conversation_history: list[dict[str, str]] | None = None,
         retrieval_history: list[str] | None = None,
+        conversation_id: str | None = None,
+        channel_id: str | None = None,
+        base_prompt_id: str | None = None,
     ) -> dict[str, Any]:
         started_at = perf_counter()
         self._enforce_request_policy(question=question, user_role=user_role)
+        session_service = self._current_session_service()
+        effective_history = list(conversation_history or [])
+        effective_conversation_id = conversation_id
+        if session_service is not None:
+            effective_conversation_id, backend_history = session_service.resolve_or_create_session(
+                conversation_id=conversation_id,
+                tenant_slug=tenant,
+                user_id=user_id,
+                kb_uuid=kb_uuid,
+                channel_id=channel_id or "web",
+            )
+            if not effective_history:
+                effective_history = backend_history
+            session_service.store_user_message(
+                session_id=effective_conversation_id,
+                tenant_slug=tenant,
+                message_text=question,
+            )
+
         context_result = await self._build_context(
             question=question,
             user_id=user_id,
@@ -102,8 +134,10 @@ class ChatWithSourcesService:
             tenant=tenant,
             debug=debug,
             started_at=started_at,
-            conversation_history=conversation_history,
+            conversation_history=effective_history,
             retrieval_history=retrieval_history,
+            conversation_id=effective_conversation_id,
+            channel_id=channel_id,
         )
         if context_result.direct_payload is not None:
             return context_result.direct_payload
@@ -111,6 +145,58 @@ class ChatWithSourcesService:
         packet = context_result.packet
         context_text = context_result.context_text
         context_failed = context_result.context_failed
+
+        blocked_mode = str(packet.get("answer_mode") or "").upper()
+        if blocked_mode == "BLOCKED_NOT_READY":
+            answer = str(packet.get("blocked_message") or AnswerGroundingValidator.NOT_READY_ANSWER)
+            payload = self._answer_post_processor.build_payload(
+                packet=packet,
+                answer=answer,
+                context_text="",
+                context_failed=True,
+                prompt_context={},
+                encoded_prompt_context="",
+                restored_pii_spans=[],
+                pii_enabled=False,
+                debug=debug,
+                kb_uuid=kb_uuid,
+            )
+            payload["conversation_id"] = effective_conversation_id
+            payload["answer_mode"] = "BLOCKED_NOT_READY"
+            payload["readiness"] = packet.get("readiness") or {}
+            return payload
+
+        if blocked_mode == "NO_ANSWER" or not (packet.get("context_blocks") or []):
+            answer = AnswerGroundingValidator.NO_EVIDENCE_ANSWER
+            payload = self._answer_post_processor.build_payload(
+                packet=packet,
+                answer=answer,
+                context_text=context_text,
+                context_failed=True,
+                prompt_context={},
+                encoded_prompt_context="",
+                restored_pii_spans=[],
+                pii_enabled=False,
+                debug=debug,
+                kb_uuid=kb_uuid,
+            )
+            payload["conversation_id"] = effective_conversation_id
+            payload["answer_mode"] = "NO_ANSWER"
+            payload["sources"] = []
+            if session_service is not None:
+                session_service.store_assistant_turn(
+                    session_id=effective_conversation_id,
+                    tenant_slug=tenant,
+                    answer=answer,
+                    query_run_id=packet.get("query_run_id"),
+                    answer_mode="NO_ANSWER",
+                    packet=packet,
+                    conversation_history=effective_history,
+                    prompt_context={},
+                    sources=[],
+                )
+            return payload
+
         pii_context = self._pii_chat_guard.prepare_question(
             packet=packet if isinstance(packet, dict) else {},
             kb_uuid=kb_uuid,
@@ -134,6 +220,10 @@ class ChatWithSourcesService:
             kb_uuid=kb_uuid,
             debug=debug,
         )
+        grounded = self._grounding_validator.validate(packet=packet, answer=answer)
+        if grounded.get("blocked"):
+            answer = str(grounded.get("answer") or AnswerGroundingValidator.NO_EVIDENCE_ANSWER)
+            llm_ms = 0.0
         self._record_timing(
             packet=packet,
             context_build_ms=context_result.context_build_ms,
@@ -158,6 +248,24 @@ class ChatWithSourcesService:
             debug=debug,
             kb_uuid=kb_uuid,
         )
+        payload["conversation_id"] = effective_conversation_id
+        payload["turn_id"] = None
+        payload["answer_mode"] = str(grounded.get("answer_mode") or payload.get("answer_mode") or "ANSWERED")
+        payload["citations"] = packet.get("citations") or []
+        payload["readiness"] = packet.get("readiness") or {}
+        if session_service is not None:
+            turn_id = session_service.store_assistant_turn(
+                session_id=effective_conversation_id,
+                tenant_slug=tenant,
+                answer=str(payload.get("answer") or ""),
+                query_run_id=packet.get("query_run_id"),
+                answer_mode=payload.get("answer_mode"),
+                packet=packet,
+                conversation_history=effective_history,
+                prompt_context=prompt_context,
+                sources=payload.get("sources") or [],
+            )
+            payload["turn_id"] = turn_id
         self._reinforce_followup(packet=packet, context_text=context_text, context_failed=context_failed, kb_uuid=kb_uuid)
         return payload
 
@@ -178,6 +286,8 @@ class ChatWithSourcesService:
         started_at: float,
         conversation_history: list[dict[str, str]] | None,
         retrieval_history: list[str] | None,
+        conversation_id: str | None = None,
+        channel_id: str | None = None,
     ) -> ContextBuildResult:
         try:
             context_started_at = perf_counter()
@@ -189,6 +299,9 @@ class ChatWithSourcesService:
                     kb_uuid=kb_uuid,
                     tenant=tenant,
                     debug=debug,
+                    conversation_history=conversation_history,
+                    conversation_id=conversation_id,
+                    channel_id=channel_id,
                 ),
                 timeout=self._context_timeout_sec,
             )

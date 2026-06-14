@@ -17,6 +17,7 @@ type ChatPersistenceState = {
   chatMode: "query" | "train";
   selectedChatKbUuid: string;
   selectedTrainKbUuid: string;
+  conversationId: string;
   activeTrainingRunId: string | undefined;
   activeTrainingTitle: string | null;
   trainingVisualProgress: number;
@@ -31,6 +32,7 @@ type ChatPersistenceRestorers = {
   setChatMode: (mode: "query" | "train") => void;
   setSelectedChatKbUuid: (uuid: string) => void;
   setSelectedTrainKbUuid: (uuid: string) => void;
+  setConversationId: (value: string) => void;
   setActiveTrainingRunId: (runId: string | undefined) => void;
   setActiveTrainingTitle: (title: string | null) => void;
   setTrainingVisualProgress: (progress: number) => void;
@@ -46,6 +48,7 @@ export function useChatPersistence(state: ChatPersistenceState, restorers: ChatP
   const chatModeRef = useRef<"query" | "train">(state.chatMode);
   const selectedChatKbUuidRef = useRef(state.selectedChatKbUuid);
   const selectedTrainKbUuidRef = useRef(state.selectedTrainKbUuid);
+  const conversationIdRef = useRef(state.conversationId);
   const activeTrainingRunIdRef = useRef<string | undefined>(state.activeTrainingRunId);
   const activeTrainingTitleRef = useRef<string | null>(state.activeTrainingTitle);
   const trainingVisualProgressRef = useRef(state.trainingVisualProgress);
@@ -57,6 +60,7 @@ export function useChatPersistence(state: ChatPersistenceState, restorers: ChatP
   chatModeRef.current = state.chatMode;
   selectedChatKbUuidRef.current = state.selectedChatKbUuid;
   selectedTrainKbUuidRef.current = state.selectedTrainKbUuid;
+  conversationIdRef.current = state.conversationId;
   activeTrainingRunIdRef.current = state.activeTrainingRunId;
   activeTrainingTitleRef.current = state.activeTrainingTitle;
   trainingVisualProgressRef.current = state.trainingVisualProgress;
@@ -78,6 +82,7 @@ export function useChatPersistence(state: ChatPersistenceState, restorers: ChatP
         chatMode: chatModeRef.current,
         selectedChatKbUuid: selectedChatKbUuidRef.current,
         selectedTrainKbUuid: selectedTrainKbUuidRef.current,
+        conversationId: conversationIdRef.current,
         activeTrainingRunId: activeTrainingRunIdRef.current,
         activeTrainingTitle: activeTrainingTitleRef.current,
         trainingVisualProgress: trainingVisualProgressRef.current,
@@ -111,6 +116,7 @@ export function useChatPersistence(state: ChatPersistenceState, restorers: ChatP
         if (data.chatMode === "query" || data.chatMode === "train") restore.setChatMode(data.chatMode);
         if (typeof data.selectedChatKbUuid === "string") restore.setSelectedChatKbUuid(data.selectedChatKbUuid);
         if (typeof data.selectedTrainKbUuid === "string") restore.setSelectedTrainKbUuid(data.selectedTrainKbUuid);
+        if (typeof data.conversationId === "string") restore.setConversationId(data.conversationId);
         if (typeof data.activeTrainingRunId === "string" && data.activeTrainingRunId.trim()) {
           restore.setActiveTrainingRunId(data.activeTrainingRunId);
         }

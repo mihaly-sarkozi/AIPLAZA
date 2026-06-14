@@ -63,6 +63,7 @@ export default function ChatPage() {
   const [dragOverTrainFile, setDragOverTrainFile] = useState(false);
   const [contextNotice, setContextNotice] = useState<string | null>(null);
   const [inputDraft, setInputDraft] = useState("");
+  const [conversationId, setConversationId] = useState("");
   const [fileEstimateLoading, setFileEstimateLoading] = useState(false);
   const [fileCountingProgress, setFileCountingProgress] = useState<FileCountingProgress | null>(null);
   const [pendingFileTraining, setPendingFileTraining] = useState<PendingFileTraining | null>(null);
@@ -85,6 +86,7 @@ export default function ChatPage() {
       chatMode,
       selectedChatKbUuid,
       selectedTrainKbUuid,
+      conversationId,
       activeTrainingRunId,
       activeTrainingTitle,
       trainingVisualProgress,
@@ -98,6 +100,7 @@ export default function ChatPage() {
       setChatMode,
       setSelectedChatKbUuid,
       setSelectedTrainKbUuid,
+      setConversationId,
       setActiveTrainingRunId,
       setActiveTrainingTitle,
       setTrainingVisualProgress,
@@ -225,6 +228,7 @@ export default function ChatPage() {
     setMessages([]);
     setContextNotice(null);
     setInputDraft("");
+    setConversationId("");
     setPendingFileTraining(null);
     clearLocalChatHistory(useAuthStore.getState().user?.id);
   }, []);
@@ -250,6 +254,8 @@ export default function ChatPage() {
     loading,
     billingRestricted,
     effectiveChatKbUuid,
+    conversationId,
+    setConversationId,
     messagesRef,
     inputRef,
     appendMessage,

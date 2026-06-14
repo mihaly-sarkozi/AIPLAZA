@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from core.kernel.config.config_loader import settings
+from apps.chat.service.answer_grounding_validator import AnswerGroundingValidator
 from apps.chat.service.answer_download_service import AnswerDownloadService
 from apps.chat.service.answer_post_processor import AnswerPostProcessor
 from apps.chat.service.chat_context_packet_service import ChatContextPacketService
@@ -30,6 +31,7 @@ def build_chat_service_runtime(
     channel_access_service: Any = None,
     pii_depersonalization_service: Any = None,
     audit_service: Any = None,
+    chat_session_service: Any = None,
 ) -> None:
     _wire_external_dependencies(
         owner,
@@ -40,6 +42,7 @@ def build_chat_service_runtime(
         channel_access_service=channel_access_service,
         pii_depersonalization_service=pii_depersonalization_service,
         audit_service=audit_service,
+        chat_session_service=chat_session_service,
     )
     _wire_llm(owner, chat_model=chat_model, chat_model_name=chat_model_name)
     _wire_context_services(owner)
@@ -154,8 +157,13 @@ def _wire_answer_services(owner: Any) -> None:
         context_timeout_sec=owner._chat_context_timeout_sec,
         max_answer_chars=owner._chat_max_answer_chars,
         enumeration_policy_detail=owner._ENUMERATION_POLICY_DETAIL,
+        grounding_validator=AnswerGroundingValidator(),
+        chat_session_service=lambda: getattr(owner, "chat_session_service", None),
     )
-    owner._answer_downloads = AnswerDownloadService(kb_service=owner.kb_service)
+    owner._answer_downloads = AnswerDownloadService(
+        kb_service=owner.kb_service,
+        retrieval_service=owner.retrieval_service,
+    )
 
 
 __all__ = ["build_chat_service_runtime"]

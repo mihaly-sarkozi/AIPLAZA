@@ -22,6 +22,9 @@ class AskRequest(BaseModel):
         max_length=_MAX_RETRIEVAL_ITEMS,
         description="Korábbi kérdésekből megőrzött Qdrant találati snippetek",
     )
+    conversation_id: str | None = Field(default=None, description="Backend-managed chat session azonosító")
+    channel_id: str | None = Field(default=None, description="Csatorna azonosító (pl. web, widget, api)")
+    base_prompt_id: str | None = Field(default=None, description="Opcionális base prompt / policy azonosító")
 
     @model_validator(mode="after")
     def validate_payload_sizes(self) -> "AskRequest":

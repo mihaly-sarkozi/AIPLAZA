@@ -87,6 +87,7 @@ class KbAppModule(BaseAppModule):
         from apps.kb.kb_discovery.bootstrap.tenant_hooks import register_kb_discovery_tenant_hooks
         from apps.kb.kb_embedding.bootstrap.tenant_hooks import register_kb_embedding_tenant_hooks
         from apps.kb.kb_indexing.bootstrap.tenant_hooks import register_kb_indexing_tenant_hooks
+        from apps.kb.kb_search.bootstrap.tenant_hooks import register_kb_search_tenant_hooks
         from apps.kb.kb_ingest.bootstrap.tenant_hooks import register_kb_ingest_tenant_hooks
         from apps.kb.kb_processing.bootstrap.tenant_hooks import register_kb_processing_tenant_hooks
         from apps.kb.kb_understanding.bootstrap.tenant_hooks import (
@@ -101,6 +102,7 @@ class KbAppModule(BaseAppModule):
             register_kb_discovery_tenant_hooks,
             register_kb_embedding_tenant_hooks,
             register_kb_indexing_tenant_hooks,
+            register_kb_search_tenant_hooks,
         )
 
 

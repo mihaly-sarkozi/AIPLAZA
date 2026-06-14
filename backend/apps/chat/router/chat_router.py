@@ -117,6 +117,86 @@ async def chat_feedback(
     return OperationStatusResponse(details=dict(result or {}))
 
 
+@router.post("/chat/sessions")
+@limiter.limit("30/minute")
+async def create_chat_session(
+    request: Request,
+    tenant: RequiredTenantContextDep,
+    current_user: User = Depends(get_current_user),
+    svc=Depends(get_chat_service),
+):
+    session_service = getattr(svc, "chat_session_service", None)
+    if session_service is None:
+        raise HTTPException(status_code=503, detail="Chat session storage unavailable")
+    session_id, _history = session_service.resolve_or_create_session(
+        conversation_id=None,
+        tenant_slug=getattr(tenant, "slug", None),
+        user_id=current_user.id,
+        kb_uuid=None,
+        channel_id="web",
+    )
+    return {"conversation_id": session_id}
+
+
+@router.get("/chat/sessions/{session_id}")
+@limiter.limit("60/minute")
+async def get_chat_session(
+    request: Request,
+    session_id: str,
+    tenant: RequiredTenantContextDep,
+    current_user: User = Depends(get_current_user),
+    svc=Depends(get_chat_service),
+):
+    session_service = getattr(svc, "chat_session_service", None)
+    if session_service is None:
+        raise HTTPException(status_code=503, detail="Chat session storage unavailable")
+    payload = session_service.get_session_payload(session_id)
+    if payload is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return payload
+
+
+@router.get("/chat/query-runs/{query_run_id}/sources")
+@limiter.limit("60/minute")
+async def get_query_run_sources(
+    request: Request,
+    query_run_id: str,
+    tenant: RequiredTenantContextDep,
+    current_user: User = Depends(get_current_user),
+    svc=Depends(get_chat_service),
+):
+    retrieval = getattr(svc, "retrieval_service", None)
+    if retrieval is None or not hasattr(retrieval, "get_query_context_download"):
+        raise HTTPException(status_code=404, detail="Sources not found")
+    download = retrieval.get_query_context_download(query_run_id)
+    if download is None:
+        raise HTTPException(status_code=404, detail="Sources not found")
+    import json
+
+    data = json.loads((download.get("body") or b"{}").decode("utf-8"))
+    return {"query_run_id": query_run_id, "citations": data.get("citations") or []}
+
+
+@router.get("/chat/query-runs/{query_run_id}/context")
+@limiter.limit("60/minute")
+async def get_query_run_context(
+    request: Request,
+    query_run_id: str,
+    tenant: RequiredTenantContextDep,
+    current_user: User = Depends(get_current_user),
+    svc=Depends(get_chat_service),
+):
+    retrieval = getattr(svc, "retrieval_service", None)
+    if retrieval is None or not hasattr(retrieval, "get_query_context_download"):
+        raise HTTPException(status_code=404, detail="Context not found")
+    download = retrieval.get_query_context_download(query_run_id)
+    if download is None:
+        raise HTTPException(status_code=404, detail="Context not found")
+    import json
+
+    return json.loads((download.get("body") or b"{}").decode("utf-8"))
+
+
 @router.get("/chat/sources/{query_run_id}/{source_id}/download")
 @limiter.limit("60/minute")
 async def chat_source_download(
