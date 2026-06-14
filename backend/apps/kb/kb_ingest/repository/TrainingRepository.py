@@ -27,6 +27,11 @@ class TrainingRepository:
     def __init__(self, session_factory) -> None:
         self._session_factory = session_factory
 
+    def ensure_active_knowledge_base(self, knowledge_base_id: str) -> None:
+        from apps.kb.kb_ingest.validation.knowledge_base_guard import require_active_knowledge_base
+
+        require_active_knowledge_base(self._session_factory, knowledge_base_id)
+
     def get_batch(self, batch_id: str, *, tenant: str | None = None) -> TrainingBatch | None:
         with self._session_factory() as session:
             batch = session.get(TrainingBatch, batch_id)
@@ -80,6 +85,37 @@ class TrainingRepository:
                 .all()
             )
             return batches, total
+
+    def list_items_for_knowledge_base(
+        self,
+        knowledge_base_id: str,
+        *,
+        limit: int = 500,
+        offset: int = 0,
+    ) -> tuple[list[TrainingItem], int]:
+        limit = max(1, min(int(limit), 500))
+        offset = max(0, int(offset))
+        with self._session_factory() as session:
+            total = int(
+                session.execute(
+                    select(func.count(TrainingItem.id)).where(
+                        TrainingItem.knowledge_base_id == knowledge_base_id
+                    )
+                ).scalar_one()
+                or 0
+            )
+            items = list(
+                session.execute(
+                    select(TrainingItem)
+                    .where(TrainingItem.knowledge_base_id == knowledge_base_id)
+                    .order_by(TrainingItem.created_at.desc(), TrainingItem.id.desc())
+                    .offset(offset)
+                    .limit(limit)
+                )
+                .scalars()
+                .all()
+            )
+            return items, total
 
     def list_items_for_batches(self, batch_ids: list[str]) -> dict[str, list[TrainingItem]]:
         if not batch_ids:

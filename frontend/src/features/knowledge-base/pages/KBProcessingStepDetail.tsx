@@ -8,7 +8,7 @@ import { useTranslation } from "../../../i18n";
 import { getApiErrorMessage } from "../../../utils/getApiErrorMessage";
 import { formatDateTime } from "../../../utils/dateTimeFormatting";
 import { useLocaleSettings } from "../../settings/hooks/useSettings";
-import ProcessingKeyValueTable from "../components/monitor/ProcessingKeyValueTable";
+import ProcessingStepSummaryPanel from "../components/monitor/ProcessingStepSummaryPanel";
 import ProcessingMonitorBreadcrumb from "../components/monitor/ProcessingMonitorBreadcrumb";
 import ProcessingStatusBadge from "../components/monitor/ProcessingStatusBadge";
 import { useProcessingMonitorBundle } from "../hooks/useProcessingMonitorBundle";
@@ -17,10 +17,10 @@ import {
   buildItemCatalogFromRuns,
   buildPipelineTimelineCompact,
   findStepRow,
-  flattenSummary,
   formatDurationMs,
   translateProcessingMonitorKey,
 } from "../utils/processingMonitorUtils";
+import { buildStepSummaryDisplay } from "../utils/stepSummaryDisplay";
 
 export default function KBProcessingStepDetail() {
   const { uuid, itemId: rawItemId, module: rawModule, step: rawStep } = useParams();
@@ -57,8 +57,14 @@ export default function KBProcessingStepDetail() {
     return fromEvents;
   }, [eventsQuery.data?.items, module, step, understandingQuery.data?.steps]);
 
-  const inputRows = useMemo(() => flattenSummary(stepRow?.inputSummary ?? {}, "input"), [stepRow]);
-  const outputRows = useMemo(() => flattenSummary(stepRow?.outputSummary ?? {}, "output"), [stepRow]);
+  const inputDisplay = useMemo(
+    () => buildStepSummaryDisplay(step, stepRow?.inputSummary ?? {}, "input", t, locale),
+    [locale, step, stepRow, t],
+  );
+  const outputDisplay = useMemo(
+    () => buildStepSummaryDisplay(step, stepRow?.outputSummary ?? {}, "output", t, locale),
+    [locale, step, stepRow, t],
+  );
 
   const error = eventsQuery.error || understandingQuery.error ? getApiErrorMessage(eventsQuery.error ?? understandingQuery.error) : null;
   const monitorUrl = `/kb/monitor/${uuid}`;
@@ -135,14 +141,14 @@ export default function KBProcessingStepDetail() {
             </section>
 
             <div className="grid gap-4 lg:grid-cols-2">
-              <ProcessingKeyValueTable
+              <ProcessingStepSummaryPanel
                 title={t("kb.processingMonitor.inputTitle")}
-                rows={inputRows}
+                display={inputDisplay}
                 emptyLabel={t("kb.processingMonitor.emptyInput")}
               />
-              <ProcessingKeyValueTable
+              <ProcessingStepSummaryPanel
                 title={t("kb.processingMonitor.outputTitle")}
-                rows={outputRows}
+                display={outputDisplay}
                 emptyLabel={t("kb.processingMonitor.emptyOutput")}
               />
             </div>

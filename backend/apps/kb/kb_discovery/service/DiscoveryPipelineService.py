@@ -17,6 +17,7 @@ from apps.kb.kb_discovery.events.discovery_completed_event import add_discovery_
 from apps.kb.kb_discovery.events.discovery_failed_event import add_discovery_failed_event
 from apps.kb.kb_discovery.events.embedding_requested_event import add_embedding_requested_event
 from apps.kb.kb_discovery.repository.DiscoveryJobRepository import DiscoveryJobRepository
+from apps.kb.kb_discovery.service.entity_output_summary import build_entity_extraction_output_summary
 from apps.kb.shared.ports.processing_flow_recorder import (
     NoOpProcessingFlowRecorder,
     ProcessingFlowContext,
@@ -194,7 +195,7 @@ class DiscoveryPipelineService:
                 DiscoveryStep.ENTITY_EXTRACTION,
                 lambda: self._entity.run(ctx, chunks),
                 input_summary={"chunk_count": len(chunks)},
-                output_summary=lambda r: {"entity_count": len(r[0]), "mention_count": len(r[1])},
+                output_summary=lambda r: build_entity_extraction_output_summary(r[0], r[1]),
             )
         except Exception:
             had_optional_failures = True

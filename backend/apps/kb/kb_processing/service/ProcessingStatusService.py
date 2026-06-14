@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any, Protocol
+
 from apps.kb.kb_processing.dto.ProcessingEventSummary import ProcessingEventSummary
 from apps.kb.kb_processing.dto.ProcessingIssueSummary import ProcessingIssueSummary
 from apps.kb.kb_processing.dto.ProcessingListResponses import ProcessingEventsPage, ProcessingIssuesPage
@@ -9,16 +11,30 @@ from apps.kb.kb_processing.repository.ProcessingIssueRepository import Processin
 from apps.kb.kb_processing.service.ProcessingMetricsService import ProcessingMetricsService
 
 
+class _OutputEnricher(Protocol):
+    def enrich(
+        self,
+        *,
+        module: str,
+        step: str,
+        training_item_id: str | None,
+        output_summary_json: dict[str, Any] | None,
+    ) -> dict[str, Any]: ...
+
+
 class ProcessingStatusService:
     def __init__(
         self,
         metrics_service: ProcessingMetricsService,
         event_repository: ProcessingEventRepository,
         issue_repository: ProcessingIssueRepository,
+        *,
+        output_enricher: _OutputEnricher | None = None,
     ) -> None:
         self._metrics_service = metrics_service
         self._event_repository = event_repository
         self._issue_repository = issue_repository
+        self._output_enricher = output_enricher
 
     def get_metrics(
         self,
@@ -64,10 +80,7 @@ class ProcessingStatusService:
             limit=limit,
             offset=offset,
         )
-        items = [
-            ProcessingEventSummary.model_validate(row, from_attributes=True)
-            for row in rows
-        ]
+        items = [self._to_event_summary(row) for row in rows]
         total = self._event_repository.count_for_knowledge_base(
             knowledge_base_id,
             training_item_id=training_item_id,
@@ -99,6 +112,20 @@ class ProcessingStatusService:
             for row in rows
         ]
         return ProcessingIssuesPage(items=items, total=len(items), limit=limit, offset=offset)
+
+    def _to_event_summary(self, row) -> ProcessingEventSummary:
+        summary = ProcessingEventSummary.model_validate(row, from_attributes=True)
+        if self._output_enricher is None:
+            return summary
+        enriched_output = self._output_enricher.enrich(
+            module=summary.module,
+            step=summary.step,
+            training_item_id=summary.training_item_id,
+            output_summary_json=summary.output_summary_json,
+        )
+        if enriched_output == summary.output_summary_json:
+            return summary
+        return summary.model_copy(update={"output_summary_json": enriched_output})
 
 
 __all__ = ["ProcessingStatusService"]

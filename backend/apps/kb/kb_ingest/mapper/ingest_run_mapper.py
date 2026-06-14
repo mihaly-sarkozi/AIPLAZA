@@ -93,6 +93,47 @@ def to_ingest_run_response(batch: TrainingBatch, items: list[TrainingItem]) -> I
     )
 
 
+def to_synthetic_ingest_run_from_items(
+    knowledge_base_id: str,
+    batch_id: str,
+    items: list[TrainingItem],
+) -> IngestRunResponse:
+    ingest_items = [
+        to_ingest_item_response(item, index=index, batch_id=batch_id, kb_id=knowledge_base_id)
+        for index, item in enumerate(items)
+    ]
+    total_char_count = sum(_char_count(item) or 0 for item in items)
+    created_at = min(item.created_at for item in items)
+    updated_at = max((item.updated_at or item.created_at) for item in items)
+    accepted = sum(1 for item in items if item.status == TrainingItemStatus.ACCEPTED.value)
+    failed = sum(1 for item in items if item.status == TrainingItemStatus.FAILED.value)
+    duplicate = sum(1 for item in items if item.duplicate_of_item_id)
+    rejected = sum(1 for item in items if item.status == TrainingItemStatus.REJECTED.value)
+    metadata: dict = {"synthetic_run": True}
+    if total_char_count > 0:
+        metadata["total_char_count"] = total_char_count
+    return IngestRunResponse(
+        id=batch_id,
+        corpus_uuid=knowledge_base_id,
+        input_channel="legacy",
+        status=TrainingBatchStatus.COMPLETED.value,
+        batch_size=len(items),
+        queued_count=0,
+        processing_count=0,
+        completed_count=max(accepted, len(items)),
+        failed_count=failed,
+        duplicate_count=duplicate,
+        rejected_count=rejected,
+        created_at=created_at,
+        completed_at=updated_at,
+        updated_at=updated_at,
+        created_by=0,
+        metadata=metadata,
+        items=ingest_items,
+        events=[],
+    )
+
+
 def to_ingest_run_from_status(status: TrainingBatchStatusResponse) -> IngestRunResponse:
     batch_row = status.batch
     items = status.items
@@ -143,4 +184,8 @@ def to_ingest_run_from_status(status: TrainingBatchStatusResponse) -> IngestRunR
     )
 
 
-__all__ = ["to_ingest_run_from_status", "to_ingest_run_response"]
+__all__ = [
+    "to_ingest_run_from_status",
+    "to_ingest_run_response",
+    "to_synthetic_ingest_run_from_items",
+]

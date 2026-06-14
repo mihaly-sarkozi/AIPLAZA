@@ -28,7 +28,11 @@ from core.modules.tenant.repositories.tenant_repository import TenantRepository
 from core.modules.tenant.schema.service import drop_tenant_schema, upgrade_tenant_schema
 from core.modules.tenant.slug.policy import initial_demo_knowledge_base_name, normalize_demo_locale
 from core.modules.users.models.user_orm import UserORM
-from shared.object_storage.service import get_object_storage
+from apps.kb.shared.qdrant_kb_collections import (
+    delete_qdrant_collections,
+    ensure_kb_qdrant_collection,
+    list_qdrant_collection_names,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -73,11 +77,13 @@ class TenantResetService:
             slug=normalized_slug,
             owner_user_id=owner_user_id,
         )
+        qdrant_collections = self._snapshot_qdrant_collections(normalized_slug)
         self._purge_public_tenant_data(tenant_id)
         self._purge_object_storage(normalized_slug)
 
         engine = self._get_engine()
         drop_tenant_schema(engine, normalized_slug)
+        delete_qdrant_collections(qdrant_collections)
         upgrade_tenant_schema(engine, normalized_slug)
 
         self._restore_owner(
@@ -90,6 +96,7 @@ class TenantResetService:
             owner_user_id=owner_user_id,
             owner_snapshot=owner_snapshot,
         )
+        self._ensure_default_kb_qdrant_collection(normalized_slug)
         self._reset_billing_and_config(tenant_id=tenant_id, slug=normalized_slug, owner_user_id=owner_user_id)
         invalidate_tenant_cache(normalized_slug)
 
@@ -195,6 +202,35 @@ class TenantResetService:
                     )
                 )
                 db.commit()
+        finally:
+            current_tenant_schema.reset(token)
+
+    def _snapshot_qdrant_collections(self, slug: str) -> list[str]:
+        token = current_tenant_schema.set(slug)
+        try:
+            return list_qdrant_collection_names(self._sf, include_deleted=True)
+        except Exception:
+            logger.exception("tenant_reset_qdrant_snapshot_failed", extra={"tenant_slug": slug})
+            return []
+        finally:
+            current_tenant_schema.reset(token)
+
+    def _ensure_default_kb_qdrant_collection(self, slug: str) -> None:
+        token = current_tenant_schema.set(slug)
+        try:
+            with self._sf() as db:
+                row = (
+                    db.query(KnowledgeBaseORM)
+                    .filter(KnowledgeBaseORM.deleted_at.is_(None))
+                    .order_by(KnowledgeBaseORM.id.asc())
+                    .first()
+                )
+                collection = str(row.qdrant_collection_name or "").strip() if row is not None else ""
+            if collection:
+                if not ensure_kb_qdrant_collection(collection, raise_on_error=True):
+                    raise RuntimeError(f"tenant_reset_qdrant_ensure_failed:{collection}")
+        except Exception:
+            logger.exception("tenant_reset_qdrant_ensure_failed", extra={"tenant_slug": slug})
         finally:
             current_tenant_schema.reset(token)
 

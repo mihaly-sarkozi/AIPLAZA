@@ -19,6 +19,7 @@ import {
   buildItemCatalogFromRuns,
   buildPipelineTimelineCompact,
   deriveActiveProgress,
+  deriveFlowProcessingDisplay,
   translateProcessingMonitorKey,
 } from "../utils/processingMonitorUtils";
 
@@ -50,9 +51,21 @@ export default function KBProcessingFlowDetail() {
     [eventsQuery.data?.items, understandingQuery.data?.steps],
   );
 
+  const job = understandingQuery.data?.job;
+
   const activeProgress = useMemo(
     () => deriveActiveProgress(eventsQuery.data?.items ?? []),
     [eventsQuery.data?.items],
+  );
+
+  const processingDisplay = useMemo(
+    () =>
+      deriveFlowProcessingDisplay(
+        eventsQuery.data?.items ?? [],
+        issuesQuery.data?.items ?? [],
+        job?.status,
+      ),
+    [eventsQuery.data?.items, issuesQuery.data?.items, job?.status],
   );
 
   const chunkSummaryRows = useMemo(() => {
@@ -73,7 +86,6 @@ export default function KBProcessingFlowDetail() {
       ? getApiErrorMessage(eventsQuery.error ?? issuesQuery.error ?? understandingQuery.error)
       : null;
 
-  const job = understandingQuery.data?.job;
   const monitorUrl = `/kb/monitor/${uuid}`;
 
   return (
@@ -120,16 +132,27 @@ export default function KBProcessingFlowDetail() {
           </div>
           <div>
             <p className="text-xs uppercase tracking-wide text-[var(--color-muted)]">{t("kb.processingMonitor.jobStatus")}</p>
-            <p className="mt-1">
-              {job ? (
-                <ProcessingStatusBadge
-                  status={job.status}
-                  label={translateProcessingMonitorKey(t, job.status, "jobStatus")}
-                />
-              ) : (
-                <span className="text-sm text-[var(--color-muted)]">—</span>
-              )}
-            </p>
+            <div className="mt-1">
+              <ProcessingStatusBadge
+                status={processingDisplay.badgeStatus}
+                label={translateProcessingMonitorKey(t, processingDisplay.flowStatus, "flowStatus")}
+              />
+              {processingDisplay.flowStatus !== "completed" &&
+              processingDisplay.module &&
+              processingDisplay.step ? (
+                <p className="mt-1 text-sm font-medium text-[var(--color-foreground)]">
+                  {translateProcessingMonitorKey(t, processingDisplay.module, "module")}
+                  {" · "}
+                  {translateProcessingMonitorKey(t, processingDisplay.step, "stepOrStage")}
+                </p>
+              ) : processingDisplay.flowStatus !== "completed" &&
+                processingDisplay.source === "job" &&
+                job?.status ? (
+                <p className="mt-1 text-sm text-[var(--color-muted)]">
+                  {translateProcessingMonitorKey(t, job.status, "jobStatus")}
+                </p>
+              ) : null}
+            </div>
           </div>
           <div>
             <p className="text-xs uppercase tracking-wide text-[var(--color-muted)]">{t("kb.processingMonitor.chunkCount")}</p>
@@ -156,25 +179,6 @@ export default function KBProcessingFlowDetail() {
           ) : null}
         </section>
 
-        {issuesQuery.data?.items.length ? (
-          <section className="mb-6">
-            <h2 className="mb-3 text-lg font-semibold">{t("kb.processingMonitor.issuesTitle")}</h2>
-            <div className="space-y-2">
-              {issuesQuery.data.items.map((issue) => (
-                <div key={issue.id} className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm">
-                  <p className="font-medium text-amber-950">
-                    {translateProcessingMonitorKey(t, issue.issue_code, "issue")} · {translateProcessingMonitorKey(t, issue.severity, "severity")}
-                  </p>
-                  {issue.issue_message ? <p className="mt-1 text-amber-900">{issue.issue_message}</p> : null}
-                  <p className="mt-1 text-xs text-amber-800">
-                    {translateProcessingMonitorKey(t, issue.module, "module")} / {translateProcessingMonitorKey(t, issue.step ?? issue.stage, "stepOrStage")}
-                  </p>
-                </div>
-              ))}
-            </div>
-          </section>
-        ) : null}
-
         <section className="mb-6">
           <h2 className="mb-3 text-lg font-semibold">{t("kb.processingMonitor.stepsTitle")}</h2>
           {uuid && itemId ? (
@@ -182,6 +186,7 @@ export default function KBProcessingFlowDetail() {
               kbUuid={uuid}
               itemId={itemId}
               steps={steps}
+              issues={issuesQuery.data?.items ?? []}
               locale={locale}
               timezone={settings?.timezone}
               dateFormat={settings?.date_format}

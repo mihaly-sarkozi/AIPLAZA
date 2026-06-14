@@ -46,6 +46,7 @@ class TrainingTextService:
         created_by: int,
         request: TrainingTextRequest,
     ) -> TrainingTextResult:
+        self._repository.ensure_active_knowledge_base(knowledge_base_id)
         title = normalize_title(request.title, config=self._config)
         text = validate_text(request.content, config=self._config)
         content_hash = sha256_text(text)

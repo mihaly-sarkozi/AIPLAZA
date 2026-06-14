@@ -64,7 +64,9 @@ export function useChatSession({
     setSelectedChatKbUuid("");
   }, [kbListFetched, selectableChatKbList, selectedChatKbUuid, setSelectedChatKbUuid]);
 
-  const effectiveTrainKbUuid = selectedTrainKbUuid || trainableKbList[0]?.uuid || "";
+    const effectiveTrainKbUuid = trainableKbList.some((kb) => kb.uuid === selectedTrainKbUuid)
+      ? selectedTrainKbUuid
+      : trainableKbList[0]?.uuid ?? "";
   const effectiveChatKbUuid = selectableChatKbList.some((kb) => kb.uuid === selectedChatKbUuid) ? selectedChatKbUuid : "";
   const selectedTopKbUuid = chatMode === "train" ? effectiveTrainKbUuid : effectiveChatKbUuid;
   const selectedTopKbLabel = useMemo(() => {

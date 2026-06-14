@@ -240,6 +240,25 @@ class ContentRepository:
                 session.expunge(row)
             return list(rows)
 
+    def list_normalized_parts_for_item(self, training_item_id: str) -> list[NormalizedContentPart]:
+        with self._session_factory() as session:
+            query = (
+                select(NormalizedContentPart)
+                .where(
+                    NormalizedContentPart.training_item_id == training_item_id,
+                    NormalizedContentPart.status == "completed",
+                )
+                .order_by(
+                    NormalizedContentPart.document_order.asc().nullsfirst(),
+                    NormalizedContentPart.page_number.asc().nullsfirst(),
+                    NormalizedContentPart.part_index.asc(),
+                )
+            )
+            rows = session.execute(query).scalars().all()
+            for row in rows:
+                session.expunge(row)
+            return list(rows)
+
     def count_usable_parts(self, training_item_id: str) -> int:
         usable = {part_type.value for part_type in NORMALIZABLE_PART_TYPES}
         with self._session_factory() as session:

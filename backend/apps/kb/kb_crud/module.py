@@ -14,7 +14,7 @@ class KbCrudModule:
         app.include_router(router)
 
     def register_services(self, container) -> None:
-        from apps.kb.kb_crud.adapters.LegacyKnowledgeContentCleanup import LegacyKnowledgeContentCleanup
+        from apps.kb.kb_crud.adapters.KnowledgeBaseContentCleanup import KnowledgeBaseContentCleanup
         from apps.kb.kb_crud.adapters.LegacyKnowledgeStorageMetrics import LegacyKnowledgeStorageMetrics
         from apps.kb.kb_crud.adapters.LegacyKnowledgeTrainingSummary import LegacyKnowledgeTrainingSummary
         from apps.kb.kb_crud.adapters.PlatformUsageLimit import PlatformUsageLimit
@@ -47,7 +47,10 @@ class KbCrudModule:
             KB_CRUD_USER_DIRECTORY,
             PlatformUserDirectory(container.user_repository),
         )
-        container.register_repository(KB_CRUD_CONTENT_CLEANUP, LegacyKnowledgeContentCleanup())
+        container.register_repository(
+            KB_CRUD_CONTENT_CLEANUP,
+            KnowledgeBaseContentCleanup(container.session_factory),
+        )
         container.register_repository(KB_CRUD_STORAGE_METRICS, LegacyKnowledgeStorageMetrics())
         container.register_repository(KB_CRUD_TRAINING_SUMMARY, LegacyKnowledgeTrainingSummary())
         container.register_repository(KB_CRUD_USAGE_LIMIT, PlatformUsageLimit())

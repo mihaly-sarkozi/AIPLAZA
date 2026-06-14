@@ -17,6 +17,7 @@ class TrainingErrorCode(str, Enum):
     STORAGE_ERROR = "storage_error"
     QUEUE_UNAVAILABLE = "queue_unavailable"
     INTERNAL_ERROR = "internal_error"
+    KNOWLEDGE_BASE_NOT_FOUND = "knowledge_base_not_found"
 
 
 __all__ = ["TrainingErrorCode"]

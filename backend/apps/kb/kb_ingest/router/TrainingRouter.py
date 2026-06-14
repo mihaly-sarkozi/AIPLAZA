@@ -52,6 +52,18 @@ def _coded_error_detail(exc: object, *, fallback_code: str) -> dict[str, object]
     return detail
 
 
+def _raise_training_validation_http(exc: TrainingValidationError) -> None:
+    if exc.code == TrainingErrorCode.KNOWLEDGE_BASE_NOT_FOUND.value:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=_coded_error_detail(exc, fallback_code=TrainingErrorCode.KNOWLEDGE_BASE_NOT_FOUND.value),
+        )
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail=_coded_error_detail(exc, fallback_code=TrainingErrorCode.VALIDATION_ERROR.value),
+    )
+
+
 @router.post("/{kb_id}/training/text", response_model=TrainingTextResponse)
 async def create_text_training_batch(
     kb_id: str,
@@ -79,10 +91,7 @@ async def create_text_training_batch(
             detail=_coded_error_detail(exc, fallback_code=TrainingErrorCode.DUPLICATE_CONTENT.value),
         ) from exc
     except TrainingValidationError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=_coded_error_detail(exc, fallback_code=TrainingErrorCode.VALIDATION_ERROR.value),
-        ) from exc
+        _raise_training_validation_http(exc)
     except TrainingQueueUnavailableError as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,

@@ -48,6 +48,9 @@ class StartIndexingService:
                 IndexingErrorCode.EMBEDDING_JOB_NOT_FOUND.value,
                 embedding_job_id=embedding_job_id,
             )
+        canonical_kb_id = str(embedding_job.get("knowledge_base_id") or "").strip()
+        if canonical_kb_id and canonical_kb_id != knowledge_base_id:
+            knowledge_base_id = canonical_kb_id
         embedding_status = str(embedding_job.get("status") or "")
         if embedding_status not in _ALLOWED_EMBEDDING_STATUSES:
             raise IndexingProcessingError(

@@ -11,6 +11,17 @@ import {
 
 export type ProcessingFlowStatus = "completed" | "failed" | "running" | "partial" | "unknown";
 
+const BLOCKING_ISSUE_SEVERITIES = new Set(["ERROR", "CRITICAL"]);
+
+/** Nyitott, feldolgozást blokkoló issue (hiba/kritikus) — figyelmeztetés nem számít. */
+export function isOpenBlockingIssue(issue: ProcessingIssueSummary): boolean {
+  return issue.status === "OPEN" && BLOCKING_ISSUE_SEVERITIES.has(issue.severity);
+}
+
+export function countOpenBlockingIssues(issues: ProcessingIssueSummary[]): number {
+  return issues.filter(isOpenBlockingIssue).length;
+}
+
 export type ProcessingFlowSummary = {
   itemId: string;
   title: string;
@@ -49,6 +60,19 @@ const TERMINAL_STATUSES = new Set(["completed", "failed", "skipped"]);
 
 function normalizeStatus(status: string | null | undefined): string {
   return String(status ?? "").trim().toLowerCase();
+}
+
+/** Esemény / issue csoportosítási kulcs: training_item_id, metadata, vagy job_id fallback. */
+export function resolveFlowItemId(
+  row: Pick<ProcessingEventSummary, "training_item_id" | "job_id" | "metadata_json">,
+): string | null {
+  const itemId = String(row.training_item_id ?? "").trim();
+  if (itemId) return itemId;
+  const metaItemId = String(row.metadata_json?.training_item_id ?? "").trim();
+  if (metaItemId) return metaItemId;
+  const jobId = String(row.job_id ?? "").trim();
+  if (jobId) return `job:${jobId}`;
+  return null;
 }
 
 function stepKey(module: string, step: string): string {
@@ -92,17 +116,34 @@ export function buildItemCatalogFromRuns(runs: IngestRun[]): Map<string, { title
   return catalog;
 }
 
+function enrichCatalogFromEvents(
+  catalog: Map<string, { title: string; inputType: string; charCount: number | null }>,
+  events: ProcessingEventSummary[],
+): void {
+  for (const event of events) {
+    const itemId = resolveFlowItemId(event);
+    if (!itemId || catalog.has(itemId)) continue;
+    const title =
+      String(event.metadata_json?.title ?? event.metadata_json?.display_name ?? "").trim() ||
+      (itemId.startsWith("job:") ? itemId.slice(4) : itemId);
+    catalog.set(itemId, {
+      title,
+      inputType: String(event.metadata_json?.input_type ?? "unknown"),
+      charCount: null,
+    });
+  }
+}
+
 export function deriveFlowStatus(events: ProcessingEventSummary[], issues: ProcessingIssueSummary[]): ProcessingFlowStatus {
   const terminal = events.filter((event) => TERMINAL_STATUSES.has(normalizeStatus(event.status)));
   if (terminal.some((event) => normalizeStatus(event.status) === "failed")) return "failed";
-  const openIssues = issues.filter((issue) => issue.status === "OPEN");
-  if (openIssues.some((issue) => ["ERROR", "CRITICAL"].includes(issue.severity))) return "failed";
-  if (openIssues.length > 0) return "partial";
+  if (issues.some(isOpenBlockingIssue)) return "failed";
+
   const hasIndexingDone = terminal.some(
     (event) =>
       event.module === "kb_indexing" &&
       event.step === "PIPELINE" &&
-      normalizeStatus(event.status) === "completed"
+      normalizeStatus(event.status) === "completed",
   );
   if (hasIndexingDone) return "completed";
 
@@ -182,17 +223,207 @@ export function deriveActiveProgress(events: ProcessingEventSummary[]): {
   };
 }
 
+const PIPELINE_MODULE_ORDER = [
+  "kb_understanding",
+  "kb_discovery",
+  "kb_embedding",
+  "kb_indexing",
+] as const;
+
+export type FlowProcessingDisplay = {
+  badgeStatus: string;
+  flowStatus: ProcessingFlowStatus;
+  module: string | null;
+  step: string | null;
+  stage: string | null;
+  source: "events" | "job";
+  jobStatus: string | null;
+};
+
+function findPipelineHead(events: ProcessingEventSummary[]): {
+  module: string;
+  step: string;
+  stage: string;
+} | null {
+  for (const moduleName of [...PIPELINE_MODULE_ORDER].reverse()) {
+    const pipelineDone = events.some(
+      (event) =>
+        event.module === moduleName &&
+        event.step === "PIPELINE" &&
+        normalizeStatus(event.status) === "completed",
+    );
+    if (pipelineDone) {
+      const match = events.find(
+        (event) => event.module === moduleName && event.step === "PIPELINE",
+      );
+      return {
+        module: moduleName,
+        step: "PIPELINE",
+        stage: match?.stage ?? moduleName,
+      };
+    }
+  }
+
+  const sorted = [...events].sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at));
+  const latest = sorted.find((event) => normalizeStatus(event.status) !== "pending");
+  if (!latest) return null;
+  return {
+    module: latest.module,
+    step: latest.step,
+    stage: latest.stage,
+  };
+}
+
+function jobStatusFallbackPosition(jobStatus: string | null | undefined): {
+  badgeStatus: string;
+  flowStatus: ProcessingFlowStatus;
+  module: string | null;
+  step: string | null;
+  stage: string | null;
+} {
+  const status = String(jobStatus ?? "").trim().toLowerCase();
+  if (!status) {
+    return { badgeStatus: "unknown", flowStatus: "unknown", module: null, step: null, stage: null };
+  }
+  if (status === "failed" || status === "retryable") {
+    return {
+      badgeStatus: "failed",
+      flowStatus: "failed",
+      module: "kb_understanding",
+      step: "PIPELINE",
+      stage: "UNDERSTANDING",
+    };
+  }
+  if (status === "ready_for_discovery") {
+    return {
+      badgeStatus: "running",
+      flowStatus: "running",
+      module: "kb_discovery",
+      step: "DETECT_LANGUAGE",
+      stage: "LANGUAGE_DETECTION",
+    };
+  }
+  if (["queued", "extracting", "normalizing", "chunking", "validating"].includes(status)) {
+    const stepMap: Record<string, string> = {
+      extracting: "EXTRACT_CONTENT",
+      normalizing: "NORMALIZE_PARTS",
+      chunking: "BUILD_CHUNKS",
+      validating: "VALIDATE_RESULT",
+      queued: "EXTRACT_CONTENT",
+    };
+    return {
+      badgeStatus: "running",
+      flowStatus: "running",
+      module: "kb_understanding",
+      step: stepMap[status] ?? "PIPELINE",
+      stage: status.toUpperCase(),
+    };
+  }
+  if (status === "partial") {
+    return {
+      badgeStatus: "partial",
+      flowStatus: "partial",
+      module: "kb_understanding",
+      step: "PIPELINE",
+      stage: "UNDERSTANDING",
+    };
+  }
+  return {
+    badgeStatus: "unknown",
+    flowStatus: "unknown",
+    module: "kb_understanding",
+    step: "PIPELINE",
+    stage: "UNDERSTANDING",
+  };
+}
+
+/** Összesített feldolgozási állapot: pipeline flow + aktuális modul/ lépés (nem csak understanding job). */
+export function deriveFlowProcessingDisplay(
+  events: ProcessingEventSummary[],
+  issues: ProcessingIssueSummary[],
+  jobStatus?: string | null,
+): FlowProcessingDisplay {
+  if (events.length) {
+    const flowStatus = deriveFlowStatus(events, issues);
+    const active = deriveActiveProgress(events);
+    if (active) {
+      return {
+        badgeStatus: "running",
+        flowStatus,
+        module: active.module,
+        step: active.step,
+        stage: active.stage,
+        source: "events",
+        jobStatus: jobStatus ?? null,
+      };
+    }
+
+    const head = findPipelineHead(events);
+    const failedEvent = [...events]
+      .sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at))
+      .find((event) => normalizeStatus(event.status) === "failed");
+
+    if (flowStatus === "failed" && failedEvent) {
+      return {
+        badgeStatus: "failed",
+        flowStatus,
+        module: failedEvent.module,
+        step: failedEvent.step,
+        stage: failedEvent.stage,
+        source: "events",
+        jobStatus: jobStatus ?? null,
+      };
+    }
+
+    const indexingComplete = events.some(
+      (event) =>
+        event.module === "kb_indexing" &&
+        event.step === "PIPELINE" &&
+        normalizeStatus(event.status) === "completed",
+    );
+    if (indexingComplete) {
+      return {
+        badgeStatus: "completed",
+        flowStatus: "completed",
+        module: "kb_indexing",
+        step: "PIPELINE",
+        stage: head?.stage ?? "INDEXING",
+        source: "events",
+        jobStatus: jobStatus ?? null,
+      };
+    }
+
+    return {
+      badgeStatus: flowStatus,
+      flowStatus,
+      module: head?.module ?? null,
+      step: head?.step ?? null,
+      stage: head?.stage ?? null,
+      source: "events",
+      jobStatus: jobStatus ?? null,
+    };
+  }
+
+  const fallback = jobStatusFallbackPosition(jobStatus);
+  return {
+    ...fallback,
+    source: "job",
+    jobStatus: jobStatus ?? null,
+  };
+}
+
 export function buildFlowSummaries(
   runs: IngestRun[],
   events: ProcessingEventSummary[],
   issues: ProcessingIssueSummary[]
 ): ProcessingFlowSummary[] {
   const catalog = buildItemCatalogFromRuns(runs);
+  enrichCatalogFromEvents(catalog, events);
   const eventsByItem = new Map<string, ProcessingEventSummary[]>();
   const issuesByItem = new Map<string, ProcessingIssueSummary[]>();
 
   for (const event of events) {
-    const itemId = event.training_item_id;
+    const itemId = resolveFlowItemId(event);
     if (!itemId) continue;
     const bucket = eventsByItem.get(itemId) ?? [];
     bucket.push(event);
@@ -200,7 +431,7 @@ export function buildFlowSummaries(
   }
 
   for (const issue of issues) {
-    const itemId = issue.training_item_id;
+    const itemId = resolveFlowItemId(issue);
     if (!itemId) continue;
     const bucket = issuesByItem.get(itemId) ?? [];
     bucket.push(issue);
@@ -217,6 +448,7 @@ export function buildFlowSummaries(
     const stepRows = buildStepRows(itemEvents);
     const lastEvent = itemEvents[0] ?? null;
     const active = deriveActiveProgress(itemEvents);
+    const pipelineHead = active ? null : findPipelineHead(itemEvents);
     flows.push({
       itemId,
       title: meta?.title ?? itemId,
@@ -226,11 +458,11 @@ export function buildFlowSummaries(
       status: deriveFlowStatus(itemEvents, itemIssues),
       completedSteps: stepRows.filter((row) => normalizeStatus(row.status) === "completed").length,
       failedSteps: stepRows.filter((row) => normalizeStatus(row.status) === "failed").length,
-      openIssues: itemIssues.filter((issue) => issue.status === "OPEN").length,
+      openIssues: countOpenBlockingIssues(itemIssues),
       latestMessage: active?.message ?? lastEvent?.message ?? itemIssues[0]?.issue_message ?? null,
-      activeModule: active?.module ?? null,
-      activeStage: active?.stage ?? null,
-      activeStep: active?.step ?? null,
+      activeModule: active?.module ?? pipelineHead?.module ?? null,
+      activeStage: active?.stage ?? pipelineHead?.stage ?? null,
+      activeStep: active?.step ?? pipelineHead?.step ?? null,
       activeEventType: active?.eventType ?? null,
     });
   }
@@ -240,6 +472,37 @@ export function buildFlowSummaries(
     const bTime = b.lastEventAt ? Date.parse(b.lastEventAt) : 0;
     return bTime - aTime;
   });
+}
+
+function normalizeIssueToken(value: string | null | undefined): string {
+  return String(value ?? "").trim().toLowerCase().replace(/_/g, "");
+}
+
+/** Nyitott issue illesztése pipeline lépés sorhoz (modul + stage/step). */
+export function issueMatchesStep(
+  issue: ProcessingIssueSummary,
+  step: ProcessingStepRow,
+): boolean {
+  if (issue.module !== step.module) return false;
+
+  const issueStep = normalizeIssueToken(issue.step);
+  const issueStage = normalizeIssueToken(issue.stage);
+  const stepStep = normalizeIssueToken(step.step);
+  const stepStage = normalizeIssueToken(step.stage);
+
+  if (issueStep && issueStep === stepStep) return true;
+  if (issueStep === "enrichment" && stepStep === "enrichlocal") return true;
+  if (issueStage && issueStage === stepStage) return true;
+  if (issueStage.includes("enrichment") && stepStep === "enrichlocal") return true;
+  if (step.step === "PIPELINE" && issueStep === "pipeline") return true;
+  return false;
+}
+
+export function getOpenIssuesForStep(
+  issues: ProcessingIssueSummary[],
+  step: ProcessingStepRow,
+): ProcessingIssueSummary[] {
+  return issues.filter((issue) => issue.status === "OPEN" && issueMatchesStep(issue, step));
 }
 
 export function buildStepRows(events: ProcessingEventSummary[]): ProcessingStepRow[] {
@@ -454,7 +717,9 @@ type ProcessingMonitorLabelKind =
   | "status"
   | "inputType"
   | "severity"
-  | "stepOrStage";
+  | "stepOrStage"
+  | "entityType"
+  | "mentionType";
 
 function prefixesForKind(kind: ProcessingMonitorLabelKind): string[] {
   switch (kind) {
@@ -478,6 +743,10 @@ function prefixesForKind(kind: ProcessingMonitorLabelKind): string[] {
       return [`${MONITOR_PREFIX}.inputTypes`];
     case "severity":
       return [`${MONITOR_PREFIX}.severities`];
+    case "entityType":
+      return [`${MONITOR_PREFIX}.entityTypes`];
+    case "mentionType":
+      return [`${MONITOR_PREFIX}.mentionTypes`];
     case "stepOrStage":
       return [
         `${MONITOR_PREFIX}.steps`,

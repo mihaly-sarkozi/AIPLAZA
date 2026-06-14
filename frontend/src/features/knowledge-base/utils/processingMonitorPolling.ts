@@ -1,7 +1,7 @@
 import type { ProcessingEventSummary } from "../../../api/services/kb/kbProcessingApi";
 import type { IngestRun } from "../../../api/services/kb/types";
 import { isTrainingActive } from "./trainingProgress";
-import { deriveFlowStatus, type ProcessingFlowStatus } from "./processingMonitorUtils";
+import { deriveFlowStatus, resolveFlowItemId, type ProcessingFlowStatus } from "./processingMonitorUtils";
 
 export const PROCESSING_MONITOR_POLL_MS = 2000;
 
@@ -25,7 +25,7 @@ export function computeMonitorPollInterval(
   }
 
   if (trainingItemId) {
-    const itemEvents = eventList.filter((event) => event.training_item_id === trainingItemId);
+    const itemEvents = eventList.filter((event) => resolveFlowItemId(event) === trainingItemId);
     if (itemEvents.length && deriveFlowStatus(itemEvents, []) === "running") {
       return PROCESSING_MONITOR_POLL_MS;
     }
@@ -33,10 +33,10 @@ export function computeMonitorPollInterval(
   }
 
   const itemIds = new Set(
-    eventList.map((event) => event.training_item_id).filter((id): id is string => Boolean(id)),
+    eventList.map((event) => resolveFlowItemId(event)).filter((id): id is string => Boolean(id)),
   );
   for (const itemId of itemIds) {
-    const itemEvents = eventList.filter((event) => event.training_item_id === itemId);
+    const itemEvents = eventList.filter((event) => resolveFlowItemId(event) === itemId);
     if (deriveFlowStatus(itemEvents, []) === "running") {
       return PROCESSING_MONITOR_POLL_MS;
     }
@@ -55,12 +55,13 @@ export function countActiveFlows(
     }
   }
   for (const event of events) {
-    if (event.training_item_id) itemIds.add(event.training_item_id);
+    const itemId = resolveFlowItemId(event);
+    if (itemId) itemIds.add(itemId);
   }
 
   let active = 0;
   for (const itemId of itemIds) {
-    const itemEvents = events.filter((event) => event.training_item_id === itemId);
+    const itemEvents = events.filter((event) => resolveFlowItemId(event) === itemId);
     if (deriveFlowStatus(itemEvents, []) === "running") {
       active += 1;
     }

@@ -56,8 +56,8 @@ services:
       APP_ENV: dev
       DATABASE_URL: postgresql+psycopg2://postgres@postgres:5432/aiplaza
       database_url: postgresql+psycopg2://postgres@postgres:5432/aiplaza
-      QDRANT_URL: http://qdrant:6333
-      QDRANT_API_KEY: ""
+      QDRANT_URL: ${QDRANT_URL:-http://qdrant:6333}
+      QDRANT_API_KEY: ${QDRANT_API_KEY:-}
       OBJECT_STORAGE_ENDPOINT: http://minio:9000
       OBJECT_STORAGE_ACCESS_KEY: minioadmin
       OBJECT_STORAGE_SECRET_KEY: minioadmin

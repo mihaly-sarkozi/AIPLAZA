@@ -20,7 +20,12 @@ class QdrantAdapter:
             raise ValueError("Qdrant adapter: hiányzó qdrant_url")
         api_key = str(settings.qdrant_api_key or "").strip() or None
         timeout = int(settings.qdrant_timeout_sec or 120)
-        self._client = QdrantClient(url=url, api_key=api_key, timeout=timeout)
+        self._client = QdrantClient(
+            url=url,
+            api_key=api_key,
+            timeout=timeout,
+            check_compatibility=False,
+        )
 
     @property
     def client(self):
@@ -84,6 +89,20 @@ class QdrantAdapter:
             for point in points
         ]
         self._client.upsert(collection_name=collection_name, points=structs)
+
+    def delete_collection(self, collection_name: str) -> bool:
+        name = str(collection_name or "").strip()
+        if not name:
+            return False
+        if not self.collection_exists(name):
+            return False
+        try:
+            self._client.delete_collection(collection_name=name)
+            logger.info("Qdrant collection törölve: %s", name)
+            return True
+        except Exception:
+            logger.warning("Qdrant collection törlés sikertelen: %s", name, exc_info=True)
+            return False
 
 
 __all__ = ["QdrantAdapter"]

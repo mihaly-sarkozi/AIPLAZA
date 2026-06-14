@@ -15,6 +15,7 @@ import { useProcessingMonitorBundle } from "../hooks/useProcessingMonitorBundle"
 import { useKbList } from "../hooks/useKb";
 import {
   buildFlowSummaries,
+  countOpenBlockingIssues,
   translateProcessingMonitorKey,
 } from "../utils/processingMonitorUtils";
 import { countActiveFlows } from "../utils/processingMonitorPolling";
@@ -27,12 +28,14 @@ export default function KBProcessingMonitor() {
   const { data: kbList = [], isLoading: kbLoading } = useKbList();
   const kb = useMemo(() => kbList.find((item) => item.uuid === uuid), [kbList, uuid]);
 
-  const { runsQuery, eventsQuery, issuesQuery, metricsQuery, isLive } = useProcessingMonitorBundle(uuid);
-
   useEffect(() => {
     if (kbLoading) return;
-    if (!uuid) navigate("/kb", { replace: true });
-  }, [kbLoading, navigate, uuid]);
+    if (!uuid || !kb) {
+      navigate("/kb", { replace: true });
+    }
+  }, [kb, kbLoading, navigate, uuid]);
+
+  const { runsQuery, eventsQuery, issuesQuery, metricsQuery, isLive } = useProcessingMonitorBundle(uuid);
 
   const flows = useMemo(() => {
     const runs = runsQuery.data?.items ?? [];
@@ -49,6 +52,11 @@ export default function KBProcessingMonitor() {
   const primaryActiveFlow = useMemo(
     () => flows.find((flow) => flow.status === "running") ?? null,
     [flows],
+  );
+
+  const blockingIssueCount = useMemo(
+    () => countOpenBlockingIssues(issuesQuery.data?.items ?? []),
+    [issuesQuery.data?.items],
   );
 
   const error =
@@ -96,7 +104,7 @@ export default function KBProcessingMonitor() {
           </div>
           <div>
             <p className="text-xs uppercase tracking-wide text-[var(--color-muted)]">{t("kb.processingMonitor.metrics.openIssues")}</p>
-            <p className="text-lg font-semibold">{metricsQuery.data?.issues_open ?? issuesQuery.data?.items.filter((i) => i.status === "OPEN").length ?? 0}</p>
+            <p className="text-lg font-semibold">{blockingIssueCount}</p>
           </div>
           <div>
             <p className="text-xs uppercase tracking-wide text-[var(--color-muted)]">{t("kb.processingMonitor.metrics.failedDocs")}</p>
@@ -122,13 +130,11 @@ export default function KBProcessingMonitor() {
               <div className="divide-y divide-[var(--color-border)]">
                 {flows.map((flow) => {
                   const detailUrl = `/kb/monitor/${uuid}/flows/${encodeURIComponent(flow.itemId)}`;
-                  const activeLabel =
-                    flow.status === "running" && flow.activeModule
+                  const progressLabel =
+                    flow.status !== "completed" && flow.activeModule && flow.activeStep
                       ? [
                           translateProcessingMonitorKey(t, flow.activeModule, "module"),
-                          flow.activeStep
-                            ? translateProcessingMonitorKey(t, flow.activeStep, "stepOrStage")
-                            : null,
+                          translateProcessingMonitorKey(t, flow.activeStep, "stepOrStage"),
                         ]
                           .filter(Boolean)
                           .join(" · ")
@@ -141,10 +147,10 @@ export default function KBProcessingMonitor() {
                     >
                       <div>
                         <p className="font-medium text-[var(--color-foreground)]">{flow.title}</p>
-                        {activeLabel ? (
-                          <p className="mt-1 text-xs font-medium text-sky-800">{activeLabel}</p>
+                        {progressLabel ? (
+                          <p className="mt-1 text-xs font-medium text-sky-800">{progressLabel}</p>
                         ) : null}
-                        {flow.latestMessage && !activeLabel ? (
+                        {flow.latestMessage && !progressLabel ? (
                           <p className="mt-1 line-clamp-2 text-xs text-[var(--color-muted)]">{flow.latestMessage}</p>
                         ) : null}
                       </div>

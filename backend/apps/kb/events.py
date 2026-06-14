@@ -179,7 +179,10 @@ def make_indexing_services_provider(session_factory: Any):
                     ),
                     knowledge_base_reader=KnowledgeBaseReaderAdapter(session_factory),
                     flow_recorder=processing.flow_recorder,
-                    metrics_updater=processing.metrics_service.update_after_indexing,
+                    metrics_updater=lambda kb_id, tenant_slug: processing.metrics_service.update_after_indexing(
+                        kb_id,
+                        tenant_slug=tenant_slug,
+                    ),
                 )
             return cache["services"]
 

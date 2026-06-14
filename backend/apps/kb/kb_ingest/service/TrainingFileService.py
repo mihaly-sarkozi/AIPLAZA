@@ -46,6 +46,7 @@ class TrainingFileService:
         created_by: int,
         uploads: list[UploadFile],
     ) -> TrainingTextResult:
+        self._repository.ensure_active_knowledge_base(knowledge_base_id)
         if not uploads:
             raise TrainingValidationError(TrainingErrorCode.VALIDATION_ERROR, reason="No files provided.")
         if len(uploads) > self._config.max_files_per_batch:

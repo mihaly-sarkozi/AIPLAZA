@@ -71,11 +71,19 @@ def main() -> int:
                 ),
                 {"from_id": from_id},
             ).scalar_one()
-            if int(count or 0) == 0:
-                continue
-            print(f"{table}: {count} sor")
-            if not args.dry_run:
+        if int(count or 0) == 0:
+            continue
+        print(f"{table}: {count} sor")
+        if not args.dry_run:
+            if table == "kb_processing_metrics":
                 session.execute(
+                    text(
+                        f"DELETE FROM \"{schema}\".{table} "
+                        "WHERE knowledge_base_id = :to_id"
+                    ),
+                    {"to_id": to_id},
+                )
+            session.execute(
                     text(
                         f"UPDATE \"{schema}\".{table} "
                         "SET knowledge_base_id = :to_id "
