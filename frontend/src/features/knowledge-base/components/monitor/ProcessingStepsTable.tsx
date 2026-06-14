@@ -17,6 +17,19 @@ type ProcessingStepsTableProps = {
   timeFormat?: SettingsTimeFormat;
 };
 
+function stageSubtitle(
+  t: (key: string) => string,
+  step: ProcessingStepRow,
+): string | null {
+  const moduleLabel = translateProcessingMonitorKey(t, step.module, "module");
+  const stageLabel = translateProcessingMonitorKey(t, step.stage, "stage");
+  const stepLabel = translateProcessingMonitorKey(t, step.step, "step");
+  if (!stageLabel || stageLabel === moduleLabel || stageLabel === stepLabel) {
+    return null;
+  }
+  return stageLabel;
+}
+
 export default function ProcessingStepsTable({
   kbUuid,
   itemId,
@@ -34,7 +47,7 @@ export default function ProcessingStepsTable({
 
   return (
     <div className="app-table-wrap">
-      <div className="app-table-head hidden grid-cols-[1.2fr_1.2fr_0.8fr_0.8fr_1fr_2rem] gap-4 !bg-[#efefef] px-5 py-3 text-sm font-medium !text-[var(--color-foreground)] md:grid">
+      <div className="app-table-head hidden grid-cols-[1.1fr_1.3fr_0.8fr_0.8fr_1fr_2rem] gap-4 !bg-[#efefef] px-5 py-3 text-sm font-medium !text-[var(--color-foreground)] md:grid">
         <div>{t("kb.processingMonitor.table.module")}</div>
         <div>{t("kb.processingMonitor.table.step")}</div>
         <div>{t("kb.processingMonitor.table.status")}</div>
@@ -43,23 +56,28 @@ export default function ProcessingStepsTable({
         <div className="sr-only">{t("kb.processingMonitor.table.details")}</div>
       </div>
       <div className="divide-y divide-[var(--color-border)]">
-        {steps.map((step) => {
+        {steps.map((step, index) => {
           const detailUrl = `/kb/monitor/${kbUuid}/flows/${encodeURIComponent(itemId)}/steps/${encodeURIComponent(step.module)}/${encodeURIComponent(step.step)}`;
-          return (
-            <Link
-              key={step.key}
-              to={detailUrl}
-              className="grid grid-cols-1 gap-2 px-5 py-4 transition hover:bg-[var(--color-card-muted)]/50 md:grid-cols-[1.2fr_1.2fr_0.8fr_0.8fr_1fr_2rem] md:items-center md:gap-4"
-            >
+          const moduleLabel = translateProcessingMonitorKey(t, step.module, "module");
+          const stepLabel = translateProcessingMonitorKey(t, step.step, "step");
+          const subtitle = stageSubtitle(t, step);
+          const prevModule = index > 0 ? steps[index - 1].module : null;
+          const isNewModule = step.module !== prevModule;
+          const rowClass = [
+            "grid grid-cols-1 gap-2 px-5 py-4 md:grid-cols-[1.1fr_1.3fr_0.8fr_0.8fr_1fr_2rem] md:items-center md:gap-4",
+            step.isPending ? "bg-[var(--color-card-muted)]/30 opacity-80" : "transition hover:bg-[var(--color-card-muted)]/50",
+            isNewModule && index > 0 ? "border-t-2 border-[var(--color-border)]" : "",
+          ]
+            .filter(Boolean)
+            .join(" ");
+
+          const content = (
+            <>
               <div>
-                <p className="text-sm font-medium text-[var(--color-foreground)]">
-                  {translateProcessingMonitorKey(t, step.module, "module")}
-                </p>
-                <p className="text-xs text-[var(--color-muted)]">{translateProcessingMonitorKey(t, step.stage, "stage")}</p>
+                <p className="text-sm font-medium text-[var(--color-foreground)]">{moduleLabel}</p>
+                {subtitle ? <p className="text-xs text-[var(--color-muted)]">{subtitle}</p> : null}
               </div>
-              <div className="text-sm text-[var(--color-foreground)]">
-                {translateProcessingMonitorKey(t, step.step, "step")}
-              </div>
+              <div className="text-sm text-[var(--color-foreground)]">{stepLabel}</div>
               <div>
                 <ProcessingStatusBadge
                   status={step.status}
@@ -68,9 +86,25 @@ export default function ProcessingStepsTable({
               </div>
               <div className="text-sm text-[var(--color-muted)]">{formatDurationMs(step.durationMs, t)}</div>
               <div className="text-sm text-[var(--color-muted)]">
-                {formatDateTime(step.createdAt, { locale, timezone, dateFormat, timeFormat })}
+                {step.createdAt
+                  ? formatDateTime(step.createdAt, { locale, timezone, dateFormat, timeFormat })
+                  : "—"}
               </div>
-              <div className="text-[var(--color-primary)] md:text-right">→</div>
+              <div className="text-[var(--color-primary)] md:text-right">{step.isPending ? "" : "→"}</div>
+            </>
+          );
+
+          if (step.isPending) {
+            return (
+              <div key={step.key} className={rowClass} aria-disabled="true">
+                {content}
+              </div>
+            );
+          }
+
+          return (
+            <Link key={step.key} to={detailUrl} className={rowClass}>
+              {content}
             </Link>
           );
         })}

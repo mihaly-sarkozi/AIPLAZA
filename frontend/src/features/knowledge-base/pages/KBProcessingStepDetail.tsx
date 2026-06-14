@@ -11,19 +11,14 @@ import { useLocaleSettings } from "../../settings/hooks/useSettings";
 import ProcessingKeyValueTable from "../components/monitor/ProcessingKeyValueTable";
 import ProcessingMonitorBreadcrumb from "../components/monitor/ProcessingMonitorBreadcrumb";
 import ProcessingStatusBadge from "../components/monitor/ProcessingStatusBadge";
-import {
-  useMonitorIngestRuns,
-  useProcessingEvents,
-  useUnderstandingStatus,
-} from "../hooks/useKbProcessingMonitor";
+import { useProcessingMonitorBundle } from "../hooks/useProcessingMonitorBundle";
 import { useKbList } from "../hooks/useKb";
 import {
   buildItemCatalogFromRuns,
+  buildPipelineTimelineCompact,
   findStepRow,
   flattenSummary,
   formatDurationMs,
-  mergeUnderstandingSteps,
-  buildStepRows,
   translateProcessingMonitorKey,
 } from "../utils/processingMonitorUtils";
 
@@ -38,9 +33,9 @@ export default function KBProcessingStepDetail() {
   const { data: kbList = [], isLoading: kbLoading } = useKbList();
   const kb = useMemo(() => kbList.find((item) => item.uuid === uuid), [kbList, uuid]);
 
-  const runsQuery = useMonitorIngestRuns(uuid);
-  const eventsQuery = useProcessingEvents(uuid, { training_item_id: itemId });
-  const understandingQuery = useUnderstandingStatus(uuid, itemId);
+  const { runsQuery, eventsQuery, understandingQuery } = useProcessingMonitorBundle(uuid, {
+    trainingItemId: itemId,
+  });
 
   useEffect(() => {
     if (kbLoading) return;
@@ -52,10 +47,14 @@ export default function KBProcessingStepDetail() {
 
   const stepRow = useMemo(() => {
     if (!module || !step) return null;
+    const timeline = buildPipelineTimelineCompact(
+      eventsQuery.data?.items ?? [],
+      understandingQuery.data?.steps ?? [],
+    );
+    const fromTimeline = timeline.find((row) => row.module === module && row.step === step && !row.isPending);
+    if (fromTimeline) return fromTimeline;
     const fromEvents = findStepRow(eventsQuery.data?.items ?? [], module, step);
-    if (fromEvents) return fromEvents;
-    const merged = mergeUnderstandingSteps(buildStepRows(eventsQuery.data?.items ?? []), understandingQuery.data?.steps ?? []);
-    return merged.find((row) => row.module === module && row.step === step) ?? null;
+    return fromEvents;
   }, [eventsQuery.data?.items, module, step, understandingQuery.data?.steps]);
 
   const inputRows = useMemo(() => flattenSummary(stepRow?.inputSummary ?? {}, "input"), [stepRow]);

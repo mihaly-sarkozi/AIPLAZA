@@ -355,6 +355,9 @@ export const hu = {
         message: "Üzenet",
         errorCode: "Hibakód",
         unknownDocument: "Ismeretlen dokumentum",
+        liveUpdating: "Élő frissítés — feldolgozás fut",
+        activeProgress: "Jelenleg: {{module}} — {{step}}",
+        activeFlowCount: "{{count}} aktív feldolgozási folyamat",
         metrics: {
           flows: "Folyamatok",
           chunks: "Chunkok összesen",
@@ -392,6 +395,7 @@ export const hu = {
           failed: "Sikertelen",
           skipped: "Kihagyva",
           started: "Elindult",
+          pending: "Várakozik",
         },
         jobStatuses: {
           created: "Létrehozva",

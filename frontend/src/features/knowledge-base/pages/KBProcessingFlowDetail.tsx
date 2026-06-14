@@ -9,20 +9,16 @@ import { getApiErrorMessage } from "../../../utils/getApiErrorMessage";
 import { formatDateTime } from "../../../utils/dateTimeFormatting";
 import { useLocaleSettings } from "../../settings/hooks/useSettings";
 import ProcessingKeyValueTable from "../components/monitor/ProcessingKeyValueTable";
+import ProcessingMonitorLiveBanner from "../components/monitor/ProcessingMonitorLiveBanner";
 import ProcessingMonitorBreadcrumb from "../components/monitor/ProcessingMonitorBreadcrumb";
 import ProcessingStatusBadge from "../components/monitor/ProcessingStatusBadge";
 import ProcessingStepsTable from "../components/monitor/ProcessingStepsTable";
-import {
-  useMonitorIngestRuns,
-  useProcessingEvents,
-  useProcessingIssues,
-  useUnderstandingStatus,
-} from "../hooks/useKbProcessingMonitor";
+import { useProcessingMonitorBundle } from "../hooks/useProcessingMonitorBundle";
 import { useKbList } from "../hooks/useKb";
 import {
   buildItemCatalogFromRuns,
-  buildStepRows,
-  mergeUnderstandingSteps,
+  buildPipelineTimelineCompact,
+  deriveActiveProgress,
   translateProcessingMonitorKey,
 } from "../utils/processingMonitorUtils";
 
@@ -35,10 +31,10 @@ export default function KBProcessingFlowDetail() {
   const { data: kbList = [], isLoading: kbLoading } = useKbList();
   const kb = useMemo(() => kbList.find((item) => item.uuid === uuid), [kbList, uuid]);
 
-  const runsQuery = useMonitorIngestRuns(uuid);
-  const eventsQuery = useProcessingEvents(uuid, { training_item_id: itemId });
-  const issuesQuery = useProcessingIssues(uuid, { training_item_id: itemId, status: "OPEN" });
-  const understandingQuery = useUnderstandingStatus(uuid, itemId);
+  const { runsQuery, eventsQuery, issuesQuery, understandingQuery, isLive } = useProcessingMonitorBundle(
+    uuid,
+    { trainingItemId: itemId },
+  );
 
   useEffect(() => {
     if (kbLoading) return;
@@ -49,10 +45,15 @@ export default function KBProcessingFlowDetail() {
   const meta = itemId ? catalog.get(itemId) : undefined;
   const title = meta?.title ?? itemId ?? t("kb.processingMonitor.unknownDocument");
 
-  const steps = useMemo(() => {
-    const eventSteps = buildStepRows(eventsQuery.data?.items ?? []);
-    return mergeUnderstandingSteps(eventSteps, understandingQuery.data?.steps ?? []);
-  }, [eventsQuery.data?.items, understandingQuery.data?.steps]);
+  const steps = useMemo(
+    () => buildPipelineTimelineCompact(eventsQuery.data?.items ?? [], understandingQuery.data?.steps ?? []),
+    [eventsQuery.data?.items, understandingQuery.data?.steps],
+  );
+
+  const activeProgress = useMemo(
+    () => deriveActiveProgress(eventsQuery.data?.items ?? []),
+    [eventsQuery.data?.items],
+  );
 
   const chunkSummaryRows = useMemo(() => {
     const chunkCount = understandingQuery.data?.chunk_count;
@@ -93,6 +94,20 @@ export default function KBProcessingFlowDetail() {
             <Button variant="secondary" onClick={() => navigate(monitorUrl)}>
               {t("kb.processingMonitor.backToMonitor")}
             </Button>
+          }
+        />
+
+        <ProcessingMonitorLiveBanner
+          isLive={isLive}
+          activeFlow={
+            activeProgress
+              ? {
+                  activeModule: activeProgress.module,
+                  activeStage: activeProgress.stage,
+                  activeStep: activeProgress.step,
+                  latestMessage: activeProgress.message,
+                }
+              : null
           }
         />
 

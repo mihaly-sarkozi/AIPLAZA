@@ -355,6 +355,9 @@ export const es = {
         message: "Mensaje",
         errorCode: "Código de error",
         unknownDocument: "Documento desconocido",
+        liveUpdating: "Actualización en vivo — procesamiento en curso",
+        activeProgress: "Paso actual: {{module}} — {{step}}",
+        activeFlowCount: "{{count}} flujos de procesamiento activos",
         metrics: {
           flows: "Flujos",
           chunks: "Chunks totales",
@@ -392,6 +395,7 @@ export const es = {
           failed: "Fallido",
           skipped: "Omitido",
           started: "Iniciado",
+          pending: "Pendiente",
         },
         jobStatuses: {
           created: "Creado",

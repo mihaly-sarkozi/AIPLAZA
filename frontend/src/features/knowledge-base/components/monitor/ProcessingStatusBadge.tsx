@@ -11,6 +11,7 @@ const STATUS_CLASS: Record<string, string> = {
   partial: "bg-amber-100 text-amber-900",
   running: "bg-sky-100 text-sky-800",
   started: "bg-sky-100 text-sky-800",
+  pending: "bg-slate-50 text-slate-500 border border-dashed border-slate-300",
   skipped: "bg-slate-100 text-slate-700",
   unknown: "bg-slate-100 text-slate-700",
 };

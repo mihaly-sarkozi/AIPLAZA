@@ -4,6 +4,10 @@ import type {
   ProcessingIssueSummary,
   UnderstandingStepSummary,
 } from "../../../api/services/kb/kbProcessingApi";
+import {
+  catalogKey,
+  PROCESSING_PIPELINE_CATALOG,
+} from "./processingPipelineCatalog";
 
 export type ProcessingFlowStatus = "completed" | "failed" | "running" | "partial" | "unknown";
 
@@ -18,6 +22,10 @@ export type ProcessingFlowSummary = {
   failedSteps: number;
   openIssues: number;
   latestMessage: string | null;
+  activeModule: string | null;
+  activeStage: string | null;
+  activeStep: string | null;
+  activeEventType: string | null;
 };
 
 export type ProcessingStepRow = {
@@ -33,6 +41,8 @@ export type ProcessingStepRow = {
   inputSummary: Record<string, unknown>;
   outputSummary: Record<string, unknown>;
   eventType: string;
+  isPending?: boolean;
+  catalogOrder: number;
 };
 
 const TERMINAL_STATUSES = new Set(["completed", "failed", "skipped"]);
@@ -42,7 +52,26 @@ function normalizeStatus(status: string | null | undefined): string {
 }
 
 function stepKey(module: string, step: string): string {
-  return `${module}::${step}`;
+  return catalogKey(module, step);
+}
+
+function emptyPendingRow(entry: typeof PROCESSING_PIPELINE_CATALOG[number], order: number): ProcessingStepRow {
+  return {
+    key: stepKey(entry.module, entry.step),
+    module: entry.module,
+    stage: entry.stage,
+    step: entry.step,
+    status: "pending",
+    durationMs: null,
+    createdAt: "",
+    message: null,
+    errorCode: null,
+    inputSummary: {},
+    outputSummary: {},
+    eventType: "",
+    isPending: true,
+    catalogOrder: order,
+  };
 }
 
 export function buildItemCatalogFromRuns(runs: IngestRun[]): Map<string, { title: string; inputType: string; charCount: number | null }> {
@@ -111,6 +140,48 @@ export function deriveFlowStatus(events: ProcessingEventSummary[], issues: Proce
   return "unknown";
 }
 
+export function deriveActiveProgress(events: ProcessingEventSummary[]): {
+  module: string;
+  stage: string;
+  step: string;
+  eventType: string;
+  message: string | null;
+} | null {
+  if (!events.length) return null;
+  const flowStatus = deriveFlowStatus(events, []);
+  if (flowStatus !== "running") return null;
+
+  const terminalKeys = new Set(
+    events
+      .filter((event) => TERMINAL_STATUSES.has(normalizeStatus(event.status)))
+      .map((event) => stepKey(event.module, event.step)),
+  );
+
+  const sorted = [...events].sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at));
+  for (const event of sorted) {
+    if (normalizeStatus(event.status) !== "started") continue;
+    if (!terminalKeys.has(stepKey(event.module, event.step))) {
+      return {
+        module: event.module,
+        stage: event.stage,
+        step: event.step,
+        eventType: event.event_type,
+        message: event.message ?? null,
+      };
+    }
+  }
+
+  const latest = sorted[0];
+  if (!latest) return null;
+  return {
+    module: latest.module,
+    stage: latest.stage,
+    step: latest.step,
+    eventType: latest.event_type,
+    message: latest.message ?? null,
+  };
+}
+
 export function buildFlowSummaries(
   runs: IngestRun[],
   events: ProcessingEventSummary[],
@@ -145,6 +216,7 @@ export function buildFlowSummaries(
     const itemIssues = issuesByItem.get(itemId) ?? [];
     const stepRows = buildStepRows(itemEvents);
     const lastEvent = itemEvents[0] ?? null;
+    const active = deriveActiveProgress(itemEvents);
     flows.push({
       itemId,
       title: meta?.title ?? itemId,
@@ -155,7 +227,11 @@ export function buildFlowSummaries(
       completedSteps: stepRows.filter((row) => normalizeStatus(row.status) === "completed").length,
       failedSteps: stepRows.filter((row) => normalizeStatus(row.status) === "failed").length,
       openIssues: itemIssues.filter((issue) => issue.status === "OPEN").length,
-      latestMessage: lastEvent?.message ?? itemIssues[0]?.issue_message ?? null,
+      latestMessage: active?.message ?? lastEvent?.message ?? itemIssues[0]?.issue_message ?? null,
+      activeModule: active?.module ?? null,
+      activeStage: active?.stage ?? null,
+      activeStep: active?.step ?? null,
+      activeEventType: active?.eventType ?? null,
     });
   }
 
@@ -169,8 +245,16 @@ export function buildFlowSummaries(
 export function buildStepRows(events: ProcessingEventSummary[]): ProcessingStepRow[] {
   const latestByKey = new Map<string, ProcessingEventSummary>();
   for (const event of [...events].sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at))) {
-    if (!TERMINAL_STATUSES.has(normalizeStatus(event.status))) continue;
-    latestByKey.set(stepKey(event.module, event.step), event);
+    const key = stepKey(event.module, event.step);
+    const status = normalizeStatus(event.status);
+    const current = latestByKey.get(key);
+    if (TERMINAL_STATUSES.has(status)) {
+      latestByKey.set(key, event);
+      continue;
+    }
+    if (status === "started" && (!current || normalizeStatus(current.status) === "started")) {
+      latestByKey.set(key, event);
+    }
   }
   return [...latestByKey.values()]
     .sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at))
@@ -187,7 +271,87 @@ export function buildStepRows(events: ProcessingEventSummary[]): ProcessingStepR
       inputSummary: event.input_summary_json ?? {},
       outputSummary: event.output_summary_json ?? {},
       eventType: event.event_type,
+      isPending: false,
+      catalogOrder: PROCESSING_PIPELINE_CATALOG.findIndex(
+        (entry) => entry.module === event.module && entry.step === event.step,
+      ),
     }));
+}
+
+/** Események + katalógus: teljes pipeline sorrend, hiányzó lépések „pending” státusszal. */
+export function buildPipelineTimeline(
+  events: ProcessingEventSummary[],
+  understandingSteps: UnderstandingStepSummary[] = [],
+): ProcessingStepRow[] {
+  const actualRows = mergeUnderstandingSteps(buildStepRows(events), understandingSteps);
+  const actualMap = new Map(actualRows.map((row) => [row.key, row]));
+
+  const timeline: ProcessingStepRow[] = [];
+  const seenKeys = new Set<string>();
+
+  for (let index = 0; index < PROCESSING_PIPELINE_CATALOG.length; index += 1) {
+    const entry = PROCESSING_PIPELINE_CATALOG[index];
+    const key = stepKey(entry.module, entry.step);
+    seenKeys.add(key);
+    const existing = actualMap.get(key);
+    if (existing) {
+      timeline.push({ ...existing, catalogOrder: index, isPending: false });
+    } else {
+      timeline.push(emptyPendingRow(entry, index));
+    }
+  }
+
+  for (const row of actualRows) {
+    if (!seenKeys.has(row.key)) {
+      timeline.push({
+        ...row,
+        catalogOrder: row.catalogOrder >= 0 ? row.catalogOrder : PROCESSING_PIPELINE_CATALOG.length + timeline.length,
+        isPending: false,
+      });
+    }
+  }
+
+  return timeline.sort((a, b) => a.catalogOrder - b.catalogOrder);
+}
+
+/** Csak már elkezdett vagy befejezett modulok + a következő folyamatban lévő modul pending lépései. */
+export function buildPipelineTimelineCompact(
+  events: ProcessingEventSummary[],
+  understandingSteps: UnderstandingStepSummary[] = [],
+): ProcessingStepRow[] {
+  const full = buildPipelineTimeline(events, understandingSteps);
+  const flowStatus = deriveFlowStatus(events, []);
+  if (flowStatus === "completed") {
+    return full.filter((row) => !row.isPending);
+  }
+
+  let lastActiveIndex = -1;
+  for (let index = 0; index < full.length; index += 1) {
+    if (!full[index].isPending) {
+      lastActiveIndex = index;
+    }
+  }
+
+  if (lastActiveIndex < 0) {
+    return full.filter((row, index) => {
+      if (!row.isPending) return true;
+      return index < PROCESSING_PIPELINE_CATALOG.length && row.module === PROCESSING_PIPELINE_CATALOG[0].module;
+    });
+  }
+
+  const activeModule = full[lastActiveIndex]?.module;
+  const moduleOrder = [
+    "kb_understanding",
+    "kb_discovery",
+    "kb_embedding",
+    "kb_indexing",
+  ];
+  const activeModuleIndex = moduleOrder.indexOf(activeModule);
+  const visibleModules = new Set(
+    moduleOrder.slice(0, activeModuleIndex + 1 + (flowStatus === "running" ? 1 : 0)),
+  );
+
+  return full.filter((row) => visibleModules.has(row.module));
 }
 
 export function findStepRow(events: ProcessingEventSummary[], module: string, step: string): ProcessingStepRow | null {
@@ -213,6 +377,10 @@ export function mergeUnderstandingSteps(stepRows: ProcessingStepRow[], understan
       inputSummary: step.input_summary ?? {},
       outputSummary: step.output_summary ?? {},
       eventType: "UNDERSTANDING_STEP",
+      isPending: false,
+      catalogOrder: PROCESSING_PIPELINE_CATALOG.findIndex(
+        (entry) => entry.module === "kb_understanding" && entry.step === step.step,
+      ),
     });
   }
   return merged.sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt));

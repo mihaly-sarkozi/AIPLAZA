@@ -8,16 +8,16 @@ import { useTranslation } from "../../../i18n";
 import { getApiErrorMessage } from "../../../utils/getApiErrorMessage";
 import { formatDateTime } from "../../../utils/dateTimeFormatting";
 import { useLocaleSettings } from "../../settings/hooks/useSettings";
+import ProcessingMonitorLiveBanner from "../components/monitor/ProcessingMonitorLiveBanner";
 import ProcessingMonitorBreadcrumb from "../components/monitor/ProcessingMonitorBreadcrumb";
 import ProcessingStatusBadge from "../components/monitor/ProcessingStatusBadge";
-import {
-  useMonitorIngestRuns,
-  useProcessingEvents,
-  useProcessingIssues,
-  useProcessingMetrics,
-} from "../hooks/useKbProcessingMonitor";
+import { useProcessingMonitorBundle } from "../hooks/useProcessingMonitorBundle";
 import { useKbList } from "../hooks/useKb";
-import { buildFlowSummaries, translateProcessingMonitorKey } from "../utils/processingMonitorUtils";
+import {
+  buildFlowSummaries,
+  translateProcessingMonitorKey,
+} from "../utils/processingMonitorUtils";
+import { countActiveFlows } from "../utils/processingMonitorPolling";
 
 export default function KBProcessingMonitor() {
   const { uuid } = useParams();
@@ -27,10 +27,7 @@ export default function KBProcessingMonitor() {
   const { data: kbList = [], isLoading: kbLoading } = useKbList();
   const kb = useMemo(() => kbList.find((item) => item.uuid === uuid), [kbList, uuid]);
 
-  const runsQuery = useMonitorIngestRuns(uuid);
-  const eventsQuery = useProcessingEvents(uuid);
-  const issuesQuery = useProcessingIssues(uuid);
-  const metricsQuery = useProcessingMetrics(uuid);
+  const { runsQuery, eventsQuery, issuesQuery, metricsQuery, isLive } = useProcessingMonitorBundle(uuid);
 
   useEffect(() => {
     if (kbLoading) return;
@@ -43,6 +40,16 @@ export default function KBProcessingMonitor() {
     const issues = issuesQuery.data?.items ?? [];
     return buildFlowSummaries(runs, events, issues);
   }, [eventsQuery.data?.items, issuesQuery.data?.items, runsQuery.data?.items]);
+
+  const activeFlowCount = useMemo(
+    () => countActiveFlows(runsQuery.data?.items ?? [], eventsQuery.data?.items ?? []),
+    [runsQuery.data?.items, eventsQuery.data?.items],
+  );
+
+  const primaryActiveFlow = useMemo(
+    () => flows.find((flow) => flow.status === "running") ?? null,
+    [flows],
+  );
 
   const error =
     runsQuery.error || eventsQuery.error || issuesQuery.error
@@ -68,6 +75,12 @@ export default function KBProcessingMonitor() {
               {t("kb.processingMonitor.backToList")}
             </Button>
           }
+        />
+
+        <ProcessingMonitorLiveBanner
+          isLive={isLive}
+          activeFlowCount={activeFlowCount}
+          activeFlow={primaryActiveFlow}
         />
 
         {error ? <Alert tone="error">{error}</Alert> : null}
@@ -109,6 +122,17 @@ export default function KBProcessingMonitor() {
               <div className="divide-y divide-[var(--color-border)]">
                 {flows.map((flow) => {
                   const detailUrl = `/kb/monitor/${uuid}/flows/${encodeURIComponent(flow.itemId)}`;
+                  const activeLabel =
+                    flow.status === "running" && flow.activeModule
+                      ? [
+                          translateProcessingMonitorKey(t, flow.activeModule, "module"),
+                          flow.activeStep
+                            ? translateProcessingMonitorKey(t, flow.activeStep, "stepOrStage")
+                            : null,
+                        ]
+                          .filter(Boolean)
+                          .join(" · ")
+                      : null;
                   return (
                     <Link
                       key={flow.itemId}
@@ -117,7 +141,12 @@ export default function KBProcessingMonitor() {
                     >
                       <div>
                         <p className="font-medium text-[var(--color-foreground)]">{flow.title}</p>
-                        {flow.latestMessage ? <p className="mt-1 line-clamp-2 text-xs text-[var(--color-muted)]">{flow.latestMessage}</p> : null}
+                        {activeLabel ? (
+                          <p className="mt-1 text-xs font-medium text-sky-800">{activeLabel}</p>
+                        ) : null}
+                        {flow.latestMessage && !activeLabel ? (
+                          <p className="mt-1 line-clamp-2 text-xs text-[var(--color-muted)]">{flow.latestMessage}</p>
+                        ) : null}
                       </div>
                       <div className="text-sm text-[var(--color-muted)]">
                         {translateProcessingMonitorKey(t, flow.inputType, "inputType")}
