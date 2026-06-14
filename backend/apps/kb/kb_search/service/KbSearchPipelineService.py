@@ -10,6 +10,7 @@ from apps.kb.kb_search.enums.SearchErrorCode import SearchErrorCode
 from apps.kb.kb_search.enums.SearchMode import SearchMode
 from apps.kb.kb_search.enums.SearchStatus import SearchStatus
 from apps.kb.kb_search.errors.SearchNotReadyError import SearchNotReadyError
+from apps.kb.kb_search.errors.SearchQdrantFailedError import SearchQdrantFailedError
 from apps.kb.kb_search.repository.SearchQueryRunRepository import SearchQueryRunRepository
 from apps.kb.kb_search.service.BuildCitationService import BuildCitationService
 from apps.kb.kb_search.service.BuildQueryEmbeddingService import BuildQueryEmbeddingService
@@ -197,7 +198,7 @@ class KbSearchPipelineService:
                 search_status=run.status,
                 message=str(exc),
             )
-            raise
+            raise SearchQdrantFailedError(str(exc)) from exc
 
         ranked = self._hybrid_rank.rank(hits)
         hydrated = self._hydration.hydrate(ranked)
@@ -373,6 +374,7 @@ class KbSearchPipelineService:
             "encoded_prompt_context": "",
             "readiness": readiness,
             "blocked_message": "A kiválasztott tudástár még nem kereshető. Az indexelés vagy ellenőrzés nem fejeződött be.",
+            "error_message": run.error_message,
         }
 
 

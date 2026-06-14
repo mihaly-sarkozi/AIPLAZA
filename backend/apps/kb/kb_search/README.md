@@ -20,7 +20,14 @@ Production-ready Qdrant-alapú keresési modul. **Az AI nem keres** — csak ez 
 ## API
 
 - `POST /api/kb/search` — közvetlen search (kb.read)
+  - HTTP hibák: `423` not ready, `503` qdrant failed, `403` permission, `500` unknown
 - Download: `get_query_source_download`, `get_query_context_download` a chat routeren keresztül
+
+### Source download endpoint
+
+`GET /api/chat/sources/{query_run_id}/{source_id}/download` jelenleg **citation/evidence export**
+(szöveges snippet + metaadatok). Nem szolgálja ki az eredeti betanított dokumentum bináris fájlját.
+Eredeti dokumentum letöltéshez később külön endpoint tervezett.
 
 ## Env
 

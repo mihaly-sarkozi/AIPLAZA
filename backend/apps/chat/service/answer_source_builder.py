@@ -8,6 +8,33 @@ class AnswerSourceBuilder:
     def __init__(self, *, sanitize_debug_text: Callable[[Any], str]) -> None:
         self._sanitize_debug_text = sanitize_debug_text
 
+    @staticmethod
+    def _normalize_page_numbers(value: Any) -> list[int]:
+        if not isinstance(value, list):
+            return []
+        out: list[int] = []
+        for item in value:
+            try:
+                out.append(int(item))
+            except (TypeError, ValueError):
+                continue
+        return out
+
+    def _citation_fields(self, row: dict[str, Any]) -> dict[str, Any]:
+        citation_id = str(row.get("citation_id") or "").strip()
+        download_url = str(row.get("download_url") or "").strip() or None
+        download_url_template = str(row.get("download_url_template") or "").strip() or None
+        download_ref = str(row.get("download_ref") or "").strip() or None
+        section_title = self._sanitize_debug_text(row.get("section_title") or "")
+        return {
+            "citation_id": citation_id,
+            "download_url": download_url,
+            "download_url_template": download_url_template,
+            "download_ref": download_ref,
+            "page_numbers": self._normalize_page_numbers(row.get("page_numbers")),
+            "section_title": section_title,
+        }
+
     def build_sources_from_packet(self, packet: dict[str, Any]) -> list[dict[str, Any]]:
         kb_sources = packet.get("sources") or []
         if isinstance(kb_sources, list) and kb_sources:
@@ -44,6 +71,7 @@ class AnswerSourceBuilder:
                         "created_by": None,
                         "created_by_label": "",
                         "created_at": None,
+                        **self._citation_fields(row),
                     }
                 )
             if out:
@@ -130,19 +158,21 @@ class AnswerSourceBuilder:
         if not kb_uuid or not point_id or not source_id:
             return None
         block = blocks_by_source.get(source_id, {})
+        citation_row = {**block, **row}
         return {
             "kb_uuid": kb_uuid,
             "kb_name": self._sanitize_debug_text(kb_name),
             "point_id": point_id,
             "source_id": source_id,
-            "title": self._sanitize_debug_text(row.get("source_document_title") or ""),
+            "title": self._sanitize_debug_text(row.get("source_document_title") or block.get("document_title") or ""),
             "snippet": self._sanitize_debug_text(block.get("snippet") or block.get("text") or row.get("text") or row.get("snippet") or ""),
-            "source_type": self._sanitize_debug_text(row.get("source_type") or ""),
+            "source_type": self._sanitize_debug_text(row.get("source_type") or block.get("source_type") or block.get("content_type") or ""),
             "file_ref": self._sanitize_debug_text(row.get("file_ref") or "") or None,
             "display_type": self._sanitize_debug_text(row.get("display_type") or ""),
             "created_by": row.get("created_by"),
             "created_by_label": self._sanitize_debug_text(row.get("created_by_label") or ""),
             "created_at": str(row.get("created_at") or "").strip() or None,
+            **self._citation_fields(citation_row),
         }
 
     @staticmethod
@@ -175,6 +205,12 @@ class AnswerSourceBuilder:
                 "created_by": None,
                 "created_by_label": "",
                 "created_at": None,
+                "citation_id": "",
+                "download_url": None,
+                "download_url_template": None,
+                "download_ref": None,
+                "page_numbers": [],
+                "section_title": "",
             }
             for source_id in fallback_source_ids[:8]
         ]

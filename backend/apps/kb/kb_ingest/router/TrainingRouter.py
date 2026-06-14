@@ -80,6 +80,7 @@ async def create_text_training_batch(
             knowledge_base_id=kb_id,
             created_by=current_user.id,
             request=body,
+            usage_tenant=tenant,
         )
         return to_text_response(
             batch_id=result.training_batch_id,
@@ -144,6 +145,7 @@ async def create_file_training_batch(
             knowledge_base_id=kb_id,
             created_by=current_user.id,
             uploads=files,
+            usage_tenant=tenant,
         )
         return to_text_response_from_batch_status(
             batch_service.get_status(result.training_batch_id, tenant=tenant_slug_or_default(tenant))

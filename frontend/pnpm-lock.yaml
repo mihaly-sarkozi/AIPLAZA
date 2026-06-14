@@ -57,6 +57,9 @@ importers:
       '@rolldown/binding-linux-arm64-musl':
         specifier: 1.0.0-beta.41
         version: 1.0.0-beta.41
+      '@rollup/rollup-linux-arm64-musl':
+        specifier: 4.60.2
+        version: 4.60.2
       '@tailwindcss/postcss':
         specifier: ^4.1.17
         version: 4.1.17
@@ -2393,8 +2396,7 @@ snapshots:
   '@rollup/rollup-linux-arm64-gnu@4.60.2':
     optional: true
 
-  '@rollup/rollup-linux-arm64-musl@4.60.2':
-    optional: true
+  '@rollup/rollup-linux-arm64-musl@4.60.2': {}
 
   '@rollup/rollup-linux-loong64-gnu@4.60.2':
     optional: true

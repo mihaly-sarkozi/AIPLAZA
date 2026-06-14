@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
 from apps.kb.kb_search.bootstrap.dependencies import get_kb_search_pipeline
+from apps.kb.kb_search.router.search_http_errors import map_search_exception, raise_if_blocked_search_result
 from core.kernel.http.tenant_dependencies import RequiredTenantContextDep
 from core.modules.auth.web.dependencies.auth_dependencies import get_current_user, require_permission
 from core.modules.users.domain.dto import User
@@ -29,7 +30,7 @@ async def search_knowledge_base(
     _perm=Depends(require_permission("kb.read")),
 ):
     try:
-        return pipeline.execute(
+        result = pipeline.execute(
             question=body.question,
             knowledge_base_id=body.kb_uuid,
             kb_uuid=body.kb_uuid,
@@ -39,8 +40,10 @@ async def search_knowledge_base(
             top_k=body.top_k,
             debug=body.debug,
         )
+        raise_if_blocked_search_result(result)
+        return result
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        raise map_search_exception(exc) from exc
 
 
 __all__ = ["router"]

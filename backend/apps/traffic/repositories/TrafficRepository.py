@@ -9,6 +9,8 @@ from typing import Any
 
 from sqlalchemy import text
 
+from shared.billing.tenant_ingest_usage import column_exists, query_tenant_ingest_usage, table_exists
+
 from core.modules.users.models.user_orm import UserORM
 
 
@@ -114,6 +116,10 @@ class TrafficRepository:
                         lines.append(line)
             return lines
 
+    def load_ingest_usage(self) -> dict[str, int]:
+        with self._session_factory() as db:
+            return query_tenant_ingest_usage(db)
+
     def load_user_map(self) -> dict[int, UserORM]:
         """Tenant-sémából felolvassa az aktív user sorokat, hogy a kérdéshasználat névvel és emaillel jelenjen meg."""
 
@@ -127,60 +133,21 @@ class TrafficRepository:
             user_count = db.query(UserORM).filter(UserORM.deleted_at.is_(None)).count()
             schema = db.execute(text("select current_schema()")).scalar_one()
 
-            def table_exists(table_name: str) -> bool:
-                return bool(
-                    db.execute(
-                        text(
-                            """
-                            select 1
-                            from information_schema.tables
-                            where table_schema = :schema and table_name = :table_name
-                            """
-                        ),
-                        {"schema": schema, "table_name": table_name},
-                    ).scalar_one_or_none()
-                )
-
-            def column_exists(table_name: str, column_name: str) -> bool:
-                return bool(
-                    db.execute(
-                        text(
-                            """
-                            select 1
-                            from information_schema.columns
-                            where table_schema = :schema and table_name = :table_name and column_name = :column_name
-                            """
-                        ),
-                        {"schema": schema, "table_name": table_name, "column_name": column_name},
-                    ).scalar_one_or_none()
-                )
-
-            has_kb_table = table_exists("knowledge_bases")
-            has_deleted_at = has_kb_table and column_exists("knowledge_bases", "deleted_at")
+            has_kb_table = table_exists(db, schema=schema, table_name="knowledge_bases")
+            has_deleted_at = has_kb_table and column_exists(
+                db, schema=schema, table_name="knowledge_bases", column_name="deleted_at"
+            )
             kb_where = "WHERE deleted_at IS NULL" if has_deleted_at else ""
             kb_count = (
                 db.execute(text(f"SELECT COUNT(*) FROM knowledge_bases {kb_where}")).scalar() or 0
                 if has_kb_table
                 else 0
             )
-            storage_bytes = 0
-            if has_kb_table and table_exists("knowledge_ingest_inputs") and table_exists("knowledge_ingest_items"):
-                deleted_filter = "WHERE kb.deleted_at IS NULL" if has_deleted_at else ""
-                storage_bytes = db.execute(
-                    text(
-                        f"""
-                        SELECT COALESCE(SUM(COALESCE(inp.size_bytes, 0)), 0)
-                        FROM knowledge_ingest_inputs inp
-                        JOIN knowledge_ingest_items item ON item.id = inp.ingest_item_id
-                        JOIN knowledge_bases kb ON kb.uuid = item.corpus_uuid
-                        {deleted_filter}
-                        """
-                    )
-                ).scalar() or 0
+            ingest_usage = query_tenant_ingest_usage(db)
             return {
                 "users": int(user_count or 0),
                 "knowledge_bases": int(kb_count or 0),
-                "storage_bytes": int(storage_bytes or 0),
+                "storage_bytes": int(ingest_usage.get("storage_bytes") or 0),
             }
 
 

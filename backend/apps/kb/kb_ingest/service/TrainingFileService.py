@@ -16,6 +16,7 @@ from apps.kb.kb_ingest.enums.TrainingMetric import TrainingMetric
 from apps.kb.kb_ingest.errors.TrainingDuplicateError import TrainingDuplicateError
 from apps.kb.kb_ingest.errors.TrainingQueueUnavailableError import TrainingQueueUnavailableError
 from apps.kb.kb_ingest.events.understanding_requested_event import add_understanding_requested_event
+from apps.kb.kb_ingest.ports.ReadingPolicyPort import ReadingPolicyPort
 from apps.kb.kb_ingest.repository.TrainingRepository import TrainingRepository
 from apps.kb.kb_ingest.service.training_file_upload import prepare_training_upload
 from apps.kb.kb_ingest.validation.TrainingValidationError import TrainingValidationError
@@ -33,10 +34,12 @@ class TrainingFileService:
         repository: TrainingRepository,
         file_storage: FileStorageInterface,
         config: ReadingConfig | None = None,
+        policy: ReadingPolicyPort | None = None,
     ) -> None:
         self._repository = repository
         self._file_storage = file_storage
         self._config = config or DEFAULT_READING_CONFIG
+        self._policy = policy
 
     async def submit_file_training(
         self,
@@ -45,6 +48,7 @@ class TrainingFileService:
         knowledge_base_id: str,
         created_by: int,
         uploads: list[UploadFile],
+        usage_tenant: object | None = None,
     ) -> TrainingTextResult:
         self._repository.ensure_active_knowledge_base(knowledge_base_id)
         if not uploads:
@@ -113,6 +117,13 @@ class TrainingFileService:
                 items=item_saves,
             )
         )
+        if self._policy is not None and usage_tenant is not None:
+            total_chars = sum(int(item.metadata.get("char_count") or 0) for item in item_saves)
+            self._policy.record_training_usage(
+                usage_tenant,
+                char_count=total_chars,
+                storage_bytes=total_size,
+            )
 
         try:
             for item in item_saves:

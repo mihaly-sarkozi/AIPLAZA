@@ -1,7 +1,7 @@
 import { Link } from "react-router-dom";
 
 import type { ProcessingIssueSummary } from "../../../../api/services/kb/kbProcessingApi";
-import type { SettingsDateFormat, SettingsTimeFormat, SettingsTimezone } from "../../../api/services/settingsService";
+import type { SettingsDateFormat, SettingsTimeFormat, SettingsTimezone } from "../../../../api/services/settingsService";
 import { useTranslation } from "../../../../i18n";
 import { formatDateTime } from "../../../../utils/dateTimeFormatting";
 import type { ProcessingStepRow } from "../../utils/processingMonitorUtils";
@@ -37,7 +37,7 @@ function stageSubtitle(
   return stageLabel;
 }
 
-function displayStatus(step: ProcessingStepRow, stepIssues: ProcessingIssueSummary[]): string {
+function displayStatus(step: ProcessingStepRow): string {
   if (step.isPending) return "pending";
   return step.status;
 }
@@ -47,7 +47,7 @@ function statusLabel(
   step: ProcessingStepRow,
   stepIssues: ProcessingIssueSummary[],
 ): string {
-  const status = displayStatus(step, stepIssues);
+  const status = displayStatus(step);
   if (status === "completed" && stepIssues.length === 0) {
     return t("kb.processingMonitor.stepCompletedOk");
   }
@@ -106,7 +106,7 @@ export default function ProcessingStepsTable({
               <div className="text-sm text-[var(--color-foreground)]">{stepLabel}</div>
               <div className="flex items-center gap-2">
                 <ProcessingStatusBadge
-                  status={displayStatus(step, stepIssues)}
+                  status={displayStatus(step)}
                   label={statusLabel(t, step, stepIssues)}
                 />
                 {stepIssues.length ? <ProcessingStepIssueHint issues={stepIssues} t={t} /> : null}

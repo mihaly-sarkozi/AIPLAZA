@@ -7,13 +7,11 @@ import {
   computeModuleWallTimes,
   computeProgressPercentPerSecond,
   computeWeightedProgressPercent,
-  deriveFlowProgress,
   extractRawStepDurationsMs,
   findFlowStartedAt,
 } from "./processingMonitorUtils";
 import {
   buildRealCompletedRunEvents,
-  REAL_COMPLETED_RUN_ITEM_ID,
   REAL_COMPLETED_RUN_TIMESTAMPS,
 } from "./processingMonitorScale.fixture";
 

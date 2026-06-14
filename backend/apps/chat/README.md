@@ -31,6 +31,19 @@ Metadata mentés: `chat_sessions.metadata_json`.
 - `download_ref` — belső referencia (`source:{chunk_id}`)
 - Fallback template: `/api/chat/sources/{query_run_id}/{source_id}/download`
 
+### `/api/chat/sources/{query_run_id}/{source_id}/download`
+
+Jelenleg **evidence / citation export**: a válaszhoz tartozó citation rekord szöveges kiexportálása
+(citation id, dokumentum cím, oldal, szekció, snippet). **Nem** az eredeti feltöltött fájl letöltése.
+
+Ha később szükséges az eredeti dokumentum letöltése (PDF/DOCX stb.), arra külön endpoint készül.
+
+## Response mezők
+
+- `sources[]` — UI-barát forráslista (`ChatSourceItem`: citation_id, download_url, page_numbers, …)
+- `citation_records[]` — opcionális teljes citation objektumlista a frontend számára
+- `citations[]` — citation id string lista (kompatibilitás)
+
 ## E2E checklist
 
 Lásd: `qa/chat-search-e2e-checklist.md`

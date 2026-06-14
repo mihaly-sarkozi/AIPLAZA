@@ -32,6 +32,7 @@
     "@eslint/js": "^9.36.0",
     "@playwright/test": "^1.60.0",
     "@rolldown/binding-linux-arm64-musl": "1.0.0-beta.41",
+    "@rollup/rollup-linux-arm64-musl": "4.60.2",
     "@tailwindcss/postcss": "^4.1.17",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",

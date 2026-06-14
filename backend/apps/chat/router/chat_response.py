@@ -9,9 +9,15 @@ class ChatSourceItem(BaseModel):
     kb_name: str = ""
     point_id: str
     source_id: str = ""
+    citation_id: str = ""
     title: str = ""
     snippet: str = ""
     source_type: str = ""
+    download_url: str | None = None
+    download_url_template: str | None = None
+    download_ref: str | None = None
+    page_numbers: list[int] = Field(default_factory=list)
+    section_title: str = ""
     file_ref: str | None = None
     display_type: str = ""
     created_by: int | None = None
@@ -34,6 +40,7 @@ class AskResponse(BaseModel):
     cited_sentence_ids: list[str] = Field(default_factory=list)
     cited_source_ids: list[str] = Field(default_factory=list)
     citations: list[str] = Field(default_factory=list)
+    citation_records: list[dict[str, Any]] = Field(default_factory=list)
     query_profile: dict[str, Any] = Field(default_factory=dict)
     matched_chunks: list[dict[str, Any]] = Field(default_factory=list)
     claims: list[dict[str, Any]] = Field(default_factory=list)

@@ -140,8 +140,9 @@ class TrafficService:
         """Kiszámolja a tanítási karakter- és tárhelyhasználatot az aktuális időszakra."""
 
         training = self._repository.get_training_usage(tenant_id, period_key)
-        trained_chars = int((training or {}).get("trained_chars") or 0)
-        storage_bytes = int((training or {}).get("storage_bytes") or 0)
+        live_usage = self._repository.load_ingest_usage()
+        trained_chars = max(int((training or {}).get("trained_chars") or 0), int(live_usage.get("trained_chars") or 0))
+        storage_bytes = max(int((training or {}).get("storage_bytes") or 0), int(live_usage.get("storage_bytes") or 0))
         plan = self._current_plan(subscription, catalog_rows)
         included_chars = max(0, int(plan.get("training_chars") or 0))
         available_chars = self._available_training_chars(tenant_id, subscription, catalog_rows)

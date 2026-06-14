@@ -54,7 +54,7 @@ function PreviewTableBlock({ table }: { table: PreviewTable }) {
       </div>
       {table.truncated ? (
         <p className="mt-2 text-xs text-[var(--color-muted)]">
-          {t("kb.processingMonitor.previewTruncated", { count: table.truncateLimit ?? 30 })}
+          {t("kb.processingMonitor.previewTruncated").replace("{{count}}", String(table.truncateLimit ?? 30))}
         </p>
       ) : null}
     </div>

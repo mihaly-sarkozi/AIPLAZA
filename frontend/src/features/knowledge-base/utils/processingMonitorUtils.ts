@@ -513,7 +513,7 @@ export function computeProgressPercentPerSecond(totalWeightMs: number): number {
   return 100 / (totalWeightMs / 1000);
 }
 
-function sumPriorStepWeightMs(timeline: ProcessingStepRow[], weights: number[], beforeIndex: number): number {
+function sumPriorStepWeightMs(_timeline: ProcessingStepRow[], weights: number[], beforeIndex: number): number {
   let sum = 0;
   for (let index = 0; index < beforeIndex; index += 1) {
     sum += weights[index] ?? DEFAULT_STEP_WEIGHT_MS;

@@ -207,6 +207,7 @@ async def chat_source_download(
     current_user: User = Depends(get_current_user),
     svc=Depends(get_chat_service),
 ):
+    """Citation/evidence export — nem az eredeti feltöltött dokumentum letöltése."""
     if not hasattr(svc, "download_answer_source"):
         raise HTTPException(status_code=404, detail="Source not found")
     try:

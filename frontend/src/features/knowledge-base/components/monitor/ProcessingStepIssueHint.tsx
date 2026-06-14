@@ -1,4 +1,4 @@
-import type { ProcessingIssueSummary } from "../../../api/services/kb/kbProcessingApi";
+import type { ProcessingIssueSummary } from "../../../../api/services/kb/kbProcessingApi";
 import { translateProcessingMonitorKey } from "../../utils/processingMonitorUtils";
 
 type ProcessingStepIssueHintProps = {

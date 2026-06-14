@@ -22,6 +22,7 @@ from apps.billing.catalog import (
     default_catalog_rows,
     plan_map_from_catalog,
 )
+from shared.billing.tenant_ingest_usage import column_exists, query_tenant_ingest_usage, table_exists
 from apps.billing.calculations import (
     add_months_to_date as _add_months_to_date,
     billing_period_label_hu as _billing_period_label_hu,
@@ -359,69 +360,25 @@ class BillingService:
     def _load_resource_counts(self) -> dict[str, Any]:
         with self._sf() as db:
             user_count = db.query(UserORM).filter(UserORM.deleted_at.is_(None)).count()
-            # Billing modulnak nincs közvetlen hozzáférése a knowledge ORM osztályhoz –
-            # raw SQL COUNT-al számolunk (a session tenant-sémára van scoped-olva).
             schema = db.execute(text("select current_schema()")).scalar_one()
 
-            def table_exists(table_name: str) -> bool:
-                return bool(
-                    db.execute(
-                        text(
-                            """
-                            select 1
-                            from information_schema.tables
-                            where table_schema = :schema and table_name = :table_name
-                            """
-                        ),
-                        {"schema": schema, "table_name": table_name},
-                    ).scalar_one_or_none()
-                )
-
-            def column_exists(table_name: str, column_name: str) -> bool:
-                return bool(
-                    db.execute(
-                        text(
-                            """
-                            select 1
-                            from information_schema.columns
-                            where table_schema = :schema and table_name = :table_name and column_name = :column_name
-                            """
-                        ),
-                        {"schema": schema, "table_name": table_name, "column_name": column_name},
-                    ).scalar_one_or_none()
-                )
-
-            has_kb_table = table_exists("knowledge_bases")
-            has_deleted_at = has_kb_table and column_exists("knowledge_bases", "deleted_at")
+            has_kb_table = table_exists(db, schema=schema, table_name="knowledge_bases")
+            has_deleted_at = has_kb_table and column_exists(
+                db, schema=schema, table_name="knowledge_bases", column_name="deleted_at"
+            )
             kb_where = "WHERE deleted_at IS NULL" if has_deleted_at else ""
             kb_count = (
                 db.execute(text(f"SELECT COUNT(*) FROM knowledge_bases {kb_where}")).scalar() or 0
                 if has_kb_table
                 else 0
             )
-            storage_bytes = 0
-            if (
-                has_kb_table
-                and table_exists("knowledge_ingest_inputs")
-                and table_exists("knowledge_ingest_items")
-            ):
-                deleted_filter = "WHERE kb.deleted_at IS NULL" if has_deleted_at else ""
-                storage_bytes = db.execute(
-                    text(
-                        f"""
-                        SELECT COALESCE(SUM(COALESCE(inp.size_bytes, 0)), 0)
-                        FROM knowledge_ingest_inputs inp
-                        JOIN knowledge_ingest_items item ON item.id = inp.ingest_item_id
-                        JOIN knowledge_bases kb ON kb.uuid = item.corpus_uuid
-                        {deleted_filter}
-                        """
-                    )
-                ).scalar() or 0
+            ingest_usage = query_tenant_ingest_usage(db)
+            storage_bytes = int(ingest_usage.get("storage_bytes") or 0)
             return {
                 "users": int(user_count or 0),
                 "knowledge_bases": int(kb_count or 0),
-                "storage_bytes": int(storage_bytes or 0),
-                "storage_gb_used_rounded": _round_storage_gb(int(storage_bytes or 0)),
+                "storage_bytes": storage_bytes,
+                "storage_gb_used_rounded": _round_storage_gb(storage_bytes),
             }
 
     def _current_period(self) -> tuple[str, datetime, datetime, date]:
@@ -470,8 +427,10 @@ class BillingService:
     def _training_usage_summary(self, tenant_id: int, subscription: BillingSubscriptionORM) -> dict[str, Any]:
         period_key, _, _, _ = self._current_period()
         training = self._repo.get_training_usage(tenant_id, period_key)
-        trained_chars = int(getattr(training, "trained_chars", 0) or 0)
-        storage_bytes = int(getattr(training, "storage_bytes", 0) or 0)
+        with self._sf() as db:
+            live_usage = query_tenant_ingest_usage(db)
+        trained_chars = max(int(getattr(training, "trained_chars", 0) or 0), int(live_usage.get("trained_chars") or 0))
+        storage_bytes = max(int(getattr(training, "storage_bytes", 0) or 0), int(live_usage.get("storage_bytes") or 0))
         plan = self._plan_map().get(subscription.plan_code) or self._plan_map()["free"]
         included_chars = max(0, int(plan.included_training_chars or 0))
         available_chars = self._available_training_chars(subscription)

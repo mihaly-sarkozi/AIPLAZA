@@ -18,6 +18,7 @@ from apps.kb.kb_ingest.enums.TrainingMetric import TrainingMetric
 from apps.kb.kb_ingest.errors.TrainingDuplicateError import TrainingDuplicateError
 from apps.kb.kb_ingest.errors.TrainingQueueUnavailableError import TrainingQueueUnavailableError
 from apps.kb.kb_ingest.events.understanding_requested_event import add_understanding_requested_event
+from apps.kb.kb_ingest.ports.ReadingPolicyPort import ReadingPolicyPort
 from apps.kb.kb_ingest.repository.TrainingRepository import TrainingRepository
 from apps.kb.kb_ingest.validation.ValidateText import validate_text
 from apps.kb.kb_ingest.validation.ValidateTitle import normalize_title
@@ -33,10 +34,12 @@ class TrainingTextService:
         repository: TrainingRepository,
         file_storage: FileStorageInterface,
         config: TrainingConfig | None = None,
+        policy: ReadingPolicyPort | None = None,
     ) -> None:
         self._repository = repository
         self._file_storage = file_storage
         self._config = config or DEFAULT_TRAINING_CONFIG
+        self._policy = policy
 
     async def submit_text_training(
         self,
@@ -45,6 +48,7 @@ class TrainingTextService:
         knowledge_base_id: str,
         created_by: int,
         request: TrainingTextRequest,
+        usage_tenant: object | None = None,
     ) -> TrainingTextResult:
         self._repository.ensure_active_knowledge_base(knowledge_base_id)
         title = normalize_title(request.title, config=self._config)
@@ -87,6 +91,12 @@ class TrainingTextService:
                 },
             )
         )
+        if self._policy is not None and usage_tenant is not None:
+            self._policy.record_training_usage(
+                usage_tenant,
+                char_count=len(text),
+                storage_bytes=len(text.encode("utf-8")),
+            )
 
         try:
             add_understanding_requested_event(

@@ -14,7 +14,7 @@ class KbIngestModule:
         app.include_router(router)
 
     def register_services(self, container) -> None:
-        from apps.kb.kb_ingest.adapters.NoOpReadingPolicy import NoOpReadingPolicy
+        from apps.kb.kb_ingest.adapters.BillingReadingPolicy import BillingReadingPolicy
         from apps.kb.kb_ingest.bootstrap.service_keys import KB_INGEST_POLICY, KB_INGEST_REPOSITORY
         from apps.kb.kb_ingest.repository.TrainingRepository import TrainingRepository
 
@@ -22,7 +22,7 @@ class KbIngestModule:
             KB_INGEST_REPOSITORY,
             TrainingRepository(container.session_factory),
         )
-        container.register_service(KB_INGEST_POLICY, NoOpReadingPolicy())
+        container.register_service(KB_INGEST_POLICY, BillingReadingPolicy())
 
     def register_event_handlers(self, event_bus) -> None:
         pass

@@ -20,6 +20,8 @@ export type ChatSourceItem = {
   download_url?: string;
   download_url_template?: string;
   download_ref?: string;
+  page_numbers?: number[];
+  section_title?: string;
   file_ref?: string | null;
   display_type?: string;
   created_by?: number | null;
@@ -48,6 +50,7 @@ export type ChatApiResponse = {
   cited_sentence_ids?: string[];
   cited_source_ids?: string[];
   citations?: string[];
+  citation_records?: Array<Record<string, unknown>>;
   query_profile?: Record<string, unknown>;
   matched_chunks?: Array<Record<string, unknown>>;
   claims?: Array<Record<string, unknown>>;
@@ -91,6 +94,7 @@ export type ChatMessageType = {
   claims?: Array<Record<string, unknown>>;
   contextBlocks?: Array<Record<string, unknown>>;
   citations?: string[];
+  citationRecords?: Array<Record<string, unknown>>;
   readiness?: Record<string, unknown>;
   sources?: ChatSourceItem[];
   promptContext?: Record<string, unknown>;

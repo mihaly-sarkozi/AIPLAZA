@@ -252,6 +252,7 @@ def _response_from_payload(payload: dict[str, Any], *, limits: dict[str, Any], e
         "cited_sentence_ids": payload.get("cited_sentence_ids") or [],
         "cited_source_ids": payload.get("cited_source_ids") or [],
         "citations": payload.get("citations") or [],
+        "citation_records": payload.get("citation_records") or [],
         "query_profile": payload.get("query_profile") or {},
         "matched_chunks": payload.get("matched_chunks") or [],
         "claims": payload.get("claims") or [],

@@ -218,7 +218,7 @@ function buildEntityTable(summary: Record<string, unknown>, t: (key: string) => 
         confidence: formatPercent(item.confidence, locale),
       };
     })
-    .filter((row): row is Record<string, string> => row !== null);
+    .filter((row) => row !== null);
   if (!rows.length) return null;
   return {
     id: "entities",
@@ -245,7 +245,7 @@ function buildKeywordTable(summary: Record<string, unknown>, t: (key: string) =>
         confidence: formatPercent(item.confidence, locale),
       };
     })
-    .filter((row): row is Record<string, string> => row !== null);
+    .filter((row) => row !== null);
   if (!rows.length) return null;
   return {
     id: "keywords",
@@ -261,7 +261,7 @@ function buildKeywordTable(summary: Record<string, unknown>, t: (key: string) =>
   };
 }
 
-function buildTopicTable(summary: Record<string, unknown>, t: (key: string) => string, locale: string): PreviewTable | null {
+function buildTopicTable(summary: Record<string, unknown>, _t: (key: string) => string, locale: string): PreviewTable | null {
   const rows = asObjectArray(summary.topics)
     .map((item) => {
       const name = String(item.name ?? item.topic_key ?? "").trim();
@@ -272,7 +272,7 @@ function buildTopicTable(summary: Record<string, unknown>, t: (key: string) => s
         confidence: formatPercent(item.confidence, locale),
       };
     })
-    .filter((row): row is Record<string, string> => row !== null);
+    .filter((row) => row !== null);
   if (!rows.length) return null;
   return {
     id: "topics",
@@ -345,7 +345,7 @@ function buildRelationshipTable(summary: Record<string, unknown>, locale: string
         confidence: formatPercent(item.confidence, locale),
       };
     })
-    .filter((row): row is Record<string, string> => row !== null);
+    .filter((row) => row !== null);
   if (!rows.length) return null;
   return {
     id: "relationships",
@@ -374,7 +374,7 @@ function buildScoreTable(summary: Record<string, unknown>, t: (key: string) => s
         snippet,
       };
     })
-    .filter((row): row is Record<string, string> => row !== null);
+    .filter((row) => row !== null);
   if (!rows.length) return null;
   return {
     id: "scores",

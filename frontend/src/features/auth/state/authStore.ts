@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import api, { bindAuthStoreAdapter, fetchCsrfToken, refreshAccessToken } from "../../../api/axiosClient";
+import api, { bindAuthStoreAdapter, refreshAccessToken } from "../../../api/axiosClient";
 
 /**
  * Authentication state – access token in memory only.

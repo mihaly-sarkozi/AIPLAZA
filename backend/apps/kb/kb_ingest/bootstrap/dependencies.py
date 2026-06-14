@@ -30,6 +30,7 @@ def get_training_text_service(request: Request) -> TrainingTextService:
     return TrainingTextService(
         repository=get_module_repository(KB_INGEST_REPOSITORY, request),
         file_storage=get_module_repository(KB_FILE_STORAGE, request),
+        policy=get_module_service(KB_INGEST_POLICY, request),
     )
 
 
@@ -37,6 +38,7 @@ def get_training_file_service(request: Request) -> TrainingFileService:
     return TrainingFileService(
         repository=get_module_repository(KB_INGEST_REPOSITORY, request),
         file_storage=get_module_repository(KB_FILE_STORAGE, request),
+        policy=get_module_service(KB_INGEST_POLICY, request),
     )
 
 

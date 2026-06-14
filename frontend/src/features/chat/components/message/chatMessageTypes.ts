@@ -10,6 +10,8 @@ export type ChatSource = {
   download_url?: string;
   download_url_template?: string;
   download_ref?: string;
+  page_numbers?: number[];
+  section_title?: string;
   source_type?: string;
   file_ref?: string | null;
   display_type?: string;

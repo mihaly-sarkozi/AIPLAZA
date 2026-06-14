@@ -26,9 +26,14 @@ export default function ChatMessagesList({
   emptyStateKey = "chat.emptyState",
   t,
 }: ChatMessagesListProps) {
-  const activePendingTrainingIndex = messages.findLastIndex(
-    (msg) => msg.textTrainingPending && !msg.textTrainingOutcome
-  );
+  let activePendingTrainingIndex = -1;
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const msg = messages[index];
+    if (msg?.textTrainingPending && !msg.textTrainingOutcome) {
+      activePendingTrainingIndex = index;
+      break;
+    }
+  }
 
   return (
     <>
