@@ -9,6 +9,7 @@ from apps.kb.kb_processing.service.ProcessingStatusService import ProcessingStat
 from core.kernel.http.tenant_dependencies import require_tenant_context
 from core.modules.tenant.context.request_tenant_context import RequestTenantContext
 from core.modules.users.domain.dto import User
+from shared.utils.tenant_slug import tenant_slug_or_default
 
 router = APIRouter()
 
@@ -23,10 +24,10 @@ async def get_processing_metrics(
     status_service: ProcessingStatusService = Depends(get_processing_status_service),
     current_user: User = Depends(require_kb_read),
 ) -> ProcessingMetricsResponse:
-    metrics = status_service.get_metrics(kb_id)
-    if metrics is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail={"code": "metrics_not_found"})
-    return metrics
+    return status_service.get_metrics(
+        kb_id,
+        tenant_slug=tenant_slug_or_default(tenant),
+    )
 
 
 @router.get(

@@ -20,10 +20,30 @@ class ProcessingStatusService:
         self._event_repository = event_repository
         self._issue_repository = issue_repository
 
-    def get_metrics(self, knowledge_base_id: str) -> ProcessingMetricsResponse | None:
+    def get_metrics(
+        self,
+        knowledge_base_id: str,
+        *,
+        tenant_slug: str | None = None,
+    ) -> ProcessingMetricsResponse:
         metrics = self._metrics_service.get_for_knowledge_base(knowledge_base_id)
         if metrics is None:
-            return None
+            self._metrics_service.recalculate_for_knowledge_base(
+                knowledge_base_id,
+                tenant_slug=tenant_slug,
+            )
+            metrics = self._metrics_service.get_for_knowledge_base(knowledge_base_id)
+        if metrics is None:
+            from apps.kb.kb_processing.orm.ProcessingMetrics import ProcessingMetrics
+            from apps.kb.shared.ids import new_id
+            from shared.utils.clock import utc_now_naive
+
+            metrics = ProcessingMetrics(
+                id=new_id("proc_metrics"),
+                tenant_slug=tenant_slug,
+                knowledge_base_id=knowledge_base_id,
+                updated_at=utc_now_naive(),
+            )
         return ProcessingMetricsResponse.model_validate(metrics, from_attributes=True)
 
     def list_events(

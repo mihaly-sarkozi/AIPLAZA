@@ -40,8 +40,8 @@ export default function KBProcessingMonitor() {
 
   useEffect(() => {
     if (kbLoading) return;
-    if (!uuid || !kb) navigate("/kb", { replace: true });
-  }, [kb, kbLoading, navigate, uuid]);
+    if (!uuid) navigate("/kb", { replace: true });
+  }, [kbLoading, navigate, uuid]);
 
   const flows = useMemo(() => {
     const runs = runsQuery.data?.items ?? [];

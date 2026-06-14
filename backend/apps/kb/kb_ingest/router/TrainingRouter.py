@@ -4,15 +4,18 @@ from __future__ import annotations
 # Feladat: Tanítási HTTP végpontok (szöveg batch indítás, batch részletek).
 # Sárközi Mihály - 2026.06.07
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 
 from apps.kb.kb_ingest.dto.FileEstimateCommand import FileEstimateCommand
+from apps.kb.kb_ingest.dto.IngestRunListResponse import IngestRunListResponse
 from apps.kb.kb_ingest.service.EstimateFilesService import EstimateFilesService
 from apps.kb.kb_ingest.bootstrap.dependencies import (
     get_estimate_files_service,
+    get_list_ingest_runs_service,
     get_training_batch_service,
     get_training_file_service,
     get_training_text_service,
+    require_kb_read,
     require_kb_train,
 )
 from apps.kb.kb_ingest.dto.TrainingBatchStatusResponse import TrainingBatchStatusResponse
@@ -26,6 +29,7 @@ from apps.kb.kb_ingest.errors.TrainingDuplicateError import TrainingDuplicateErr
 from apps.kb.kb_ingest.errors.TrainingNotFoundError import TrainingNotFoundError
 from apps.kb.kb_ingest.errors.TrainingProcessingError import TrainingProcessingError
 from apps.kb.kb_ingest.errors.TrainingQueueUnavailableError import TrainingQueueUnavailableError
+from apps.kb.kb_ingest.service.ListIngestRunsService import ListIngestRunsService
 from apps.kb.kb_ingest.service.TrainingBatchService import TrainingBatchService
 from apps.kb.kb_ingest.service.TrainingFileService import TrainingFileService
 from apps.kb.kb_ingest.service.TrainingTextService import TrainingTextService
@@ -153,6 +157,18 @@ async def create_file_training_batch(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=_coded_error_detail(exc, fallback_code=TrainingErrorCode.VALIDATION_ERROR.value),
         ) from exc
+
+
+@router.get("/{kb_id}/ingest/runs", response_model=IngestRunListResponse)
+def list_ingest_runs(
+    kb_id: str,
+    limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+    tenant: RequestTenantContext = Depends(require_tenant_context),
+    list_service: ListIngestRunsService = Depends(get_list_ingest_runs_service),
+    _: User = Depends(require_kb_read),
+) -> IngestRunListResponse:
+    return list_service.list_runs(kb_id, limit=limit, offset=offset)
 
 
 @router.get("/training/batches/{batch_id}", response_model=TrainingBatchStatusResponse)

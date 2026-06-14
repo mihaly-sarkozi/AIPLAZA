@@ -49,8 +49,28 @@ export async function listIngestRuns(
   kbUuid: string,
   params?: { limit?: number; offset?: number }
 ): Promise<IngestRunListResponse> {
-  const res = await api.get(`/kb/${kbUuid}/ingest/runs`, { params });
-  return res.data as IngestRunListResponse;
+  try {
+    const res = await api.get(`/kb/${kbUuid}/ingest/runs`, { params });
+    return res.data as IngestRunListResponse;
+  } catch (error) {
+    const status = (error as { response?: { status?: number } })?.response?.status;
+    if (status === 404) {
+      return {
+        items: [],
+        total_count: 0,
+        limit: params?.limit ?? 100,
+        offset: params?.offset ?? 0,
+        has_more: false,
+        summary: {
+          total_run_count: 0,
+          total_item_count: 0,
+          total_char_count: 0,
+          total_sentence_count: 0,
+        },
+      };
+    }
+    throw error;
+  }
 }
 
 function isTrainingBatchRunId(runId: string): boolean {

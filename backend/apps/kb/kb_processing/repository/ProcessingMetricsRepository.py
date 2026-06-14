@@ -154,6 +154,23 @@ class ProcessingMetricsRepository:
                     {"kb_id": knowledge_base_id},
                 ).scalar_one()
             )
+            documents_indexed = int(
+                session.execute(
+                    text(
+                        "SELECT COUNT(DISTINCT training_item_id) FROM kb_indexing_jobs "
+                        "WHERE knowledge_base_id = :kb_id AND status IN ('COMPLETED', 'PARTIAL')"
+                    ),
+                    {"kb_id": knowledge_base_id},
+                ).scalar_one()
+                or 0
+            )
+            last_indexed_at = session.execute(
+                text(
+                    "SELECT MAX(finished_at) FROM kb_indexing_jobs "
+                    "WHERE knowledge_base_id = :kb_id AND finished_at IS NOT NULL"
+                ),
+                {"kb_id": knowledge_base_id},
+            ).scalar_one()
 
         open_total = sum(issue_counts.values())
         return ProcessingMetrics(
@@ -164,7 +181,7 @@ class ProcessingMetricsRepository:
             documents_ingested=documents_ingested,
             documents_understanding_ready=understanding_ready,
             documents_discovery_ready=discovery_ready,
-            documents_indexed=0,
+            documents_indexed=documents_indexed,
             documents_failed=understanding_failed,
             documents_partial=understanding_partial,
             batches_total=batches_total,
@@ -179,7 +196,7 @@ class ProcessingMetricsRepository:
             last_ingested_at=last_ingested_at,
             last_processed_at=last_processed_at,
             last_failed_at=last_failed_at,
-            last_indexed_at=None,
+            last_indexed_at=last_indexed_at,
             metadata_json={},
             updated_at=utc_now_naive(),
         )

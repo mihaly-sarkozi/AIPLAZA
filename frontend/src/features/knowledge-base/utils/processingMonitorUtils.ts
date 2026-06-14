@@ -69,6 +69,34 @@ export function deriveFlowStatus(events: ProcessingEventSummary[], issues: Proce
   const openIssues = issues.filter((issue) => issue.status === "OPEN");
   if (openIssues.some((issue) => ["ERROR", "CRITICAL"].includes(issue.severity))) return "failed";
   if (openIssues.length > 0) return "partial";
+  const hasIndexingDone = terminal.some(
+    (event) =>
+      event.module === "kb_indexing" &&
+      event.step === "PIPELINE" &&
+      normalizeStatus(event.status) === "completed"
+  );
+  if (hasIndexingDone) return "completed";
+
+  const hasEmbeddingDone = terminal.some(
+    (event) =>
+      event.module === "kb_embedding" &&
+      event.step === "PIPELINE" &&
+      normalizeStatus(event.status) === "completed"
+  );
+  const hasDiscoveryDone = terminal.some(
+    (event) =>
+      event.module === "kb_discovery" &&
+      event.step === "PIPELINE" &&
+      normalizeStatus(event.status) === "completed"
+  );
+  const hasUnderstandingDone = terminal.some(
+    (event) =>
+      event.module === "kb_understanding" &&
+      event.step === "PIPELINE" &&
+      normalizeStatus(event.status) === "completed"
+  );
+  if (hasEmbeddingDone || hasDiscoveryDone || hasUnderstandingDone) return "running";
+
   const hasPipelineDone = terminal.some(
     (event) => event.step === "PIPELINE" && normalizeStatus(event.status) === "completed"
   );

@@ -4,7 +4,7 @@ from __future__ import annotations
 # Feladat: Training batch / item / event SQLAlchemy perzisztencia (közvetlenül hívható).
 # Sárközi Mihály - 2026.06.07
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from shared.utils.clock import utc_now
 
@@ -49,6 +49,55 @@ class TrainingRepository:
                     .order_by(TrainingItem.created_at.asc(), TrainingItem.id.asc())
                 ).scalars().all()
             )
+
+    def list_batches_for_knowledge_base(
+        self,
+        knowledge_base_id: str,
+        *,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> tuple[list[TrainingBatch], int]:
+        limit = max(1, min(int(limit), 500))
+        offset = max(0, int(offset))
+        with self._session_factory() as session:
+            total = int(
+                session.execute(
+                    select(func.count(TrainingBatch.id)).where(
+                        TrainingBatch.knowledge_base_id == knowledge_base_id
+                    )
+                ).scalar_one()
+                or 0
+            )
+            batches = list(
+                session.execute(
+                    select(TrainingBatch)
+                    .where(TrainingBatch.knowledge_base_id == knowledge_base_id)
+                    .order_by(TrainingBatch.created_at.desc(), TrainingBatch.id.desc())
+                    .offset(offset)
+                    .limit(limit)
+                )
+                .scalars()
+                .all()
+            )
+            return batches, total
+
+    def list_items_for_batches(self, batch_ids: list[str]) -> dict[str, list[TrainingItem]]:
+        if not batch_ids:
+            return {}
+        with self._session_factory() as session:
+            rows = list(
+                session.execute(
+                    select(TrainingItem)
+                    .where(TrainingItem.training_batch_id.in_(batch_ids))
+                    .order_by(TrainingItem.created_at.asc(), TrainingItem.id.asc())
+                )
+                .scalars()
+                .all()
+            )
+        grouped: dict[str, list[TrainingItem]] = {batch_id: [] for batch_id in batch_ids}
+        for row in rows:
+            grouped.setdefault(row.training_batch_id, []).append(row)
+        return grouped
 
     def list_events_for_batch(self, training_batch_id: str) -> list[TrainingEvent]:
         with self._session_factory() as session:
