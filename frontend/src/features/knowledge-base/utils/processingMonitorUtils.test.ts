@@ -4,10 +4,12 @@ import type { ProcessingEventSummary, ProcessingIssueSummary } from "../../../ap
 import {
   buildPipelineTimeline,
   buildStepDurationProfile,
+  computeProgressPercentPerSecond,
   computeWeightedProgressPercent,
   countOpenBlockingIssues,
   deriveFlowProgress,
   deriveFlowStatus,
+  findFlowStartedAt,
   findLastCompletedRunItemId,
   isOpenBlockingIssue,
   roundDurationToMagnitude,
@@ -223,5 +225,86 @@ describe("duration-weighted progress", () => {
     expect(rawPercent).toBeLessThan(15);
     expect(weightedProgress!.percent).toBe(rawPercent);
     expect(weightedProgress!.percent).toBeGreaterThan(0);
+  });
+
+  it("advances proportionally each second based on total expected duration", () => {
+    const referenceRun = [
+      event({
+        id: "ref-index",
+        training_item_id: "item-ref",
+        module: "kb_indexing",
+        step: "PIPELINE",
+        status: "completed",
+        created_at: "2026-06-14T08:00:00Z",
+      }),
+      event({
+        id: "ref-extract",
+        training_item_id: "item-ref",
+        module: "kb_understanding",
+        step: "EXTRACT_CONTENT",
+        status: "completed",
+        duration_ms: 50_000,
+      }),
+      event({
+        id: "ref-generate",
+        training_item_id: "item-ref",
+        module: "kb_embedding",
+        step: "GENERATE",
+        status: "completed",
+        duration_ms: 200_000,
+      }),
+    ];
+
+    const profile = buildStepDurationProfile(referenceRun);
+    const totalWeight = [...profile.values()].reduce((sum, weight) => sum + weight, 0);
+    const percentPerSecond = computeProgressPercentPerSecond(totalWeight);
+
+    expect(percentPerSecond).toBeGreaterThan(0);
+    expect(percentPerSecond).toBeLessThan(1);
+
+    const flowStart = Date.parse("2026-06-14T12:00:00Z");
+    const runningEvents = [
+      event({
+        id: "run-start",
+        training_item_id: "item-live",
+        module: "kb_understanding",
+        step: "EXTRACT_CONTENT",
+        status: "started",
+        created_at: "2026-06-14T12:00:00Z",
+      }),
+    ];
+    const timeline = buildPipelineTimeline(runningEvents);
+    const weights = timeline.map((row) => profile.get(row.key) ?? 1000);
+
+    const at30s = computeWeightedProgressPercent(
+      timeline,
+      weights,
+      runningEvents,
+      flowStart + 30_000,
+    );
+    const at60s = computeWeightedProgressPercent(
+      timeline,
+      weights,
+      runningEvents,
+      flowStart + 60_000,
+    );
+
+    expect(at30s).toBeGreaterThanOrEqual(Math.round(30 * percentPerSecond) - 2);
+    expect(at60s).toBeGreaterThan(at30s);
+    expect(at60s - at30s).toBeGreaterThanOrEqual(Math.round(25 * percentPerSecond) - 3);
+  });
+
+  it("uses flow start timestamp for time-based interpolation", () => {
+    const events = [
+      event({
+        id: "e1",
+        training_item_id: "item-1",
+        module: "kb_understanding",
+        step: "EXTRACT_CONTENT",
+        status: "started",
+        created_at: "2026-06-14T12:00:00Z",
+      }),
+    ];
+    expect(findFlowStartedAt(events)).toBe(Date.parse("2026-06-14T12:00:00Z"));
   });
 });

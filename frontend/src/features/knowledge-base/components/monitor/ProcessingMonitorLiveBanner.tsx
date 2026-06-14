@@ -99,7 +99,7 @@ export default function ProcessingMonitorLiveBanner({
       {percent != null ? (
         <div className="mt-3 h-2 overflow-hidden rounded-full bg-sky-200/70" aria-hidden="true">
           <div
-            className="h-full rounded-full bg-sky-600 transition-[width] duration-500 ease-out"
+            className="h-full rounded-full bg-sky-600 transition-[width] duration-1000 ease-linear"
             style={{ width: `${Math.max(percent, 2)}%` }}
           />
         </div>

@@ -5,8 +5,11 @@ import {
   buildPipelineTimelineCompact,
   buildStepDurationProfile,
   computeModuleWallTimes,
+  computeProgressPercentPerSecond,
+  computeWeightedProgressPercent,
   deriveFlowProgress,
   extractRawStepDurationsMs,
+  findFlowStartedAt,
 } from "./processingMonitorUtils";
 import {
   buildRealCompletedRunEvents,
@@ -123,8 +126,57 @@ describe("real run progress scale", () => {
         index < discoveryDoneIndex ? "completed" : index === discoveryDoneIndex ? "started" : "pending",
       isPending: index > discoveryDoneIndex,
     }));
-    const percent = cumulativePercent(profile, partialTimeline, 0.04);
+    const weights = partialTimeline.map((row) => profile.get(row.key) ?? 1000);
+    const flowStart = findFlowStartedAt(referenceEvents) ?? Date.parse(REAL_COMPLETED_RUN_TIMESTAMPS.start);
+    const elapsedMs = Date.parse(REAL_COMPLETED_RUN_TIMESTAMPS.discovery_done) - flowStart;
+    const percent = computeWeightedProgressPercent(
+      partialTimeline,
+      weights,
+      referenceEvents,
+      flowStart + elapsedMs,
+    );
     expect(percent).toBeGreaterThan(12);
     expect(percent).toBeLessThan(30);
+  });
+
+  it("ticks smoothly during embedding instead of stalling at ~4%", () => {
+    const profile = buildStepDurationProfile(referenceEvents);
+    const fullTimeline = buildPipelineTimelineCompact(referenceEvents);
+    const weights = fullTimeline.map((row) => profile.get(row.key) ?? 1000);
+    const totalWeight = weights.reduce((sum, weight) => sum + weight, 0);
+    const percentPerSecond = computeProgressPercentPerSecond(totalWeight);
+    const flowStart = Date.parse(REAL_COMPLETED_RUN_TIMESTAMPS.start);
+
+    const embeddingStartIndex = fullTimeline.findIndex((row) => row.key === "kb_embedding::GENERATE");
+    const midEmbeddingMs = Date.parse(REAL_COMPLETED_RUN_TIMESTAMPS.embedding_mid) - flowStart;
+
+    const midTimeline = fullTimeline.map((row, index) => ({
+      ...row,
+      status:
+        index < embeddingStartIndex
+          ? "completed"
+          : index === embeddingStartIndex
+            ? "started"
+            : "pending",
+      isPending: index > embeddingStartIndex,
+    }));
+
+    const midEvents = referenceEvents.filter(
+      (event) =>
+        event.created_at <= REAL_COMPLETED_RUN_TIMESTAMPS.embedding_mid ||
+        (event.module === "kb_embedding" && event.step === "GENERATE" && event.status === "started"),
+    );
+
+    const percent = computeWeightedProgressPercent(
+      midTimeline,
+      weights,
+      midEvents.length ? midEvents : referenceEvents,
+      flowStart + midEmbeddingMs,
+    );
+
+    const expectedFromClock = Math.round(Math.min(99, (midEmbeddingMs / 1000) * percentPerSecond));
+    expect(percent).toBeGreaterThan(35);
+    expect(percent).toBeLessThan(65);
+    expect(Math.abs(percent - expectedFromClock)).toBeLessThanOrEqual(8);
   });
 });

@@ -490,6 +490,62 @@ function findStepStartedAt(events: ProcessingEventSummary[], module: string, ste
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+/** Pipeline indulás: legkorábbi started esemény, vagy legkorábbi esemény időbélyege. */
+export function findFlowStartedAt(events: ProcessingEventSummary[]): number | null {
+  const timestamps: number[] = [];
+  for (const event of events) {
+    if (normalizeStatus(event.status) !== "started") continue;
+    const parsed = Date.parse(event.created_at);
+    if (Number.isFinite(parsed)) timestamps.push(parsed);
+  }
+  if (!timestamps.length) {
+    for (const event of events) {
+      const parsed = Date.parse(event.created_at);
+      if (Number.isFinite(parsed)) timestamps.push(parsed);
+    }
+  }
+  return timestamps.length ? Math.min(...timestamps) : null;
+}
+
+/** Összes várható lépésidő alapján: hány százalék / másodperc (összeg = 100%). */
+export function computeProgressPercentPerSecond(totalWeightMs: number): number {
+  if (!Number.isFinite(totalWeightMs) || totalWeightMs <= 0) return 0;
+  return 100 / (totalWeightMs / 1000);
+}
+
+function sumPriorStepWeightMs(timeline: ProcessingStepRow[], weights: number[], beforeIndex: number): number {
+  let sum = 0;
+  for (let index = 0; index < beforeIndex; index += 1) {
+    sum += weights[index] ?? DEFAULT_STEP_WEIGHT_MS;
+  }
+  return sum;
+}
+
+function resolveActiveStepRatio(
+  row: ProcessingStepRow,
+  stepWeight: number,
+  events: ProcessingEventSummary[],
+  flowStartMs: number | null,
+  priorWeightMs: number,
+  nowMs: number,
+): number {
+  const batch = extractBatchProgress(events);
+  if (batch && batch.total > 0) {
+    return Math.min(0.98, batch.done / batch.total);
+  }
+
+  if (nowMs == null || !Number.isFinite(nowMs)) return 0;
+
+  const stepStartedAt =
+    findStepStartedAt(events, row.module, row.step) ??
+    (flowStartMs != null ? flowStartMs + priorWeightMs : null);
+
+  if (stepStartedAt == null) return 0;
+
+  const elapsedMs = Math.max(0, nowMs - stepStartedAt);
+  return Math.min(0.98, elapsedMs / Math.max(stepWeight, MIN_STEP_WEIGHT_MS));
+}
+
 export function computeWeightedProgressPercent(
   timeline: ProcessingStepRow[],
   weights: number[],
@@ -498,14 +554,14 @@ export function computeWeightedProgressPercent(
 ): number {
   if (!timeline.length) return 0;
 
-  let earnedWeight = 0;
+  let completedWeight = 0;
   let activeIndex = -1;
 
   for (let index = 0; index < timeline.length; index += 1) {
     const row = timeline[index];
     const status = normalizeStatus(row.status);
     if (status === "completed") {
-      earnedWeight += weights[index] ?? DEFAULT_STEP_WEIGHT_MS;
+      completedWeight += weights[index] ?? DEFAULT_STEP_WEIGHT_MS;
       continue;
     }
     if (status === "started" || status === "failed" || status === "skipped") {
@@ -521,25 +577,36 @@ export function computeWeightedProgressPercent(
   const totalWeight = weights.reduce((sum, weight) => sum + weight, 0);
   if (totalWeight <= 0) return 0;
 
+  let earnedWeight = completedWeight;
+
   if (activeIndex >= 0) {
     const stepWeight = weights[activeIndex] ?? DEFAULT_STEP_WEIGHT_MS;
     const row = timeline[activeIndex];
-    let ratio = 0.04;
-
-    const batch = extractBatchProgress(events);
-    if (batch && batch.total > 0) {
-      ratio = Math.min(0.95, batch.done / batch.total);
-    } else if (nowMs != null) {
-      const startedAt = findStepStartedAt(events, row.module, row.step);
-      if (startedAt != null) {
-        ratio = Math.min(0.92, Math.max(0, nowMs - startedAt) / Math.max(stepWeight, MIN_STEP_WEIGHT_MS));
-      }
-    }
-
+    const flowStartMs = findFlowStartedAt(events);
+    const priorWeightMs = sumPriorStepWeightMs(timeline, weights, activeIndex);
+    const ratio =
+      nowMs != null
+        ? resolveActiveStepRatio(row, stepWeight, events, flowStartMs, priorWeightMs, nowMs)
+        : 0;
     earnedWeight += stepWeight * ratio;
   }
 
-  return Math.round((earnedWeight / totalWeight) * 100);
+  const stepPercent = (earnedWeight / totalWeight) * 100;
+
+  if (nowMs == null || !Number.isFinite(nowMs)) {
+    return Math.round(stepPercent);
+  }
+
+  const flowStartMs = findFlowStartedAt(events);
+  if (flowStartMs == null) {
+    return Math.round(stepPercent);
+  }
+
+  const elapsedSec = Math.max(0, (nowMs - flowStartMs) / 1000);
+  const percentPerSecond = computeProgressPercentPerSecond(totalWeight);
+  const timePercent = Math.min(99, elapsedSec * percentPerSecond);
+
+  return Math.round(Math.max(stepPercent, timePercent));
 }
 
 function readPositiveInt(value: unknown): number | null {
