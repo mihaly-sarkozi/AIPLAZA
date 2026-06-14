@@ -36,7 +36,7 @@ from apps.kb.shared.qdrant_kb_collections import (
 
 logger = logging.getLogger(__name__)
 
-FREE_INCLUDED_TRAINING_CHARS = 100_000
+FREE_INCLUDED_TRAINING_CHARS = 500_000
 FREE_TRIAL_DAYS = 7
 
 

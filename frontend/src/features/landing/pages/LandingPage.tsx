@@ -190,7 +190,7 @@ export default function LandingPage() {
                   >
                     Betanítás
                   </th>
-                  <td className="px-3 py-2.5 text-center">100 000 karakter</td>
+                  <td className="px-3 py-2.5 text-center">500 000 karakter</td>
                   <td className="px-3 py-2.5 text-center bg-amber-50/50 dark:bg-amber-950/20">—</td>
                   <td className="px-3 py-2.5 text-center">—</td>
                   <td className="px-3 py-2.5 text-center">—</td>

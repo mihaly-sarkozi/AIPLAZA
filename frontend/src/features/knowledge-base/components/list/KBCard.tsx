@@ -47,19 +47,6 @@ export default function KBCard({
           {t("kb.metricFile")}: {formatBytes(metricValue(kb, "file_bytes"))}
           <span className="mx-2">|</span>
           {t("kb.metricDatabase")}: {formatBytes(metricValue(kb, "database_bytes"))}
-          {canManage && canTrain && !deleted ? (
-            <div className="mt-1">
-              <button
-                type="button"
-                onClick={() => onTrainingLog(kb)}
-                className="font-medium text-[var(--color-muted)] hover:text-[var(--color-muted-foreground)] hover:underline"
-                title={t("kb.actionTrainingLog")}
-                aria-label={t("kb.actionTrainingLog")}
-              >
-                {t("kb.actionLog")} →
-              </button>
-            </div>
-          ) : null}
         </div>
       </div>
 
@@ -68,6 +55,19 @@ export default function KBCard({
           <div className="w-full rounded-lg bg-[var(--color-card-muted)] px-3 py-2 text-center text-sm font-medium text-[var(--color-muted-foreground)]">
             {t("kb.deletedNoActions")}
           </div>
+        ) : null}
+        {canManage && canTrain && !deleted ? (
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={() => onTrainingLog(kb)}
+            disabled={actionLoading}
+            size="sm"
+            title={t("kb.actionTrainingLog")}
+            aria-label={t("kb.actionTrainingLog")}
+          >
+            {t("kb.actionLog")}
+          </Button>
         ) : null}
         {canManage && canTrain && !billingRestricted && !deleted ? (
           <Button type="button" variant="secondary" onClick={() => onSettings(kb)} disabled={actionLoading} size="sm">
