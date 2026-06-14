@@ -7,5 +7,9 @@ import { hu } from "./locales/hu";
 import { en } from "./locales/en";
 import { es } from "./locales/es";
 
-/** Szekciók (common, nav, roles, ...), minden szekción belül kulcs -> szöveg */
-export const translations: Record<Locale, Record<string, Record<string, string>>> = { hu, en, es };
+/** Szekciók (common, nav, roles, ...) és beágyazott kulcsfa */
+export interface TranslationTree {
+  [key: string]: string | TranslationTree;
+}
+
+export const translations: Record<Locale, TranslationTree> = { hu, en, es };

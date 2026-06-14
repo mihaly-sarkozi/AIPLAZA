@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { Locale } from "./translations";
+import type { Locale, TranslationTree } from "./translations";
 import { translations } from "./translations";
 
 const DEFAULT_LOCALE: Locale = "hu";
@@ -24,19 +24,18 @@ function initTheme(): Theme {
   return theme;
 }
 
-/** Ponttal elválasztott kulcs, pl. "common.loading" vagy "roles.title" */
+/** Ponttal elválasztott kulcs, pl. "common.loading" vagy "kb.processingMonitor.title" */
 function getTranslation(locale: Locale, key: string): string {
-  const data = translations[locale];
   const parts = key.split(".");
-  if (parts.length !== 2) return key;
-  const [section, k] = parts;
-  const sectionData = data[section];
-  if (!sectionData || typeof sectionData !== "object") {
-    if (locale !== DEFAULT_LOCALE) return getTranslation(DEFAULT_LOCALE, key);
-    return key;
+  let current: string | TranslationTree | undefined = translations[locale];
+  for (const part of parts) {
+    if (!current || typeof current !== "object") {
+      if (locale !== DEFAULT_LOCALE) return getTranslation(DEFAULT_LOCALE, key);
+      return key;
+    }
+    current = current[part];
   }
-  const value = sectionData[k];
-  if (typeof value === "string") return value;
+  if (typeof current === "string") return current;
   if (locale !== DEFAULT_LOCALE) return getTranslation(DEFAULT_LOCALE, key);
   return key;
 }

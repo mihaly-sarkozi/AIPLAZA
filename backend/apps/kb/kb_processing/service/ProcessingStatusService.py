@@ -30,11 +30,17 @@ class ProcessingStatusService:
         self,
         knowledge_base_id: str,
         *,
+        training_item_id: str | None = None,
+        job_id: str | None = None,
+        module: str | None = None,
         limit: int = 100,
         offset: int = 0,
     ) -> ProcessingEventsPage:
         rows = self._event_repository.list_for_knowledge_base(
             knowledge_base_id,
+            training_item_id=training_item_id,
+            job_id=job_id,
+            module=module,
             limit=limit,
             offset=offset,
         )
@@ -42,13 +48,19 @@ class ProcessingStatusService:
             ProcessingEventSummary.model_validate(row, from_attributes=True)
             for row in rows
         ]
-        total = self._event_repository.count_for_knowledge_base(knowledge_base_id)
+        total = self._event_repository.count_for_knowledge_base(
+            knowledge_base_id,
+            training_item_id=training_item_id,
+            job_id=job_id,
+            module=module,
+        )
         return ProcessingEventsPage(items=items, total=total, limit=limit, offset=offset)
 
     def list_issues(
         self,
         knowledge_base_id: str,
         *,
+        training_item_id: str | None = None,
         status: str | None = None,
         severity: str | None = None,
         limit: int = 100,
@@ -56,6 +68,7 @@ class ProcessingStatusService:
     ) -> ProcessingIssuesPage:
         rows = self._issue_repository.list_for_knowledge_base(
             knowledge_base_id,
+            training_item_id=training_item_id,
             status=status,
             severity=severity,
             limit=limit,

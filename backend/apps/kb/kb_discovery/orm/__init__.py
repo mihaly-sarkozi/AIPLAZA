@@ -1,5 +1,4 @@
 from apps.kb.kb_discovery.orm.DiscoveryJob import DiscoveryJob
-from apps.kb.kb_discovery.orm.DiscoveryStepRun import DiscoveryStepRun
 from apps.kb.kb_discovery.orm.EntityMention import EntityMention
 from apps.kb.kb_discovery.orm.KnowledgeEnrichment import KnowledgeEnrichment
 from apps.kb.kb_discovery.orm.KnowledgeEntity import KnowledgeEntity
@@ -13,7 +12,6 @@ from apps.kb.kb_discovery.orm.TemporalMention import TemporalMention
 
 __all__ = [
     "DiscoveryJob",
-    "DiscoveryStepRun",
     "EntityMention",
     "KnowledgeEnrichment",
     "KnowledgeEntity",

@@ -18,15 +18,4 @@ class DiscoveryChunkDto:
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
-@dataclass(frozen=True)
-class DiscoveryStepResult:
-    step: Any
-    status: str
-    duration_ms: int
-    input_summary: dict[str, Any] = field(default_factory=dict)
-    output_summary: dict[str, Any] = field(default_factory=dict)
-    error_code: str | None = None
-    error_message: str | None = None
-
-
-__all__ = ["DiscoveryChunkDto", "DiscoveryStepResult"]
+__all__ = ["DiscoveryChunkDto"]

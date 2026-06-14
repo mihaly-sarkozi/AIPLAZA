@@ -35,13 +35,23 @@ async def get_processing_metrics(
 )
 async def list_processing_events(
     kb_id: str,
+    training_item_id: str | None = Query(default=None),
+    job_id: str | None = Query(default=None),
+    module: str | None = Query(default=None),
     limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
     tenant: RequestTenantContext = Depends(require_tenant_context),
     status_service: ProcessingStatusService = Depends(get_processing_status_service),
     current_user: User = Depends(require_kb_read),
 ) -> ProcessingEventsPage:
-    return status_service.list_events(kb_id, limit=limit, offset=offset)
+    return status_service.list_events(
+        kb_id,
+        training_item_id=training_item_id,
+        job_id=job_id,
+        module=module,
+        limit=limit,
+        offset=offset,
+    )
 
 
 @router.get(
@@ -50,6 +60,7 @@ async def list_processing_events(
 )
 async def list_processing_issues(
     kb_id: str,
+    training_item_id: str | None = Query(default=None),
     issue_status: str | None = Query(default=None, alias="status"),
     severity: str | None = Query(default=None),
     limit: int = Query(default=100, ge=1, le=500),
@@ -60,6 +71,7 @@ async def list_processing_issues(
 ) -> ProcessingIssuesPage:
     return status_service.list_issues(
         kb_id,
+        training_item_id=training_item_id,
         status=issue_status,
         severity=severity,
         limit=limit,

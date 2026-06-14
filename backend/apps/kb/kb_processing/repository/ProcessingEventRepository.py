@@ -58,34 +58,73 @@ class ProcessingEventRepository:
         self,
         knowledge_base_id: str,
         *,
+        training_item_id: str | None = None,
+        job_id: str | None = None,
+        module: str | None = None,
         limit: int = 100,
         offset: int = 0,
     ) -> list[ProcessingEvent]:
         with self._session_factory() as session:
-            rows = list(
-                session.execute(
-                    select(ProcessingEvent)
-                    .where(ProcessingEvent.knowledge_base_id == knowledge_base_id)
-                    .order_by(ProcessingEvent.created_at.desc(), ProcessingEvent.id.desc())
-                    .limit(limit)
-                    .offset(offset)
-                )
-                .scalars()
-                .all()
+            query = (
+                select(ProcessingEvent)
+                .where(ProcessingEvent.knowledge_base_id == knowledge_base_id)
+                .order_by(ProcessingEvent.created_at.desc(), ProcessingEvent.id.desc())
+                .limit(limit)
+                .offset(offset)
             )
+            if training_item_id:
+                query = query.where(ProcessingEvent.training_item_id == training_item_id)
+            if job_id:
+                query = query.where(ProcessingEvent.job_id == job_id)
+            if module:
+                query = query.where(ProcessingEvent.module == module)
+            rows = list(session.execute(query).scalars().all())
             for row in rows:
                 session.expunge(row)
             return rows
 
-    def count_for_knowledge_base(self, knowledge_base_id: str) -> int:
+    def count_for_knowledge_base(
+        self,
+        knowledge_base_id: str,
+        *,
+        training_item_id: str | None = None,
+        job_id: str | None = None,
+        module: str | None = None,
+    ) -> int:
         with self._session_factory() as session:
-            return int(
-                session.execute(
-                    select(func.count())
-                    .select_from(ProcessingEvent)
-                    .where(ProcessingEvent.knowledge_base_id == knowledge_base_id)
-                ).scalar_one()
+            query = (
+                select(func.count())
+                .select_from(ProcessingEvent)
+                .where(ProcessingEvent.knowledge_base_id == knowledge_base_id)
             )
+            if training_item_id:
+                query = query.where(ProcessingEvent.training_item_id == training_item_id)
+            if job_id:
+                query = query.where(ProcessingEvent.job_id == job_id)
+            if module:
+                query = query.where(ProcessingEvent.module == module)
+            return int(session.execute(query).scalar_one())
+
+    def list_for_job(
+        self,
+        job_id: str,
+        *,
+        module: str | None = None,
+        limit: int = 500,
+    ) -> list[ProcessingEvent]:
+        with self._session_factory() as session:
+            query = (
+                select(ProcessingEvent)
+                .where(ProcessingEvent.job_id == job_id)
+                .order_by(ProcessingEvent.created_at.asc(), ProcessingEvent.id.asc())
+                .limit(limit)
+            )
+            if module:
+                query = query.where(ProcessingEvent.module == module)
+            rows = list(session.execute(query).scalars().all())
+            for row in rows:
+                session.expunge(row)
+            return rows
 
 
 __all__ = ["ProcessingEventRepository"]

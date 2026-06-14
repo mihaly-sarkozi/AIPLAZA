@@ -8,7 +8,6 @@ from apps.kb.kb_discovery.processes.ProcessExtractionService import ProcessExtra
 from apps.kb.kb_discovery.relationships.BuildRelationshipsService import BuildRelationshipsService
 from apps.kb.kb_discovery.repository.DiscoveryBundleRepository import DiscoveryBundleRepository
 from apps.kb.kb_discovery.repository.DiscoveryJobRepository import DiscoveryJobRepository
-from apps.kb.kb_discovery.repository.DiscoveryStepRunRepository import DiscoveryStepRunRepository
 from apps.kb.kb_discovery.repository.EnrichmentRepository import EnrichmentRepository
 from apps.kb.kb_discovery.repository.EntityRepository import EntityMentionRepository, EntityRepository
 from apps.kb.kb_discovery.repository.KeywordRepository import KeywordRepository
@@ -21,7 +20,6 @@ from apps.kb.kb_discovery.repository.TopicRepository import TopicRepository
 from apps.kb.kb_discovery.scoring.KnowledgeScoringService import KnowledgeScoringService
 from apps.kb.kb_discovery.scoring.ScoreKnowledgeService import ScoreKnowledgeService
 from apps.kb.kb_discovery.service.DiscoveryPipelineService import DiscoveryPipelineService
-from apps.kb.kb_discovery.service.DiscoveryTraceService import DiscoveryTraceService
 from apps.kb.kb_discovery.service.LanguageDetectionService import LanguageDetectionService
 from apps.kb.kb_discovery.service.StartDiscoveryService import StartDiscoveryService
 from apps.kb.kb_discovery.service.ValidateDiscoveryService import ValidateDiscoveryService
@@ -29,6 +27,7 @@ from apps.kb.kb_discovery.spatial.SpatialExtractionService import SpatialExtract
 from apps.kb.kb_discovery.temporal.TemporalExtractionService import TemporalExtractionService
 from apps.kb.kb_discovery.ports.ChunkLanguageWriterPort import ChunkLanguageWriterPort
 from apps.kb.kb_discovery.ports.ChunkReaderPort import ChunkReaderPort, UnderstandingJobReaderPort
+from apps.kb.shared.ports.processing_flow_recorder import NoOpProcessingFlowRecorder
 
 
 @dataclass(frozen=True)
@@ -49,7 +48,6 @@ def build_discovery_services(
     flow_recorder=None,
 ) -> DiscoveryServices:
     job_repository = DiscoveryJobRepository(session_factory)
-    step_run_repository = DiscoveryStepRunRepository(session_factory)
     entity_repository = EntityRepository(session_factory)
     mention_repository = EntityMentionRepository(session_factory)
     enrichment_repository = EnrichmentRepository(session_factory)
@@ -61,7 +59,6 @@ def build_discovery_services(
     relationship_repository = RelationshipRepository(session_factory)
     score_repository = ScoreRepository(session_factory)
 
-    trace = DiscoveryTraceService(step_run_repository)
     knowledge_scoring = KnowledgeScoringService(score_repository)
     bundle_repository = DiscoveryBundleRepository(
         enrichment_repository,
@@ -75,7 +72,6 @@ def build_discovery_services(
     )
     pipeline = DiscoveryPipelineService(
         job_repository,
-        trace,
         language_service=LanguageDetectionService(job_repository, chunk_language_writer),
         entity_service=ExtractEntitiesService(
             entity_repository,
@@ -107,6 +103,7 @@ def build_discovery_services(
             spatial_repository,
             process_repository,
         ),
+        flow_recorder=flow_recorder or NoOpProcessingFlowRecorder(),
     )
     return DiscoveryServices(
         job_repository=job_repository,

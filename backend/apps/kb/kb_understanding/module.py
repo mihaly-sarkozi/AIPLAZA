@@ -12,23 +12,15 @@ class KbUnderstandingModule:
         from apps.kb.kb_understanding.bootstrap.service_keys import (
             KB_UNDERSTANDING_CHUNK_REPOSITORY,
             KB_UNDERSTANDING_JOB_REPOSITORY,
-            KB_UNDERSTANDING_STEP_RUN_REPOSITORY,
         )
         from apps.kb.kb_understanding.repository.ChunkRepository import ChunkRepository
         from apps.kb.kb_understanding.repository.UnderstandingJobRepository import (
             UnderstandingJobRepository,
         )
-        from apps.kb.kb_understanding.repository.UnderstandingStepRunRepository import (
-            UnderstandingStepRunRepository,
-        )
 
         container.register_repository(
             KB_UNDERSTANDING_JOB_REPOSITORY,
             UnderstandingJobRepository(container.session_factory),
-        )
-        container.register_repository(
-            KB_UNDERSTANDING_STEP_RUN_REPOSITORY,
-            UnderstandingStepRunRepository(container.session_factory),
         )
         container.register_repository(
             KB_UNDERSTANDING_CHUNK_REPOSITORY,

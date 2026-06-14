@@ -18,7 +18,6 @@ from apps.kb.kb_understanding.events.understanding_failed_event import (
 from apps.kb.kb_understanding.repository.UnderstandingJobRepository import (
     UnderstandingJobRepository,
 )
-from apps.kb.kb_understanding.service.ProcessingTraceService import ProcessingTraceService
 from apps.kb.shared.ports.processing_flow_recorder import (
     NoOpProcessingFlowRecorder,
     ProcessingFlowContext,
@@ -79,7 +78,6 @@ class UnderstandingPipelineService:
     def __init__(
         self,
         job_repository: UnderstandingJobRepository,
-        trace: ProcessingTraceService,
         *,
         extract_service,
         normalize_service,
@@ -90,7 +88,6 @@ class UnderstandingPipelineService:
         emit_failed: Callable[..., None] = add_understanding_failed_event,
     ) -> None:
         self._job_repository = job_repository
-        self._trace = trace
         self._extract = extract_service
         self._normalize = normalize_service
         self._chunk = chunk_service
@@ -223,15 +220,6 @@ class UnderstandingPipelineService:
         except Exception as exc:
             duration_ms = int((time.monotonic() - started) * 1000)
             error_code = str(getattr(exc, "code", UnderstandingErrorCode.INTERNAL_ERROR.value))
-            self._trace.record(
-                ctx.job_id,
-                step,
-                status="failed",
-                duration_ms=duration_ms,
-                input_summary=input_summary,
-                error_code=error_code,
-                error_message=str(exc),
-            )
             self._flow_recorder.record_stage_failed(
                 flow_ctx,
                 module=_PROCESSING_MODULE,
@@ -246,14 +234,6 @@ class UnderstandingPipelineService:
             raise
         duration_ms = int((time.monotonic() - started) * 1000)
         output = output_summary(result)
-        self._trace.record(
-            ctx.job_id,
-            step,
-            status="completed",
-            duration_ms=duration_ms,
-            input_summary=input_summary,
-            output_summary=output,
-        )
         self._flow_recorder.record_stage_completed(
             flow_ctx,
             module=_PROCESSING_MODULE,

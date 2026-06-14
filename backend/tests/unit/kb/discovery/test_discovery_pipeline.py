@@ -8,11 +8,11 @@ from apps.kb.kb_discovery.dto.DiscoveryJobContext import DiscoveryJobContext
 from apps.kb.kb_discovery.dto.DiscoveryChunkDto import DiscoveryChunkDto
 from apps.kb.kb_discovery.enums.DiscoveryStatus import DiscoveryStatus
 from apps.kb.kb_discovery.service.DiscoveryPipelineService import DiscoveryPipelineService
-from apps.kb.kb_discovery.service.DiscoveryTraceService import DiscoveryTraceService
 from apps.kb.kb_discovery.dto.DiscoveryResultDtos import RelationshipBuildResult
 from apps.kb.kb_discovery.dto.DiscoveryResultDtos import LocalKnowledgeEnrichmentResult
 from apps.kb.kb_discovery.dto.KnowledgeEnrichmentDto import KnowledgeEnrichmentDto
 from apps.kb.kb_discovery.validation.ValidateDiscoveryResult import DiscoveryChecklist
+from tests.unit.kb.understanding.conftest import FakeFlowRecorder
 
 pytestmark = pytest.mark.unit
 
@@ -47,11 +47,6 @@ class _FakeJobRepo:
 
     def mark_failed(self, *args, **kwargs):
         pass
-
-
-class _FakeStepRunRepo:
-    def add_run(self, job_id, result):
-        return "step1"
 
 
 def _ctx():
@@ -98,7 +93,6 @@ def test_discovery_pipeline_happy_path():
 
     pipeline = DiscoveryPipelineService(
         _FakeJobRepo(),
-        DiscoveryTraceService(_FakeStepRunRepo()),
         language_service=_Step(
             "language",
             LanguageDetectionResult(language_code="hu", language_confidence=0.8, chunk_languages={"c1": "hu"}),
@@ -125,6 +119,7 @@ def test_discovery_pipeline_happy_path():
             "validate",
             (DiscoveryStatus.READY_FOR_EMBEDDING, DiscoveryChecklist(has_chunks=True, has_enrichments=True, has_scores=True)),
         ),
+        flow_recorder=FakeFlowRecorder(),
         emit_completed=emit("completed"),
         emit_failed=emit("failed"),
         emit_embedding_requested=emit("embedding"),
@@ -152,7 +147,6 @@ def test_discovery_pipeline_partial_on_optional_failure():
 
     pipeline = DiscoveryPipelineService(
         _FakeJobRepo(),
-        DiscoveryTraceService(_FakeStepRunRepo()),
         language_service=_Step("language", error=RuntimeError("language fail")),
         entity_service=_Step("entity", ([], [])),
         enrichment_service=_Step(
@@ -170,6 +164,7 @@ def test_discovery_pipeline_partial_on_optional_failure():
             "validate",
             (DiscoveryStatus.PARTIAL, DiscoveryChecklist(has_chunks=True)),
         ),
+        flow_recorder=FakeFlowRecorder(),
         emit_completed=emit("completed"),
         emit_failed=emit("failed"),
         emit_embedding_requested=emit("embedding"),

@@ -30,6 +30,30 @@ export function getModule(): FrontendModuleDefinition {
         loader: () => import("@frontend/features/knowledge-base/pages/KBEdit"),
       },
       {
+        key: "kb.monitor",
+        path: "/kb/monitor/:uuid",
+        layout: "main",
+        requiresAuth: true,
+        requiredPermission: "kb.read",
+        loader: () => import("@frontend/features/knowledge-base/pages/KBProcessingMonitor"),
+      },
+      {
+        key: "kb.monitorFlow",
+        path: "/kb/monitor/:uuid/flows/:itemId",
+        layout: "main",
+        requiresAuth: true,
+        requiredPermission: "kb.read",
+        loader: () => import("@frontend/features/knowledge-base/pages/KBProcessingFlowDetail"),
+      },
+      {
+        key: "kb.monitorStep",
+        path: "/kb/monitor/:uuid/flows/:itemId/steps/:module/:step",
+        layout: "main",
+        requiresAuth: true,
+        requiredPermission: "kb.read",
+        loader: () => import("@frontend/features/knowledge-base/pages/KBProcessingStepDetail"),
+      },
+      {
         key: "kb.ingest",
         path: "/kb/ingest/:uuid",
         layout: "main",
@@ -77,7 +101,9 @@ export function getModule(): FrontendModuleDefinition {
       void import("@frontend/features/knowledge-base/pages/KBList");
       void import("@frontend/features/knowledge-base/pages/KBEdit");
       void import("@frontend/features/knowledge-base/pages/KBIngest");
-      void import("@frontend/features/knowledge-base/pages/KBIngestRunDetail");
+      void import("@frontend/features/knowledge-base/pages/KBProcessingMonitor");
+      void import("@frontend/features/knowledge-base/pages/KBProcessingFlowDetail");
+      void import("@frontend/features/knowledge-base/pages/KBProcessingStepDetail");
     },
   };
 }

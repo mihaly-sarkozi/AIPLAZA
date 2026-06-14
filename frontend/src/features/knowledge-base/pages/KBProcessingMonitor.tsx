@@ -1,0 +1,162 @@
+import { useEffect, useMemo } from "react";
+import { Link, useNavigate, useParams } from "react-router-dom";
+
+import Alert from "../../../components/ui/Alert";
+import Button from "../../../components/ui/Button";
+import PageHeader from "../../../components/ui/PageHeader";
+import { useTranslation } from "../../../i18n";
+import { getApiErrorMessage } from "../../../utils/getApiErrorMessage";
+import { formatDateTime } from "../../../utils/dateTimeFormatting";
+import { useLocaleSettings } from "../../settings/hooks/useSettings";
+import ProcessingMonitorBreadcrumb from "../components/monitor/ProcessingMonitorBreadcrumb";
+import ProcessingStatusBadge from "../components/monitor/ProcessingStatusBadge";
+import {
+  useMonitorIngestRuns,
+  useProcessingEvents,
+  useProcessingIssues,
+  useProcessingMetrics,
+} from "../hooks/useKbProcessingMonitor";
+import { useKbList } from "../hooks/useKb";
+import { buildFlowSummaries } from "../utils/processingMonitorUtils";
+
+function translateKey(t: (key: string) => string, prefix: string, value: string): string {
+  const translated = t(`${prefix}.${value}`);
+  if (translated !== `${prefix}.${value}`) return translated;
+  return value.replace(/_/g, " ");
+}
+
+export default function KBProcessingMonitor() {
+  const { uuid } = useParams();
+  const navigate = useNavigate();
+  const { t, locale } = useTranslation();
+  const { data: settings } = useLocaleSettings();
+  const { data: kbList = [], isLoading: kbLoading } = useKbList();
+  const kb = useMemo(() => kbList.find((item) => item.uuid === uuid), [kbList, uuid]);
+
+  const runsQuery = useMonitorIngestRuns(uuid);
+  const eventsQuery = useProcessingEvents(uuid);
+  const issuesQuery = useProcessingIssues(uuid);
+  const metricsQuery = useProcessingMetrics(uuid);
+
+  useEffect(() => {
+    if (kbLoading) return;
+    if (!uuid || !kb) navigate("/kb", { replace: true });
+  }, [kb, kbLoading, navigate, uuid]);
+
+  const flows = useMemo(() => {
+    const runs = runsQuery.data?.items ?? [];
+    const events = eventsQuery.data?.items ?? [];
+    const issues = issuesQuery.data?.items ?? [];
+    return buildFlowSummaries(runs, events, issues);
+  }, [eventsQuery.data?.items, issuesQuery.data?.items, runsQuery.data?.items]);
+
+  const error =
+    runsQuery.error || eventsQuery.error || issuesQuery.error
+      ? getApiErrorMessage(runsQuery.error ?? eventsQuery.error ?? issuesQuery.error)
+      : null;
+  const loading = runsQuery.isLoading || eventsQuery.isLoading;
+
+  return (
+    <div className="app-page">
+      <div className="app-page-container">
+        <ProcessingMonitorBreadcrumb
+          crumbs={[
+            { label: t("kb.title"), to: "/kb" },
+            { label: kb?.name ?? t("kb.processingMonitor.title") },
+          ]}
+        />
+        <PageHeader
+          eyebrow={t("kb.processingMonitor.eyebrow")}
+          title={kb?.name ?? t("kb.processingMonitor.title")}
+          description={t("kb.processingMonitor.intro")}
+          actions={
+            <Button variant="secondary" onClick={() => navigate("/kb")}>
+              {t("kb.processingMonitor.backToList")}
+            </Button>
+          }
+        />
+
+        {error ? <Alert tone="error">{error}</Alert> : null}
+
+        <section className="mb-6 grid grid-cols-2 gap-3 rounded-2xl bg-[var(--color-card-muted)]/60 px-4 py-3 md:grid-cols-4">
+          <div>
+            <p className="text-xs uppercase tracking-wide text-[var(--color-muted)]">{t("kb.processingMonitor.metrics.flows")}</p>
+            <p className="text-lg font-semibold">{flows.length}</p>
+          </div>
+          <div>
+            <p className="text-xs uppercase tracking-wide text-[var(--color-muted)]">{t("kb.processingMonitor.metrics.chunks")}</p>
+            <p className="text-lg font-semibold">{metricsQuery.data?.chunks_total ?? "—"}</p>
+          </div>
+          <div>
+            <p className="text-xs uppercase tracking-wide text-[var(--color-muted)]">{t("kb.processingMonitor.metrics.openIssues")}</p>
+            <p className="text-lg font-semibold">{metricsQuery.data?.issues_open ?? issuesQuery.data?.items.filter((i) => i.status === "OPEN").length ?? 0}</p>
+          </div>
+          <div>
+            <p className="text-xs uppercase tracking-wide text-[var(--color-muted)]">{t("kb.processingMonitor.metrics.failedDocs")}</p>
+            <p className="text-lg font-semibold">{metricsQuery.data?.documents_failed ?? "—"}</p>
+          </div>
+        </section>
+
+        <section>
+          <h2 className="mb-3 text-lg font-semibold text-[var(--color-foreground)]">{t("kb.processingMonitor.flowListTitle")}</h2>
+          {loading ? <p className="text-sm text-[var(--color-muted)]">{t("common.loading")}</p> : null}
+          {!loading && !flows.length ? <Alert tone="info">{t("kb.processingMonitor.emptyFlows")}</Alert> : null}
+          {flows.length ? (
+            <div className="app-table-wrap">
+              <div className="app-table-head hidden grid-cols-[1.6fr_0.8fr_0.8fr_0.7fr_0.7fr_1fr_2rem] gap-4 !bg-[#efefef] px-5 py-3 text-sm font-medium !text-[var(--color-foreground)] md:grid">
+                <div>{t("kb.processingMonitor.table.document")}</div>
+                <div>{t("kb.processingMonitor.table.type")}</div>
+                <div>{t("kb.processingMonitor.table.status")}</div>
+                <div>{t("kb.processingMonitor.table.steps")}</div>
+                <div>{t("kb.processingMonitor.table.issues")}</div>
+                <div>{t("kb.processingMonitor.table.lastRun")}</div>
+                <div className="sr-only">{t("kb.processingMonitor.table.details")}</div>
+              </div>
+              <div className="divide-y divide-[var(--color-border)]">
+                {flows.map((flow) => {
+                  const detailUrl = `/kb/monitor/${uuid}/flows/${encodeURIComponent(flow.itemId)}`;
+                  return (
+                    <Link
+                      key={flow.itemId}
+                      to={detailUrl}
+                      className="grid grid-cols-1 gap-2 px-5 py-4 transition hover:bg-[var(--color-card-muted)]/50 md:grid-cols-[1.6fr_0.8fr_0.8fr_0.7fr_0.7fr_1fr_2rem] md:items-center md:gap-4"
+                    >
+                      <div>
+                        <p className="font-medium text-[var(--color-foreground)]">{flow.title}</p>
+                        {flow.latestMessage ? <p className="mt-1 line-clamp-2 text-xs text-[var(--color-muted)]">{flow.latestMessage}</p> : null}
+                      </div>
+                      <div className="text-sm text-[var(--color-muted)]">
+                        {translateKey(t, "kb.processingMonitor.inputTypes", flow.inputType)}
+                      </div>
+                      <div>
+                        <ProcessingStatusBadge
+                          status={flow.status}
+                          label={translateKey(t, "kb.processingMonitor.flowStatuses", flow.status)}
+                        />
+                      </div>
+                      <div className="text-sm text-[var(--color-muted)]">
+                        {flow.completedSteps}/{flow.completedSteps + flow.failedSteps || flow.completedSteps}
+                      </div>
+                      <div className="text-sm text-[var(--color-muted)]">{flow.openIssues}</div>
+                      <div className="text-sm text-[var(--color-muted)]">
+                        {flow.lastEventAt
+                          ? formatDateTime(flow.lastEventAt, {
+                              locale,
+                              timezone: settings?.timezone,
+                              dateFormat: settings?.date_format,
+                              timeFormat: settings?.time_format,
+                            })
+                          : "—"}
+                      </div>
+                      <div className="text-[var(--color-primary)] md:text-right">→</div>
+                    </Link>
+                  );
+                })}
+              </div>
+            </div>
+          ) : null}
+        </section>
+      </div>
+    </div>
+  );
+}

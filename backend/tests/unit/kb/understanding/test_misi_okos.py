@@ -7,15 +7,14 @@ from apps.kb.kb_understanding.enums.UnderstandingStatus import UnderstandingStat
 from apps.kb.kb_understanding.service.ChunkContentService import ChunkContentService
 from apps.kb.kb_understanding.service.ExtractContentService import ExtractContentService
 from apps.kb.kb_understanding.service.NormalizeContentService import NormalizeContentService
-from apps.kb.kb_understanding.service.ProcessingTraceService import ProcessingTraceService
 from apps.kb.kb_understanding.service.UnderstandingPipelineService import UnderstandingPipelineService
 from apps.kb.kb_understanding.service.ValidateUnderstandingService import ValidateUnderstandingService
 
 from tests.unit.kb.understanding.conftest import (
     FakeChunkRepository,
     FakeContentRepository,
+    FakeFlowRecorder,
     FakeJobRepository,
-    FakeStepRunRepository,
 )
 
 pytestmark = pytest.mark.unit
@@ -37,14 +36,13 @@ def test_misi_okos_understanding_pipeline_creates_artifacts_and_emits_discovery(
     content_repo = FakeContentRepository()
     chunk_repo = FakeChunkRepository()
     job_repo = FakeJobRepository()
-    step_runs = FakeStepRunRepository()
+    flow_recorder = FakeFlowRecorder()
 
     def emit_discovery_requested(**kwargs):
         events.append("discovery_requested")
 
     pipeline = UnderstandingPipelineService(
         job_repo,
-        ProcessingTraceService(step_runs),
         extract_service=ExtractContentService(
             content_repo,
             _FakeStorage(b"Misi okos"),
@@ -55,6 +53,7 @@ def test_misi_okos_understanding_pipeline_creates_artifacts_and_emits_discovery(
         normalize_service=NormalizeContentService(content_repo),
         chunk_service=ChunkContentService(chunk_repo, content_repo),
         validate_service=ValidateUnderstandingService(content_repo, chunk_repo),
+        flow_recorder=flow_recorder,
         emit_discovery_requested=emit_discovery_requested,
     )
 

@@ -119,6 +119,7 @@ class ProcessingIssueRepository:
         self,
         knowledge_base_id: str,
         *,
+        training_item_id: str | None = None,
         status: str | None = None,
         severity: str | None = None,
         limit: int = 100,
@@ -126,7 +127,8 @@ class ProcessingIssueRepository:
     ) -> list[ProcessingIssue]:
         with self._session_factory() as session:
             query = select(ProcessingIssue).where(ProcessingIssue.knowledge_base_id == knowledge_base_id)
-            if status:
+            if training_item_id:
+                query = query.where(ProcessingIssue.training_item_id == training_item_id)
                 query = query.where(ProcessingIssue.status == status)
             if severity:
                 query = query.where(ProcessingIssue.severity == severity)

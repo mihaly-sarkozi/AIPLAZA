@@ -11,13 +11,12 @@ from apps.kb.kb_understanding.dto.NormalizedContentDto import NormalizedContentD
 from apps.kb.kb_understanding.enums.UnderstandingErrorCode import UnderstandingErrorCode
 from apps.kb.kb_understanding.enums.UnderstandingStatus import UnderstandingStatus
 from apps.kb.kb_understanding.errors.UnderstandingProcessingError import UnderstandingProcessingError
-from apps.kb.kb_understanding.service.ProcessingTraceService import ProcessingTraceService
 from apps.kb.kb_understanding.service.UnderstandingPipelineService import (
     UnderstandingPipelineService,
 )
 from apps.kb.kb_understanding.validation.ValidateUnderstandingResult import UnderstandingChecklist
 
-from tests.unit.kb.understanding.conftest import FakeJobRepository, FakeStepRunRepository
+from tests.unit.kb.understanding.conftest import FakeFlowRecorder, FakeJobRepository
 
 pytestmark = pytest.mark.unit
 
@@ -63,10 +62,9 @@ def _build(recorder: _Recorder, *, failing: dict[str, Exception] | None = None):
         return _emit
 
     job_repo = FakeJobRepository()
-    step_runs = FakeStepRunRepository()
+    flow_recorder = FakeFlowRecorder()
     pipeline = UnderstandingPipelineService(
         job_repo,
-        ProcessingTraceService(step_runs),
         extract_service=step("extract", ExtractedContentDto.from_legacy(text="t", char_count=1)),
         normalize_service=step(
             "normalize",
@@ -77,35 +75,35 @@ def _build(recorder: _Recorder, *, failing: dict[str, Exception] | None = None):
             ChunkContentResultDto(chunks=[], trace_summary={"chunks_created": 1}),
         ),
         validate_service=_ValidateStep(recorder, "validate", error=failing.get("validate")),
+        flow_recorder=flow_recorder,
         emit_discovery_requested=emit("discovery_requested"),
         emit_failed=emit("failed"),
     )
-    return pipeline, job_repo, step_runs, recorder
+    return pipeline, job_repo, flow_recorder, recorder
 
 
 def test_happy_path_runs_steps_in_order_and_emits_discovery_requested(ctx):
     recorder = _Recorder()
-    pipeline, job_repo, step_runs, _ = _build(recorder)
+    pipeline, job_repo, flow_recorder, _ = _build(recorder)
     status = pipeline.run(ctx)
     assert status == UnderstandingStatus.READY_FOR_DISCOVERY
     assert recorder.order == ["extract", "normalize", "chunk", "validate"]
     assert job_repo.completed == (ctx.job_id, UnderstandingStatus.READY_FOR_DISCOVERY.value)
     assert [name for name, _ in recorder.events] == ["discovery_requested"]
     assert recorder.events[0][1]["understanding_job_id"] == ctx.job_id
-    assert len(step_runs.runs) == 4
-    assert all(result.status == "completed" for _, result in step_runs.runs)
+    assert len(flow_recorder.completed) == 4
 
 
 def test_required_step_retryable_failure(ctx):
     recorder = _Recorder()
     error = UnderstandingProcessingError(UnderstandingErrorCode.STORAGE_ERROR, retryable=True)
-    pipeline, job_repo, step_runs, _ = _build(recorder, failing={"extract": error})
+    pipeline, job_repo, flow_recorder, _ = _build(recorder, failing={"extract": error})
     status = pipeline.run(ctx)
     assert status == UnderstandingStatus.RETRYABLE
     assert job_repo.failed["retryable"] is True
     assert recorder.order == ["extract"]
     assert [name for name, _ in recorder.events] == ["failed"]
-    assert step_runs.runs[0][1].status == "failed"
+    assert len(flow_recorder.failed) == 1
 
 
 def test_required_step_content_failure_is_failed(ctx):

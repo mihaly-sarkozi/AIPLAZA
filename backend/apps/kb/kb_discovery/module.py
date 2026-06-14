@@ -16,12 +16,10 @@ class KbDiscoveryModule:
             KB_DISCOVERY_RELATIONSHIP_REPOSITORY,
             KB_DISCOVERY_SCORE_REPOSITORY,
             KB_DISCOVERY_SPATIAL_REPOSITORY,
-            KB_DISCOVERY_STEP_RUN_REPOSITORY,
             KB_DISCOVERY_TEMPORAL_REPOSITORY,
             KB_DISCOVERY_TOPIC_REPOSITORY,
         )
         from apps.kb.kb_discovery.repository.DiscoveryJobRepository import DiscoveryJobRepository
-        from apps.kb.kb_discovery.repository.DiscoveryStepRunRepository import DiscoveryStepRunRepository
         from apps.kb.kb_discovery.repository.EntityRepository import EntityMentionRepository, EntityRepository
         from apps.kb.kb_discovery.repository.KeywordRepository import KeywordRepository
         from apps.kb.kb_discovery.repository.RelationshipRepository import RelationshipRepository
@@ -32,7 +30,6 @@ class KbDiscoveryModule:
 
         sf = container.session_factory
         container.register_repository(KB_DISCOVERY_JOB_REPOSITORY, DiscoveryJobRepository(sf))
-        container.register_repository(KB_DISCOVERY_STEP_RUN_REPOSITORY, DiscoveryStepRunRepository(sf))
         container.register_repository(KB_DISCOVERY_ENTITY_REPOSITORY, EntityRepository(sf))
         container.register_repository(KB_DISCOVERY_MENTION_REPOSITORY, EntityMentionRepository(sf))
         container.register_repository(KB_DISCOVERY_KEYWORD_REPOSITORY, KeywordRepository(sf))

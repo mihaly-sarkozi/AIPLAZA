@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from apps.kb.kb_discovery.orm.DiscoveryJob import DiscoveryJob
-from apps.kb.kb_discovery.orm.DiscoveryStepRun import DiscoveryStepRun
 from apps.kb.kb_discovery.orm.EntityMention import EntityMention
 from apps.kb.kb_discovery.orm.KnowledgeEnrichment import KnowledgeEnrichment
 from apps.kb.kb_discovery.orm.KnowledgeEntity import KnowledgeEntity
@@ -26,7 +25,6 @@ def _install_kb_discovery_schema(engine, slug: str) -> None:
         slug,
         (
             DiscoveryJob.__table__,
-            DiscoveryStepRun.__table__,
             KnowledgeEntity.__table__,
             EntityMention.__table__,
             KnowledgeEnrichment.__table__,
@@ -103,11 +101,10 @@ def register_kb_discovery_tenant_hooks() -> None:
         [
             TenantSchemaHook(
                 name="kb_discovery",
-                revision="kb.discovery.schema.v6",
+                revision="kb.discovery.schema.v7",
                 install=_install_kb_discovery_schema,
                 table_names=(
                     "kb_discovery_jobs",
-                    "kb_discovery_step_runs",
                     "kb_entities",
                     "kb_entity_mentions",
                     "kb_enrichments",

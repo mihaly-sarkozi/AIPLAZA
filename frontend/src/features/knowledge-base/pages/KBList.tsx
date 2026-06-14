@@ -337,7 +337,7 @@ export default function KBList() {
           actionLoading={actionLoading}
           loadMoreRef={loadMoreRef}
           t={t}
-          onTrainingLog={(kb) => navigate(`/kb/ingest/${kb.uuid}`)}
+          onTrainingLog={(kb) => navigate(`/kb/monitor/${kb.uuid}`)}
           onSettings={openSettingsModal}
           onDelete={(kb) => {
             setDeleteConfirmKb(kb);

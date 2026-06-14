@@ -13,13 +13,9 @@ from apps.kb.kb_understanding.repository.ContentRepository import ContentReposit
 from apps.kb.kb_understanding.repository.UnderstandingJobRepository import (
     UnderstandingJobRepository,
 )
-from apps.kb.kb_understanding.repository.UnderstandingStepRunRepository import (
-    UnderstandingStepRunRepository,
-)
 from apps.kb.kb_understanding.service.ChunkContentService import ChunkContentService
 from apps.kb.kb_understanding.service.ExtractContentService import ExtractContentService
 from apps.kb.kb_understanding.service.NormalizeContentService import NormalizeContentService
-from apps.kb.kb_understanding.service.ProcessingTraceService import ProcessingTraceService
 from apps.kb.kb_understanding.service.StartUnderstandingService import StartUnderstandingService
 from apps.kb.kb_understanding.service.UnderstandingPipelineService import (
     UnderstandingPipelineService,
@@ -36,7 +32,6 @@ from apps.kb.shared.ports.processing_flow_recorder import (
 @dataclass(frozen=True)
 class UnderstandingServices:
     job_repository: UnderstandingJobRepository
-    step_run_repository: UnderstandingStepRunRepository
     chunk_repository: ChunkRepository
     start_service: StartUnderstandingService
     pipeline: UnderstandingPipelineService
@@ -50,16 +45,13 @@ def build_understanding_services(
     flow_recorder: ProcessingFlowRecorder | None = None,
 ) -> UnderstandingServices:
     job_repository = UnderstandingJobRepository(session_factory)
-    step_run_repository = UnderstandingStepRunRepository(session_factory)
     content_repository = ContentRepository(session_factory)
     chunk_repository = ChunkRepository(session_factory)
 
-    trace = ProcessingTraceService(step_run_repository)
     extract_config = DEFAULT_EXTRACT_CONFIG
     ocr_extractor = OcrExtractorAdapter(extract_config)
     pipeline = UnderstandingPipelineService(
         job_repository,
-        trace,
         extract_service=ExtractContentService(
             content_repository,
             file_storage,
@@ -76,7 +68,6 @@ def build_understanding_services(
     )
     return UnderstandingServices(
         job_repository=job_repository,
-        step_run_repository=step_run_repository,
         chunk_repository=chunk_repository,
         start_service=StartUnderstandingService(job_repository, item_reader),
         pipeline=pipeline,

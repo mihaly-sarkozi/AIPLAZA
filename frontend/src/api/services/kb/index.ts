@@ -6,3 +6,4 @@ export * from "./kbSourceApi";
 export * from "./kbTraceApi";
 export * from "./kbPermissionsApi";
 export * from "./kbMetricsApi";
+export * from "./kbProcessingApi";

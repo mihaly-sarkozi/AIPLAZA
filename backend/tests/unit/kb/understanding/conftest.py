@@ -232,16 +232,27 @@ class FakeJobRepository:
         }
 
 
-class FakeStepRunRepository:
+class FakeFlowRecorder:
     def __init__(self) -> None:
-        self.runs: list = []
+        self.started: list[dict] = []
+        self.completed: list[dict] = []
+        self.failed: list[dict] = []
+        self.issues: list[dict] = []
 
-    def add_run(self, job_id: str, result) -> str:
-        self.runs.append((job_id, result))
-        return f"run_{len(self.runs)}"
+    def record_stage_started(self, ctx, **kwargs) -> None:
+        self.started.append(kwargs)
 
-    def list_for_job(self, job_id: str) -> list:
-        return [result for run_job_id, result in self.runs if run_job_id == job_id]
+    def record_stage_completed(self, ctx, **kwargs) -> None:
+        self.completed.append(kwargs)
+
+    def record_stage_failed(self, ctx, **kwargs) -> None:
+        self.failed.append(kwargs)
+
+    def open_issue(self, ctx, **kwargs) -> None:
+        self.issues.append(kwargs)
+
+    def recalculate_metrics(self, ctx) -> None:
+        return None
 
 
 @pytest.fixture

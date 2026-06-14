@@ -6,7 +6,6 @@ from apps.kb.kb_understanding.orm.KnowledgeChunk import KnowledgeChunk
 from apps.kb.kb_understanding.orm.NormalizedContent import NormalizedContent
 from apps.kb.kb_understanding.orm.NormalizedContentPart import NormalizedContentPart
 from apps.kb.kb_understanding.orm.UnderstandingJob import UnderstandingJob
-from apps.kb.kb_understanding.orm.UnderstandingStepRun import UnderstandingStepRun
 
 __all__ = [
     "ExtractedContent",
@@ -15,5 +14,4 @@ __all__ = [
     "NormalizedContent",
     "NormalizedContentPart",
     "UnderstandingJob",
-    "UnderstandingStepRun",
 ]

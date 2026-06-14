@@ -133,7 +133,7 @@ További szabályok:
 - **Ne szaporítsd a kódot:** nincs pass-through wrapper, nincs felesleges
   `manager` / `handler` / `coordinator` — csak ami döntést vagy perzisztenciát hordoz.
 - Audit és metrics modulon belül van, külön service fájlokban.
-- Observability / trace a **kb_understanding** része (`ProcessingTraceService`).
+- Observability / trace a **kb_processing** része (`kb_processing_events`, `ProcessingEventService`).
 - A **shared** csak közös típusokat, hibákat, eseményeket tartalmaz — nincs benne
   üzleti logika, és nem importálhat konkrét modult.
 

@@ -7,7 +7,7 @@ from __future__ import annotations
 from apps.kb.kb_understanding.dto.UnderstandingJobResponse import UnderstandingJobResponse
 from apps.kb.kb_understanding.dto.UnderstandingStepRunResponse import UnderstandingStepRunResponse
 from apps.kb.kb_understanding.orm.UnderstandingJob import UnderstandingJob
-from apps.kb.kb_understanding.orm.UnderstandingStepRun import UnderstandingStepRun
+from apps.kb.shared.ports.processing_event_reader import ProcessingStepEventView
 
 
 def job_to_response(job: UnderstandingJob) -> UnderstandingJobResponse:
@@ -27,17 +27,17 @@ def job_to_response(job: UnderstandingJob) -> UnderstandingJobResponse:
     )
 
 
-def step_run_to_response(run: UnderstandingStepRun) -> UnderstandingStepRunResponse:
+def processing_event_to_step_response(event: ProcessingStepEventView) -> UnderstandingStepRunResponse:
     return UnderstandingStepRunResponse(
-        step=run.step,
-        status=run.status,
-        duration_ms=int(run.duration_ms or 0),
-        input_summary=dict(run.input_summary or {}),
-        output_summary=dict(run.output_summary or {}),
-        error_code=run.error_code,
-        error_message=run.error_message,
-        created_at=run.created_at,
+        step=event.step,
+        status=event.status,
+        duration_ms=int(event.duration_ms or 0),
+        input_summary=dict(event.input_summary),
+        output_summary=dict(event.output_summary),
+        error_code=event.error_code,
+        error_message=event.error_message,
+        created_at=event.created_at,
     )
 
 
-__all__ = ["job_to_response", "step_run_to_response"]
+__all__ = ["job_to_response", "processing_event_to_step_response"]
