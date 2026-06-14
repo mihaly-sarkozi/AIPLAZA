@@ -65,6 +65,7 @@ class ValidateDiscoveryResult:
         topic_relationship_count: int = 0,
         temporal_relationship_count: int = 0,
         spatial_relationship_count: int = 0,
+        process_relationship_count: int = 0,
         scores: list | None = None,
     ) -> DiscoveryChecklist:
         checks = {
@@ -93,6 +94,8 @@ class ValidateDiscoveryResult:
             warnings.append("MISSING_TEMPORAL_RELATIONSHIPS")
         if spatial_count > 0 and spatial_relationship_count == 0:
             warnings.append("MISSING_SPATIAL_RELATIONSHIPS")
+        if process_count > 0 and process_relationship_count == 0:
+            warnings.append("MISSING_PROCESS_RELATIONSHIPS")
         if process_content_without_extraction > 0:
             warnings.append("PROCESS_CONTENT_WITHOUT_PROCESS_EXTRACTION")
         if low_score_chunks > 0:

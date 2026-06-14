@@ -46,6 +46,11 @@ class TemporalMentionDto:
     normalized_end: str | None
     temporal_type: str
     confidence: float
+    language_code: str = "unknown"
+    recognizer_name: str = ""
+    start_offset: int | None = None
+    end_offset: int | None = None
+    metadata: dict[str, object] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -55,7 +60,12 @@ class SpatialMentionDto:
     normalized_location: str
     location_type: str
     confidence: float
+    language_code: str = "unknown"
+    recognizer_name: str = ""
+    start_offset: int | None = None
+    end_offset: int | None = None
     site_id: str | None = None
+    metadata: dict[str, object] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

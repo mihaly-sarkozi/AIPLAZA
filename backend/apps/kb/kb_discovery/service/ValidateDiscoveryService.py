@@ -90,7 +90,7 @@ class ValidateDiscoveryService:
                 process_content_without_extraction = len(process_chunks)
 
         duplicate_keyword_chunks, duplicate_topic_chunks = self._duplicate_counts(enrichment_result)
-        relationship_counts = self._relationship_type_counts(ctx.job_id)
+        relationship_counts = self._relationship_repository.count_relationship_groups_for_job(ctx.job_id)
 
         for chunk in chunks:
             if len(chunk.text.strip()) > 200:
@@ -121,6 +121,7 @@ class ValidateDiscoveryService:
             topic_relationship_count=relationship_counts.get("topic", 0),
             temporal_relationship_count=relationship_counts.get("time", 0),
             spatial_relationship_count=relationship_counts.get("location", 0),
+            process_relationship_count=relationship_counts.get("process", 0),
         )
         if not checklist.core_complete:
             return DiscoveryStatus.FAILED, checklist
@@ -147,13 +148,6 @@ class ValidateDiscoveryService:
             if len(keys) != len(set(keys)):
                 topic_dupes += 1
         return keyword_dupes, topic_dupes
-
-    def _relationship_type_counts(self, job_id: str) -> dict[str, int]:
-        # Lightweight count via repository; relationship rows are not loaded in full here.
-        total = self._relationship_repository.count_for_job(job_id)
-        if total == 0:
-            return {}
-        return {"entity": total, "topic": total, "time": total, "location": total}
 
 
 __all__ = ["ValidateDiscoveryService"]

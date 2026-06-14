@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from apps.kb.kb_discovery.dto.DiscoveryJobContext import DiscoveryJobContext
 from apps.kb.kb_discovery.dto.DiscoveryResultDtos import RelationshipBuildInput, RelationshipBuildResult
-from apps.kb.kb_discovery.orm.KnowledgeRelationship import KnowledgeRelationship
+from apps.kb.kb_discovery.mapper.discovery_mapper import relationship_dict_to_orm
 from apps.kb.kb_discovery.relationships.EntityChunkRelationshipBuilder import (
     EntityChunkRelationshipBuilder,
     EntityCoOccurrenceBuilder,
@@ -17,7 +17,6 @@ from apps.kb.kb_discovery.relationships.SpatialRelationshipBuilder import Spatia
 from apps.kb.kb_discovery.relationships.TemporalRelationshipBuilder import TemporalRelationshipBuilder
 from apps.kb.kb_discovery.relationships.TopicRelationshipBuilder import TopicRelationshipBuilder
 from apps.kb.kb_discovery.repository.RelationshipRepository import RelationshipRepository
-from apps.kb.shared.ids import new_id
 
 
 class BuildRelationshipsService:
@@ -36,8 +35,9 @@ class BuildRelationshipsService:
         self._scorer = RelationshipScorer()
 
     def run(self, ctx: DiscoveryJobContext, *, build_input: RelationshipBuildInput) -> RelationshipBuildResult:
-        rows: list[KnowledgeRelationship] = []
+        rows = []
         for builder in self._builders:
+            builder_name = type(builder).__name__
             for rel in builder.build(
                 ctx,
                 entities=list(build_input.entities),
@@ -47,17 +47,13 @@ class BuildRelationshipsService:
                 spatial=list(build_input.spatial_mentions),
                 process_mentions=list(build_input.process_mentions),
             ):
+                confidence = self._scorer.score(rel)
                 rows.append(
-                    KnowledgeRelationship(
-                        id=new_id("rel"),
-                        job_id=ctx.job_id,
-                        knowledge_base_id=ctx.knowledge_base_id,
-                        from_type=rel["from_type"],
-                        from_id=rel["from_id"],
-                        to_type=rel["to_type"],
-                        to_id=rel["to_id"],
-                        relation=rel["relation"],
-                        confidence=self._scorer.score(rel),
+                    relationship_dict_to_orm(
+                        ctx,
+                        rel,
+                        builder_name=builder_name,
+                        confidence=confidence,
                     )
                 )
         count = self._relationship_repository.replace_for_job(ctx.job_id, rows)

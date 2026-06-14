@@ -20,6 +20,9 @@ class EntityChunkRelationshipBuilder:
                         "to_id": chunk_id,
                         "relation": "mentioned_in",
                         "confidence": entity.confidence,
+                        "evidence_chunk_ids": [chunk_id],
+                        "evidence_text": entity.name,
+                        "weight": entity.confidence,
                     }
                 )
             rows.append(

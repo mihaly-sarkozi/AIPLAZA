@@ -13,6 +13,13 @@ from apps.kb.kb_discovery.temporal.RelativeDateResolver import RelativeDateResol
 from apps.kb.kb_discovery.temporal.TemporalContextScorer import TemporalContextScorer
 
 
+def _text_offsets(text: str, raw_text: str) -> tuple[int | None, int | None]:
+    index = text.find(raw_text)
+    if index < 0:
+        return None, None
+    return index, index + len(raw_text)
+
+
 class TemporalExtractionService:
     def __init__(self, temporal_repository: TemporalRepository) -> None:
         self._temporal_repository = temporal_repository
@@ -28,8 +35,14 @@ class TemporalExtractionService:
     def run(self, ctx: DiscoveryJobContext, chunks: list[DiscoveryChunkDto]) -> TemporalExtractionResult:
         mentions: list[TemporalMentionDto] = []
         for chunk in chunks:
+            language_code = chunk.language_code or ctx.language_code or "unknown"
             for recognizer in self._recognizers:
+                recognizer_name = type(recognizer).__name__
                 for mention in recognizer.recognize(chunk):
+                    start_offset = mention.get("start_offset")
+                    end_offset = mention.get("end_offset")
+                    if start_offset is None or end_offset is None:
+                        start_offset, end_offset = _text_offsets(chunk.text, mention["raw_text"])
                     mentions.append(
                         TemporalMentionDto(
                             chunk_id=chunk.chunk_id,
@@ -38,6 +51,11 @@ class TemporalExtractionService:
                             normalized_end=mention.get("normalized_end"),
                             temporal_type=mention["temporal_type"],
                             confidence=self._scorer.score(mention),
+                            language_code=language_code,
+                            recognizer_name=recognizer_name,
+                            start_offset=start_offset,
+                            end_offset=end_offset,
+                            metadata=dict(mention.get("metadata") or {}),
                         )
                     )
         self._temporal_repository.replace_for_job(

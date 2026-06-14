@@ -18,8 +18,9 @@ from apps.kb.kb_discovery.dto.KnowledgeEntityDto import EntityMentionDto, Knowle
 from apps.kb.kb_discovery.orm.EntityMention import EntityMention
 from apps.kb.kb_discovery.orm.KnowledgeEntity import KnowledgeEntity
 from apps.kb.kb_discovery.orm.KnowledgeKeyword import KnowledgeKeyword
-from apps.kb.kb_discovery.orm.KnowledgeScore import KnowledgeScore
+from apps.kb.kb_discovery.orm.KnowledgeRelationship import KnowledgeRelationship
 from apps.kb.kb_discovery.orm.KnowledgeTopic import KnowledgeTopic
+from apps.kb.kb_discovery.orm.KnowledgeScore import KnowledgeScore
 from apps.kb.kb_discovery.orm.ProcessMention import ProcessMention
 from apps.kb.kb_discovery.orm.SpatialMention import SpatialMention
 from apps.kb.kb_discovery.orm.TemporalMention import TemporalMention
@@ -150,28 +151,52 @@ def topic_dto_to_orm(ctx: DiscoveryJobContext, dto: KnowledgeTopicDto) -> Knowle
 
 
 def temporal_dto_to_orm(ctx: DiscoveryJobContext, dto: TemporalMentionDto) -> TemporalMention:
+    from shared.utils.clock import utc_now_naive
+
+    now = utc_now_naive()
     return TemporalMention(
         id=new_id("temporal"),
         job_id=ctx.job_id,
+        knowledge_base_id=ctx.knowledge_base_id,
+        training_item_id=ctx.training_item_id,
         chunk_id=dto.chunk_id,
         raw_text=dto.raw_text[:256],
         normalized_start=dto.normalized_start,
         normalized_end=dto.normalized_end,
         temporal_type=dto.temporal_type,
+        start_offset=dto.start_offset,
+        end_offset=dto.end_offset,
+        language_code=dto.language_code,
         confidence=dto.confidence,
+        recognizer_name=dto.recognizer_name[:64],
+        metadata_json=dict(dto.metadata),
+        created_at=now,
+        updated_at=now,
     )
 
 
 def spatial_dto_to_orm(ctx: DiscoveryJobContext, dto: SpatialMentionDto) -> SpatialMention:
+    from shared.utils.clock import utc_now_naive
+
+    now = utc_now_naive()
     return SpatialMention(
         id=new_id("spatial"),
         job_id=ctx.job_id,
+        knowledge_base_id=ctx.knowledge_base_id,
+        training_item_id=ctx.training_item_id,
         chunk_id=dto.chunk_id,
         raw_text=dto.raw_text[:512],
         normalized_location=dto.normalized_location[:512],
         location_type=dto.location_type,
+        start_offset=dto.start_offset,
+        end_offset=dto.end_offset,
+        language_code=dto.language_code,
         site_id=dto.site_id,
         confidence=dto.confidence,
+        recognizer_name=dto.recognizer_name[:64],
+        metadata_json=dict(dto.metadata),
+        created_at=now,
+        updated_at=now,
     )
 
 
@@ -202,6 +227,48 @@ def process_dto_to_orm(ctx: DiscoveryJobContext, dto: ProcessMentionDto) -> Proc
     )
 
 
+def relationship_dict_to_orm(
+    ctx: DiscoveryJobContext,
+    rel: dict[str, object],
+    *,
+    builder_name: str,
+    confidence: float,
+) -> KnowledgeRelationship:
+    from shared.utils.clock import utc_now_naive
+
+    now = utc_now_naive()
+    evidence_chunk_ids = list(rel.get("evidence_chunk_ids") or [])
+    if not evidence_chunk_ids:
+        if rel.get("to_type") == "chunk":
+            evidence_chunk_ids = [str(rel["to_id"])]
+        elif rel.get("from_type") == "chunk":
+            evidence_chunk_ids = [str(rel["from_id"])]
+
+    evidence_text = str(rel.get("evidence_text") or rel.get("from_id") or "")
+    weight = float(rel.get("weight", confidence))
+    metadata = dict(rel.get("metadata") or {})
+    metadata.setdefault("builder", builder_name)
+
+    return KnowledgeRelationship(
+        id=new_id("rel"),
+        job_id=ctx.job_id,
+        knowledge_base_id=ctx.knowledge_base_id,
+        training_item_id=ctx.training_item_id,
+        from_type=str(rel["from_type"]),
+        from_id=str(rel["from_id"])[:512],
+        to_type=str(rel["to_type"]),
+        to_id=str(rel["to_id"])[:512],
+        relation=str(rel["relation"]),
+        confidence=confidence,
+        weight=weight,
+        evidence_chunk_ids=evidence_chunk_ids,
+        evidence_text=evidence_text[:2048],
+        metadata_json=metadata,
+        created_at=now,
+        updated_at=now,
+    )
+
+
 def score_dto_to_orm(ctx: DiscoveryJobContext, dto: KnowledgeScoreDto) -> KnowledgeScore:
     return KnowledgeScore(
         id=new_id("score"),
@@ -219,6 +286,7 @@ __all__ = [
     "mention_dto_from_candidate",
     "mention_dto_to_orm",
     "process_dto_to_orm",
+    "relationship_dict_to_orm",
     "score_dto_to_orm",
     "spatial_dto_to_orm",
     "temporal_dto_to_orm",

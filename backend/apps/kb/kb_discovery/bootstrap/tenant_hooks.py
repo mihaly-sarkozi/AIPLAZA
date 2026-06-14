@@ -72,6 +72,28 @@ def _install_kb_discovery_schema(engine, slug: str) -> None:
             'ALTER TABLE "{schema}".kb_topics ADD COLUMN IF NOT EXISTS taxonomy_version VARCHAR(32) NOT NULL DEFAULT \'\'',
             'ALTER TABLE "{schema}".kb_topics ADD COLUMN IF NOT EXISTS metadata_json JSONB NOT NULL DEFAULT \'{{}}\'::jsonb',
             'ALTER TABLE "{schema}".kb_topics ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP NOT NULL DEFAULT NOW()',
+            'ALTER TABLE "{schema}".kb_temporal_mentions ADD COLUMN IF NOT EXISTS knowledge_base_id VARCHAR(64)',
+            'ALTER TABLE "{schema}".kb_temporal_mentions ADD COLUMN IF NOT EXISTS training_item_id VARCHAR(64)',
+            'ALTER TABLE "{schema}".kb_temporal_mentions ADD COLUMN IF NOT EXISTS start_offset INTEGER',
+            'ALTER TABLE "{schema}".kb_temporal_mentions ADD COLUMN IF NOT EXISTS end_offset INTEGER',
+            'ALTER TABLE "{schema}".kb_temporal_mentions ADD COLUMN IF NOT EXISTS language_code VARCHAR(8)',
+            'ALTER TABLE "{schema}".kb_temporal_mentions ADD COLUMN IF NOT EXISTS recognizer_name VARCHAR(64) NOT NULL DEFAULT \'\'',
+            'ALTER TABLE "{schema}".kb_temporal_mentions ADD COLUMN IF NOT EXISTS metadata_json JSONB NOT NULL DEFAULT \'{{}}\'::jsonb',
+            'ALTER TABLE "{schema}".kb_temporal_mentions ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP NOT NULL DEFAULT NOW()',
+            'ALTER TABLE "{schema}".kb_spatial_mentions ADD COLUMN IF NOT EXISTS knowledge_base_id VARCHAR(64)',
+            'ALTER TABLE "{schema}".kb_spatial_mentions ADD COLUMN IF NOT EXISTS training_item_id VARCHAR(64)',
+            'ALTER TABLE "{schema}".kb_spatial_mentions ADD COLUMN IF NOT EXISTS start_offset INTEGER',
+            'ALTER TABLE "{schema}".kb_spatial_mentions ADD COLUMN IF NOT EXISTS end_offset INTEGER',
+            'ALTER TABLE "{schema}".kb_spatial_mentions ADD COLUMN IF NOT EXISTS language_code VARCHAR(8)',
+            'ALTER TABLE "{schema}".kb_spatial_mentions ADD COLUMN IF NOT EXISTS recognizer_name VARCHAR(64) NOT NULL DEFAULT \'\'',
+            'ALTER TABLE "{schema}".kb_spatial_mentions ADD COLUMN IF NOT EXISTS metadata_json JSONB NOT NULL DEFAULT \'{{}}\'::jsonb',
+            'ALTER TABLE "{schema}".kb_spatial_mentions ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP NOT NULL DEFAULT NOW()',
+            'ALTER TABLE "{schema}".kb_relationships ADD COLUMN IF NOT EXISTS training_item_id VARCHAR(64)',
+            'ALTER TABLE "{schema}".kb_relationships ADD COLUMN IF NOT EXISTS weight DOUBLE PRECISION NOT NULL DEFAULT 0',
+            'ALTER TABLE "{schema}".kb_relationships ADD COLUMN IF NOT EXISTS evidence_chunk_ids JSONB NOT NULL DEFAULT \'[]\'::jsonb',
+            'ALTER TABLE "{schema}".kb_relationships ADD COLUMN IF NOT EXISTS evidence_text TEXT NOT NULL DEFAULT \'\'',
+            'ALTER TABLE "{schema}".kb_relationships ADD COLUMN IF NOT EXISTS metadata_json JSONB NOT NULL DEFAULT \'{{}}\'::jsonb',
+            'ALTER TABLE "{schema}".kb_relationships ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP NOT NULL DEFAULT NOW()',
         ),
     )
 
@@ -81,7 +103,7 @@ def register_kb_discovery_tenant_hooks() -> None:
         [
             TenantSchemaHook(
                 name="kb_discovery",
-                revision="kb.discovery.schema.v5",
+                revision="kb.discovery.schema.v6",
                 install=_install_kb_discovery_schema,
                 table_names=(
                     "kb_discovery_jobs",

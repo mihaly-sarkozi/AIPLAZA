@@ -29,6 +29,24 @@ class EntityRepository:
                 or 0
             )
 
+    def list_for_document(self, document_id: str) -> list[KnowledgeEntity]:
+        with self._session_factory() as session:
+            return list(
+                session.execute(
+                    select(KnowledgeEntity).where(KnowledgeEntity.document_id == document_id)
+                ).scalars()
+            )
+
+    def list_for_chunks(self, document_id: str, chunk_ids: list[str]) -> list[KnowledgeEntity]:
+        if not chunk_ids:
+            return []
+        chunk_id_set = set(chunk_ids)
+        return [
+            entity
+            for entity in self.list_for_document(document_id)
+            if chunk_id_set.intersection(entity.chunk_ids or [])
+        ]
+
 
 class EntityMentionRepository:
     def __init__(self, session_factory) -> None:
